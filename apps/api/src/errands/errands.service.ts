@@ -1,6 +1,14 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { and, desc, eq, inArray, lt, ne, sql } from 'drizzle-orm';
-import { canRevealPin, nextState, type CountrySettings, type ErrandEvent, type ErrandState } from '@jiffo/shared';
+import {
+  canRevealPin,
+  nextState,
+  serviceFee,
+  type CommissionTier,
+  type CountrySettings,
+  type ErrandEvent,
+  type ErrandState,
+} from '@jiffo/shared';
 import type { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db, type Tx } from '../db/database.module';
@@ -10,6 +18,7 @@ import type { AuthContext } from '../auth/auth.types';
 import { decrypt, encrypt, numericCode, safeEqual } from '../common/crypto';
 import { ApiError, badRequest, conflict, locked, notFound, unprocessable } from '../common/errors';
 import { ERRAND_TIMERS, type ErrandTimerJob, type ErrandTimers } from '../timers/errand-timers';
+import { WalletService } from '../money/wallet.service';
 import { ErrandNotifier, type TransitionResult } from './errand-notifier';
 import { EVENT_DATA, type CreateErrandInput, type ErrandEventInput } from './errand-input';
 import {
@@ -40,6 +49,7 @@ export class ErrandsService implements OnModuleInit {
     @Inject(ERRAND_TIMERS) private readonly timers: ErrandTimers,
     private readonly countries: CountriesService,
     private readonly notifier: ErrandNotifier,
+    private readonly wallet: WalletService,
   ) {}
 
   onModuleInit() {
@@ -180,6 +190,15 @@ export class ErrandsService implements OnModuleInit {
     if (input.scheduledFor && input.scheduledFor.getTime() < Date.now() + 15 * MINUTE_MS) {
       throw unprocessable('schedule_too_soon', 'Schedule at least 15 minutes ahead, or send it now');
     }
+    // Nothing is held until an agent accepts, but the wallet must cover the errand before it goes out.
+    const serviceFeeKobo = serviceFee(input.feeKobo, settings.fees);
+    const balanceKobo = await this.wallet.customerBalance(customer.id, country);
+    if (balanceKobo < input.feeKobo + serviceFeeKobo) {
+      throw conflict('insufficient_funds', 'Top up your wallet to send this errand', {
+        neededKobo: input.feeKobo + serviceFeeKobo,
+        balanceKobo,
+      });
+    }
 
     const created = await this.db.transaction(async (tx) => {
       const [errand] = await tx
@@ -194,6 +213,7 @@ export class ErrandsService implements OnModuleInit {
           description: input.description,
           status: 'requested',
           feeKobo: input.feeKobo,
+          serviceFeeKobo,
           scheduledFor: input.scheduledFor ?? null,
           settingsVersion: version,
         })
@@ -231,12 +251,19 @@ export class ErrandsService implements OnModuleInit {
    * The settings an errand runs under. Its country and settings version never change, so this is read
    * before the transaction: a query on the pool while holding a locked connection could starve the pool.
    */
-  private async settingsOf(errandId: string) {
+  private async settingsOf(errandId: string, agentId?: string) {
     const [row] = await this.db
-      .select({ countryCode: errands.countryCode, settingsVersion: errands.settingsVersion })
+      .select({ countryCode: errands.countryCode, settingsVersion: errands.settingsVersion, agentId: errands.agentId })
       .from(errands)
       .where(eq(errands.id, errandId));
-    return row ? this.countries.settingsAt(row.countryCode, row.settingsVersion) : null;
+    if (!row) return null;
+    const agent = agentId ?? row.agentId;
+    const [settings, { currency }, tier] = await Promise.all([
+      this.countries.settingsAt(row.countryCode, row.settingsVersion),
+      this.countries.basics(row.countryCode),
+      agent ? this.wallet.agentTier(agent) : Promise.resolve<CommissionTier>('bronze'),
+    ]);
+    return { settings, currency, tier };
   }
 
   private async viewOne(errand: ErrandRow, role: ViewerRole) {
@@ -246,8 +273,24 @@ export class ErrandsService implements OnModuleInit {
 
   /** Runs one event from the customer or agent app through the state machine. */
   async transition(errandId: string, auth: AuthContext, input: ErrandEventInput) {
-    const settings = await this.settingsOf(errandId);
-    if (!settings) throw notFound('errand_not_found', 'Errand not found');
+    try {
+      return await this.runTransition(errandId, auth, input);
+    } catch (error) {
+      // An agent tried to accept but the customer's wallet no longer covers it: tell the customer.
+      const code =
+        error instanceof ApiError ? (error.getResponse() as { error?: { code?: string } }).error?.code : undefined;
+      if (code === 'customer_funds_low') await this.notifier.customerFundsLow(errandId);
+      throw error;
+    }
+  }
+
+  private async runTransition(errandId: string, auth: AuthContext, input: ErrandEventInput) {
+    const money = await this.settingsOf(
+      errandId,
+      input.event === 'accept' && auth.app === 'agent' ? auth.userId : undefined,
+    );
+    if (!money) throw notFound('errand_not_found', 'Errand not found');
+    const { settings } = money;
 
     const outcome = await this.db.transaction(async (tx) => {
       const [errand] = await tx.select().from(errands).where(eq(errands.id, errandId)).for('update');
@@ -265,6 +308,7 @@ export class ErrandsService implements OnModuleInit {
       if (effect instanceof ApiError) return { error: effect };
 
       const after = await this.write(tx, errand, event, to, effect, actor, auth.userId);
+      await this.wallet.onErrandTransition(tx, { before: errand, after, event, ...money });
       await this.scheduleTimers(after, settings);
       return {
         role: role === 'prospect' ? ('agent' as const) : role,
@@ -279,14 +323,16 @@ export class ErrandsService implements OnModuleInit {
 
   /** A timer came due. It applies only if the errand has not moved since the timer was set. */
   async applyTimer(job: ErrandTimerJob) {
-    const settings = await this.settingsOf(job.errandId);
-    if (!settings) return;
+    const money = await this.settingsOf(job.errandId);
+    if (!money) return;
+    const { settings } = money;
     const result = await this.db.transaction(async (tx) => {
       const [errand] = await tx.select().from(errands).where(eq(errands.id, job.errandId)).for('update');
       if (!errand || errand.version !== job.version || errand.status !== job.status) return null;
       const to = nextState(errand.status, job.event, transitionContext(errand, 'system'));
       const effect: EventEffect = { patch: {}, record: { timer: true } };
       const after = await this.write(tx, errand, job.event, to, effect, 'system', null);
+      await this.wallet.onErrandTransition(tx, { before: errand, after, event: job.event as ErrandEvent, ...money });
       await this.scheduleTimers(after, settings);
       return {
         before: errand,
@@ -398,7 +444,11 @@ export class ErrandsService implements OnModuleInit {
       }
       case 'accept_offer':
         return {
-          patch: { feeKobo: errand.pendingOfferKobo!, pendingOfferKobo: null },
+          patch: {
+            feeKobo: errand.pendingOfferKobo!,
+            serviceFeeKobo: serviceFee(errand.pendingOfferKobo!, settings.fees),
+            pendingOfferKobo: null,
+          },
           record: { amountKobo: errand.pendingOfferKobo, previousFeeKobo: errand.feeKobo },
         };
       case 'decline_offer':

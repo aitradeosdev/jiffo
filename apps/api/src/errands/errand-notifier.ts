@@ -1,4 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
+import { DB, type Db } from '../db/database.module';
+import { errands } from '../db/schema';
 import { formatNaira, TERMINAL_STATES, type CountrySettings, type ErrandEvent } from '@jiffo/shared';
 import { ChatService } from '../chat/chat.service';
 import { PushService } from '../push/push.service';
@@ -163,10 +166,25 @@ export class ErrandNotifier {
   private readonly logger = new Logger(ErrandNotifier.name);
 
   constructor(
+    @Inject(DB) private readonly db: Db,
     private readonly realtime: RealtimeGateway,
     private readonly chat: ChatService,
     private readonly push: PushService,
   ) {}
+
+  /** An agent is ready, but the wallet no longer covers the errand. */
+  async customerFundsLow(errandId: string) {
+    const [errand] = await this.db
+      .select({ customerId: errands.customerId })
+      .from(errands)
+      .where(eq(errands.id, errandId));
+    if (!errand) return;
+    await this.push.notifyUser(errand.customerId, 'customer', {
+      title: 'Top up to get your agent',
+      body: 'An agent wants to take your errand, but your wallet is short. Top up and they can accept.',
+      data: { type: 'wallet.low', errandId },
+    });
+  }
 
   async transitioned(r: TransitionResult) {
     try {

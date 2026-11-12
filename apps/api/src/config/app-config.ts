@@ -19,6 +19,19 @@ const EnvSchema = z
     PUSH_PROVIDER: z.enum(['console', 'memory', 'fcm']).default('console'),
     FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
     CHAT_PROVIDER: z.enum(['builtin']).default('builtin'),
+    PAYMENTS_PROVIDER: z.enum(['paystack', 'fake']).default('fake'),
+    PAYSTACK_SECRET_KEY: z.string().optional(),
+    PAYSTACK_BASE_URL: z.string().url().default('https://api.paystack.co'),
+    /** The fake provider signs its webhooks with this, so the webhook endpoint runs as in production. */
+    FAKE_PAYMENTS_SECRET: z.string().default('fake-payments-secret'),
+    /**
+     * Paystack needs an email on every charge. Customers sign in by phone, so each gets an address
+     * on this domain built from their account id. No personal details go in it.
+     */
+    PAYMENT_EMAIL_DOMAIN: z.string().default('customers.jiffo.app'),
+    /** When the free daily withdrawals go out, and when the ledger is checked against the provider (UTC). */
+    PAYOUT_CRON: z.string().default('0 15 * * *'),
+    RECONCILE_CRON: z.string().default('30 23 * * *'),
     /** Errand timers (item lock, auto-release, unreachable, urgent expiry). memory is for tests only. */
     TIMER_PROVIDER: z.enum(['bullmq', 'memory']).default('bullmq'),
     REDIS_URL: z.string().url().default('redis://localhost:6379'),
@@ -40,6 +53,9 @@ const EnvSchema = z
       need(!!env.TERMII_API_KEY, 'TERMII_API_KEY', 'required when MESSAGING_PROVIDER is termii');
       need(!!env.TERMII_SENDER_ID, 'TERMII_SENDER_ID', 'required when MESSAGING_PROVIDER is termii');
     }
+    if (env.PAYMENTS_PROVIDER === 'paystack') {
+      need(!!env.PAYSTACK_SECRET_KEY, 'PAYSTACK_SECRET_KEY', 'required when PAYMENTS_PROVIDER is paystack');
+    }
     if (env.PUSH_PROVIDER === 'fcm') {
       need(!!env.FCM_SERVICE_ACCOUNT_JSON, 'FCM_SERVICE_ACCOUNT_JSON', 'required when PUSH_PROVIDER is fcm');
     }
@@ -55,6 +71,7 @@ const EnvSchema = z
         'must be a real provider in production',
       );
       need(env.TIMER_PROVIDER !== 'memory', 'TIMER_PROVIDER', 'must be bullmq in production');
+      need(env.PAYMENTS_PROVIDER !== 'fake', 'PAYMENTS_PROVIDER', 'must be a real provider in production');
       // Behind a load balancer, 0 would make every client share one IP and one sign-in limit.
       need(
         env.TRUST_PROXY_HOPS !== undefined,

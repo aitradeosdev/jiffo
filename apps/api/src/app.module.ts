@@ -7,6 +7,7 @@ import { CountriesModule } from './countries/countries.module';
 import { DatabaseModule } from './db/database.module';
 import { ErrandsModule } from './errands/errands.module';
 import { HealthController } from './health/health.controller';
+import { MoneyModule } from './money/money.module';
 import { PushModule } from './push/push.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { TimersModule } from './timers/timers.module';
@@ -24,6 +25,7 @@ import { UsersModule } from './users/users.module';
     PushModule,
     RealtimeModule,
     ChatModule,
+    MoneyModule,
     ErrandsModule,
   ],
   controllers: [HealthController],

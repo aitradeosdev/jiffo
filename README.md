@@ -67,6 +67,9 @@ All routes are under `/v1` except `GET /health`. Errors always look like `{ "err
 | Country config | `GET /config/:country`: currency, states, categories and the public settings                                                                                                                    |
 | Errands        | `POST /errands`, `GET /errands`, `GET /errands/board` (agent app), `GET /errands/:id`, `GET /errands/:id/events`, `GET /errands/:id/pin` (customer, once delivered), `POST /errands/:id/events` |
 | Chat           | `GET /errands/:id/messages`, `POST /errands/:id/messages`                                                                                                                                       |
+| Wallet         | `GET /wallet`, `GET /wallet/transactions`, `POST /wallet/deposits` and `GET /wallet/deposits/:id` (customer app), `POST /wallet/withdrawals` (agent app), `POST /errands/:id/tip`               |
+| Payouts        | `GET /banks`, `GET /payout-account`, `PUT /payout-account` (agent app)                                                                                                                          |
+| Webhooks       | `POST /webhooks/paystack`: signature-checked, stored, applied once                                                                                                                              |
 | Realtime       | Socket.IO namespace `/realtime`, with the access token in `auth.token`. Emit `errand.subscribe`; receive `errand.updated` and `message.created`.                                                |
 
 Every errand change goes through one endpoint, `POST /errands/:id/events`, with an event name such as `accept`, `send_offer`, `start`, `send_item_amount`, `mark_delivered` or `confirm_pin`. Who is acting comes from the session (customer app or agent app), never from the request. Each errand view lists the `allowedEvents` for the caller, so the apps show only the actions that are possible.
@@ -81,5 +84,16 @@ Outside services are chosen by environment variable, one implementation per port
 | Push          | Firebase Cloud Messaging, or console        | `PUSH_PROVIDER`      |
 | Chat          | Built-in (Postgres and the realtime socket) | `CHAT_PROVIDER`      |
 | Errand timers | BullMQ on Redis                             | `TIMER_PROVIDER`     |
+| Payments      | Paystack, or fake for development           | `PAYMENTS_PROVIDER`  |
 
-Payments, identity checks, voice calls, maps and storage arrive in later steps on the same pattern.
+Identity checks, voice calls, maps and storage arrive in later steps on the same pattern.
+
+### Money
+
+Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entries`, `postings`) in whole kobo. Each movement debits one account and credits another, every journal sums to zero, and each one has a unique key so it can never be applied twice. Balances that belong to people (wallets, earnings, escrows) can't go below zero.
+
+- **Top-ups:** the customer asks for an amount and gets a one-time account number from Paystack. The wallet is credited with what actually arrived, only after Paystack confirms it, from the webhook or when the app checks the top-up.
+- **Escrow:** the fee and service fee are held when an agent accepts, adjusted when a new price is accepted, and returned if the agent leaves or the errand is cancelled. Item money is held separately when the customer locks the item amount.
+- **Hand-off:** item money goes to the agent untouched and withdrawable at once. The fee, less commission, goes to the agent; Bronze earnings are held for 24 hours. The service fee and commission go to platform revenue.
+- **Withdrawals:** agents only, to an account in their own name. One free scheduled withdrawal a day, or instant for a fee. A bounced transfer puts the full amount back.
+- **Reconciliation:** every night the ledger's cash is compared with the Paystack balance and the result is saved for finance.

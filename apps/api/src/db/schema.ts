@@ -3,6 +3,7 @@ import {
   bigserial,
   boolean,
   char,
+  check,
   customType,
   doublePrecision,
   index,
@@ -209,6 +210,8 @@ export const errands = pgTable(
     description: text('description').notNull(),
     status: text('status').$type<ErrandState>().notNull(),
     feeKobo: kobo('fee_kobo').notNull(),
+    /** The customer's service fee on the current fee. Locked in the fee escrow with it. */
+    serviceFeeKobo: kobo('service_fee_kobo').notNull().default(0),
     pendingOfferKobo: kobo('pending_offer_kobo'),
     itemAmountKobo: kobo('item_amount_kobo'),
     scheduledFor: timestamp('scheduled_for', { withTimezone: true }),
@@ -314,3 +317,236 @@ export const messages = pgTable(
     uniqueIndex('messages_client_id_uq').on(t.conversationId, t.senderId, t.clientId),
   ],
 );
+
+/* ---------- Money ---------- */
+
+/**
+ * Ledger account types. Wallets, earnings, escrows and revenue are owed by the platform (credit-normal);
+ * cash at the payment provider and its fees are what the platform holds or spends (debit-normal).
+ */
+export const LEDGER_ACCOUNT_TYPES = [
+  'customer_wallet',
+  'agent_available',
+  'agent_held',
+  'fee_escrow',
+  'item_escrow',
+  'payouts_in_transit',
+  'platform_revenue',
+  'provider_cash',
+  'provider_fees',
+] as const;
+export type LedgerAccountType = (typeof LEDGER_ACCOUNT_TYPES)[number];
+
+export const ledgerAccounts = pgTable(
+  'ledger_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** For example customer_wallet:<user id> or platform_revenue:NG. */
+    key: text('key').notNull(),
+    type: text('type', { enum: LEDGER_ACCOUNT_TYPES }).notNull(),
+    countryCode: char('country_code', { length: 2 })
+      .notNull()
+      .references(() => countries.code),
+    currency: char('currency', { length: 3 }).notNull(),
+    /** The user or errand the account belongs to; null for platform accounts. */
+    ownerId: uuid('owner_id'),
+    normal: text('normal', { enum: ['debit', 'credit'] }).notNull(),
+    allowNegative: boolean('allow_negative').notNull().default(false),
+    /** Kept in step with the postings in the same transaction, in the account's normal direction. */
+    balance: kobo('balance').notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('ledger_accounts_key_uq').on(t.key),
+    index('ledger_accounts_owner_idx').on(t.ownerId),
+    check('ledger_accounts_balance_ck', sql`${t.allowNegative} or ${t.balance} >= 0`),
+  ],
+);
+
+/** One money movement. Its postings always sum to zero; the key makes every movement happen once. */
+export const journalEntries = pgTable(
+  'journal_entries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    key: text('key').notNull(),
+    kind: text('kind').notNull(),
+    countryCode: char('country_code', { length: 2 })
+      .notNull()
+      .references(() => countries.code),
+    errandId: uuid('errand_id').references(() => errands.id),
+    memo: text('memo').notNull().default(''),
+    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('journal_entries_key_uq').on(t.key), index('journal_entries_errand_idx').on(t.errandId)],
+);
+
+/** Positive amounts are debits, negative amounts credits. */
+export const postings = pgTable(
+  'postings',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    journalId: uuid('journal_id')
+      .notNull()
+      .references(() => journalEntries.id),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => ledgerAccounts.id),
+    amount: kobo('amount').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('postings_account_idx').on(t.accountId, t.id),
+    index('postings_journal_idx').on(t.journalId),
+    check('postings_amount_ck', sql`${t.amount} <> 0`),
+  ],
+);
+
+/** A bank-transfer top-up through a one-time account number from the payment provider. */
+export const deposits = pgTable(
+  'deposits',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    countryCode: char('country_code', { length: 2 })
+      .notNull()
+      .references(() => countries.code),
+    provider: text('provider').notNull(),
+    reference: text('reference').notNull(),
+    status: text('status', { enum: ['pending', 'succeeded', 'failed'] })
+      .notNull()
+      .default('pending'),
+    amountKobo: kobo('amount_kobo').notNull(),
+    accountNumber: text('account_number').notNull(),
+    accountName: text('account_name').notNull(),
+    bankName: text('bank_name').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** What the provider says arrived, which is what the wallet is credited with. */
+    paidKobo: kobo('paid_kobo'),
+    feesKobo: kobo('fees_kobo'),
+    senderName: text('sender_name'),
+    senderBank: text('sender_bank'),
+    /** The sender's name does not match the customer's: shown to admin as a fraud signal. */
+    senderMismatch: boolean('sender_mismatch').notNull().default(false),
+    createdAt: createdAt(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('deposits_reference_uq').on(t.reference), index('deposits_user_idx').on(t.userId, t.createdAt)],
+);
+
+/** The agent's own-name bank account. A new one replaces the old; the old row is kept for history. */
+export const payoutAccounts = pgTable(
+  'payout_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    provider: text('provider').notNull(),
+    bankCode: text('bank_code').notNull(),
+    bankName: text('bank_name').notNull(),
+    accountNumber: text('account_number').notNull(),
+    accountName: text('account_name').notNull(),
+    recipientCode: text('recipient_code').notNull(),
+    createdAt: createdAt(),
+    replacedAt: timestamp('replaced_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('payout_accounts_user_idx').on(t.userId),
+    uniqueIndex('payout_accounts_current_uq')
+      .on(t.userId)
+      .where(sql`${t.replacedAt} is null`),
+  ],
+);
+
+/** An agent's withdrawal to their payout account. The amount leaves their balance when requested. */
+export const payouts = pgTable(
+  'payouts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    countryCode: char('country_code', { length: 2 })
+      .notNull()
+      .references(() => countries.code),
+    payoutAccountId: uuid('payout_account_id')
+      .notNull()
+      .references(() => payoutAccounts.id),
+    reference: text('reference').notNull(),
+    speed: text('speed', { enum: ['instant', 'scheduled'] }).notNull(),
+    status: text('status', { enum: ['requested', 'processing', 'succeeded', 'failed'] })
+      .notNull()
+      .default('requested'),
+    /** Taken from the balance. */
+    amountKobo: kobo('amount_kobo').notNull(),
+    feeKobo: kobo('fee_kobo').notNull().default(0),
+    /** Sent to the bank: the amount less the fee. */
+    sendKobo: kobo('send_kobo').notNull(),
+    providerTransferCode: text('provider_transfer_code'),
+    failureReason: text('failure_reason'),
+    createdAt: createdAt(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('payouts_reference_uq').on(t.reference),
+    index('payouts_user_idx').on(t.userId, t.createdAt),
+    index('payouts_status_idx').on(t.status),
+  ],
+);
+
+/** Errand earnings that become withdrawable later (Bronze and new agents). */
+export const earningHolds = pgTable(
+  'earning_holds',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    countryCode: char('country_code', { length: 2 })
+      .notNull()
+      .references(() => countries.code),
+    errandId: uuid('errand_id').references(() => errands.id),
+    amountKobo: kobo('amount_kobo').notNull(),
+    availableAt: timestamp('available_at', { withTimezone: true }).notNull(),
+    releasedAt: timestamp('released_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index('earning_holds_due_idx').on(t.userId, t.availableAt)],
+);
+
+/** Every webhook from a payment provider, kept as received. A repeat delivery is recognised and skipped. */
+export const providerEvents = pgTable(
+  'provider_events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    provider: text('provider').notNull(),
+    eventKey: text('event_key').notNull(),
+    kind: text('kind').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+    error: text('error'),
+  },
+  (t) => [uniqueIndex('provider_events_key_uq').on(t.provider, t.eventKey)],
+);
+
+/** The daily check of the ledger's cash against the balance the payment provider reports. */
+export const reconciliationRuns = pgTable('reconciliation_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  countryCode: char('country_code', { length: 2 })
+    .notNull()
+    .references(() => countries.code),
+  provider: text('provider').notNull(),
+  providerBalanceKobo: kobo('provider_balance_kobo').notNull(),
+  ledgerCashKobo: kobo('ledger_cash_kobo').notNull(),
+  /** Money on its way out that the provider has already taken from its balance. */
+  inTransitKobo: kobo('in_transit_kobo').notNull(),
+  differenceKobo: kobo('difference_kobo').notNull(),
+  pendingDeposits: integer('pending_deposits').notNull(),
+  stuckPayouts: integer('stuck_payouts').notNull(),
+  createdAt: createdAt(),
+});

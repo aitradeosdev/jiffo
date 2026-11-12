@@ -44,6 +44,33 @@ export function commission(errandFee: Kobo, commissionBps: number): Kobo {
   return applyBps(errandFee, commissionBps);
 }
 
+export type CommissionTier = 'bronze' | 'silver' | 'gold' | 'platinum';
+
+/** The commission rate for a tier, or the launch rate while admin has one switched on. */
+export function commissionBpsFor(
+  fees: { commissionBps: Record<CommissionTier, number>; launchCommissionBps: number | null },
+  tier: CommissionTier,
+): number {
+  return fees.launchCommissionBps ?? fees.commissionBps[tier];
+}
+
+/** Bronze agents (and new agents) wait for errand earnings; Silver and up can withdraw them at once. */
+export const holdsEarnings = (tier: CommissionTier) => tier === 'bronze';
+
+/**
+ * How the fee escrow is shared out at hand-off: the customer's service fee and the agent's commission
+ * go to the platform, the rest of the errand fee to the agent. The parts always add up to the escrow.
+ */
+export function splitFeeEscrow(input: { feeKobo: Kobo; serviceFeeKobo: Kobo; commissionBps: number }) {
+  const commissionKobo = commission(input.feeKobo, input.commissionBps);
+  return {
+    agentKobo: input.feeKobo - commissionKobo,
+    commissionKobo,
+    serviceFeeKobo: assertKobo(input.serviceFeeKobo, 'service fee'),
+    escrowKobo: input.feeKobo + input.serviceFeeKobo,
+  };
+}
+
 /** Formats kobo as naira for display, for example 150050 → "₦1,500.50" and 150000 → "₦1,500". */
 export function formatNaira(amount: Kobo): string {
   assertKobo(amount);

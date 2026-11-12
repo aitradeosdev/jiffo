@@ -17,8 +17,24 @@ export interface VersionedSettings {
 @Injectable()
 export class CountriesService {
   private readonly versions = new Map<string, Promise<CountrySettings>>();
+  private readonly countryBasics = new Map<string, { currency: string; timezone: string }>();
 
   constructor(@Inject(DB) private readonly db: Db) {}
+
+  /** A country's currency and time zone. They never change once set, so they are kept in memory. */
+  async basics(code: string): Promise<{ currency: string; timezone: string }> {
+    let cached = this.countryBasics.get(code);
+    if (!cached) {
+      const [row] = await this.db
+        .select({ currency: countries.currency, timezone: countries.timezone })
+        .from(countries)
+        .where(eq(countries.code, code));
+      if (!row) throw notFound('country_not_available', 'Jiffo is not available in this country yet');
+      cached = row;
+      this.countryBasics.set(code, cached);
+    }
+    return cached;
+  }
 
   async enabledCountry(code: string) {
     const [country] = await this.db.select().from(countries).where(eq(countries.code, code.toUpperCase()));
