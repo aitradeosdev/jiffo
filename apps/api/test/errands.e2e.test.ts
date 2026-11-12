@@ -1,5 +1,7 @@
+import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { countries, errands, users } from '../src/db/schema';
 import {
   act,
   createErrand,
@@ -220,6 +222,26 @@ describe('errands', () => {
     });
   });
 
+  describe('countries', () => {
+    it('keeps agents to errands in their own country', async () => {
+      await t.db
+        .insert(countries)
+        .values({ code: 'GH', name: 'Ghana', currency: 'GHS', phonePrefix: '+233', timezone: 'Africa/Accra' })
+        .onConflictDoNothing();
+      const abroad = await signIn(t, 'agent');
+      await t.db.update(users).set({ countryCode: 'GH' }).where(eq(users.id, abroad.userId));
+      const errand = await createErrand(t, customer);
+
+      await get(abroad, errand.id, 404);
+      await act(t, abroad, errand.id, 'accept', {}, 404);
+      const board = await request(t.http)
+        .get('/v1/errands/board?lat=6.4480&lng=3.4700')
+        .set(abroad.headers)
+        .expect(200);
+      expect(board.body).toEqual([]);
+    });
+  });
+
   describe('changing agents', () => {
     it('sends the errand back to the board with a fresh PIN', async () => {
       const errand = await createErrand(t, customer);
@@ -278,6 +300,29 @@ describe('errands', () => {
   });
 
   describe('timers', () => {
+    it('rolls the change back when its timer cannot be stored', async () => {
+      const errand = await createErrand(t, customer);
+      await act(t, agent, errand.id, 'accept');
+      await act(t, agent, errand.id, 'start');
+      await act(t, agent, errand.id, 'mark_delivered');
+
+      const schedule = t.timers.schedule;
+      t.timers.schedule = async () => {
+        throw new Error('Redis is down');
+      };
+      try {
+        await act(t, agent, errand.id, 'send_dropoff_photo', { photo: 'p.jpg' }, 500);
+      } finally {
+        t.timers.schedule = schedule;
+      }
+      const [row] = await t.db.select().from(errands).where(eq(errands.id, errand.id));
+      expect(row).toMatchObject({ status: 'delivered', version: 3 });
+
+      // Once the timer store is back, the same request goes through and its timer is set.
+      await act(t, agent, errand.id, 'send_dropoff_photo', { photo: 'p.jpg' });
+      expect(t.timers.pending.some((p) => p.job.errandId === errand.id && p.job.event === 'auto_release')).toBe(true);
+    });
+
     it('expires an urgent errand nobody took', async () => {
       const errand = await createErrand(t, customer, { urgent: true });
       expect(t.timers.pending.find((p) => p.job.errandId === errand.id)).toMatchObject({

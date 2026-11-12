@@ -16,6 +16,8 @@ export interface VersionedSettings {
  */
 @Injectable()
 export class CountriesService {
+  private readonly versions = new Map<string, Promise<CountrySettings>>();
+
   constructor(@Inject(DB) private readonly db: Db) {}
 
   async enabledCountry(code: string) {
@@ -27,17 +29,31 @@ export class CountriesService {
 
   async currentSettings(countryCode: string): Promise<VersionedSettings> {
     const [row] = await this.db
-      .select()
+      .select({ version: settingsVersions.version })
       .from(settingsVersions)
       .where(eq(settingsVersions.countryCode, countryCode))
       .orderBy(desc(settingsVersions.version))
       .limit(1);
     if (!row) throw notFound('settings_missing', `No settings saved for ${countryCode}`);
-    return { version: row.version, settings: CountrySettingsSchema.parse(row.data) };
+    return { version: row.version, settings: await this.settingsAt(countryCode, row.version) };
   }
 
-  /** The settings an errand was created under, so its timers and limits never change mid-errand. */
-  async settingsAt(countryCode: string, version: number): Promise<CountrySettings> {
+  /**
+   * The settings an errand was created under, so its timers and limits never change mid-errand.
+   * A saved version never changes, so each one is read and checked once and then kept in memory.
+   */
+  settingsAt(countryCode: string, version: number): Promise<CountrySettings> {
+    const key = `${countryCode}:${version}`;
+    let cached = this.versions.get(key);
+    if (!cached) {
+      cached = this.loadVersion(countryCode, version);
+      this.versions.set(key, cached);
+      cached.catch(() => this.versions.delete(key));
+    }
+    return cached;
+  }
+
+  private async loadVersion(countryCode: string, version: number): Promise<CountrySettings> {
     const [row] = await this.db
       .select()
       .from(settingsVersions)

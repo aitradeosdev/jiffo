@@ -12,7 +12,14 @@ import { ApiError, badRequest, conflict, locked, notFound, unprocessable } from 
 import { ERRAND_TIMERS, type ErrandTimerJob, type ErrandTimers } from '../timers/errand-timers';
 import { ErrandNotifier, type TransitionResult } from './errand-notifier';
 import { EVENT_DATA, type CreateErrandInput, type ErrandEventInput } from './errand-input';
-import { errandView, type ErrandRow, type PersonSummary, type StopRow, type ViewerRole } from './errand-view';
+import {
+  errandView,
+  transitionContext,
+  type ErrandRow,
+  type PersonSummary,
+  type StopRow,
+  type ViewerRole,
+} from './errand-view';
 
 type Patch = Partial<typeof errands.$inferInsert>;
 
@@ -44,7 +51,8 @@ export class ErrandsService implements OnModuleInit {
   private roleFor(errand: ErrandRow, auth: AuthContext): ViewerRole | null {
     if (auth.app === 'customer') return errand.customerId === auth.userId ? 'customer' : null;
     if (errand.agentId === auth.userId) return 'agent';
-    if (errand.status === 'requested' && errand.customerId !== auth.userId) return 'prospect';
+    const open = errand.status === 'requested' && errand.customerId !== auth.userId;
+    if (open && errand.countryCode === auth.countryCode) return 'prospect';
     return null;
   }
 
@@ -84,8 +92,7 @@ export class ErrandsService implements OnModuleInit {
 
   async get(errandId: string, auth: AuthContext) {
     const { errand, role } = await this.load(errandId, auth);
-    const [view] = await this.views([errand], () => role);
-    return view!;
+    return this.viewOne(errand, role);
   }
 
   /** The caller's own errands: as the customer in the customer app, as the agent in the agent app. */
@@ -102,7 +109,6 @@ export class ErrandsService implements OnModuleInit {
 
   /** Open errands whose pickup is within the radius, nearest first. */
   async board(auth: AuthContext, q: { lat: number; lng: number; radiusKm: number; limit: number }) {
-    const [me] = await this.db.select({ countryCode: users.countryCode }).from(users).where(eq(users.id, auth.userId));
     const here = sql`ST_SetSRID(ST_MakePoint(${q.lng}, ${q.lat}), 4326)::geography`;
     const distance = sql<number>`ST_Distance(${errandStops.location}, ${here})`;
     const rows = await this.db
@@ -112,7 +118,7 @@ export class ErrandsService implements OnModuleInit {
       .where(
         and(
           eq(errands.status, 'requested'),
-          eq(errands.countryCode, me!.countryCode),
+          eq(errands.countryCode, auth.countryCode),
           ne(errands.customerId, auth.userId),
           sql`ST_DWithin(${errandStops.location}, ${here}, ${q.radiusKm * 1000})`,
         ),
@@ -212,17 +218,37 @@ export class ErrandsService implements OnModuleInit {
         actorRole: 'customer',
         actorId: customer.id,
       });
+      await this.scheduleTimers(errand!, settings);
       return errand!;
     });
 
-    await this.scheduleTimers(created, settings);
-    return this.get(created.id, auth);
+    return this.viewOne(created, 'customer');
   }
 
   /* ---------- Changing ---------- */
 
+  /**
+   * The settings an errand runs under. Its country and settings version never change, so this is read
+   * before the transaction: a query on the pool while holding a locked connection could starve the pool.
+   */
+  private async settingsOf(errandId: string) {
+    const [row] = await this.db
+      .select({ countryCode: errands.countryCode, settingsVersion: errands.settingsVersion })
+      .from(errands)
+      .where(eq(errands.id, errandId));
+    return row ? this.countries.settingsAt(row.countryCode, row.settingsVersion) : null;
+  }
+
+  private async viewOne(errand: ErrandRow, role: ViewerRole) {
+    const [view] = await this.views([errand], () => role);
+    return view!;
+  }
+
   /** Runs one event from the customer or agent app through the state machine. */
   async transition(errandId: string, auth: AuthContext, input: ErrandEventInput) {
+    const settings = await this.settingsOf(errandId);
+    if (!settings) throw notFound('errand_not_found', 'Errand not found');
+
     const outcome = await this.db.transaction(async (tx) => {
       const [errand] = await tx.select().from(errands).where(eq(errands.id, errandId)).for('update');
       const role = errand ? this.roleFor(errand, auth) : null;
@@ -233,38 +259,35 @@ export class ErrandsService implements OnModuleInit {
       }
 
       const actor = role === 'customer' ? 'customer' : 'agent';
-      const to = nextState(errand.status, input.event, {
-        actor,
-        buy: errand.buy,
-        pendingOffer: errand.pendingOfferKobo !== null,
-      });
+      const to = nextState(errand.status, input.event, transitionContext(errand, actor));
       const event = input.event as ErrandEvent;
-      const settings = await this.countries.settingsAt(errand.countryCode, errand.settingsVersion);
       const effect = await this.effectOf(tx, event, errand, auth, input.data, settings);
       if (effect instanceof ApiError) return { error: effect };
 
       const after = await this.write(tx, errand, event, to, effect, actor, auth.userId);
-      return { result: { before: errand, after, event, record: effect.record, settings } satisfies TransitionResult };
+      await this.scheduleTimers(after, settings);
+      return {
+        role: role === 'prospect' ? ('agent' as const) : role,
+        result: { before: errand, after, event, record: effect.record, settings } satisfies TransitionResult,
+      };
     });
 
     if ('error' in outcome) throw outcome.error;
-    await this.afterCommit(outcome.result);
-    return this.get(errandId, auth);
+    await this.notifier.transitioned(outcome.result);
+    return this.viewOne(outcome.result.after, outcome.role);
   }
 
   /** A timer came due. It applies only if the errand has not moved since the timer was set. */
   async applyTimer(job: ErrandTimerJob) {
+    const settings = await this.settingsOf(job.errandId);
+    if (!settings) return;
     const result = await this.db.transaction(async (tx) => {
       const [errand] = await tx.select().from(errands).where(eq(errands.id, job.errandId)).for('update');
       if (!errand || errand.version !== job.version || errand.status !== job.status) return null;
-      const to = nextState(errand.status, job.event, {
-        actor: 'system',
-        buy: errand.buy,
-        pendingOffer: errand.pendingOfferKobo !== null,
-      });
-      const settings = await this.countries.settingsAt(errand.countryCode, errand.settingsVersion);
+      const to = nextState(errand.status, job.event, transitionContext(errand, 'system'));
       const effect: EventEffect = { patch: {}, record: { timer: true } };
       const after = await this.write(tx, errand, job.event, to, effect, 'system', null);
+      await this.scheduleTimers(after, settings);
       return {
         before: errand,
         after,
@@ -273,7 +296,7 @@ export class ErrandsService implements OnModuleInit {
         settings,
       } satisfies TransitionResult;
     });
-    if (result) await this.afterCommit(result);
+    if (result) await this.notifier.transitioned(result);
   }
 
   private async write(
@@ -413,12 +436,12 @@ export class ErrandsService implements OnModuleInit {
     }
   }
 
-  private async afterCommit(result: TransitionResult) {
-    await this.scheduleTimers(result.after, result.settings);
-    await this.notifier.transitioned(result);
-  }
-
-  /** Sets the system timer for the state the errand just entered, if that state has one. */
+  /**
+   * Sets the system timer for the state the errand just entered, if that state has one. Called inside
+   * the transaction: if the timer cannot be stored the change is rolled back, so an errand is never left
+   * in a state whose timer is missing. A timer whose transaction later fails finds a different version
+   * when it fires and does nothing.
+   */
   private async scheduleTimers(errand: ErrandRow, settings: CountrySettings) {
     const t = settings.timers;
     const plan: Partial<Record<ErrandState, [ErrandTimerJob['event'], number]>> = {

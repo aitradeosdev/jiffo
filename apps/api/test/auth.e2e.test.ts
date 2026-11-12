@@ -49,6 +49,9 @@ describe('phone sign-in', () => {
 
   it('rejects numbers that are not valid or not in a live country', async () => {
     expect((await requestCode('12345').expect(400)).body.error.code).toBe('invalid_phone');
+    // Landlines and toll-free numbers cannot receive the code.
+    expect((await requestCode('+2342012345678').expect(400)).body.error.message).toBe('Enter a mobile number');
+    expect((await requestCode('+2348001234567').expect(400)).body.error.code).toBe('invalid_phone');
     expect((await requestCode('+233241234567').expect(404)).body.error.code).toBe('country_not_available');
   });
 

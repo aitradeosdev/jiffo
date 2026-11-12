@@ -37,8 +37,10 @@ export class AuthController {
 
   @Post('otp/verify')
   @HttpCode(200)
-  verify(@Body(new ZodBody(VerifyCodeBody)) body: z.infer<typeof VerifyCodeBody>) {
-    return this.auth.verifyCode(body.phone, body.code, body.app, body.device);
+  async verify(@Body(new ZodBody(VerifyCodeBody)) body: z.infer<typeof VerifyCodeBody>) {
+    const { response, replacedSessionIds } = await this.auth.verifyCode(body.phone, body.code, body.app, body.device);
+    if (replacedSessionIds.length > 0) this.realtime.disconnectWhere((s) => replacedSessionIds.includes(s.sessionId));
+    return response;
   }
 
   @Post('refresh')

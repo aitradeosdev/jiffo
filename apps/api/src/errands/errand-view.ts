@@ -1,4 +1,4 @@
-import { allowedEvents, type ErrandEvent } from '@jiffo/shared';
+import { allowedEvents, type Actor, type ErrandEvent, type TransitionContext } from '@jiffo/shared';
 import type { errandStops, errands } from '../db/schema';
 
 export type ErrandRow = typeof errands.$inferSelect;
@@ -11,13 +11,15 @@ export interface PersonSummary {
   firstName: string | null;
 }
 
+/** The state machine's view of an errand, for one actor. */
+export const transitionContext = (errand: ErrandRow, actor: Actor): TransitionContext => ({
+  actor,
+  buy: errand.buy,
+  pendingOffer: errand.pendingOfferKobo !== null,
+});
+
 export function eventsFor(errand: ErrandRow, role: ViewerRole): ErrandEvent[] {
-  const ctx = {
-    actor: role === 'customer' ? 'customer' : 'agent',
-    buy: errand.buy,
-    pendingOffer: errand.pendingOfferKobo !== null,
-  } as const;
-  const events = allowedEvents(errand.status, ctx);
+  const events = allowedEvents(errand.status, transitionContext(errand, role === 'customer' ? 'customer' : 'agent'));
   return role === 'prospect' ? events.filter((e) => e === 'accept') : events;
 }
 

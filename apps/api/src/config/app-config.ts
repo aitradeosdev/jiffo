@@ -25,7 +25,7 @@ const EnvSchema = z
     /** Code requests allowed from one IP address per hour, across all phone numbers. */
     OTP_PER_IP_PER_HOUR: z.coerce.number().int().positive().default(30),
     /** Load balancers in front of the API, so the client IP is read from X-Forwarded-For correctly. */
-    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
+    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).optional(),
     CORS_ORIGINS: z.string().default('*'),
     RUN_MIGRATIONS: z
       .enum(['true', 'false'])
@@ -55,6 +55,12 @@ const EnvSchema = z
         'must be a real provider in production',
       );
       need(env.TIMER_PROVIDER !== 'memory', 'TIMER_PROVIDER', 'must be bullmq in production');
+      // Behind a load balancer, 0 would make every client share one IP and one sign-in limit.
+      need(
+        env.TRUST_PROXY_HOPS !== undefined,
+        'TRUST_PROXY_HOPS',
+        'must be set in production (load balancers in front)',
+      );
     }
   });
 

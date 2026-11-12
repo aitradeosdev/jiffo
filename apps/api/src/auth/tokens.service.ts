@@ -4,7 +4,7 @@ import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { APPS, type AppName } from '../db/schema';
 import { randomToken, sha256 } from '../common/crypto';
 import { unauthorized } from '../common/errors';
-import type { AuthContext } from './auth.types';
+import type { TokenClaims } from './auth.types';
 
 const ISSUER = 'jiffo';
 const AUDIENCE = 'jiffo-api';
@@ -21,7 +21,7 @@ export class TokensService {
     return this.config.ACCESS_TOKEN_TTL_SECONDS;
   }
 
-  signAccess(auth: AuthContext): Promise<string> {
+  signAccess(auth: TokenClaims): Promise<string> {
     return new SignJWT({ sid: auth.sessionId, did: auth.deviceId, app: auth.app })
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(auth.userId)
@@ -33,7 +33,7 @@ export class TokensService {
   }
 
   /** Checks the signature and expiry only. AuthGuard also checks the session is still live. */
-  async verifyAccess(token: string): Promise<AuthContext> {
+  async verifyAccess(token: string): Promise<TokenClaims> {
     try {
       const { payload } = await jwtVerify(token, this.key, {
         issuer: ISSUER,

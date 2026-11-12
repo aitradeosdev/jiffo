@@ -9,7 +9,7 @@ import { forbidden, unauthorized } from '../common/errors';
 import { normalisePhone } from './phone';
 import { OtpService } from './otp.service';
 import { TokensService } from './tokens.service';
-import type { AuthContext } from './auth.types';
+import type { AuthContext, TokenClaims } from './auth.types';
 
 const DAY_MS = 86_400_000;
 
@@ -74,10 +74,11 @@ export class AuthService {
         .returning();
 
       // Signing in again on the same phone replaces the old session there.
-      await tx
+      const replaced = await tx
         .update(sessions)
         .set({ revokedAt: new Date(), revokedReason: 'replaced' })
-        .where(and(eq(sessions.deviceId, deviceRow!.id), isNull(sessions.revokedAt)));
+        .where(and(eq(sessions.deviceId, deviceRow!.id), isNull(sessions.revokedAt)))
+        .returning({ id: sessions.id });
 
       const [session] = await tx
         .insert(sessions)
@@ -89,11 +90,11 @@ export class AuthService {
         })
         .returning();
 
-      const auth: AuthContext = { userId: user.id, sessionId: session!.id, deviceId: deviceRow!.id, app };
+      const auth: TokenClaims = { userId: user.id, sessionId: session!.id, deviceId: deviceRow!.id, app };
       return {
-        ...(await this.issue(tx, auth)),
-        user: publicUser(user),
-        isNewUser: inserted.length > 0,
+        response: { ...(await this.issue(tx, auth)), user: publicUser(user), isNewUser: inserted.length > 0 },
+        /** Sessions this sign-in ended; their open sockets must be dropped too. */
+        replacedSessionIds: replaced.map((r) => r.id),
       };
     });
   }
@@ -126,7 +127,7 @@ export class AuthService {
         .set({ expiresAt: new Date(Date.now() + this.config.REFRESH_TOKEN_TTL_DAYS * DAY_MS) })
         .where(eq(sessions.id, session.id));
       await tx.update(devices).set({ lastSeenAt: new Date() }).where(eq(devices.id, session.deviceId));
-      const auth: AuthContext = {
+      const auth: TokenClaims = {
         userId: session.userId,
         sessionId: session.id,
         deviceId: session.deviceId,
@@ -161,7 +162,7 @@ export class AuthService {
       .where(and(eq(sessions.userId, auth.userId), ne(sessions.id, auth.sessionId), isNull(sessions.revokedAt)));
   }
 
-  private async issue(tx: Tx, auth: AuthContext) {
+  private async issue(tx: Tx, auth: TokenClaims) {
     const refresh = this.tokens.newRefreshToken();
     await tx.insert(refreshTokens).values({
       sessionId: auth.sessionId,

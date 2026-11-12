@@ -2,8 +2,8 @@ import { eq } from 'drizzle-orm';
 import { io, type Socket } from 'socket.io-client';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { devices } from '../src/db/schema';
-import { act, createErrand, createTestApp, signIn, type Person, type TestApp } from './helpers';
+import { devices, otpChallenges } from '../src/db/schema';
+import { act, createErrand, createTestApp, randomIp, randomPhone, signIn, type Person, type TestApp } from './helpers';
 
 describe('chat, realtime and push', () => {
   let t: TestApp;
@@ -100,6 +100,22 @@ describe('chat, realtime and push', () => {
     expect((await send(customer, errand.id, 'hello').expect(409)).body.error.code).toBe('chat_closed');
   });
 
+  it('shows the customer the current agent’s chat when an earlier agent comes back', async () => {
+    const errand = await createErrand(t, customer);
+    const second = await signIn(t, 'agent');
+    await act(t, agent, errand.id, 'accept');
+    await act(t, customer, errand.id, 'release_agent');
+    await act(t, second, errand.id, 'accept');
+    await act(t, customer, errand.id, 'release_agent');
+    await act(t, agent, errand.id, 'accept');
+
+    const res = await list(customer, errand.id).expect(200);
+    expect(res.body.conversation.open).toBe(true);
+    await send(customer, errand.id, 'Welcome back').expect(201);
+    const seen = await list(agent, errand.id).expect(200);
+    expect(seen.body.messages.map((m: { body: string }) => m.body)).toContain('Welcome back');
+  });
+
   it('keeps chat to the errand’s own people', async () => {
     const errand = await createErrand(t, customer);
     await act(t, agent, errand.id, 'accept');
@@ -172,6 +188,30 @@ describe('chat, realtime and push', () => {
       const started = next<{ status: string }>(customerSocket, 'errand.updated');
       await act(t, agent, errand.id, 'start');
       expect((await started).status).toBe('started');
+    });
+
+    it('drops the sockets of a session replaced by signing in again on the same phone', async () => {
+      const phone = randomPhone();
+      const device = { key: crypto.randomUUID(), platform: 'android' };
+      const signInOnDevice = async () => {
+        await t.db.delete(otpChallenges).where(eq(otpChallenges.phone, phone));
+        await request(t.http)
+          .post('/v1/auth/otp/request')
+          .set('x-forwarded-for', randomIp())
+          .send({ phone })
+          .expect(200);
+        const code = t.messaging.lastCodeFor(phone);
+        const res = await request(t.http)
+          .post('/v1/auth/otp/verify')
+          .send({ phone, code, app: 'customer', device })
+          .expect(200);
+        return res.body.accessToken as string;
+      };
+      const first = await signInOnDevice();
+      const socket = await connect(null, first);
+      const gone = next(socket, 'disconnect');
+      await signInOnDevice();
+      await gone;
     });
 
     it('will not subscribe someone to another person’s errand', async () => {

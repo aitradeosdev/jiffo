@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { TERMINAL_STATES } from '@jiffo/shared';
 import { DB, type Db } from '../db/database.module';
 import { conversations, errands, users } from '../db/schema';
@@ -44,7 +44,11 @@ export class ChatService {
           ? eq(conversations.errandId, errandId)
           : and(eq(conversations.errandId, errandId), eq(conversations.agentId, auth.userId)),
       )
-      .orderBy(desc(conversations.createdAt))
+      // The current agent's conversation first, even if an agent who came later already left.
+      .orderBy(
+        ...(errand.agentId ? [desc(sql`${conversations.agentId} = ${errand.agentId}::uuid`)] : []),
+        desc(conversations.createdAt),
+      )
       .limit(1);
     if (!conversation) {
       if (!isCustomer) throw notFound('errand_not_found', 'Errand not found');

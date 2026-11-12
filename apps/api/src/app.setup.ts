@@ -7,7 +7,7 @@ import { ApiExceptionFilter } from './common/errors';
 export function configureApp(app: INestApplication) {
   const config = app.get<AppConfig>(APP_CONFIG);
   const express = app as NestExpressApplication;
-  express.set('trust proxy', config.TRUST_PROXY_HOPS);
+  express.set('trust proxy', config.TRUST_PROXY_HOPS ?? 0);
   express.disable('x-powered-by');
   app.setGlobalPrefix('v1', { exclude: ['health'] });
   app.useGlobalFilters(new ApiExceptionFilter());

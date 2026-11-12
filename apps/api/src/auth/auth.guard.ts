@@ -22,7 +22,12 @@ export class SessionVerifier {
   async verify(token: string): Promise<AuthContext> {
     const auth = await this.tokens.verifyAccess(token);
     const [row] = await this.db
-      .select({ revokedAt: sessions.revokedAt, expiresAt: sessions.expiresAt, status: users.status })
+      .select({
+        revokedAt: sessions.revokedAt,
+        expiresAt: sessions.expiresAt,
+        status: users.status,
+        countryCode: users.countryCode,
+      })
       .from(sessions)
       .innerJoin(users, eq(users.id, sessions.userId))
       .where(eq(sessions.id, auth.sessionId));
@@ -30,7 +35,7 @@ export class SessionVerifier {
       throw unauthorized('session_ended', 'Sign in again');
     }
     if (row.status !== 'active') throw forbidden('account_suspended', 'This account is suspended. Contact support.');
-    return auth;
+    return { ...auth, countryCode: row.countryCode };
   }
 }
 

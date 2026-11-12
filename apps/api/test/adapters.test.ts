@@ -107,6 +107,17 @@ describe('config', () => {
     expect(() => loadConfig({ ...base, MESSAGING_PROVIDER: 'termii' })).toThrow(/TERMII_API_KEY/);
     expect(() => loadConfig({ ...base, NODE_ENV: 'production' })).toThrow(/MESSAGING_PROVIDER/);
     expect(loadConfig(base)).toMatchObject({ PORT: 3000, MESSAGING_PROVIDER: 'console', TIMER_PROVIDER: 'bullmq' });
+    const live = {
+      ...base,
+      NODE_ENV: 'production',
+      MESSAGING_PROVIDER: 'termii',
+      TERMII_API_KEY: 'k',
+      TERMII_SENDER_ID: 'Jiffo',
+      PUSH_PROVIDER: 'fcm',
+      FCM_SERVICE_ACCOUNT_JSON: '{}',
+    };
+    expect(() => loadConfig(live)).toThrow(/TRUST_PROXY_HOPS/);
+    expect(loadConfig({ ...live, TRUST_PROXY_HOPS: '1' }).TRUST_PROXY_HOPS).toBe(1);
   });
 });
 
