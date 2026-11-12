@@ -1,0 +1,57 @@
+<div class="stage">
+  <div class="device" id="device"><div id="app"></div></div>
+  <aside class="panel" aria-label="Prototype controls">
+    <header style="display:flex;flex-direction:column;gap:8px">
+      <p class="eyebrow">Jiffo prototype · Agent app</p>
+      <h2>Chinedu runs a Shoprite errand</h2>
+      <p>Go online, take an urgent request, agree the price, start the service, buy and send the receipt, mark it delivered and enter the PIN. People, places and amounts are samples; commission, fees and timers come from admin.</p>
+    </header>
+    <div id="panel-root"></div>
+    <section class="pcard">
+      <h3>Jump to a screen</h3>
+      <nav class="jump" aria-label="Screens">
+        <a href="#offline">Offline</a><a href="#selfie">Selfie check</a>
+        <a href="#board">Errand board</a><a href="#request">Urgent request</a>
+        <a href="#trip">Errand accepted</a><a href="#counter">Send a new price</a>
+        <a href="#chat">Chat</a><a href="#started">Service started</a>
+        <a href="#item">Item amount: photos</a><a href="#itemready">Item amount: ready</a>
+        <a href="#itemsent">Waiting for lock</a><a href="#bought">On the way</a>
+        <a href="#delivered">Marked delivered</a><a href="#pin">Enter PIN</a>
+        <a href="#dropphoto">Drop-off photo</a><a href="#unreachable">Not answering</a>
+        <a href="#done">Errand earnings</a><a href="#earnings">Earnings tab</a>
+        <a href="#withdraw">Withdraw</a><a href="#history">Errands tab</a><a href="#account">Account tab</a>
+        <a href="#me">Your public profile</a><a href="#custprofile">Customer profile</a>
+        <a href="#prefs">Errand preferences</a><a href="#filtered">Board, preferences applied</a>
+      </nav>
+    </section>
+    <section class="pcard">
+      <h3>Sign-up and log in</h3>
+      <nav class="jump" aria-label="Sign-up screens">
+        <a href="#apply">Welcome</a><a href="#aphone">Phone number</a>
+        <a href="#acode">6-digit code</a><a href="#basics">About you</a>
+        <a href="#waitlist">Waitlisted state</a><a href="#checklist">Checklist</a>
+        <a href="#aid">Identity: NIN</a><a href="#abvn">Identity: BVN</a>
+        <a href="#aconsent">BVN consent (provider)</a><a href="#aselfie">Identity: selfie</a>
+        <a href="#submitted">Sent for review</a>
+        <a href="#address">Address and contact</a><a href="#bank">Payout account</a>
+        <a href="#learn">How errands work</a><a href="#terms">Agent terms</a>
+        <a href="#ready">Ready to submit</a><a href="#checking">Automatic checks</a>
+        <a href="#approved">Approved</a><a href="#underreview">Under review</a>
+        <a href="#alogin">Log in</a>
+      </nav>
+    </section>
+    <section class="pcard">
+      <h3>Rules this follows</h3>
+      <ul class="pnotes">
+        <li>Urgent requests and the board show only errands in the agent's categories, and purchase errands only if they take them.</li>
+        <li>New prices only until Start service.</li>
+        <li>The item amount can't be sent without the receipt (or price-tag) photo and the items photo.</li>
+        <li>The customer's PIN appears only after the agent marks the errand delivered.</li>
+        <li>Item money is paid at hand-off and is withdrawable at once; Bronze errand earnings clear after 24 hours.</li>
+      </ul>
+    </section>
+  </aside>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>

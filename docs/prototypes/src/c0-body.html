@@ -1,0 +1,51 @@
+<div class="stage">
+  <div class="device" id="device"><div id="app"></div></div>
+  <aside class="panel" aria-label="Prototype controls">
+    <header style="display:flex;flex-direction:column;gap:8px">
+      <p class="eyebrow">Jiffo prototype · Customer app</p>
+      <h2>Request, track and chat, like a ride</h2>
+      <p>Describe an errand on Home, choose the stops, slide to request, then follow the agent on the map and agree prices, items and hand-off in the errand chat. People, places and amounts are samples; fees and timers come from admin.</p>
+    </header>
+    <div id="panel-root"></div>
+    <section class="pcard">
+      <h3>Jump to a screen</h3>
+      <nav class="jump" aria-label="Screens">
+        <a href="#home">Home</a><a href="#categories">Choose a category</a>
+        <a href="#plan">Plan your errand</a><a href="#nobuy">No-purchase errand</a>
+        <a href="#review">Confirm and request</a><a href="#matching">Finding an agent</a>
+        <a href="#trip">Agent accepted</a><a href="#counter">New price popup</a>
+        <a href="#live">Heading to Shoprite</a><a href="#chat">Chat: new price</a>
+        <a href="#items">Chat: item amount</a><a href="#pin">Hand-off PIN</a>
+        <a href="#photo">Drop-off photo to approve</a>
+        <a href="#delivered">Delivered: PIN button</a><a href="#profile">Agent profile</a>
+        <a href="#rate">Rate and tip</a><a href="#errands">Errands tab</a>
+        <a href="#wallet">Wallet tab</a><a href="#account">Account tab</a>
+        <a href="#me">How agents see you</a>
+      </nav>
+    </section>
+    <section class="pcard">
+      <h3>Sign-up and log in</h3>
+      <nav class="jump" aria-label="Sign-up screens">
+        <a href="#welcome">Welcome</a><a href="#signphone">Phone number</a>
+        <a href="#signcode">6-digit code</a><a href="#signname">Name and terms</a>
+        <a href="#signid">Choose an ID</a><a href="#signidnum">ID number</a>
+        <a href="#signselfie">Selfie</a><a href="#signresult">Review or verified</a>
+        <a href="#signperms">Permissions</a>
+        <a href="#newhome">New account home</a><a href="#login">Log in</a>
+      </nav>
+    </section>
+    <section class="pcard">
+      <h3>Try the interactions</h3>
+      <ul class="pnotes">
+        <li>Drag or pinch the maps; recentre with the target button.</li>
+        <li>Slide the black bar to request an agent.</li>
+        <li>On the errand screen, drag the sheet's handle to see the full details. The chat opens full screen.</li>
+        <li>Swipe a bottom sheet down to close it.</li>
+        <li>Every errand needs a category. Turn off Agent buys items and the agent goes straight from Start service to delivered, with no item amount.</li>
+      </ul>
+    </section>
+  </aside>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>

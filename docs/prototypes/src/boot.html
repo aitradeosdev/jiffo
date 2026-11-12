@@ -1,0 +1,31 @@
+<script>
+/* Start-up guard: if the app can't start, say why on the phone screen instead of leaving it blank. */
+(function () {
+  var shown = false;
+  function show(title, detail) {
+    if (shown) return; shown = true;
+    var d = document.getElementById('device'); if (!d) return;
+    var box = document.createElement('div');
+    box.setAttribute('role', 'alert');
+    box.style.cssText = 'position:absolute;inset:0;z-index:99;display:flex;flex-direction:column;justify-content:center;gap:10px;padding:28px;background:var(--bg,#fff);color:var(--ink,#000);font:15px/1.45 system-ui,sans-serif';
+    var h = document.createElement('b'); h.textContent = title; h.style.fontSize = '20px';
+    var p = document.createElement('p'); p.textContent = detail; p.style.margin = '0';
+    var r = document.createElement('button'); r.textContent = 'Reload';
+    r.style.cssText = 'align-self:flex-start;margin-top:6px;height:44px;padding:0 18px;border:0;border-radius:10px;background:var(--ink,#000);color:var(--on-ink,#fff);font:inherit;font-weight:700';
+    r.onclick = function () { location.reload(); };
+    box.appendChild(h); box.appendChild(p); box.appendChild(r); d.appendChild(box);
+  }
+  window.__bootFail = show;
+  window.addEventListener('error', function (e) {
+    var app = document.getElementById('app');
+    if (!app || !app.firstChild) show('The prototype could not start', (e && e.message) || 'A script failed to load.');
+  });
+  setTimeout(function () {
+    var app = document.getElementById('app');
+    if (app && app.firstChild) return;
+    var miss = [];
+    if (!window.React) miss.push('React'); if (!window.ReactDOM) miss.push('ReactDOM'); if (!window.htm) miss.push('htm');
+    show('The prototype could not start', miss.length ? 'These libraries did not load: ' + miss.join(', ') + '. Check the connection and reload.' : 'The app did not render. Reload to try again.');
+  }, 8000);
+})();
+</script>
