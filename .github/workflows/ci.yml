@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: jiffo
+          POSTGRES_PASSWORD: jiffo
+          POSTGRES_DB: jiffo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jiffo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://jiffo:jiffo@localhost:5432/jiffo
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build
+      - name: Lint
+        run: pnpm lint
+      - name: Formatting
+        run: pnpm format:check
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Migrations match the schema
+        working-directory: apps/api
+        run: |
+          pnpm exec drizzle-kit generate --name ci_check
+          if [ -n "$(git status --porcelain drizzle)" ]; then
+            echo "src/db/schema.ts has changes with no migration. Run pnpm --filter @jiffo/api db:generate and commit the result."
+            git status --porcelain drizzle
+            exit 1
+          fi
