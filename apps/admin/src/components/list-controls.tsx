@@ -56,19 +56,27 @@ export function ListControls({
   );
 }
 
-/** Newest and Older links under a paged list. */
-export function Pager({ newest, older }: { newest: string | null; older: string | null }) {
+/** Links to the first page and the next. Lists that run oldest first pass their own words. */
+export function Pager({
+  newest,
+  older,
+  labels = { first: 'Newest', next: 'Older' },
+}: {
+  newest: string | null;
+  older: string | null;
+  labels?: { first: string; next: string };
+}) {
   if (!newest && !older) return null;
   return (
     <div className="mt-4 flex gap-2">
       {newest ? (
         <Link href={newest} className={buttonClass('secondary', true)}>
-          Newest
+          {labels.first}
         </Link>
       ) : null}
       {older ? (
         <Link href={older} className={buttonClass('secondary', true)}>
-          Older
+          {labels.next}
         </Link>
       ) : null}
     </div>

@@ -28,6 +28,7 @@ import { CountriesService } from '../countries/countries.service';
 import { ErrandsService } from '../errands/errands.service';
 import { PushService } from '../push/push.service';
 import { AuditService } from './audit.service';
+import { ApplicationsAdminService } from './applications-admin.service';
 import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
 
@@ -50,6 +51,7 @@ export class PeopleAdminService {
     private readonly push: PushService,
     private readonly audit: AuditService,
     private readonly countries: CountriesService,
+    private readonly applications: ApplicationsAdminService,
   ) {}
 
   /** What each tier means under the country's current settings: commission, and when earnings can be withdrawn. */
@@ -244,6 +246,7 @@ export class PeopleAdminService {
     ]);
     const balance = (type: string) => Number(balances.find((b) => b.type === type)?.balance ?? 0);
     const isAgent = apps.some((a) => a.app === 'agent');
+    const application = isAgent ? await this.applications.detail(id) : null;
     const avg = (role: 'customer' | 'agent') => averages.find((a) => a.raterRole === role)?.average ?? null;
     const p = payout[0];
     return {
@@ -277,6 +280,8 @@ export class PeopleAdminService {
             heldKobo: balance('agent_held'),
             rating: avg('customer'),
             stats: asAgent,
+            /** Their application: the provider's results and support's decision, never their documents. */
+            application,
             payoutAccount: p
               ? {
                   bankName: p.bankName,

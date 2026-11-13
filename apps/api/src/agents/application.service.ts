@@ -1,12 +1,12 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { and, eq, isNull, ne, sql } from 'drizzle-orm';
 import { createHmac, hkdfSync } from 'node:crypto';
-import { normaliseIdNumber } from '@jiffo/shared';
+import { normaliseIdNumber, yearsOld } from '@jiffo/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
-import { DB, type Db } from '../db/database.module';
-import { agentApplications, agentProfiles, payoutAccounts, states, users } from '../db/schema';
+import { DB, type Db, type Tx } from '../db/database.module';
+import { agentApplications, agentPresence, agentProfiles, payoutAccounts, states, users } from '../db/schema';
 import { IDENTITY, IdentityUnavailable, type CheckOutcome, type IdentityAdapter } from '../adapters/identity';
-import { badRequest, conflict, forbidden, unavailable, unprocessable } from '../common/errors';
+import { badRequest, conflict, forbidden, notFound, unavailable, unprocessable } from '../common/errors';
 import { nameWords } from '../common/names';
 import { PushService } from '../push/push.service';
 import { CountriesService } from '../countries/countries.service';
@@ -28,17 +28,6 @@ const CHECK_LABELS: Record<string, string> = {
 const IDENTITY_CHECKS = ['nin', 'bvn', 'selfie'];
 /** While checking, the provider is asked again at most this often, however often the app looks. */
 const POLL_EVERY_MS = 15_000;
-
-const yearsSince = (isoDate: string) => {
-  const born = new Date(`${isoDate}T00:00:00Z`);
-  const now = new Date();
-  let years = now.getUTCFullYear() - born.getUTCFullYear();
-  const beforeBirthday =
-    now.getUTCMonth() < born.getUTCMonth() ||
-    (now.getUTCMonth() === born.getUTCMonth() && now.getUTCDate() < born.getUTCDate());
-  if (beforeBirthday) years -= 1;
-  return years;
-};
 
 /**
  * Whether a name (a bank account's, or the one in the app) belongs to the person on the NIN record: it has
@@ -389,7 +378,7 @@ export class AgentApplicationService {
       {
         key: 'age',
         ...(app.dateOfBirth
-          ? yearsSince(app.dateOfBirth) >= 18
+          ? yearsOld(app.dateOfBirth) >= 18
             ? { outcome: 'passed' }
             : { outcome: 'failed', note: 'Agents must be 18 or older' }
           : { outcome: 'review', note: 'No date of birth on the NIN record' }),
@@ -431,6 +420,107 @@ export class AgentApplicationService {
       data: { type: 'agent.application', status: after.status },
     });
     return after;
+  }
+
+  /**
+   * Support's decision, made inside the caller's transaction so it is audited with it. Approving needs an
+   * application in review (or one declined by mistake) with no failed check, and claims the agent's NIN as
+   * the checks would have: an approved agent always holds their NIN, and no two approved agents share one.
+   * Declining takes the agent offline; an errand they already have can still be finished. Reopening a
+   * declined application lets the agent change it and send it again.
+   */
+  async decide(
+    tx: Tx,
+    input: { userId: string; decision: 'approve' | 'reject' | 'reopen'; adminId: string; note: string },
+  ) {
+    const [app] = await tx
+      .select()
+      .from(agentApplications)
+      .where(eq(agentApplications.userId, input.userId))
+      .for('update');
+    if (!app) throw notFound('application_not_found', 'This person has no agent application');
+    const from = { approve: ['review', 'rejected'], reject: ['review'], reopen: ['rejected'] }[input.decision];
+    if (!from.includes(app.status)) {
+      throw conflict(
+        input.decision === 'reopen' ? 'not_declined' : 'not_in_review',
+        input.decision === 'reopen'
+          ? 'Only a declined application can be reopened'
+          : 'Only an application in review can be decided',
+        { status: app.status },
+      );
+    }
+    const decided = {
+      decidedAt: new Date(),
+      decidedBy: input.adminId,
+      decisionNote: input.note,
+      updatedAt: new Date(),
+    };
+
+    if (input.decision === 'reopen') {
+      const [row] = await tx
+        .update(agentApplications)
+        .set({
+          status: 'draft',
+          submittedAt: null,
+          decidedAt: null,
+          decidedBy: null,
+          decisionNote: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(agentApplications.userId, input.userId))
+        .returning();
+      return { before: app, after: row! };
+    }
+
+    if (input.decision === 'reject') {
+      const [row] = await tx
+        .update(agentApplications)
+        .set({ status: 'rejected', ...decided })
+        .where(eq(agentApplications.userId, input.userId))
+        .returning();
+      await tx
+        .update(agentPresence)
+        .set({ online: false, updatedAt: new Date() })
+        .where(eq(agentPresence.userId, input.userId));
+      return { before: app, after: row! };
+    }
+
+    const failed = app.checks.filter((c) => c.outcome === 'failed');
+    if (failed.length) {
+      throw unprocessable('check_failed', 'A check failed, so this application can only be declined', {
+        failed: failed.map((c) => c.key),
+      });
+    }
+    let ninFingerprint = app.ninFingerprint;
+    if (!ninFingerprint && app.pendingNinFingerprint) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'nin:' + app.pendingNinFingerprint}))`);
+      const [holder] = await tx
+        .select({ userId: agentApplications.userId, status: agentApplications.status })
+        .from(agentApplications)
+        .where(
+          and(
+            eq(agentApplications.ninFingerprint, app.pendingNinFingerprint),
+            ne(agentApplications.userId, input.userId),
+          ),
+        );
+      if (holder?.status === 'approved') {
+        throw conflict('nin_held', 'Another approved agent account uses this NIN', { userId: holder.userId });
+      }
+      // An account that isn't approved lets the NIN go to the one support approves.
+      if (holder) {
+        await tx
+          .update(agentApplications)
+          .set({ ninFingerprint: null, updatedAt: new Date() })
+          .where(eq(agentApplications.userId, holder.userId));
+      }
+      ninFingerprint = app.pendingNinFingerprint;
+    }
+    const [row] = await tx
+      .update(agentApplications)
+      .set({ status: 'approved', ninFingerprint, ...decided })
+      .where(eq(agentApplications.userId, input.userId))
+      .returning();
+    return { before: app, after: row! };
   }
 
   /** The verified legal name, once the provider has checked the agent's NIN. */

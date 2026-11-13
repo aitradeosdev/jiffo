@@ -18,6 +18,7 @@ import { ERRAND_FILTERS, ErrandsAdminService } from './errands-admin.service';
 import { PEOPLE_ROLES, PeopleAdminService } from './people-admin.service';
 import { MAX_ADJUSTMENT_KOBO, MoneyAdminService } from './money-admin.service';
 import { SettingsAdminService } from './settings-admin.service';
+import { APPLICATION_STATUSES, ApplicationsAdminService } from './applications-admin.service';
 import { AGENT_TIERS } from '@jiffo/shared';
 import { notFound } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
@@ -106,6 +107,15 @@ const ActBody = z.object({
   split: z.object({ agentKobo: kobo, jiffoKobo: kobo, itemsToAgentKobo: kobo, chargeCustomerKobo: kobo }).optional(),
 });
 const CountryQuery = z.object({ country: z.string().length(2).toUpperCase() });
+const ApplicationsQuery = z.object({
+  country: z.string().length(2).toUpperCase(),
+  status: z.enum(APPLICATION_STATUSES).default('review'),
+  q: z.string().trim().max(80).optional(),
+  before: z.string().max(80).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+/** The note is shown to the agent when their application is declined. */
+const DecisionBody = z.object({ decision: z.enum(['approve', 'reject', 'reopen']), note: Note });
 const InviteBody = z.object({
   email: z.string().email().max(200),
   name: z.string().trim().min(1).max(80),
@@ -133,6 +143,7 @@ export class AdminController {
     private readonly people: PeopleAdminService,
     private readonly money: MoneyAdminService,
     private readonly settingsAdmin: SettingsAdminService,
+    private readonly applications: ApplicationsAdminService,
   ) {}
 
   @Get('settings')
@@ -230,6 +241,30 @@ export class AdminController {
   @Needs('money')
   adjust(@CurrentAdmin() admin: AdminContext, @Body(new ZodBody(AdjustBody)) body: z.infer<typeof AdjustBody>) {
     return this.money.adjust(admin, body);
+  }
+
+  @Get('applications')
+  @Needs('read')
+  listApplications(@Query(new ZodBody(ApplicationsQuery)) query: z.infer<typeof ApplicationsQuery>) {
+    return this.applications.list(query);
+  }
+
+  @Get('applications/counts')
+  @Needs('read')
+  applicationCounts(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
+    return this.applications.counts(query.country);
+  }
+
+  /** Approve or decline an agent application the checks sent to review, or reopen a declined one. */
+  @Post('people/:id/application')
+  @HttpCode(200)
+  @Needs('operate')
+  decideApplication(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', PersonId) id: string,
+    @Body(new ZodBody(DecisionBody)) body: z.infer<typeof DecisionBody>,
+  ) {
+    return this.applications.decide(admin, id, body);
   }
 
   @Get('people')

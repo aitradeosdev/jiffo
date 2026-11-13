@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { adminRoleLabel } from '@jiffo/shared';
 import {
+  ApplicationsIcon,
   AuditIcon,
   DisputesIcon,
   ErrandsIcon,
@@ -21,6 +22,7 @@ const SECTIONS: Array<NavItem & { needs: Permission }> = [
   { href: '/errands', label: 'Errands', icon: <ErrandsIcon />, needs: 'read' },
   { href: '/disputes', label: 'Disputes', icon: <DisputesIcon />, needs: 'read' },
   { href: '/people', label: 'People', icon: <PeopleIcon />, needs: 'read' },
+  { href: '/applications', label: 'Applications', icon: <ApplicationsIcon />, needs: 'read' },
   { href: '/money', label: 'Money', icon: <MoneyIcon />, needs: 'read' },
   { href: '/settings', label: 'Settings', icon: <SettingsIcon />, needs: 'read' },
   { href: '/team', label: 'Team', icon: <TeamIcon />, needs: 'team' },

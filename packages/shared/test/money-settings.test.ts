@@ -12,7 +12,7 @@ import {
   splitFeeEscrow,
 } from '../src/money';
 import { CountrySettingsSchema, NIGERIA_DEFAULT_SETTINGS, publicSettings } from '../src/settings';
-import { normaliseIdNumber } from '../src/identity';
+import { normaliseIdNumber, yearsOld } from '../src/identity';
 
 describe('money', () => {
   it('converts naira to whole kobo', () => {
@@ -111,5 +111,13 @@ describe('ID numbers', () => {
     expect(normaliseIdNumber('nin', '2201 384 5576')).toBe('22013845576');
     expect(normaliseIdNumber('nin', '2201')).toBeNull();
     expect(normaliseIdNumber('drivers_licence', 'lag12345aa12')).toBe('LAG12345AA12');
+  });
+
+  it('counts a birthday only once it has come', () => {
+    const on = (iso: string) => new Date(`${iso}T12:00:00Z`);
+    expect(yearsOld('2008-06-15', on('2026-06-14'))).toBe(17);
+    expect(yearsOld('2008-06-15', on('2026-06-15'))).toBe(18);
+    expect(yearsOld('2008-02-29', on('2026-02-28'))).toBe(17);
+    expect(yearsOld('2008-02-29', on('2026-03-01'))).toBe(18);
   });
 });
