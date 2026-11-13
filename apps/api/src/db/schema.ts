@@ -98,21 +98,26 @@ export const categories = pgTable(
 
 /* ---------- Accounts and sessions ---------- */
 
-export const users = pgTable('users', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  phone: text('phone').notNull().unique(),
-  countryCode: char('country_code', { length: 2 })
-    .notNull()
-    .references(() => countries.code),
-  firstName: text('first_name'),
-  lastName: text('last_name'),
-  email: text('email'),
-  status: text('status', { enum: ['active', 'suspended'] })
-    .notNull()
-    .default('active'),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    phone: text('phone').notNull().unique(),
+    countryCode: char('country_code', { length: 2 })
+      .notNull()
+      .references(() => countries.code),
+    firstName: text('first_name'),
+    lastName: text('last_name'),
+    email: text('email'),
+    status: text('status', { enum: ['active', 'suspended'] })
+      .notNull()
+      .default('active'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  // The admin People list: a country's accounts, newest first.
+  (t) => [index('users_country_created_idx').on(t.countryCode, t.createdAt, t.id)],
+);
 
 export const APPS = ['customer', 'agent'] as const;
 export type AppName = (typeof APPS)[number];
@@ -278,6 +283,7 @@ export const errands = pgTable(
     index('errands_customer_idx').on(t.customerId, t.createdAt),
     index('errands_agent_idx').on(t.agentId, t.createdAt),
     index('errands_status_idx').on(t.status),
+    index('errands_country_created_idx').on(t.countryCode, t.createdAt, t.id),
     check('errands_agent_tier_ck', sql`${t.agentTier} is null or ${tierCheck(t.agentTier)}`),
   ],
 );
@@ -484,7 +490,12 @@ export const deposits = pgTable(
     createdAt: createdAt(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
-  (t) => [uniqueIndex('deposits_reference_uq').on(t.reference), index('deposits_user_idx').on(t.userId, t.createdAt)],
+  (t) => [
+    uniqueIndex('deposits_reference_uq').on(t.reference),
+    index('deposits_user_idx').on(t.userId, t.createdAt),
+    // The admin list: a country's top-ups, newest first.
+    index('deposits_country_created_idx').on(t.countryCode, t.createdAt, t.id),
+  ],
 );
 
 /** The agent's own-name bank account. A new one replaces the old; the old row is kept for history. */
@@ -546,6 +557,7 @@ export const payouts = pgTable(
     uniqueIndex('payouts_reference_uq').on(t.reference),
     index('payouts_user_idx').on(t.userId, t.createdAt),
     index('payouts_status_idx').on(t.status),
+    index('payouts_country_created_idx').on(t.countryCode, t.createdAt, t.id),
   ],
 );
 

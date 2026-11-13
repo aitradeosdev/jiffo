@@ -7,6 +7,7 @@ import { Badge, Card, Notice, Stat } from '@/components/ui';
 import { api, ApiError, getCountry, getMe } from '@/lib/api';
 import { ACCOUNT, JOURNAL, nameOf, STATUS } from '@/lib/errands';
 import { ago, dateTime, money } from '@/lib/format';
+import { AdjustForm } from './adjust';
 import { AccessForm, TierForm, type TierTerms } from './forms';
 
 export const metadata: Metadata = { title: 'Person' };
@@ -78,6 +79,7 @@ const DONE: Record<string, string> = {
   tier: 'Tier changed. The agent has been told.',
   suspend: 'Account suspended. They have been signed out everywhere.',
   reactivate: 'Account reactivated.',
+  adjust: 'Balance adjusted. It shows in their history as an adjustment by Jiffo support.',
 };
 const HISTORY: Record<string, string> = {
   ...JOURNAL,
@@ -309,6 +311,37 @@ export default async function PersonPage({
               </ul>
             )}
           </Card>
+
+          {me.permissions.includes('money') ? (
+            <Card title="Adjust balance">
+              <AdjustForm
+                key={d.money[0]?.id ?? 'none'}
+                id={p.id}
+                currency={country.currency}
+                accounts={[
+                  ...(d.apps.includes('customer')
+                    ? [
+                        {
+                          value: 'customer_wallet' as const,
+                          label: 'Customer wallet',
+                          balanceKobo: d.customer.walletKobo,
+                        },
+                      ]
+                    : []),
+                  ...(d.agent
+                    ? [
+                        {
+                          value: 'agent_available' as const,
+                          label: 'Agent balance',
+                          balanceKobo: d.agent.availableKobo,
+                        },
+                      ]
+                    : []),
+                ]}
+                errands={d.errands.map((e) => ({ id: e.id, description: e.description }))}
+              />
+            </Card>
+          ) : null}
 
           {canOperate ? (
             <Card title="Access">

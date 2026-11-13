@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { buttonClass, Card, Empty, PageHeader, tableClass, tdClass, thClass } from '@/components/ui';
+import { Pager } from '@/components/list-controls';
+import { Card, Empty, PageHeader, tableClass, tdClass, thClass } from '@/components/ui';
 import { adminRoleLabel, agentTierLabel } from '@jiffo/shared';
 import { api, getCountry, getMe } from '@/lib/api';
-import { dateTime } from '@/lib/format';
+import { dateTime, money } from '@/lib/format';
 
 export const metadata: Metadata = { title: 'Audit log' };
 
@@ -13,6 +14,7 @@ interface Entry {
   targetType: string | null;
   targetId: string | null;
   targetLabel: string | null;
+  countryCode: string | null;
   data: Record<string, unknown>;
   ip: string | null;
   createdAt: string;
@@ -20,7 +22,7 @@ interface Entry {
 }
 
 /** One line a person can read, from the action and what it changed. */
-function describe(entry: Entry, names: Map<string, string>): string {
+function describe(entry: Entry, names: Map<string, string>, currencyOf: (code: string | null) => string): string {
   const who = (entry.targetId && names.get(entry.targetId)) || String(entry.data.email ?? 'a teammate');
   switch (entry.action) {
     case 'team.invite':
@@ -44,6 +46,10 @@ function describe(entry: Entry, names: Map<string, string>): string {
       return `Changed ${entry.targetLabel ?? 'an agent'}'s tier from ${agentTierLabel(String(entry.data.from))} to ${agentTierLabel(
         String(entry.data.to),
       )}`;
+    case 'money.adjust':
+      return `${entry.data.direction === 'debit' ? 'Took back' : 'Added'} ${money(Number(entry.data.amountKobo ?? 0), currencyOf(entry.countryCode))} ${
+        entry.data.direction === 'debit' ? 'from' : 'to'
+      } ${entry.targetLabel ?? 'an account'}'s ${entry.data.account === 'agent_available' ? 'agent balance' : 'wallet'}`;
     case 'person.suspend':
       return `Suspended ${entry.targetLabel ?? 'an account'}`;
     case 'person.reactivate':
@@ -81,6 +87,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
     getCountry(),
   ]);
   const names = new Map(team.map((t) => [t.id, t.name]));
+  const currencyOf = (code: string | null) => me.countries.find((c) => c.code === code)?.currency ?? country.currency;
   const last = log.entries.at(-1);
 
   return (
@@ -119,10 +126,10 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
                           href={`/${e.targetType === 'person' ? 'people' : 'errands'}/${e.targetId}`}
                           className="hover:underline"
                         >
-                          {describe(e, names)}
+                          {describe(e, names, currencyOf)}
                         </Link>
                       ) : (
-                        describe(e, names)
+                        describe(e, names, currencyOf)
                       )}
                       {typeof e.data.note === 'string' ? (
                         <span className="block text-[13px] text-ink-3">“{e.data.note}”</span>
@@ -136,18 +143,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
           </div>
         )}
       </Card>
-      <div className="mt-4 flex gap-2">
-        {query ? (
-          <Link href="/audit" className={buttonClass('secondary', true)}>
-            Newest
-          </Link>
-        ) : null}
-        {log.more && last ? (
-          <Link href={`/audit?before=${last.id}`} className={buttonClass('secondary', true)}>
-            Older entries
-          </Link>
-        ) : null}
-      </div>
+      <Pager newest={query ? '/audit' : null} older={log.more && last ? `/audit?before=${last.id}` : null} />
     </>
   );
 }

@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { api, ApiError, messageOf } from '@/lib/api';
+import { nairaToKobo } from '@/lib/format';
 
 export interface PersonState {
   error?: string;
@@ -22,6 +23,33 @@ export async function setTier(_: PersonState, form: FormData): Promise<PersonSta
     return { error: messageOf(error) };
   }
   back(id, 'tier');
+  return {};
+}
+
+export async function adjustBalance(_: PersonState, form: FormData): Promise<PersonState> {
+  const id = String(form.get('id') ?? '');
+  const amountKobo = nairaToKobo(String(form.get('amount') ?? ''));
+  if (!(amountKobo > 0)) return { error: 'Enter an amount' };
+  const errandId = String(form.get('errandId') ?? '');
+  try {
+    const res = await api<{ posted: boolean }>('/admin/money/adjustments', {
+      method: 'POST',
+      body: {
+        personId: id,
+        account: String(form.get('account') ?? ''),
+        direction: String(form.get('direction') ?? ''),
+        amountKobo,
+        note: String(form.get('note') ?? ''),
+        requestId: String(form.get('requestId') ?? ''),
+        ...(errandId ? { errandId } : {}),
+      },
+    });
+    // The same form was already saved (a retry after a lost answer): say so rather than claim a new change.
+    if (!res.posted) return { error: 'This adjustment was already saved. Refresh the page to see it.' };
+  } catch (error) {
+    return { error: messageOf(error) };
+  }
+  back(id, 'adjust');
   return {};
 }
 

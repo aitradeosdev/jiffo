@@ -70,6 +70,7 @@ const HISTORY_LABELS: Record<string, string> = {
   hold_release: 'Earnings now available',
   payout: 'Withdrawal',
   payout_reversed: 'Withdrawal returned',
+  adjustment: 'Adjustment by Jiffo support',
 };
 
 @Injectable()

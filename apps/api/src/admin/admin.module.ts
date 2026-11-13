@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ErrandsModule } from '../errands/errands.module';
 import { ErrandsAdminService } from './errands-admin.service';
 import { PeopleAdminService } from './people-admin.service';
+import { MoneyAdminService } from './money-admin.service';
 import { PushModule } from '../push/push.module';
 import { AdminAuthController } from './admin-auth.controller';
 import { AdminAuthService } from './admin-auth.service';
@@ -20,6 +21,7 @@ import { TeamService } from './team.service';
     AdminGuard,
     AuditService,
     ErrandsAdminService,
+    MoneyAdminService,
     OverviewService,
     PeopleAdminService,
     TeamService,
