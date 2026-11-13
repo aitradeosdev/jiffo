@@ -14,7 +14,7 @@ import { useColors } from '../theme/theme';
 import { fonts } from '../theme/tokens';
 import { Button, Text } from '../ui/kit';
 import { Avatar, Badge, Chip, Empty, Icon, List } from '../ui/parts';
-import { Art, hasArt } from '../ui/svg';
+import { CategoryArt } from '../ui/category-art';
 import { FloatPill, Sheet } from '../ui/floating';
 import { JiffoMap } from '../ui/map/map';
 import type { MapPin } from '../ui/map/types';
@@ -330,7 +330,7 @@ function JobRow({ job }: { job: BoardErrand }) {
       style={({ pressed }) => [styles.job, pressed && { opacity: 0.6 }]}
     >
       <View style={[styles.jobThumb, { backgroundColor: c.surface2 }]}>
-        {cat && hasArt(cat.key) ? <Art name={cat.key} size={40} /> : <Icon name={cat?.icon ?? 'bag'} size={26} />}
+        <CategoryArt categoryKey={job.categoryKey} icon={cat?.icon} size={48} />
       </View>
       <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
         <Text style={styles.jobTitle} numberOfLines={1}>

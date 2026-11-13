@@ -1,12 +1,16 @@
+import { StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { goBack } from '@/nav';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { useDraft } from '@/errands/draft';
+import { useColors } from '@/theme/theme';
 import { Screen, Text } from '@/ui/kit';
-import { Badge, IconCircle, List, Row } from '@/ui/parts';
+import { Badge, Icon, IconCircle, List, Row } from '@/ui/parts';
+import { CategoryArt } from '@/ui/category-art';
 
 /** "Choose a category". From the home screen's See all it goes on to the plan. */
 export default function Category() {
+  const c = useColors();
   const { config } = useCountryConfig();
   const { draft, update } = useDraft();
   const { then } = useLocalSearchParams<{ then?: string }>();
@@ -24,8 +28,20 @@ export default function Category() {
           return (
             <Row
               key={cat.key}
-              iconNode={<IconCircle icon={on ? 'check' : cat.icon} tone={on ? 'ink' : undefined} />}
+              iconNode={
+                <View>
+                  <IconCircle size={48}>
+                    <CategoryArt categoryKey={cat.key} icon={cat.icon} size={40} />
+                  </IconCircle>
+                  {on ? (
+                    <View style={[styles.tick, { backgroundColor: c.ink, borderColor: c.surface }]}>
+                      <Icon name="check" size={12} weight={3} color={c.onInk} />
+                    </View>
+                  ) : null}
+                </View>
+              }
               title={cat.name}
+              selected={on}
               subtitle={cat.description || null}
               right={cat.buyDefault ? <Badge label="Buys items" /> : false}
               onPress={() => {
@@ -41,3 +57,18 @@ export default function Category() {
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  // The check on the chosen category's picture.
+  tick: {
+    position: 'absolute',
+    right: -3,
+    bottom: -3,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

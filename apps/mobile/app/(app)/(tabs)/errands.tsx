@@ -12,8 +12,8 @@ import { naira } from '@/money';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
 import { Button, Text } from '@/ui/kit';
-import { Badge, Empty, Icon } from '@/ui/parts';
-import { Art, hasArt } from '@/ui/svg';
+import { Badge, Empty } from '@/ui/parts';
+import { CategoryArt } from '@/ui/category-art';
 import { TabPage } from '@/ui/tab-page';
 
 /** The Errands (customer) or Jobs (agent) tab: what's running now, what's booked, and the past with totals. */
@@ -103,11 +103,7 @@ function ErrandRow({ errand: e, category }: { errand: ErrandView; category?: { k
       style={({ pressed }) => [styles.erow, pressed && { opacity: 0.6 }]}
     >
       <View style={[styles.thumb, { backgroundColor: c.surface2 }]}>
-        {category && hasArt(category.key) ? (
-          <Art name={category.key} size={34} />
-        ) : (
-          <Icon name={category?.icon ?? 'bag'} size={22} />
-        )}
+        <CategoryArt categoryKey={e.categoryKey} icon={category?.icon} size={40} />
       </View>
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <Text style={styles.title} numberOfLines={1}>
