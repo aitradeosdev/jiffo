@@ -55,7 +55,11 @@ export interface PaymentsAdapter {
   verifyDeposit(reference: string): Promise<DepositStatus>;
   listBanks(): Promise<Bank[]>;
   /** The name the bank holds for the account, for the own-name check. */
-  resolveAccount(bankCode: string, accountNumber: string): Promise<{ accountName: string }>;
+  /**
+   * `expectedName` is whose the account should be. Real providers ignore it; the fake uses it in
+   * development to name accounts it doesn't know.
+   */
+  resolveAccount(bankCode: string, accountNumber: string, expectedName?: string): Promise<{ accountName: string }>;
   createRecipient(input: { name: string; bankCode: string; accountNumber: string }): Promise<{ recipientCode: string }>;
   transfer(input: {
     reference: string;
@@ -354,17 +358,21 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
     ];
   }
 
-  /**
-   * Development only: with auto-pay on, an account the fake bank doesn't know is taken to be in the given
-   * name, so a payout account can be added when trying the app end to end.
-   */
-  assumeHolder(bankCode: string, accountNumber: string, name: string) {
-    const key = `${bankCode}:${accountNumber}`;
-    if (this.autoPayAfterMs > 0 && !this.accounts.has(key)) this.accounts.set(key, name.toUpperCase());
-  }
+  /** Accounts named after whoever asked, in development. */
+  private readonly assumed = new Set<string>();
 
-  async resolveAccount(bankCode: string, accountNumber: string) {
-    const name = this.accounts.get(`${bankCode}:${accountNumber}`);
+  /**
+   * Development only: with auto-pay on, an account the fake bank doesn't know is taken to be in the expected
+   * name, so a payout account can be added when trying the app end to end. Accounts set up by tests are
+   * never renamed.
+   */
+  async resolveAccount(bankCode: string, accountNumber: string, expectedName?: string) {
+    const key = `${bankCode}:${accountNumber}`;
+    if (this.autoPayAfterMs > 0 && expectedName && (!this.accounts.has(key) || this.assumed.has(key))) {
+      this.accounts.set(key, expectedName.toUpperCase());
+      this.assumed.add(key);
+    }
+    const name = this.accounts.get(key);
     if (!name) throw new PaystackError(422, 'Could not resolve account name');
     return { accountName: name };
   }

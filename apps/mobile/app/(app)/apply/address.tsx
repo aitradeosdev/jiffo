@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useSession } from '@/auth/session';
 import { errorMessage } from '@/api/client';
 import { useCountryConfig } from '@/api/useCountryConfig';
+import { formatNational, nationalDigits, plausibleNumber, toE164 } from '@/auth/phone';
 import { ProviderName, useApplication, type Application } from '@/agent/application';
 import { FieldGroup, Waiting } from '@/agent/apply-parts';
 import { useColors } from '@/theme/theme';
@@ -13,12 +14,6 @@ import { Flag, ObScreen, Question, TextBox } from '@/ui/onboarding';
 import { Chip } from '@/ui/parts';
 
 const RELATIONSHIPS = ['Parent', 'Sibling', 'Spouse', 'Friend', 'Other'];
-
-/** "803 447 1902": the local number in groups, as the prototype shows it. */
-const spaced = (text: string) => {
-  const d = text.replace(/\D/g, '').slice(0, 10);
-  return [d.slice(0, 3), d.slice(3, 6), d.slice(6)].filter(Boolean).join(' ');
-};
 
 /** Where the agent lives, which the provider confirms, and who to call in an emergency. */
 export default function Address() {
@@ -30,12 +25,12 @@ export default function Address() {
   const saved = app?.emergency;
   const [address, setAddress] = useState(app?.address ?? '');
   const [name, setName] = useState(saved?.name ?? '');
-  const [phone, setPhone] = useState(spaced(saved?.phone?.replace(prefix, '') ?? ''));
+  const [phone, setPhone] = useState(saved?.phone ? formatNational(nationalDigits(saved.phone, prefix)) : '');
   const [relationship, setRelationship] = useState(saved?.relationship ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const local = phone.replace(/\D/g, '');
-  const ready = address.trim().length >= 8 && name.trim().length >= 2 && local.length === 10;
+  const local = nationalDigits(phone, prefix);
+  const ready = address.trim().length >= 8 && name.trim().length >= 2 && plausibleNumber(local);
 
   const save = async () => {
     setBusy(true);
@@ -46,7 +41,7 @@ export default function Address() {
           address: address.trim(),
           emergency: {
             name: name.trim(),
-            phone: `${prefix}${local}`,
+            phone: toE164(prefix, local),
             ...(relationship ? { relationship } : {}),
           },
         }),
@@ -104,7 +99,7 @@ export default function Address() {
             keyboardType="phone-pad"
             placeholder="803 000 0000"
             value={phone}
-            onChangeText={(t) => setPhone(spaced(t))}
+            onChangeText={(t) => setPhone(formatNational(nationalDigits(t, prefix)))}
           />
         </View>
       </FieldGroup>

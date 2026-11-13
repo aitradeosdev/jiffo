@@ -4,7 +4,7 @@ import { and, desc, eq, gte, inArray, isNull, lt, sql, sum } from 'drizzle-orm';
 import { formatNaira } from '@jiffo/shared';
 import { DB, type Db } from '../db/database.module';
 import { payoutAccounts, payouts, users } from '../db/schema';
-import { FakePaymentsAdapter, PAYMENTS, PaystackError, type PaymentsAdapter } from '../adapters/payments';
+import { PAYMENTS, PaystackError, type PaymentsAdapter } from '../adapters/payments';
 import { CountriesService } from '../countries/countries.service';
 import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -97,12 +97,13 @@ export class PayoutsService {
     if (!bank) throw unprocessable('bank_not_supported', 'Choose a bank from the list');
 
     const legalName = await this.applications.legalName(auth.userId);
-    if (this.payments instanceof FakePaymentsAdapter) {
-      this.payments.assumeHolder(bankCode, accountNumber, legalName ?? `${me.firstName} ${me.lastName}`);
-    }
     let accountName: string;
     try {
-      ({ accountName } = await this.payments.resolveAccount(bankCode, accountNumber));
+      ({ accountName } = await this.payments.resolveAccount(
+        bankCode,
+        accountNumber,
+        legalName ?? `${me.firstName} ${me.lastName}`,
+      ));
     } catch (error) {
       if (error instanceof PaystackError) throw unprocessable('account_not_found', 'Check the account number and bank');
       throw error;

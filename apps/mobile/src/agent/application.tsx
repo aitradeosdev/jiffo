@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, AppState, StyleSheet, View } from 'react-native';
 import { useSession } from '../auth/session';
 import { errorMessage } from '../api/client';
 import { useColors } from '../theme/theme';
@@ -13,6 +13,8 @@ export type CheckOutcome = 'passed' | 'failed' | 'review';
 export interface Application {
   status: ApplicationStatus;
   steps: { basics: boolean; identity: boolean; address: boolean; bank: boolean; prefs: boolean; learn: boolean };
+  /** Started with the provider, and its result not back yet. */
+  identityChecking: boolean;
   stateCode: string | null;
   stateName: string | null;
   waitlisted: boolean;
@@ -57,8 +59,20 @@ interface ApplicationValue {
 
 const ApplicationContext = createContext<ApplicationValue | null>(null);
 
-/** While checks are running, the app asks again this often. The API asks the provider less often. */
-const CHECKING_POLL_MS = 5_000;
+/**
+ * How often the app asks again while something is being decided: the checks after submitting, an identity
+ * result not back yet, or support looking at an application in review. The API asks the provider less often.
+ */
+const pollEvery = (app: Application | null) =>
+  !app
+    ? null
+    : app.status === 'checking'
+      ? 5_000
+      : app.status === 'draft' && app.identityChecking
+        ? 10_000
+        : app.status === 'review'
+          ? 30_000
+          : null;
 
 /**
  * The agent's application, for the gate in front of the board and for the application screens. Loaded on
@@ -86,27 +100,44 @@ export function ApplicationProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    // Its own flag, so a loop from an earlier run of this effect stops even if a newer one has started.
+    let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     (async () => {
-      for (let attempt = 0; live.current; attempt += 1) {
+      for (let attempt = 0; !stopped; attempt += 1) {
         if (await reload()) return;
+        if (stopped) return;
         await new Promise<void>((resolve) => {
           timer = setTimeout(resolve, Math.min(30_000, 2_000 * 2 ** attempt));
         });
       }
     })();
     return () => {
-      live.current = false;
+      stopped = true;
       clearTimeout(timer);
     };
   }, [reload]);
 
-  const checking = app?.status === 'checking';
+  const every = pollEvery(app);
   useEffect(() => {
-    if (!checking) return;
-    const timer = setInterval(() => void reload(), CHECKING_POLL_MS);
+    if (!every) return;
+    const timer = setInterval(() => void reload(), every);
     return () => clearInterval(timer);
-  }, [checking, reload]);
+  }, [every, reload]);
+
+  // Back in the app after a while (a text or a notification about the decision): look again.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void reload();
+    });
+    return () => sub.remove();
+  }, [reload]);
 
   return <ApplicationContext.Provider value={{ app, error, reload, setApp }}>{children}</ApplicationContext.Provider>;
 }
@@ -116,6 +147,9 @@ export function useApplication() {
   if (!value) throw new Error('useApplication needs ApplicationProvider');
   return value;
 }
+
+/** The application in the agent app, and null in the customer app, for screens both apps share. */
+export const useOptionalApplication = () => useContext(ApplicationContext)?.app ?? null;
 
 type CheckState = 'done' | 'warn' | 'now' | 'waiting';
 

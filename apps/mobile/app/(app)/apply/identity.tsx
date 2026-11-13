@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { View } from 'react-native';
 import { useSession } from '@/auth/session';
 import { errorMessage } from '@/api/client';
-import { ProviderName, providerName, useApplication, type CheckOutcome } from '@/agent/application';
+import { ProviderName, providerName, useApplication, type Application, type CheckOutcome } from '@/agent/application';
 import { Confirmed, FieldGroup, Point, Waiting } from '@/agent/apply-parts';
 import { ProviderSdk } from '@/agent/identity-sdk';
 import { Button, Text } from '@/ui/kit';
@@ -19,6 +19,16 @@ interface Finished {
   outcome?: CheckOutcome;
 }
 
+/** The identity result already on the application, as this screen shows it. */
+function savedOutcome(app: Application): CheckOutcome | 'pending' | null {
+  if (app.identityChecking) return 'pending';
+  if (!app.steps.identity) return null;
+  const own = app.checks.filter((c) => ['nin', 'bvn', 'selfie', 'duplicate'].includes(c.key));
+  if (own.some((c) => c.outcome === 'failed')) return 'failed';
+  const all = ['nin', 'bvn', 'selfie'].every((key) => own.some((c) => c.key === key));
+  return all && own.every((c) => c.outcome === 'passed') ? 'passed' : 'review';
+}
+
 const digits = (text: string) => text.replace(/\D/g, '').slice(0, 11);
 const mask = (number: string) => `•••••••${number.slice(-4)}`;
 /** How often, and how many times, the app asks for the result after the provider's screens. */
@@ -32,11 +42,12 @@ const FINISH_TRIES = 10;
 export default function Identity() {
   const { api } = useSession();
   const { app, reload } = useApplication();
-  const [phase, setPhase] = useState<Phase>('nin');
+  // Opened again after a check: start from its result, so it isn't replaced by accident.
+  const [phase, setPhase] = useState<Phase>(app && (app.steps.identity || app.identityChecking) ? 'done' : 'nin');
   const [nin, setNin] = useState('');
   const [bvn, setBvn] = useState('');
   const [started, setStarted] = useState<Started | null>(null);
-  const [outcome, setOutcome] = useState<CheckOutcome | 'pending' | null>(null);
+  const [outcome, setOutcome] = useState<CheckOutcome | 'pending' | null>(() => app && savedOutcome(app));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
@@ -122,8 +133,15 @@ export default function Identity() {
         footer={
           <View style={{ gap: 8 }}>
             <Button label="Back to your application" onPress={back} />
-            {outcome === 'failed' ? (
-              <Button kind="secondary" label="Check the numbers and try again" onPress={again} />
+            <Button
+              kind="secondary"
+              label={outcome === 'failed' ? 'Check the numbers and try again' : 'Check again'}
+              onPress={again}
+            />
+            {outcome === 'passed' ? (
+              <Text variant="note" tone="ink3" style={{ textAlign: 'center' }}>
+                Checking again replaces this result.
+              </Text>
             ) : null}
           </View>
         }
@@ -132,7 +150,11 @@ export default function Identity() {
         {outcome === 'passed' ? (
           <Confirmed
             title="Your NIN, BVN and selfie match"
-            sub="We keep the result, your legal name and date of birth"
+            sub={
+              app?.legalName
+                ? `Name on your NIN: ${app.legalName}`
+                : 'We keep the result, your legal name and date of birth'
+            }
           />
         ) : outcome === 'pending' ? (
           <Waiting

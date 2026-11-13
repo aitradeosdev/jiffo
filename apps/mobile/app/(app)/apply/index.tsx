@@ -155,7 +155,13 @@ function Checklist({ app }: { app: Application }) {
                 />
               }
               title={s.title}
-              subtitle={isDone ? 'Done' : s.sub(app)}
+              subtitle={
+                isDone
+                  ? 'Done'
+                  : s.key === 'identity' && app.identityChecking
+                    ? `Waiting for the result from ${providerName(app)}`
+                    : s.sub(app)
+              }
               subtitleLines={2}
               onPress={() => router.push(s.href)}
               right={
