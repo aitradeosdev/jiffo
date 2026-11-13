@@ -34,17 +34,29 @@ export class PresenceService {
     private readonly applications: AgentApplicationService,
   ) {}
 
-  async report(auth: AuthContext, input: { online: boolean; lat?: number; lng?: number }) {
-    const running = await this.db
-      .select({ id: errands.id, customerId: errands.customerId })
-      .from(errands)
-      .where(and(eq(errands.agentId, auth.userId), inArray(errands.status, [...TRAVEL_STATES])));
-    let body = input;
+  /**
+   * Going online or offline, and where the agent is. Without `online` (the app reporting from the
+   * background), the agent stays online or offline as they last chose, or as support or the sweep left them.
+   */
+  async report(auth: AuthContext, input: { online?: boolean; lat?: number; lng?: number }) {
+    const [running, [current]] = await Promise.all([
+      this.db
+        .select({ id: errands.id, customerId: errands.customerId })
+        .from(errands)
+        .where(and(eq(errands.agentId, auth.userId), inArray(errands.status, [...TRAVEL_STATES]))),
+      input.online === undefined
+        ? this.db
+            .select({ online: agentPresence.online })
+            .from(agentPresence)
+            .where(eq(agentPresence.userId, auth.userId))
+        : Promise.resolve([]),
+    ]);
+    let body = { ...input, online: input.online ?? current?.online ?? false };
     // Going online is for approved agents; going offline always works. An agent not approved yet who still
     // has an errand running keeps sharing where they are for it, but isn't counted as online.
-    if (input.online && !(await this.applications.approved(auth.userId))) {
-      if (running.length === 0) await this.applications.assertApproved(auth.userId);
-      body = { ...input, online: false };
+    if (body.online && !(await this.applications.approved(auth.userId))) {
+      if (running.length === 0 && input.online) await this.applications.assertApproved(auth.userId);
+      body = { ...body, online: false };
     }
     const sharing = body.online || running.length > 0;
     const located = sharing && body.lat !== undefined && body.lng !== undefined;

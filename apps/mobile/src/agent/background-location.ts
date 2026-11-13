@@ -5,7 +5,7 @@ import { ApiError } from '../api/client';
 import { sharedApi } from '../auth/session';
 import { VARIANT } from '../config';
 import { secureStorage } from '../storage';
-import { latestPosition, REPORT_EVERY_MS, shouldSendFromBackground } from './background-rules';
+import { lastSent, latestPosition, markSent, REPORT_EVERY_MS, shouldSendFromBackground } from './background-rules';
 
 /**
  * The agent's location while the app is in the background: when they switch to their maps app or lock the
@@ -13,30 +13,25 @@ import { latestPosition, REPORT_EVERY_MS, shouldSendFromBackground } from './bac
  * runs. It stops when the server says nothing needs sharing (offline, no errand) or the agent signs out.
  */
 export const LOCATION_TASK = 'jiffo-agent-location';
-const ONLINE_KEY = 'jiffo.agent.online';
-const ASKED_KEY = 'jiffo.agent.background-asked';
+/** Per account: each agent signing in on a phone is told once. */
+const askedKey = (userId: string) => `jiffo.agent.background-asked.${userId}`;
 
 /** Background location works only in the phone apps. */
 export const backgroundSupported = Platform.OS !== 'web' && VARIANT === 'agent';
-
-/** Kept for the task, which can run with the app closed: whether the agent is online. */
-export const rememberOnline = (online: boolean) => secureStorage.set(ONLINE_KEY, online ? '1' : null);
-
-let lastSent = 0;
 
 if (backgroundSupported) {
   TaskManager.defineTask<{ locations?: Location.LocationObject[] }>(LOCATION_TASK, async ({ data, error }) => {
     if (error) return;
     const here = latestPosition(data?.locations);
-    if (!here || !shouldSendFromBackground(AppState.currentState, Date.now(), lastSent)) return;
-    lastSent = Date.now();
+    if (!here || !shouldSendFromBackground(AppState.currentState, Date.now(), lastSent())) return;
+    markSent();
     try {
-      const online = (await secureStorage.get(ONLINE_KEY)) === '1';
-      const result = await sharedApi.put<{ sharingLocation: boolean }>('/v1/agent/presence', { online, ...here });
+      // The position only: the server keeps the agent online or offline as they, or support, left it.
+      const result = await sharedApi.put<{ sharingLocation: boolean }>('/v1/agent/presence', here);
       if (!result.sharingLocation) await stopBackgroundLocation();
     } catch (e) {
-      // Signed out: nothing to report for. Anything else (no signal) is tried again with the next position.
-      if (e instanceof ApiError && e.status === 401) await stopBackgroundLocation();
+      // Signed out or not allowed: nothing to report for. Anything else (no signal) waits for the next position.
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) await stopBackgroundLocation();
     }
   });
 }
@@ -48,20 +43,20 @@ export async function backgroundAllowed() {
 }
 
 /** Whether to show the explanation before asking for background location: once, and only if it can be asked. */
-export async function shouldExplainBackground() {
-  if (!backgroundSupported || (await secureStorage.get(ASKED_KEY))) return false;
+export async function shouldExplainBackground(userId: string) {
+  if (!backgroundSupported || (await secureStorage.get(askedKey(userId)))) return false;
   const permission = await Location.getBackgroundPermissionsAsync().catch(() => null);
   return !!permission && !permission.granted && permission.canAskAgain;
 }
 
 /** Asks the phone for background location, after the agent read why. Asked once, whatever the answer. */
-export async function askForBackground() {
-  await secureStorage.set(ASKED_KEY, '1');
+export async function askForBackground(userId: string) {
+  await secureStorage.set(askedKey(userId), '1');
   return (await Location.requestBackgroundPermissionsAsync().catch(() => null))?.granted ?? false;
 }
 
 /** Remembers that the agent chose not to now, so they aren't asked every time they go online. */
-export const skipBackground = () => secureStorage.set(ASKED_KEY, '1');
+export const skipBackground = (userId: string) => secureStorage.set(askedKey(userId), '1');
 
 export async function startBackgroundLocation() {
   if (!(await backgroundAllowed())) return false;

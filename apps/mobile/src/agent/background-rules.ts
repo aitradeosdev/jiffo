@@ -17,3 +17,13 @@ export function latestPosition(
   const newest = locations.reduce((a, b) => (b.timestamp > a.timestamp ? b : a));
   return { lat: newest.coords.latitude, lng: newest.coords.longitude };
 }
+
+/**
+ * When the agent's position was last sent, shared by the app and the background task in the same process
+ * (on Android the app keeps running behind the task), so the two never both send within REPORT_EVERY_MS.
+ */
+let lastSentAt = 0;
+export const markSent = (at = Date.now()) => {
+  lastSentAt = at;
+};
+export const lastSent = () => lastSentAt;

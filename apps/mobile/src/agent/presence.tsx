@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Linking, View } from 'react-native';
+import { AppState, Linking, View } from 'react-native';
 import * as Location from 'expo-location';
 import { useSession } from '../auth/session';
 import { useRealtimeEvent } from '../realtime/realtime';
@@ -9,13 +9,12 @@ import { Button, Text } from '../ui/kit';
 import { ModalSheet } from '../ui/modal-sheet';
 import {
   askForBackground,
-  rememberOnline,
   shouldExplainBackground,
   skipBackground,
   startBackgroundLocation,
   stopBackgroundLocation,
 } from './background-location';
-import { REPORT_EVERY_MS } from './background-rules';
+import { lastSent, markSent, REPORT_EVERY_MS } from './background-rules';
 
 /** Sent this often even when the agent isn't moving, so a parked agent stays visible and online. */
 const HEARTBEAT_MS = 60_000;
@@ -43,7 +42,7 @@ const PresenceContext = createContext<Presence | null>(null);
  * switches to their maps app). Nothing is tracked once the agent is offline and free.
  */
 export function AgentPresenceProvider({ children }: { children: ReactNode }) {
-  const { api } = useSession();
+  const { api, user } = useSession();
   const [online, setOnlineState] = useState(false);
   const [coords, setCoords] = useState<Coords | null>(null);
   const [switching, setSwitching] = useState(false);
@@ -52,7 +51,8 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   const [onErrand, setOnErrand] = useState(false);
   /** Explaining background location before the phone asks for it. */
   const [explain, setExplain] = useState(false);
-  const lastSent = useRef(0);
+  /** The server's answer is in (or the agent switched): until then nothing is started or stopped. */
+  const [known, setKnown] = useState(false);
   const onlineRef = useRef(online);
   onlineRef.current = online;
   const coordsRef = useRef(coords);
@@ -65,6 +65,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
     try {
       const r = await api.get<{ online: boolean; onErrand: boolean }>('/v1/agent/presence');
       setOnErrand(r.onErrand);
+      setKnown(true);
       return r;
     } catch {
       return null;
@@ -84,13 +85,11 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
         setBlocked(!!permission && !permission.granted && !permission.canAskAgain);
         setError("You're offline because Jiffo Agent can't read your location. Go online again when it's on.");
         await api.put('/v1/agent/presence', { online: false }).catch(() => undefined);
-        await rememberOnline(false);
         return;
       }
       const here = { lat: position.coords.latitude, lng: position.coords.longitude };
       setCoords(here);
       setOnlineState(true);
-      await rememberOnline(true);
     })();
   }, [api, refresh]);
   useRealtimeEvent('errand.updated', () => {
@@ -113,7 +112,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
 
   const send = useCallback(
     async (next: { online: boolean; lat?: number; lng?: number }) => {
-      lastSent.current = Date.now();
+      markSent();
       await api.put('/v1/agent/presence', next);
     },
     [api],
@@ -137,13 +136,11 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
           const here = { lat: position.coords.latitude, lng: position.coords.longitude };
           setCoords(here);
           await send({ online: true, ...here });
-          // The first time: say why the phone is about to ask for location all the time.
-          if (await shouldExplainBackground()) setExplain(true);
         } else {
           await send({ online: false });
         }
         setOnlineState(next);
-        await rememberOnline(next);
+        setKnown(true);
       } catch (e) {
         setError(errorMessage(e));
       } finally {
@@ -167,7 +164,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
         (position) => {
           const here = { lat: position.coords.latitude, lng: position.coords.longitude };
           setCoords(here);
-          if (Date.now() - lastSent.current < REPORT_EVERY_MS) return;
+          if (Date.now() - lastSent() < REPORT_EVERY_MS) return;
           send({ online: onlineRef.current, ...here }).catch(() => undefined);
         },
       );
@@ -176,7 +173,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
     // A phone that isn't moving sends nothing above, so send the last position every minute too.
     const heartbeat = setInterval(() => {
       const here = coordsRef.current;
-      if (here && Date.now() - lastSent.current >= HEARTBEAT_MS) {
+      if (here && Date.now() - lastSent() >= HEARTBEAT_MS) {
         send({ online: onlineRef.current, ...here }).catch(() => undefined);
       }
     }, HEARTBEAT_MS / 4);
@@ -188,14 +185,44 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   }, [tracking, send]);
 
   // In the background, the phone carries on while there is something to share, if the agent allowed it.
+  // Nothing changes before the server has said where things stand: a task left running stays running.
+  const userId = user?.id;
+  const trackingRef = useRef(tracking);
+  trackingRef.current = tracking;
   useEffect(() => {
-    (tracking ? startBackgroundLocation() : stopBackgroundLocation()).catch(() => undefined);
-  }, [tracking]);
+    if (!known) return;
+    if (!tracking) {
+      stopBackgroundLocation().catch(() => undefined);
+      return;
+    }
+    (async () => {
+      // The first time there is something to share: say why the phone is about to ask for "all the time".
+      if (userId && AppState.currentState === 'active' && (await shouldExplainBackground(userId))) setExplain(true);
+      await startBackgroundLocation();
+    })().catch(() => undefined);
+  }, [known, tracking, userId]);
+  // Back in the app, perhaps after allowing "all the time" in Settings: start if it can now.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && trackingRef.current) startBackgroundLocation().catch(() => undefined);
+    });
+    return () => sub.remove();
+  }, []);
+  // Signed out, or no longer on the board: the phone stops too.
+  useEffect(
+    () => () => {
+      stopBackgroundLocation().catch(() => undefined);
+    },
+    [],
+  );
 
   const answerExplain = async (allow: boolean) => {
     setExplain(false);
-    if (allow && (await askForBackground()) && tracking) await startBackgroundLocation().catch(() => undefined);
-    if (!allow) await skipBackground();
+    if (!userId) return;
+    if (allow && (await askForBackground(userId)) && trackingRef.current) {
+      await startBackgroundLocation().catch(() => undefined);
+    }
+    if (!allow) await skipBackground(userId);
   };
 
   const value = useMemo<Presence>(

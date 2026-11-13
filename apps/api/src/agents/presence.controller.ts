@@ -7,7 +7,8 @@ import { PresenceService } from './presence.service';
 
 const PresenceBody = z
   .object({
-    online: z.boolean(),
+    /** Left out when only the position is sent (the app in the background): online stays as it is. */
+    online: z.boolean().optional(),
     lat: z.number().min(-90).max(90).optional(),
     lng: z.number().min(-180).max(180).optional(),
   })
