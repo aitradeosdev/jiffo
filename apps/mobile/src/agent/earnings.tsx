@@ -1,3 +1,4 @@
+import { agentTierLabel } from '@jiffo/shared';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
@@ -34,7 +35,6 @@ interface PayoutAccount {
   accountName: string;
 }
 
-const TIER_NAME = { bronze: 'Bronze', silver: 'Silver', gold: 'Gold', platinum: 'Platinum' } as const;
 const STATUS = {
   requested: 'Queued',
   processing: 'On its way',
@@ -110,8 +110,8 @@ export function AgentEarnings() {
           <View style={[styles.clears, { borderTopColor: 'rgba(255,255,255,0.18)' }]}>
             <Text variant="small" style={{ color: c.onInk, flex: 1 }}>
               {w.upcoming[0]
-                ? `Next clears ${shortWhen(w.upcoming[0].availableAt)} (${TIER_NAME[w.tier]})`
-                : `Clearing soon (${TIER_NAME[w.tier]})`}
+                ? `Next clears ${shortWhen(w.upcoming[0].availableAt)} (${agentTierLabel(w.tier)})`
+                : `Clearing soon (${agentTierLabel(w.tier)})`}
             </Text>
             <Text style={[styles.clearsAmount, { color: c.onInk }]}>{naira(w.heldKobo)}</Text>
           </View>
@@ -123,10 +123,10 @@ export function AgentEarnings() {
           <Text variant="sec">Your tier</Text>
           <View style={[styles.tier, { backgroundColor: c.surface2 }]}>
             <View style={[styles.tierBadge, { backgroundColor: TIER_COLOR[w.tier] }]}>
-              <Text style={styles.tierLetter}>{TIER_NAME[w.tier][0]}</Text>
+              <Text style={styles.tierLetter}>{agentTierLabel(w.tier)[0]}</Text>
             </View>
             <View style={{ flex: 1, gap: 2 }}>
-              <Text style={styles.tierTitle}>{TIER_NAME[w.tier]}</Text>
+              <Text style={styles.tierTitle}>{agentTierLabel(w.tier)}</Text>
               <Text variant="note" tone="ink3">
                 {w.tier === 'bronze'
                   ? 'Earnings clear after 24 hours. Silver means lower commission and instant earnings.'

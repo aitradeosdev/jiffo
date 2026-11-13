@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { agentTierLabel } from '@jiffo/shared';
 import { Badge, buttonClass, Card, Empty, inputClass, PageHeader, tableClass, tdClass, thClass } from '@/components/ui';
 import { api, getCountry } from '@/lib/api';
-import { nameOf, TIER } from '@/lib/errands';
+import { nameOf } from '@/lib/errands';
 import { dateTime, money } from '@/lib/format';
 
 export const metadata: Metadata = { title: 'People' };
@@ -115,7 +116,7 @@ export default async function PeoplePage({
                     </td>
                     {agents ? (
                       <td className={tdClass}>
-                        <Badge>{TIER[p.tier ?? 'bronze'] ?? p.tier}</Badge>
+                        <Badge>{agentTierLabel(p.tier ?? 'bronze')}</Badge>
                       </td>
                     ) : null}
                     <td className={`${tdClass} num text-right`}>{p.errands}</td>

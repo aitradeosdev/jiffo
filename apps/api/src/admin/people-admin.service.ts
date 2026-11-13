@@ -1,6 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, ilike, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
-import { AGENT_TIERS, commissionBpsFor, holdsEarnings, TERMINAL_STATES, type AgentTier } from '@jiffo/shared';
+import {
+  AGENT_TIERS,
+  agentTierLabel,
+  commissionBpsFor,
+  holdsEarnings,
+  TERMINAL_STATES,
+  type AgentTier,
+} from '@jiffo/shared';
 import { DB, type Db, type Tx } from '../db/database.module';
 import {
   admins,
@@ -16,25 +23,23 @@ import {
   sessions,
   users,
 } from '../db/schema';
-import { badRequest, conflict, notFound } from '../common/errors';
+import { conflict, notFound } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
 import { ErrandsService } from '../errands/errands.service';
 import { PushService } from '../push/push.service';
 import { AuditService } from './audit.service';
+import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
 
 export const PEOPLE_ROLES = ['customer', 'agent'] as const;
 export type PeopleRole = (typeof PEOPLE_ROLES)[number];
 
-const TIER_NAME: Record<AgentTier, string> = { bronze: 'Bronze', silver: 'Silver', gold: 'Gold', platinum: 'Platinum' };
 /** Agents seen within this long count as online, as on the matching screen. */
 const ONLINE_MS = 10 * 60_000;
 
 const usesApp = (app: PeopleRole) =>
   sql<boolean>`exists (select 1 from ${devices} where ${devices.userId} = ${users.id} and ${devices.app} = ${app})`;
-const createdAtExact = sql<string>`to_char(${users.createdAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
-const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z)_([0-9a-f-]{36})$/i;
-const NOT_DONE = [...TERMINAL_STATES];
+const DONE_STATES = [...TERMINAL_STATES];
 
 /** Customers and agents as support sees them: who they are, what they've done, and the levers on them. */
 @Injectable()
@@ -59,8 +64,7 @@ export class PeopleAdminService {
 
   /** Newest first. Searched by name, phone, email or part of the account id. */
   async list(query: { country: string; role: PeopleRole; q?: string; before?: string; limit: number }) {
-    const cursor = query.before ? CURSOR.exec(query.before) : null;
-    if (query.before && !cursor) throw badRequest('invalid_cursor', 'That page link is not valid');
+    const cursor = parseCursor(query.before);
     const agent = query.role === 'agent';
     const rows = await this.db
       .select({
@@ -70,7 +74,7 @@ export class PeopleAdminService {
         phone: users.phone,
         status: users.status,
         createdAt: users.createdAt,
-        cursorAt: createdAtExact,
+        cursorAt: exactTime(users.createdAt),
         tier: agentProfiles.tier,
         online: sql<boolean>`coalesce("agent_presence"."online"
           and "agent_presence"."located_at" > now() - make_interval(secs => ${ONLINE_MS / 1000}), false)`,
@@ -93,7 +97,7 @@ export class PeopleAdminService {
           eq(users.countryCode, query.country),
           usesApp(query.role),
           query.q ? this.search(query.q) : undefined,
-          cursor ? sql`(${users.createdAt}, ${users.id}) < (${cursor[1]}::timestamptz, ${cursor[2]}::uuid)` : undefined,
+          cursor ? sql`(${users.createdAt}, ${users.id}) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)` : undefined,
         ),
       )
       .orderBy(desc(users.createdAt), desc(users.id))
@@ -106,122 +110,141 @@ export class PeopleAdminService {
         balanceKobo: Number(r.balanceKobo),
         ...(agent ? { tier: tier ?? 'bronze' } : {}),
       })),
-      next: rows.length > query.limit && last ? `${last.cursorAt}_${last.id}` : null,
+      next: rows.length > query.limit && last ? cursorOf(last) : null,
     };
   }
 
   private search(text: string): SQL | undefined {
-    const q = text.trim();
-    const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-    const local = q.replace(/[^\d]/g, '').replace(/^(234|0)/, '');
-    const clauses: Array<SQL | undefined> = [
+    const like = containing(text);
+    const phone = phoneDigits(text);
+    const id = idPrefix(text);
+    return or(
       ilike(sql`coalesce(${users.firstName}, '') || ' ' || coalesce(${users.lastName}, '')`, like),
       ilike(users.email, like),
-    ];
-    if (/^[0-9a-f-]{6,36}$/i.test(q)) clauses.push(ilike(sql`${users.id}::text`, `${q.toLowerCase()}%`));
-    if (local.length >= 4) clauses.push(ilike(users.phone, `%${local}%`));
-    return or(...clauses);
+      id ? ilike(sql`${users.id}::text`, id) : undefined,
+      phone ? ilike(users.phone, `%${phone}%`) : undefined,
+    );
   }
 
   /** One person in full: both sides of their activity, their money, devices and payout account. */
   async detail(id: string) {
     const [user] = await this.db.select().from(users).where(eq(users.id, id));
     if (!user) throw notFound('person_not_found', 'Person not found');
-    const [apps, profile, presence, asCustomer, asAgent, ratings, balances, recent, money, payout, live] =
-      await Promise.all([
-        this.db
-          .select({
-            app: devices.app,
-            platform: devices.platform,
-            name: devices.name,
-            push: sql<boolean>`${devices.pushToken} is not null`,
-            lastSeenAt: devices.lastSeenAt,
-            activeSessions: sql<number>`(select count(*)::int from sessions s
+    const [
+      apps,
+      profile,
+      presence,
+      asCustomer,
+      asAgent,
+      ratings,
+      averages,
+      balances,
+      recent,
+      money,
+      payout,
+      live,
+      tiers,
+    ] = await Promise.all([
+      this.db
+        .select({
+          app: devices.app,
+          platform: devices.platform,
+          name: devices.name,
+          push: sql<boolean>`${devices.pushToken} is not null`,
+          lastSeenAt: devices.lastSeenAt,
+          activeSessions: sql<number>`(select count(*)::int from sessions s
               where s.device_id = "devices"."id" and s.revoked_at is null and s.expires_at > now())`,
-          })
-          .from(devices)
-          .where(eq(devices.userId, id))
-          .orderBy(desc(devices.lastSeenAt)),
-        this.db
-          .select({
-            tier: agentProfiles.tier,
-            tierSetAt: agentProfiles.tierSetAt,
-            tierSetBy: admins.name,
-            categoryKeys: agentProfiles.categoryKeys,
-            takesPurchases: agentProfiles.takesPurchases,
-          })
-          .from(agentProfiles)
-          .leftJoin(admins, eq(admins.id, agentProfiles.tierSetBy))
-          .where(eq(agentProfiles.userId, id)),
-        this.db
-          .select({ online: agentPresence.online, locatedAt: agentPresence.locatedAt })
-          .from(agentPresence)
-          .where(eq(agentPresence.userId, id)),
-        this.counts(eq(errands.customerId, id)),
-        this.counts(eq(errands.agentId, id)),
-        this.db
-          .select({
-            raterRole: errandRatings.raterRole,
-            stars: errandRatings.stars,
-            comment: errandRatings.comment,
-            errandId: errandRatings.errandId,
-            createdAt: errandRatings.createdAt,
-          })
-          .from(errandRatings)
-          .where(eq(errandRatings.rateeId, id))
-          .orderBy(desc(errandRatings.createdAt))
-          .limit(10),
-        this.db
-          .select({ type: ledgerAccounts.type, balance: ledgerAccounts.balance })
-          .from(ledgerAccounts)
-          .where(eq(ledgerAccounts.ownerId, id)),
-        this.db
-          .select({
-            id: errands.id,
-            status: errands.status,
-            description: errands.description,
-            feeKobo: errands.feeKobo,
-            createdAt: errands.createdAt,
-            asAgent: sql<boolean>`${errands.agentId} = ${id}`,
-          })
-          .from(errands)
-          .where(or(eq(errands.customerId, id), eq(errands.agentId, id)))
-          .orderBy(desc(errands.createdAt))
-          .limit(15),
-        this.db
-          .select({
-            id: postings.id,
-            account: ledgerAccounts.type,
-            kind: journalEntries.kind,
-            errandId: journalEntries.errandId,
-            // Their accounts are owed by the platform: a credit (negative) is money in.
-            amountKobo: sql<number>`(-${postings.amount})::bigint`,
-            createdAt: postings.createdAt,
-          })
-          .from(postings)
-          .innerJoin(ledgerAccounts, eq(ledgerAccounts.id, postings.accountId))
-          .innerJoin(journalEntries, eq(journalEntries.id, postings.journalId))
-          .where(eq(ledgerAccounts.ownerId, id))
-          .orderBy(desc(postings.id))
-          .limit(20),
-        this.db
-          .select({
-            bankName: payoutAccounts.bankName,
-            accountName: payoutAccounts.accountName,
-            accountNumber: payoutAccounts.accountNumber,
-            createdAt: payoutAccounts.createdAt,
-          })
-          .from(payoutAccounts)
-          .where(and(eq(payoutAccounts.userId, id), isNull(payoutAccounts.replacedAt))),
-        this.liveErrands(id),
-      ]);
+        })
+        .from(devices)
+        .where(eq(devices.userId, id))
+        .orderBy(desc(devices.lastSeenAt)),
+      this.db
+        .select({
+          tier: agentProfiles.tier,
+          tierSetAt: agentProfiles.tierSetAt,
+          tierSetBy: admins.name,
+          categoryKeys: agentProfiles.categoryKeys,
+          takesPurchases: agentProfiles.takesPurchases,
+        })
+        .from(agentProfiles)
+        .leftJoin(admins, eq(admins.id, agentProfiles.tierSetBy))
+        .where(eq(agentProfiles.userId, id)),
+      this.db
+        .select({ online: agentPresence.online, locatedAt: agentPresence.locatedAt })
+        .from(agentPresence)
+        .where(eq(agentPresence.userId, id)),
+      this.counts(eq(errands.customerId, id)),
+      this.counts(eq(errands.agentId, id)),
+      this.db
+        .select({
+          raterRole: errandRatings.raterRole,
+          stars: errandRatings.stars,
+          comment: errandRatings.comment,
+          errandId: errandRatings.errandId,
+          createdAt: errandRatings.createdAt,
+        })
+        .from(errandRatings)
+        .where(eq(errandRatings.rateeId, id))
+        .orderBy(desc(errandRatings.createdAt))
+        .limit(10),
+      // Over every rating they've had, each side apart: not just the few shown.
+      this.db
+        .select({
+          raterRole: errandRatings.raterRole,
+          average: sql<number>`round(avg(${errandRatings.stars})::numeric, 1)::float`,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(errandRatings)
+        .where(eq(errandRatings.rateeId, id))
+        .groupBy(errandRatings.raterRole),
+      this.db
+        .select({ type: ledgerAccounts.type, balance: ledgerAccounts.balance })
+        .from(ledgerAccounts)
+        .where(eq(ledgerAccounts.ownerId, id)),
+      this.db
+        .select({
+          id: errands.id,
+          status: errands.status,
+          description: errands.description,
+          feeKobo: errands.feeKobo,
+          createdAt: errands.createdAt,
+          asAgent: sql<boolean>`${errands.agentId} = ${id}`,
+        })
+        .from(errands)
+        .where(or(eq(errands.customerId, id), eq(errands.agentId, id)))
+        .orderBy(desc(errands.createdAt))
+        .limit(15),
+      this.db
+        .select({
+          id: postings.id,
+          account: ledgerAccounts.type,
+          kind: journalEntries.kind,
+          errandId: journalEntries.errandId,
+          // Their accounts are owed by the platform: a credit (negative) is money in.
+          amountKobo: sql<number>`(-${postings.amount})::bigint`,
+          createdAt: postings.createdAt,
+        })
+        .from(postings)
+        .innerJoin(ledgerAccounts, eq(ledgerAccounts.id, postings.accountId))
+        .innerJoin(journalEntries, eq(journalEntries.id, postings.journalId))
+        .where(eq(ledgerAccounts.ownerId, id))
+        .orderBy(desc(postings.id))
+        .limit(20),
+      this.db
+        .select({
+          bankName: payoutAccounts.bankName,
+          accountName: payoutAccounts.accountName,
+          accountNumber: payoutAccounts.accountNumber,
+          createdAt: payoutAccounts.createdAt,
+        })
+        .from(payoutAccounts)
+        .where(and(eq(payoutAccounts.userId, id), isNull(payoutAccounts.replacedAt))),
+      this.liveErrands(id),
+      this.tierTerms(user.countryCode),
+    ]);
     const balance = (type: string) => Number(balances.find((b) => b.type === type)?.balance ?? 0);
     const isAgent = apps.some((a) => a.app === 'agent');
-    const tiers = isAgent ? await this.tierTerms(user.countryCode) : null;
-    const avg = (role: 'customer' | 'agent') => {
-      const given = ratings.filter((r) => r.raterRole === role);
-      return given.length ? Math.round((given.reduce((s, r) => s + r.stars, 0) / given.length) * 10) / 10 : null;
-    };
+    const avg = (role: 'customer' | 'agent') => averages.find((a) => a.raterRole === role)?.average ?? null;
     const p = payout[0];
     return {
       person: {
@@ -240,6 +263,7 @@ export class PeopleAdminService {
         ? {
             tier: profile[0]?.tier ?? 'bronze',
             tiers,
+            ratings: averages.find((a) => a.raterRole === 'customer')?.count ?? 0,
             tierSetAt: profile[0]?.tierSetAt ?? null,
             tierSetBy: profile[0]?.tierSetBy ?? null,
             categoryKeys: profile[0]?.categoryKeys ?? null,
@@ -294,22 +318,33 @@ export class PeopleAdminService {
     return db
       .select({ id: errands.id, status: errands.status, version: errands.version, customerId: errands.customerId })
       .from(errands)
-      .where(and(or(eq(errands.customerId, id), eq(errands.agentId, id)), notInArray(errands.status, NOT_DONE)));
+      .where(and(or(eq(errands.customerId, id), eq(errands.agentId, id)), notInArray(errands.status, DONE_STATES)));
   }
 
-  /** Sets an agent's tier, which decides their commission and when earnings can be withdrawn. Tells the agent. */
+  /**
+   * Sets an agent's tier, which decides their commission and when earnings can be withdrawn, and tells the
+   * agent. Choosing the tier they already have changes nothing.
+   */
   async setTier(admin: AdminContext, id: string, tier: AgentTier, note: string) {
-    const [isAgent] = await this.db
-      .select({ id: devices.id })
-      .from(devices)
-      .where(and(eq(devices.userId, id), eq(devices.app, 'agent')))
-      .limit(1);
-    if (!isAgent) throw notFound('agent_not_found', 'This person is not an agent');
-    const from = await this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
+      // Locks the person, so two changes at once are recorded one after the other.
+      const [user] = await tx
+        .select({ countryCode: users.countryCode })
+        .from(users)
+        .where(eq(users.id, id))
+        .for('update');
+      const [isAgent] = await tx
+        .select({ id: devices.id })
+        .from(devices)
+        .where(and(eq(devices.userId, id), eq(devices.app, 'agent')))
+        .limit(1);
+      if (!user || !isAgent) throw notFound('agent_not_found', 'This person is not an agent');
       const [before] = await tx
         .select({ tier: agentProfiles.tier })
         .from(agentProfiles)
         .where(eq(agentProfiles.userId, id));
+      const previous = before?.tier ?? 'bronze';
+      if (previous === tier) return { tier, changed: false, countryCode: user.countryCode };
       await tx
         .insert(agentProfiles)
         .values({ userId: id, tier, tierSetBy: admin.adminId, tierSetAt: new Date() })
@@ -317,46 +352,55 @@ export class PeopleAdminService {
           target: agentProfiles.userId,
           set: { tier, tierSetBy: admin.adminId, tierSetAt: new Date(), updatedAt: new Date() },
         });
-      const previous = before?.tier ?? 'bronze';
-      const [user] = await tx.select({ countryCode: users.countryCode }).from(users).where(eq(users.id, id));
       await this.audit.record(tx, admin, {
         action: 'agent.tier',
         targetType: 'person',
         targetId: id,
-        countryCode: user?.countryCode,
+        countryCode: user.countryCode,
         data: { from: previous, to: tier, note },
       });
-      return previous;
+      return { tier, changed: true, countryCode: user.countryCode };
     });
-    if (from !== tier) {
+    if (result.changed) {
+      const terms = (await this.tierTerms(result.countryCode)).find((t) => t.tier === tier)!;
       await this.push.notifyUser(id, 'agent', {
-        title: `You're now ${TIER_NAME[tier]}`,
-        body:
-          tier === 'bronze'
-            ? 'Your errand earnings become withdrawable 24 hours after each hand-off.'
-            : 'Your errand earnings are withdrawable as soon as each hand-off is done.',
+        title: `You're now ${agentTierLabel(tier)}`,
+        body: terms.holdHours
+          ? `Your errand earnings become withdrawable ${terms.holdHours} hours after each hand-off.`
+          : 'Your errand earnings are withdrawable as soon as each hand-off is done.',
         data: { type: 'agent.tier', tier },
       });
     }
-    return { tier };
+    return { tier: result.tier, changed: result.changed };
   }
 
   /**
    * Stops someone using Jiffo: their sessions end, an agent goes offline, and errands still waiting for an
-   * agent are closed. Refused while they are part of an errand in progress, which support settles first.
+   * agent are cancelled by support, all in one transaction. Refused while they are part of an errand in
+   * progress, which support settles first.
    */
   async suspend(admin: AdminContext, id: string, note: string) {
-    const waiting = await this.db.transaction(async (tx) => {
+    const { closed } = await this.db.transaction(async (tx) => {
+      // Accepting and creating errands share this lock, so neither can slip in while this runs.
       const [user] = await tx.select().from(users).where(eq(users.id, id)).for('update');
       if (!user) throw notFound('person_not_found', 'Person not found');
       if (user.status === 'suspended') throw conflict('already_suspended', 'This account is already suspended');
-      const live = await this.liveErrands(id, tx);
+      const live = await tx
+        .select()
+        .from(errands)
+        .where(and(or(eq(errands.customerId, id), eq(errands.agentId, id)), notInArray(errands.status, DONE_STATES)))
+        .for('update');
       const inProgress = live.filter((e) => e.status !== 'requested');
       if (inProgress.length) {
         throw conflict('has_live_errands', 'Settle their errands in progress first', {
           errandIds: inProgress.map((e) => e.id),
         });
       }
+      // Only their own requests can be waiting: an errand that is waiting has no agent yet.
+      const closedResults = [];
+      for (const errand of live)
+        closedResults.push(await this.errandsService.adminCancelWaiting(tx, errand, admin.adminId, note));
+
       await tx.update(users).set({ status: 'suspended', updatedAt: new Date() }).where(eq(users.id, id));
       await tx
         .update(sessions)
@@ -373,18 +417,11 @@ export class PeopleAdminService {
         countryCode: user.countryCode,
         data: { note, closedErrands: live.map((e) => e.id) },
       });
-      return live.filter((e) => e.status === 'requested' && e.customerId === id);
+      return { closed: closedResults };
     });
-    // Their errands waiting for an agent end as if no agent came: nothing was held yet, so nothing moves.
-    for (const e of waiting) {
-      await this.errandsService.applyTimer({
-        errandId: e.id,
-        event: 'expire',
-        status: 'requested',
-        version: e.version,
-      });
-    }
-    return { status: 'suspended' as const, closedErrands: waiting.map((e) => e.id) };
+    // Boards drop the closed errands, and the customer hears they were cancelled.
+    await this.errandsService.announce(closed);
+    return { status: 'suspended' as const, closedErrands: closed.map((r) => r.after.id) };
   }
 
   async reactivate(admin: AdminContext, id: string, note: string) {

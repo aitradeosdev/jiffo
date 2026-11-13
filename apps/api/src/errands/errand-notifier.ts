@@ -156,6 +156,12 @@ function noteFor(event: ErrandEvent, r: TransitionResult): Note | null {
             body: 'The customer asked for redelivery.',
             chat: 'Redelivery requested',
           };
+    case 'admin_cancel':
+      return {
+        to: 'customer',
+        title: 'Errand cancelled',
+        body: 'Jiffo support cancelled this errand before an agent took it. Nothing was charged.',
+      };
     case 'admin_intervene':
       return {
         to: 'both',

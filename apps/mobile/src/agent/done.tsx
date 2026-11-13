@@ -1,3 +1,4 @@
+import { agentTierLabel } from '@jiffo/shared';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
@@ -13,8 +14,6 @@ import { PageFooter } from '../ui/floating';
 import { Lines } from '../errands/trip';
 import { shortWhen } from '../errands/when';
 import type { ErrandView } from '../errands/types';
-
-const TIER = { bronze: 'Bronze', silver: 'Silver', gold: 'Gold', platinum: 'Platinum' } as Record<string, string>;
 
 /** After hand-off, for the agent: what they earned and when they can withdraw it, and a rating. */
 export function AgentDone({ errand, onRated }: { errand: ErrandView; onRated: () => void }) {
@@ -76,7 +75,7 @@ export function AgentDone({ errand, onRated }: { errand: ErrandView; onRated: ()
               rows={[
                 ['Errand fee', naira(errand.feeKobo)],
                 [
-                  `Commission${s.tier ? ` (${TIER[s.tier] ?? s.tier}${pct !== null ? `, ${pct}%` : ''})` : ''}`,
+                  `Commission${s.tier ? ` (${agentTierLabel(s.tier)}${pct !== null ? `, ${pct}%` : ''})` : ''}`,
                   `−${naira(s.commissionKobo)}`,
                 ],
                 ...(changedBySupport

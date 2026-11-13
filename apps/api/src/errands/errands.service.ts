@@ -20,7 +20,7 @@ import { earningHolds, errandEvents, errandRatings, errandStops, errands, journa
 import { CountriesService } from '../countries/countries.service';
 import type { AuthContext } from '../auth/auth.types';
 import { decrypt, encrypt, numericCode, safeEqual } from '../common/crypto';
-import { ApiError, badRequest, conflict, locked, notFound, unprocessable } from '../common/errors';
+import { ApiError, badRequest, conflict, forbidden, locked, notFound, unprocessable } from '../common/errors';
 import { ERRAND_TIMERS, type ErrandTimerJob, type ErrandTimers } from '../timers/errand-timers';
 import { CustomerFundsLow, WalletService, type DisputeSplit } from '../money/wallet.service';
 import { AgentsService } from '../agents/agents.service';
@@ -63,7 +63,13 @@ export interface Settlement {
 }
 
 /** The events support sends from the admin panel. */
-export const ADMIN_ERRAND_EVENTS = ['admin_intervene', 'redeliver', 'resolve_complete', 'resolve_cancel'] as const;
+export const ADMIN_ERRAND_EVENTS = [
+  'admin_cancel',
+  'admin_intervene',
+  'redeliver',
+  'resolve_complete',
+  'resolve_cancel',
+] as const;
 export type AdminErrandEvent = (typeof ADMIN_ERRAND_EVENTS)[number];
 
 /** How far from the pickup the matching screen counts online agents. */
@@ -306,6 +312,14 @@ export class ErrandsService implements OnModuleInit {
     await this.assertWalletCovers(customer.id, country, input.feeKobo, settings, 'send this errand');
 
     const created = await this.db.transaction(async (tx) => {
+      // Shares the lock a suspension takes, so an errand can't slip in while the account is being suspended.
+      const [still] = await tx
+        .select({ status: users.status })
+        .from(users)
+        .where(eq(users.id, auth.userId))
+        .for('share');
+      if (still?.status !== 'active')
+        throw forbidden('account_suspended', 'This account is suspended. Contact support.');
       const [errand] = await tx
         .insert(errands)
         .values({
@@ -697,6 +711,28 @@ export class ErrandsService implements OnModuleInit {
     return { id: result.after.id, status: result.after.status, version: result.after.version };
   }
 
+  /**
+   * Inside the caller's transaction, with the errand row already locked: support closes an errand still
+   * waiting for an agent. Nothing is held yet, so no money moves. Call announce() after the commit.
+   */
+  async adminCancelWaiting(tx: Tx, errand: ErrandRow, adminId: string, note: string): Promise<TransitionResult> {
+    const money = await this.settingsOf(errand.id);
+    if (!money) throw notFound('errand_not_found', 'Errand not found');
+    const to = nextState(errand.status, 'admin_cancel', transitionContext(errand, 'admin'));
+    const effect: EventEffect = { patch: { pendingOfferKobo: null }, record: { note, by: 'support' } };
+    const after = await this.write(tx, errand, 'admin_cancel', to, effect, 'admin', adminId);
+    await this.wallet.onErrandTransition(tx, { before: errand, after, event: 'admin_cancel', ...money });
+    return { before: errand, after, event: 'admin_cancel', record: effect.record, settings: money.settings };
+  }
+
+  /** After a caller's transaction commits: updates open screens and tells people about changes made in it. */
+  async announce(results: TransitionResult[]) {
+    for (const r of results) {
+      await this.notifier.transitioned(r);
+      await this.afterAgentLeft(r.before, r.after);
+    }
+  }
+
   private async write(
     tx: Tx,
     errand: ErrandRow,
@@ -767,8 +803,15 @@ export class ErrandsService implements OnModuleInit {
 
     switch (event) {
       case 'accept': {
-        const [agent] = await tx.select({ firstName: users.firstName }).from(users).where(eq(users.id, auth.userId));
-        if (!agent?.firstName) throw conflict('profile_incomplete', 'Add your name before accepting errands');
+        // Shares the lock a suspension takes: an agent being suspended can't accept at the same moment.
+        const [agent] = await tx
+          .select({ firstName: users.firstName, status: users.status })
+          .from(users)
+          .where(eq(users.id, auth.userId))
+          .for('share');
+        if (agent?.status !== 'active')
+          throw forbidden('account_suspended', 'This account is suspended. Contact support.');
+        if (!agent.firstName) throw conflict('profile_incomplete', 'Add your name before accepting errands');
         const pin = numericCode(4);
         return {
           patch: {

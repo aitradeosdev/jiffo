@@ -77,6 +77,7 @@ const PHOTO: Record<string, string> = {
 const WHO: Record<string, string> = { customer: 'Customer', agent: 'Agent', system: 'Jiffo', admin: 'Support' };
 
 const DONE: Record<string, string> = {
+  admin_cancel: 'Errand cancelled. The customer has been told.',
   admin_intervene: 'You stepped in. The errand is in dispute and its money stays held.',
   redeliver: 'Redelivery arranged. Both sides have been told.',
   resolve_complete: 'Settled as complete. Both sides have been told.',

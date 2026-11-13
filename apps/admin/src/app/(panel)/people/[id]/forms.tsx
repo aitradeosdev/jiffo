@@ -1,12 +1,11 @@
 'use client';
 
 import Link from 'next/link';
+import { agentTierLabel } from '@jiffo/shared';
 import { useActionState, useState } from 'react';
 import { SubmitButton } from '@/components/submit-button';
 import { buttonClass, inputClass, Notice } from '@/components/ui';
 import { changeAccess, setTier, type PersonState } from './actions';
-
-const LABEL: Record<string, string> = { bronze: 'Bronze', silver: 'Silver', gold: 'Gold', platinum: 'Platinum' };
 
 export interface TierTerms {
   tier: string;
@@ -61,7 +60,7 @@ export function TierForm({ id, tier, tiers }: { id: string; tier: string; tiers:
                 onChange={() => setChosen(t.tier)}
                 className="accent-current"
               />
-              {LABEL[t.tier] ?? t.tier}
+              {agentTierLabel(t.tier)}
             </span>
             <span className="mt-0.5 text-[12px] text-ink-3">{about(t)}</span>
           </label>

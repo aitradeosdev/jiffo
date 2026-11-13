@@ -129,6 +129,8 @@ export const ERRAND_EVENTS = {
   admin_intervene: { from: ['item_pending', 'photo_pending', 'unreachable'], to: 'disputed', actors: ['admin'] },
   resolve_complete: { from: ['disputed'], to: 'completed', actors: ['admin'] },
   resolve_cancel: { from: ['disputed'], to: 'cancelled', actors: ['admin'] },
+  /** Support closes an errand still waiting for an agent, for example when its customer is suspended. */
+  admin_cancel: { from: ['requested'], to: 'cancelled', actors: ['admin'] },
 } as const satisfies Record<string, Rule>;
 
 export type ErrandEvent = keyof typeof ERRAND_EVENTS;

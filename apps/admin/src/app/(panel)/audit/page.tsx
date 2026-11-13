@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { buttonClass, Card, Empty, PageHeader, tableClass, tdClass, thClass } from '@/components/ui';
-import { adminRoleLabel } from '@jiffo/shared';
+import { adminRoleLabel, agentTierLabel } from '@jiffo/shared';
 import { api, getCountry, getMe } from '@/lib/api';
 import { dateTime } from '@/lib/format';
 
@@ -41,11 +41,15 @@ function describe(entry: Entry, names: Map<string, string>): string {
       return line[0]!.toUpperCase() + line.slice(1);
     }
     case 'agent.tier':
-      return `Changed ${entry.targetLabel ?? 'an agent'}'s tier from ${String(entry.data.from)} to ${String(entry.data.to)}`;
+      return `Changed ${entry.targetLabel ?? 'an agent'}'s tier from ${agentTierLabel(String(entry.data.from))} to ${agentTierLabel(
+        String(entry.data.to),
+      )}`;
     case 'person.suspend':
       return `Suspended ${entry.targetLabel ?? 'an account'}`;
     case 'person.reactivate':
       return `Reactivated ${entry.targetLabel ?? 'an account'}`;
+    case 'errand.admin_cancel':
+      return `Cancelled “${entry.targetLabel ?? 'an errand'}” before an agent took it`;
     case 'errand.admin_intervene':
       return `Stepped into “${entry.targetLabel ?? 'an errand'}”`;
     case 'errand.redeliver':
@@ -110,7 +114,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
                       <div className="text-[13px] text-ink-3">{e.admin.email}</div>
                     </td>
                     <td className={tdClass}>
-                      {e.targetType === 'person' || e.targetType === 'errand' ? (
+                      {e.targetId && (e.targetType === 'person' || e.targetType === 'errand') ? (
                         <Link
                           href={`/${e.targetType === 'person' ? 'people' : 'errands'}/${e.targetId}`}
                           className="hover:underline"

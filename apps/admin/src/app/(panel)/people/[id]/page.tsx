@@ -1,10 +1,11 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { agentTierLabel } from '@jiffo/shared';
 import { notFound } from 'next/navigation';
 import type { ErrandState } from '@jiffo/shared';
 import { Badge, Card, Notice, Stat } from '@/components/ui';
 import { api, ApiError, getCountry, getMe } from '@/lib/api';
-import { ACCOUNT, JOURNAL, nameOf, STATUS, TIER } from '@/lib/errands';
+import { ACCOUNT, JOURNAL, nameOf, STATUS } from '@/lib/errands';
 import { ago, dateTime, money } from '@/lib/format';
 import { AccessForm, TierForm, type TierTerms } from './forms';
 
@@ -136,7 +137,7 @@ export default async function PersonPage({
           {d.apps.map((a) => (
             <Badge key={a}>{a === 'agent' ? 'Agent' : 'Customer'}</Badge>
           ))}
-          {d.agent ? <Badge tone="brand">{TIER[d.agent.tier] ?? d.agent.tier}</Badge> : null}
+          {d.agent ? <Badge tone="brand">{agentTierLabel(d.agent.tier)}</Badge> : null}
           {p.status === 'suspended' ? <Badge tone="danger">Suspended</Badge> : null}
           {d.agent?.online ? <Badge tone="brand">Online now</Badge> : null}
         </div>
@@ -260,7 +261,7 @@ export default async function PersonPage({
               {canOperate ? (
                 <TierForm key={d.agent.tier} id={p.id} tier={d.agent.tier} tiers={d.agent.tiers} />
               ) : (
-                <p className="font-bold">{TIER[d.agent.tier] ?? d.agent.tier}</p>
+                <p className="font-bold">{agentTierLabel(d.agent.tier)}</p>
               )}
             </Card>
           ) : null}

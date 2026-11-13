@@ -1,3 +1,4 @@
+import { agentTierLabel } from '@jiffo/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
@@ -34,7 +35,6 @@ type Sort = 'near' | 'fee' | 'buy';
 const RADIUS_KM = 10;
 const REFRESH_MS = 20_000;
 export const km = (m: number) => (m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`);
-const TIER_NAME = { bronze: 'Bronze', silver: 'Silver', gold: 'Gold', platinum: 'Platinum' } as const;
 
 /**
  * The agent's home, after the prototype: the map with nearby errands and today's earnings. Offline, a GO
@@ -275,10 +275,10 @@ function OfflineHead({ tier }: { tier?: Earnings['tier'] }) {
           style={[styles.tier, { backgroundColor: c.surface2 }]}
         >
           <View style={[styles.tierBadge, { backgroundColor: '#8C5A2B' }]}>
-            <Text style={styles.tierLetter}>{TIER_NAME[tier][0]}</Text>
+            <Text style={styles.tierLetter}>{agentTierLabel(tier)[0]}</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.tierTitle}>{TIER_NAME[tier]} tier</Text>
+            <Text style={styles.tierTitle}>{agentTierLabel(tier)} tier</Text>
             <Text variant="note" tone="ink3">
               {tier === 'bronze'
                 ? 'Silver means lower commission and instant earnings'

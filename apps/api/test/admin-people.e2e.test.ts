@@ -90,6 +90,11 @@ describe('admin people', () => {
     expect((await post(agent.userId, 'tier', { tier: 'gold', note: 'ok' })).status).toBe(400);
     expect((await post(customer.userId, 'tier', { tier: 'gold', note: 'Great ratings' })).status).toBe(404);
     await post(agent.userId, 'tier', { tier: 'gold', note: '50 errands, 4.9 stars' }).expect(200);
+    // The tier they already have changes nothing and records nothing.
+    expect((await post(agent.userId, 'tier', { tier: 'gold', note: 'Clicked twice by mistake' })).body).toEqual({
+      tier: 'gold',
+      changed: false,
+    });
 
     const [row] = await t.db.select().from(agentProfiles).where(eq(agentProfiles.userId, agent.userId));
     expect(row).toMatchObject({ tier: 'gold', tierSetBy: ops.id });
@@ -133,7 +138,9 @@ describe('admin people', () => {
     const [{ body: errandNow }] = await Promise.all([
       request(t.http).get(`/v1/admin/errands/${waiting.id}`).set(support.headers).expect(200),
     ]);
-    expect(errandNow.errand.status).toBe('expired');
+    // Cancelled by support, in the suspension's own transaction, with the reason on the timeline.
+    expect(errandNow.errand.status).toBe('cancelled');
+    expect(errandNow.events.at(-1)).toMatchObject({ event: 'admin_cancel', actorRole: 'admin', actorName: ops.name });
     // Their sessions ended.
     await request(t.http).get('/v1/me').set(customer.headers).expect(401);
     expect((await detail(customer.userId)).person.status).toBe('suspended');
