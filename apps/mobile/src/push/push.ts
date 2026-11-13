@@ -13,11 +13,16 @@ export function usePushRegistration() {
   const { status, api } = useSession();
   useEffect(() => {
     if (status !== 'signedIn' || Platform.OS !== 'android' || !Device.isDevice) return;
+    const send = (token: unknown) => {
+      if (typeof token === 'string') api.put('/v1/devices/current/push-token', { token }).catch(() => undefined);
+    };
     (async () => {
       const { status: permission } = await Notifications.requestPermissionsAsync();
       if (permission !== 'granted') return;
-      const { data } = await Notifications.getDevicePushTokenAsync();
-      if (typeof data === 'string') await api.put('/v1/devices/current/push-token', { token: data });
+      send((await Notifications.getDevicePushTokenAsync()).data);
     })().catch(() => undefined);
+    // FCM can rotate the token while the app runs; the server must always have the current one.
+    const subscription = Notifications.addPushTokenListener((token) => send(token.data));
+    return () => subscription.remove();
   }, [status, api]);
 }

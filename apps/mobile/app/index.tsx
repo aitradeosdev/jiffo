@@ -6,6 +6,7 @@ export default function Index() {
   const { status, user } = useSession();
   if (status === 'loading') return null;
   if (status === 'signedOut') return <Redirect href="/welcome" />;
-  if (user && !user.firstName) return <Redirect href="/name" />;
+  if (!user) return <Redirect href="/home" />; // the app layout waits for the profile
+  if (!user.firstName) return <Redirect href="/name" />;
   return <Redirect href="/home" />;
 }

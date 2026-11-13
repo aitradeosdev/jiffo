@@ -73,6 +73,23 @@ describe('api client', () => {
     expect(store.peek()).toBeNull();
   });
 
+  it('never sends a refresh token that another request already used', async () => {
+    const store = memoryStore(fresh);
+    const rotated: Tokens = { accessToken: 'a9', refreshToken: 'r9', accessExpiresAt: NOW + 600_000 };
+    const { impl, calls } = fakeFetch(async (_url, init) => {
+      const auth = (init.headers as Record<string, string>).authorization;
+      if (auth === 'Bearer a1') {
+        // Meanwhile another request refreshed and stored new tokens; this one gets refused.
+        await store.set(rotated);
+        return json({ error: { code: 'invalid_token', message: 'Sign in again' } }, 401);
+      }
+      return json({ ok: auth });
+    });
+    const api = createApiClient({ baseUrl: '', store, fetchImpl: impl, now: () => NOW });
+    expect(await api.get('/v1/me')).toEqual({ ok: 'Bearer a9' });
+    expect(calls.some((c) => c.url.endsWith('/v1/auth/refresh'))).toBe(false);
+  });
+
   it('turns error bodies and network failures into ApiError with details', async () => {
     const { impl } = fakeFetch(() =>
       json({ error: { code: 'otp_invalid', message: 'That code is not right', attemptsLeft: 3 } }, 400),

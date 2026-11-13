@@ -1,12 +1,19 @@
 import { useEffect, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSession } from '@/auth/session';
-import { ApiError } from '@/api/client';
+import { ApiError, errorMessage } from '@/api/client';
 import { formatE164 } from '@/auth/phone';
 import { Button, Field, Screen, Text } from '@/ui/kit';
 
+/** 75 → "1:15". */
+const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
 export default function Code() {
-  const { phone = '', resend = '60' } = useLocalSearchParams<{ phone: string; resend: string }>();
+  const {
+    phone = '',
+    prefix = '',
+    resend = '60',
+  } = useLocalSearchParams<{ phone: string; prefix: string; resend: string }>();
   const { verifyCode, requestCode } = useSession();
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -45,9 +52,9 @@ export default function Code() {
       const sent = await requestCode(phone);
       setLeft(sent.resendInSeconds);
     } catch (e) {
-      const err = e as ApiError;
-      if (typeof err.details.retryAfterSeconds === 'number') setLeft(err.details.retryAfterSeconds);
-      setError(err.message);
+      if (e instanceof ApiError && typeof e.details.retryAfterSeconds === 'number')
+        setLeft(e.details.retryAfterSeconds);
+      setError(errorMessage(e));
     }
   }
 
@@ -56,7 +63,7 @@ export default function Code() {
       footer={
         <Button
           kind="secondary"
-          label={left > 0 ? `Resend code in 0:${String(left).padStart(2, '0')}` : 'Resend code'}
+          label={left > 0 ? `Resend code in ${clock(left)}` : 'Resend code'}
           disabled={left > 0 || busy}
           onPress={sendAgain}
         />
@@ -64,7 +71,7 @@ export default function Code() {
     >
       <Text variant="title">Enter the 6-digit code</Text>
       <Text tone="ink2">
-        Sent by text to {formatE164(phone)}.{' '}
+        Sent by text to {formatE164(phone, prefix)}.{' '}
         <Text tone="brand" variant="label" onPress={() => router.back()} accessibilityRole="link">
           Change number
         </Text>

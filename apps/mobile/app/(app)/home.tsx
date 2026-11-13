@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { View } from 'react-native';
+import { errorMessage } from '@/api/client';
 import { VARIANT } from '@/config';
 import { useSession } from '@/auth/session';
 import { useCountryConfig } from '@/api/useCountryConfig';
@@ -8,8 +10,20 @@ import { Button, Screen, Text, Wordmark } from '@/ui/kit';
 export default function Home() {
   const { user, signOut } = useSession();
   const { config, error } = useCountryConfig();
+  const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const leave = async () => {
+    setLeaving(true);
+    setSignOutError(null);
+    try {
+      await signOut();
+    } catch (e) {
+      setSignOutError(errorMessage(e));
+      setLeaving(false);
+    }
+  };
   return (
-    <Screen footer={<Button kind="secondary" label="Sign out" onPress={signOut} />}>
+    <Screen footer={<Button kind="secondary" label="Sign out" onPress={leave} loading={leaving} />}>
       <Wordmark height={32} />
       <Text variant="title">{user?.firstName ? `Hi ${user.firstName}` : 'Hi there'}</Text>
       <Text tone="ink2">
@@ -26,6 +40,11 @@ export default function Home() {
         {error ? (
           <Text variant="small" tone="danger">
             {error}
+          </Text>
+        ) : null}
+        {signOutError ? (
+          <Text variant="small" tone="danger" accessibilityLiveRegion="polite">
+            {signOutError}
           </Text>
         ) : null}
       </View>

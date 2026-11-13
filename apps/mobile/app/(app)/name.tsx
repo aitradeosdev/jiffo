@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { router } from 'expo-router';
 import { useSession } from '@/auth/session';
 import { VARIANT } from '@/config';
-import { ApiError } from '@/api/client';
+import { errorMessage } from '@/api/client';
 import { Button, Field, Screen, Text } from '@/ui/kit';
 
 export default function Name() {
@@ -20,7 +20,7 @@ export default function Name() {
       await updateProfile({ firstName: first.trim(), lastName: last.trim() });
       router.replace('/home');
     } catch (e) {
-      setError((e as ApiError).message);
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

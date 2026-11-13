@@ -58,19 +58,42 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // At launch: a stored session is trusted until the server says otherwise (401). Offline, a server
+  // error or a rate limit keeps the person signed in and tries again, so nobody is sent back to SMS
+  // sign-in for a problem that isn't theirs.
+  const loadUser = useCallback(async () => {
+    try {
+      setUser(await api.get<User>('/v1/me'));
+      setStatus('signedIn');
+      return true;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        await tokenStore.set(null);
+        signedOut.current();
+        return true;
+      }
+      setStatus('signedIn');
+      return false;
+    }
+  }, [api]);
+
   useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     (async () => {
       if (!(await tokenStore.get())) return signedOut.current();
-      try {
-        setUser(await api.get<User>('/v1/me'));
-        setStatus('signedIn');
-      } catch (error) {
-        // Offline at launch: keep the session and let screens retry, rather than signing the person out.
-        if (error instanceof ApiError && error.status === 0) setStatus('signedIn');
-        else signedOut.current();
+      for (let attempt = 0; !stopped; attempt += 1) {
+        if (await loadUser()) return;
+        await new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, Math.min(30_000, 2_000 * 2 ** attempt));
+        });
       }
     })();
-  }, [api]);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [loadUser]);
 
   const requestCode = useCallback(
     (phone: string) => api.public<CodeSent>('POST', '/v1/auth/otp/request', { phone }),
@@ -106,8 +129,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [api],
   );
 
+  /**
+   * Ends the session on the server first, so this phone stops getting pushes. Offline or with the server
+   * down, it throws and the person stays signed in; a session the server already ended just clears.
+   */
   const signOut = useCallback(async () => {
-    await api.post('/v1/auth/logout').catch(() => undefined);
+    try {
+      await api.post('/v1/auth/logout');
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 401)) {
+        throw new ApiError(0, 'sign_out_failed', "Can't sign out right now. Check your connection and try again.");
+      }
+    }
     await tokenStore.set(null);
     signedOut.current();
   }, [api]);

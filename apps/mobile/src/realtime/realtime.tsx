@@ -17,12 +17,33 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     if (status !== 'signedIn') return;
     const s = io(`${API_URL}/realtime`, {
       transports: ['websocket'],
+      // Read on every (re)connect. A failed token read still answers, so the handshake never hangs.
       auth: (cb) => {
-        api.accessToken().then((token) => cb({ token }));
+        api
+          .accessToken()
+          .then((token) => cb({ token }))
+          .catch(() => cb({ token: null }));
       },
+    });
+    // The server drops a socket whose token it refuses, and socket.io won't reconnect on its own after
+    // that. Try again with a fresh token, backing off, until it connects or the person signs out.
+    let attempt = 0;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const reconnectLater = () => {
+      clearTimeout(retry);
+      retry = setTimeout(() => s.connect(), Math.min(30_000, 1_000 * 2 ** attempt++));
+    };
+    s.on('ready', () => {
+      attempt = 0;
+    });
+    s.on('auth_error', reconnectLater);
+    s.on('disconnect', (reason) => {
+      if (reason === 'io server disconnect') reconnectLater();
     });
     setSocket(s);
     return () => {
+      clearTimeout(retry);
+      s.removeAllListeners();
       s.disconnect();
       setSocket(null);
     };

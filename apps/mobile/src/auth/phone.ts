@@ -1,23 +1,30 @@
-/** Nigerian mobile numbers as people type them: 0803 123 4567, 803 123 4567 or +234 803 123 4567. */
-export function nationalDigits(input: string): string {
+/**
+ * Phone input for any country. The app only tidies what was typed; the server checks the number
+ * properly (and that it is a mobile) for the country's prefix from the country config.
+ */
+
+/** What the person typed, as national digits: the country prefix and one leading 0 removed. */
+export function nationalDigits(input: string, prefix: string): string {
+  const prefixDigits = prefix.replace(/\D/g, '');
   let d = input.replace(/\D/g, '');
-  if (d.startsWith('234')) d = d.slice(3);
+  if (input.trim().startsWith('+') || (d.startsWith(prefixDigits) && d.length > 10)) {
+    if (d.startsWith(prefixDigits)) d = d.slice(prefixDigits.length);
+  }
   if (d.startsWith('0')) d = d.slice(1);
-  return d.slice(0, 10);
+  return d.slice(0, 12);
 }
 
-/** Ten national digits starting 7, 8 or 9 (the mobile ranges). The server does the full check. */
-export const looksLikeMobile = (digits: string) => /^[789]\d{9}$/.test(digits);
+/** Long enough to be worth sending to the server. */
+export const plausibleNumber = (digits: string) => digits.length >= 7;
 
 /** 8031234567 → "803 123 4567". */
 export function formatNational(digits: string): string {
-  const parts = [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 10)].filter(Boolean);
-  return parts.join(' ');
+  return [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6)].filter(Boolean).join(' ');
 }
 
-export const toE164 = (digits: string) => `+234${digits}`;
+export const toE164 = (prefix: string, digits: string) => `${prefix}${digits}`;
 
 /** +2348031234567 → "+234 803 123 4567", for showing a number back to the person. */
-export function formatE164(phone: string): string {
-  return phone.startsWith('+234') ? `+234 ${formatNational(phone.slice(4))}` : phone;
+export function formatE164(phone: string, prefix: string): string {
+  return phone.startsWith(prefix) ? `${prefix} ${formatNational(phone.slice(prefix.length))}` : phone;
 }

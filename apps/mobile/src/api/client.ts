@@ -16,6 +16,11 @@ export interface TokenStore {
   set(tokens: Tokens | null): Promise<void>;
 }
 
+/** The message to show for any error: the server's own words, or a general fallback. */
+export function errorMessage(error: unknown): string {
+  return error instanceof ApiError ? error.message : 'Something went wrong. Try again.';
+}
+
 /** Every API error arrives as { error: { code, message, ...details } }. */
 export class ApiError extends Error {
   constructor(
@@ -88,7 +93,12 @@ export function createApiClient(options: ApiOptions) {
   function refresh(current: Tokens): Promise<Tokens | null> {
     refreshing ??= (async () => {
       try {
-        const { res, json } = await send('POST', '/v1/auth/refresh', { refreshToken: current.refreshToken }, null);
+        // Another request may already have refreshed (the server rotates refresh tokens, and sending an
+        // old one again ends the session). Use what is stored if it moved on.
+        const stored = await options.store.get();
+        if (!stored) return null;
+        if (stored.refreshToken !== current.refreshToken) return stored;
+        const { res, json } = await send('POST', '/v1/auth/refresh', { refreshToken: stored.refreshToken }, null);
         if (res.status === 401) {
           await options.store.set(null);
           options.onSignedOut?.();

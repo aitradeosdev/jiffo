@@ -1,32 +1,36 @@
 import { useState } from 'react';
 import { router } from 'expo-router';
 import { useSession } from '@/auth/session';
-import { formatNational, looksLikeMobile, nationalDigits, toE164 } from '@/auth/phone';
-import { ApiError } from '@/api/client';
+import { useCountryConfig } from '@/api/useCountryConfig';
+import { formatNational, nationalDigits, plausibleNumber, toE164 } from '@/auth/phone';
+import { ApiError, errorMessage } from '@/api/client';
 import { Button, Field, Screen, Text } from '@/ui/kit';
 
 export default function Phone() {
   const { requestCode } = useSession();
+  const { config, error: configError } = useCountryConfig();
+  const prefix = config?.country.phonePrefix;
   const [digits, setDigits] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const ready = looksLikeMobile(digits);
+  const ready = !!prefix && plausibleNumber(digits);
 
   async function send() {
+    if (!prefix) return;
     setBusy(true);
     setError(null);
+    const phone = toE164(prefix, digits);
     try {
-      const sent = await requestCode(toE164(digits));
-      router.push({ pathname: '/code', params: { phone: sent.phone, resend: String(sent.resendInSeconds) } });
+      const sent = await requestCode(phone);
+      router.push({ pathname: '/code', params: { phone: sent.phone, prefix, resend: String(sent.resendInSeconds) } });
     } catch (e) {
-      const err = e as ApiError;
       // A code was sent moments ago: go and enter it rather than stopping here.
-      if (err.code === 'otp_resend_wait') {
+      if (e instanceof ApiError && e.code === 'otp_resend_wait') {
         router.push({
           pathname: '/code',
-          params: { phone: toE164(digits), resend: String(err.details.retryAfterSeconds ?? 60) },
+          params: { phone, prefix, resend: String(e.details.retryAfterSeconds ?? 60) },
         });
-      } else setError(err.message);
+      } else setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -37,15 +41,15 @@ export default function Phone() {
       <Text variant="title">What's your number?</Text>
       <Field
         label="Phone number"
-        prefix="+234"
+        prefix={prefix ?? '…'}
         value={formatNational(digits)}
-        onChangeText={(t) => setDigits(nationalDigits(t))}
+        onChangeText={(t) => setDigits(nationalDigits(t, prefix ?? ''))}
         keyboardType="phone-pad"
         autoComplete="tel"
         textContentType="telephoneNumber"
         placeholder="803 123 4567"
         autoFocus
-        error={error}
+        error={error ?? (prefix ? null : configError)}
         onSubmitEditing={() => ready && send()}
       />
       <Text variant="small" tone="ink3">
