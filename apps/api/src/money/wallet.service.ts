@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql, type SQLWrapper } from 'drizzle-orm';
 import {
   ERRAND_STATES,
   TERMINAL_STATES,
@@ -291,7 +291,7 @@ export class WalletService {
     }
     // Read only: earnings whose hold has ended count as available here, and are moved in the ledger by
     // the recurring job or when the agent withdraws.
-    const [availableKobo, heldKobo, holds, todayKobo] = await Promise.all([
+    const [availableKobo, heldKobo, holds, week] = await Promise.all([
       this.ledger.balance(this.db, available(auth.userId), auth.countryCode),
       this.ledger.balance(this.db, held(auth.userId), auth.countryCode),
       this.db
@@ -299,8 +299,10 @@ export class WalletService {
         .from(earningHolds)
         .where(and(eq(earningHolds.userId, auth.userId), isNull(earningHolds.releasedAt)))
         .orderBy(asc(earningHolds.availableAt)),
-      this.earnedSince(auth, sql`date_trunc('day', now() at time zone ${timezone}) at time zone ${timezone}`),
+      this.week(auth, timezone),
     ]);
+    // Today is the last of the seven days, so both read the same way.
+    const todayKobo = week[week.length - 1]?.earnedKobo ?? 0;
     const now = Date.now();
     const dueKobo = holds.filter((h) => h.availableAt.getTime() <= now).reduce((sum, h) => sum + h.amountKobo, 0);
     return {
@@ -308,37 +310,98 @@ export class WalletService {
       availableKobo: availableKobo + dueKobo,
       heldKobo: heldKobo - dueKobo,
       todayKobo,
+      week,
       tier: await this.agents.tier(auth.userId),
       upcoming: holds.filter((h) => h.availableAt.getTime() > now).slice(0, 20),
     };
   }
 
   /**
-   * An agent's earnings since a moment: their share of each fee (as recorded when the errand settled)
-   * and tips. Item money paid back at hand-off is the agent's own money, not earnings.
+   * How finished errands paid the agent: their fee share, the commission, item money paid back and any
+   * tip, from the settlement and tip entries.
    */
-  private async earnedSince(auth: AuthContext, since: SQL) {
+  async settlements(errandIds: string[]) {
+    const out = new Map<
+      string,
+      { agentKobo: number; commissionKobo: number; itemsKobo: number; tipKobo: number; tier: string | null }
+    >();
+    if (errandIds.length === 0) return out;
+    const keys = errandIds.flatMap((id) => [`errand:${id}:settle`, `errand:${id}:tip`]);
+    const rows = await this.db
+      .select({
+        errandId: journalEntries.errandId,
+        kind: journalEntries.kind,
+        data: journalEntries.data,
+        // Both postings of a tip move the same amount.
+        // Only a tip needs its amount from the postings (both move the same amount). Spelled out with
+        // table names: inside a select list the columns would otherwise be unqualified.
+        amount: sql<string>`case when "journal_entries"."kind" = 'tip'
+          then (select coalesce(max(abs(p.amount)), 0) from postings p where p.journal_id = "journal_entries"."id")
+          else 0 end`,
+      })
+      .from(journalEntries)
+      .where(inArray(journalEntries.key, keys));
+    for (const r of rows) {
+      if (!r.errandId) continue;
+      const entry = out.get(r.errandId) ?? { agentKobo: 0, commissionKobo: 0, itemsKobo: 0, tipKobo: 0, tier: null };
+      if (r.kind === 'settle') {
+        entry.agentKobo = Number(r.data.agentKobo ?? 0);
+        entry.commissionKobo = Number(r.data.commissionKobo ?? 0);
+        entry.itemsKobo = Number(r.data.itemsKobo ?? 0);
+        entry.tier = typeof r.data.tier === 'string' ? r.data.tier : null;
+      } else {
+        entry.tipKobo = Number(r.amount);
+      }
+      out.set(r.errandId, entry);
+    }
+    return out;
+  }
+
+  /**
+   * The agent's earnings for each of the last 7 days in the country's time zone: their share of each
+   * fee (as recorded when the errand settled) and tips. Item money paid back is their own money, not
+   * earnings.
+   */
+  private async week(auth: AuthContext, timezone: string) {
     const keys = (['agent_available', 'agent_held'] as const).map((type) =>
       accountKey({ type, ownerId: auth.userId }, auth.countryCode),
     );
-    const touchesAgent = (journalId: SQL | typeof journalEntries.id) =>
-      sql`exists (select 1 from ${postings} join ${ledgerAccounts} on ${ledgerAccounts.id} = ${postings.accountId}
-        where ${postings.journalId} = ${journalId} and ${inArray(ledgerAccounts.key, keys)})`;
-    const [[fees], [tips]] = await Promise.all([
+    // Grouped by position (1, the day): the time zone is a parameter, so a repeated expression would differ.
+    const day = (col: SQLWrapper) => sql<string>`to_char(${col} at time zone ${timezone}, 'YYYY-MM-DD')`;
+    const since = sql`date_trunc('day', now() at time zone ${timezone}) at time zone ${timezone} - interval '6 days'`;
+    const [fees, tips] = await Promise.all([
       this.db
-        .select({ total: sql<string>`coalesce(sum((${journalEntries.data}->>'agentKobo')::bigint), 0)` })
+        .select({
+          day: day(journalEntries.createdAt),
+          total: sql<string>`sum((${journalEntries.data}->>'agentKobo')::bigint)`,
+        })
         .from(journalEntries)
         .where(
-          and(eq(journalEntries.kind, 'settle'), gte(journalEntries.createdAt, since), touchesAgent(journalEntries.id)),
-        ),
+          and(
+            eq(journalEntries.kind, 'settle'),
+            gte(journalEntries.createdAt, since),
+            sql`exists (select 1 from ${postings} join ${ledgerAccounts} on ${ledgerAccounts.id} = ${postings.accountId}
+              where ${postings.journalId} = ${journalEntries.id} and ${inArray(ledgerAccounts.key, keys)})`,
+          ),
+        )
+        .groupBy(sql`1`),
       this.db
-        .select({ total: sql<string>`coalesce(sum(-${postings.amount}), 0)` })
+        .select({ day: day(postings.createdAt), total: sql<string>`sum(-${postings.amount})` })
         .from(postings)
         .innerJoin(ledgerAccounts, eq(ledgerAccounts.id, postings.accountId))
         .innerJoin(journalEntries, eq(journalEntries.id, postings.journalId))
-        .where(and(inArray(ledgerAccounts.key, keys), eq(journalEntries.kind, 'tip'), gte(postings.createdAt, since))),
+        .where(and(inArray(ledgerAccounts.key, keys), eq(journalEntries.kind, 'tip'), gte(postings.createdAt, since)))
+        .groupBy(sql`1`),
     ]);
-    return Number(fees?.total ?? 0) + Number(tips?.total ?? 0);
+    const totals = new Map<string, number>();
+    for (const r of [...fees, ...tips]) totals.set(r.day, (totals.get(r.day) ?? 0) + Number(r.total));
+    // Today's date where the country is, as YYYY-MM-DD.
+    const todayKey = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, dateStyle: 'short' }).format(new Date());
+    const [y, m, d] = todayKey.split('-').map(Number) as [number, number, number];
+    return Array.from({ length: 7 }, (_, i) => {
+      const date = new Date(Date.UTC(y, m - 1, d - 6 + i)).toISOString().slice(0, 10);
+      return { date, earnedKobo: totals.get(date) ?? 0 };
+    });
   }
 
   /** The customer's errands that have money held in escrow now, with how much. */

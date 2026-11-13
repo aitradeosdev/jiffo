@@ -84,6 +84,7 @@ export function Button({
   disabled,
   loading,
   style,
+  tint,
 }: {
   label: string;
   onPress?: () => void;
@@ -93,11 +94,15 @@ export function Button({
   disabled?: boolean;
   loading?: boolean;
   style?: ViewStyle;
+  /** Fixed colours, for buttons on a surface that doesn't follow the theme (the black camera screen). */
+  tint?: { bg: string; fg: string };
 }) {
   const c = useColors();
   const off = disabled || loading;
-  const bg = { primary: c.ink, brand: c.brand, secondary: c.surface2, plain: 'transparent', danger: c.danger }[kind];
-  const fg = { primary: c.onInk, brand: c.onBrand, secondary: c.ink, plain: c.ink, danger: c.onDanger }[kind];
+  const bg =
+    tint?.bg ?? { primary: c.ink, brand: c.brand, secondary: c.surface2, plain: 'transparent', danger: c.danger }[kind];
+  const fg =
+    tint?.fg ?? { primary: c.onInk, brand: c.onBrand, secondary: c.ink, plain: c.ink, danger: c.onDanger }[kind];
   return (
     <Pressable
       accessibilityRole="button"

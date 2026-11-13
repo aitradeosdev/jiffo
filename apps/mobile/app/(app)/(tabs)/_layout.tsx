@@ -12,7 +12,7 @@ const tab = (title: string, icon: IconName) => ({
   ),
 });
 
-/** Customer: Home, Errands, Wallet, Account. Agent: Board, Jobs, Earnings, Account. */
+/** Customer: Home, Errands, Wallet, Account. Agent: Home, Earnings, Errands, Account. */
 export default function TabsLayout() {
   const c = useColors();
   const insets = useSafeAreaInsets();
@@ -27,9 +27,11 @@ export default function TabsLayout() {
         tabBarLabelStyle: { fontFamily: fonts.semibold, fontSize: 11.5 },
       }}
     >
-      <Tabs.Screen name="home" options={tab(agent ? 'Board' : 'Home', 'home')} />
-      <Tabs.Screen name="errands" options={tab(agent ? 'Jobs' : 'Errands', 'history')} />
-      <Tabs.Screen name="wallet" options={tab(agent ? 'Earnings' : 'Wallet', agent ? 'chart' : 'wallet')} />
+      <Tabs.Screen name="home" options={tab('Home', 'home')} />
+      {/* The prototype puts Earnings second in the agent app and Errands second in the customer app. */}
+      {agent ? <Tabs.Screen name="wallet" options={tab('Earnings', 'chart')} /> : null}
+      <Tabs.Screen name="errands" options={tab('Errands', 'history')} />
+      {agent ? null : <Tabs.Screen name="wallet" options={tab('Wallet', 'wallet')} />}
       <Tabs.Screen name="account" options={tab('Account', 'user')} />
     </Tabs>
   );

@@ -31,11 +31,11 @@ export default function Errands() {
   const row = (e: ErrandView) => <ErrandRow key={e.id} errand={e} category={categories.get(e.categoryKey)} />;
 
   return (
-    <TabPage title={agent ? 'Jobs' : 'Errands'} refreshing={refreshing} onRefresh={refresh}>
+    <TabPage title="Errands" refreshing={refreshing} onRefresh={refresh}>
       {data && data.length === 0 ? (
         <Empty
           icon="history"
-          title={agent ? 'No jobs yet' : 'No errands yet'}
+          title="No errands yet"
           body={
             agent
               ? 'Errands you accept show here, with what you earned.'
@@ -80,7 +80,9 @@ function ErrandRow({ errand: e, category }: { errand: ErrandView; category?: { k
   const scheduled = e.status === 'requested' ? upcoming(e.scheduledFor) : null;
   const when = scheduled ? whenLabel(scheduled) : shortWhen(e.completedAt ?? e.cancelledAt ?? e.createdAt);
   // Item money counts only if the customer locked it; an unlocked amount was never paid.
-  const total = agent ? e.feeKobo : e.feeKobo + e.serviceFeeKobo + (e.itemsLocked ? (e.itemAmountKobo ?? 0) : 0);
+  const total = agent
+    ? (e.earnedKobo ?? e.feeKobo)
+    : e.feeKobo + e.serviceFeeKobo + (e.itemsLocked ? (e.itemAmountKobo ?? 0) : 0);
   const right =
     e.status === 'completed' ? (
       <Text style={styles.amt}>{naira(total)}</Text>
