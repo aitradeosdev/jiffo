@@ -21,6 +21,8 @@ export interface ErrandView {
   serviceFeeKobo: number;
   pendingOfferKobo: number | null;
   itemAmountKobo: number | null;
+  /** The customer locked the item amount, so item money was held and paid at hand-off. */
+  itemsLocked: boolean;
   scheduledFor: string | null;
   stateCode: string;
   stops: StopView[];
@@ -110,6 +112,18 @@ export const STATUS_TEXT: Record<ErrandState, string> = {
   completed: 'Completed',
   cancelled: 'Cancelled',
   expired: 'No agent found',
+};
+
+/** Short status labels for the agent's list badges. */
+export const AGENT_BADGE: Partial<Record<ErrandState, string>> = {
+  accepted: 'Accepted',
+  started: 'In progress',
+  item_pending: 'Awaiting lock',
+  items_locked: 'Items locked',
+  delivered: 'Delivered',
+  photo_pending: 'Photo sent',
+  unreachable: 'Unreachable',
+  disputed: 'Disputed',
 };
 
 /** How each status reads to the agent. */

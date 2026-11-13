@@ -375,8 +375,13 @@ describe('errands', () => {
         amountKobo: 900_000,
         photos: [await photo(t, agent, buy.id, 'receipt')],
       });
+      const disputes = async () =>
+        (await request(t.http).get('/v1/me/stats').set(customer.headers).expect(200)).body.disputes as number;
+      const before = await disputes();
       await t.timers.fireAll(buy.id);
-      expect((await get(customer, buy.id)).body.status).toBe('disputed');
+      expect((await get(customer, buy.id)).body).toMatchObject({ status: 'disputed', itemsLocked: false });
+      // A missed deadline counts as a dispute on the account, like one either side opens.
+      expect(await disputes()).toBe(before + 1);
 
       const drop = await createErrand(t, customer);
       await act(t, agent, drop.id, 'accept');

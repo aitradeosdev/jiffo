@@ -1,6 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNull, lt, lte } from 'drizzle-orm';
 import {
+  ERRAND_STATES,
+  TERMINAL_STATES,
   commissionBpsFor,
   holdsEarnings,
   splitFeeEscrow,
@@ -32,6 +34,9 @@ const held = (userId: string): AccountRef => ({ type: 'agent_held', ownerId: use
 const feeEscrow = (errandId: string): AccountRef => ({ type: 'fee_escrow', ownerId: errandId });
 const itemEscrow = (errandId: string): AccountRef => ({ type: 'item_escrow', ownerId: errandId });
 const REVENUE: AccountRef = { type: 'platform_revenue' };
+
+/** Between accept and the end of an errand, its money sits in escrow. */
+const HOLDING_STATES = ERRAND_STATES.filter((s) => s !== 'requested' && !TERMINAL_STATES.has(s));
 
 /** What each journal kind looks like in the wallet history. */
 const HISTORY_LABELS: Record<string, string> = {
@@ -278,7 +283,11 @@ export class WalletService {
   async summary(auth: AuthContext) {
     const { currency } = await this.countries.basics(auth.countryCode);
     if (auth.app === 'customer') {
-      return { currency, balanceKobo: await this.ledger.balance(this.db, wallet(auth.userId), auth.countryCode) };
+      const [balanceKobo, holding] = await Promise.all([
+        this.ledger.balance(this.db, wallet(auth.userId), auth.countryCode),
+        this.holding(auth),
+      ]);
+      return { currency, balanceKobo, heldKobo: holding.reduce((sum, h) => sum + h.heldKobo, 0), holding };
     }
     // Read only: earnings whose hold has ended count as available here, and are moved in the ledger by
     // the recurring job or when the agent withdraws.
@@ -302,6 +311,43 @@ export class WalletService {
     };
   }
 
+  /** The customer's errands that have money held in escrow now, with how much. */
+  private async holding(auth: AuthContext) {
+    const running = await this.db
+      .select({ id: errands.id, description: errands.description })
+      .from(errands)
+      .where(
+        and(
+          eq(errands.customerId, auth.userId),
+          eq(errands.countryCode, auth.countryCode),
+          inArray(errands.status, HOLDING_STATES),
+        ),
+      );
+    if (running.length === 0) return [];
+    const accounts = await this.db
+      .select({ key: ledgerAccounts.key, balance: ledgerAccounts.balance })
+      .from(ledgerAccounts)
+      .where(
+        inArray(
+          ledgerAccounts.key,
+          running.flatMap((e) => [
+            accountKey(feeEscrow(e.id), auth.countryCode),
+            accountKey(itemEscrow(e.id), auth.countryCode),
+          ]),
+        ),
+      );
+    const balance = new Map(accounts.map((a) => [a.key, a.balance]));
+    return running
+      .map((e) => ({
+        errandId: e.id,
+        description: e.description,
+        heldKobo:
+          (balance.get(accountKey(feeEscrow(e.id), auth.countryCode)) ?? 0) +
+          (balance.get(accountKey(itemEscrow(e.id), auth.countryCode)) ?? 0),
+      }))
+      .filter((h) => h.heldKobo > 0);
+  }
+
   /** The person's money movements, newest first. Amounts are positive for money in, negative for money out. */
   async history(auth: AuthContext, before: number | undefined, limit: number) {
     const types: LedgerAccountType[] =
@@ -314,11 +360,13 @@ export class WalletService {
         accountType: ledgerAccounts.type,
         kind: journalEntries.kind,
         errandId: journalEntries.errandId,
+        errandDescription: errands.description,
         createdAt: postings.createdAt,
       })
       .from(postings)
       .innerJoin(ledgerAccounts, eq(ledgerAccounts.id, postings.accountId))
       .innerJoin(journalEntries, eq(journalEntries.id, postings.journalId))
+      .leftJoin(errands, eq(errands.id, journalEntries.errandId))
       .where(and(inArray(ledgerAccounts.key, keys), before ? lt(postings.id, before) : undefined))
       .orderBy(desc(postings.id))
       .limit(limit);
@@ -330,6 +378,8 @@ export class WalletService {
       label: HISTORY_LABELS[r.kind] ?? r.kind,
       balance: r.accountType === 'agent_held' ? 'held' : 'available',
       errandId: r.errandId,
+      /** What the errand was for, so a movement reads as more than its kind. */
+      detail: r.errandDescription,
       createdAt: r.createdAt,
     }));
   }

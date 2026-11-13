@@ -28,6 +28,8 @@ export function errandView(
   stops: StopRow[],
   people: { customer: PersonSummary | null; agent: PersonSummary | null },
   role: ViewerRole,
+  /** The customer locked the item amount: item money was (or is) held for it. */
+  itemsLocked = false,
 ) {
   return {
     id: errand.id,
@@ -43,6 +45,7 @@ export function errandView(
     serviceFeeKobo: errand.serviceFeeKobo,
     pendingOfferKobo: errand.pendingOfferKobo,
     itemAmountKobo: errand.itemAmountKobo,
+    itemsLocked,
     scheduledFor: errand.scheduledFor,
     settingsVersion: errand.settingsVersion,
     stops: [...stops]

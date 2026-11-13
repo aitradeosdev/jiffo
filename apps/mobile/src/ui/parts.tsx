@@ -152,7 +152,9 @@ export function Badge({ label, icon, tone }: { label: string; icon?: IconName; t
   return (
     <View style={[styles.badge, { backgroundColor: bg }]}>
       {icon ? <Icon name={icon} size={12} color={fg} /> : null}
-      <Text style={{ fontFamily: fonts.bold, fontSize: 12, color: fg }}>{label}</Text>
+      <Text style={{ fontFamily: fonts.bold, fontSize: 12, color: fg, flexShrink: 1 }} numberOfLines={1}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -341,6 +343,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     borderRadius: radius.pill,
     alignSelf: 'flex-start',
+    flexShrink: 1,
+    maxWidth: 140,
   },
   switch: { width: 50, height: 30, borderRadius: radius.pill, padding: 3 },
   knob: {

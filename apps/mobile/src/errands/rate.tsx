@@ -31,7 +31,8 @@ export function CustomerRate({ errand, onDone }: { errand: ErrandView; onDone: (
   const dropoff = errand.stops.find((s) => s.kind === 'dropoff');
   const when = stepTime(errand, 4);
   const how = errand.completedBy ? COMPLETED_BY_TEXT[errand.completedBy] : 'completed';
-  const items = errand.itemAmountKobo ?? 0;
+  // Item money counts only if it was locked; an unlocked amount was never paid.
+  const items = errand.itemsLocked ? (errand.itemAmountKobo ?? 0) : 0;
   const tipNow = tipped ? 0 : tip;
   const total = errand.feeKobo + errand.serviceFeeKobo + items + tipNow;
 

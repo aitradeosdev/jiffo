@@ -8,15 +8,15 @@ import { useCountryConfig } from '@/api/useCountryConfig';
 import { useResource } from '@/api/useResource';
 import { useRealtimeEvent } from '@/realtime/realtime';
 import { useDraft } from '@/errands/draft';
-import { Segments } from '@/errands/progress';
-import { STATUS_TEXT, isActive, stepOf, type ErrandView, type PlacePick } from '@/errands/types';
-import { liveSchedule, upcoming, whenLabel } from '@/errands/when';
+import { LiveCard } from '@/errands/live-card';
+import { isActive, type ErrandView, type PlacePick } from '@/errands/types';
+import { liveSchedule, whenLabel } from '@/errands/when';
 import { useCurrentLocation } from '@/location';
 import { naira } from '@/money';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
 import { Button, Text, Wordmark } from '@/ui/kit';
-import { Avatar, Icon, List, Row } from '@/ui/parts';
+import { Icon, List, Row } from '@/ui/parts';
 import { Art } from '@/ui/svg';
 import { Fab, FloatPill, Sheet, useShadows } from '@/ui/floating';
 import { JiffoMap } from '@/ui/map/map';
@@ -253,43 +253,6 @@ function WhereTo({ when, onPress }: { when: string; onPress: () => void }) {
   );
 }
 
-/** .livecard: a running errand, in black, with its progress. */
-function LiveCard({ errand }: { errand: ErrandView }) {
-  const c = useColors();
-  const step = stepOf(errand.status);
-  const scheduled = errand.status === 'requested' ? upcoming(errand.scheduledFor) : null;
-  const title = scheduled ? `Scheduled · ${whenLabel(scheduled)}` : STATUS_TEXT[errand.status];
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${title}. Open errand`}
-      onPress={() => router.push(`/errand/${errand.id}`)}
-      style={[styles.livecard, { backgroundColor: c.ink }]}
-    >
-      {step < 0 ? (
-        <View style={[styles.ico, { backgroundColor: 'rgba(255,255,255,0.14)' }]}>
-          <Icon name={scheduled ? 'cal' : 'search'} size={19} color={c.onInk} />
-        </View>
-      ) : (
-        <Avatar name={errand.agent?.firstName} size={48} onInk />
-      )}
-      <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
-        <Text style={[styles.liveTitle, { color: c.onInk }]} numberOfLines={1}>
-          {title}
-        </Text>
-        {step < 0 ? (
-          <Text variant="note" style={{ color: c.onInk, opacity: 0.75 }} numberOfLines={1}>
-            {scheduled ? 'Goes on the board ahead of time' : 'Your errand is with nearby agents'}
-          </Text>
-        ) : (
-          <Segments step={step} onInk />
-        )}
-      </View>
-      <Icon name="chev" size={20} color={c.onInk} />
-    </Pressable>
-  );
-}
-
 /** The last two different places from past errands, kept as the kind of stop they were. */
 function recentPlaces(errands: ErrandView[]) {
   const seen = new Set<string>();
@@ -369,6 +332,4 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   promoGoText: { color: '#0A3B26', fontFamily: fonts.bold, fontSize: 13 },
-  livecard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14 },
-  liveTitle: { fontFamily: fonts.bold, fontSize: 15 },
 });

@@ -175,5 +175,13 @@ describe('photos and ratings', () => {
     await rate(agent, { stars: 6 }).expect(400);
     const stranger = await signIn(t, 'customer');
     await rate(stranger, { stars: 1 }).expect(404);
+
+    // Each side's account shows the rating the other side gave, in that app's role.
+    const stats = async (person: Person) =>
+      (await request(t.http).get('/v1/me/stats').set(person.headers).expect(200)).body;
+    expect(await stats(agent)).toMatchObject({ ratingAvg: 5, ratingCount: 1 });
+    expect(await stats(customer)).toMatchObject({ ratingAvg: 4, ratingCount: 1 });
+    expect((await stats(customer)).errandsCompleted).toBeGreaterThanOrEqual(1);
+    expect(await stats(stranger)).toEqual({ ratingAvg: null, ratingCount: 0, errandsCompleted: 0, disputes: 0 });
   });
 });
