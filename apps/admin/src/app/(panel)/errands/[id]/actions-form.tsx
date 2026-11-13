@@ -3,7 +3,7 @@
 import { useActionState, useState } from 'react';
 import { SubmitButton } from '@/components/submit-button';
 import { buttonClass, inputClass, Notice } from '@/components/ui';
-import { money } from '@/lib/format';
+import { money, nairaToKobo } from '@/lib/format';
 import { actOnErrand, type ActState } from './actions';
 
 const ACTIONS: Record<string, { label: string; about: string }> = {
@@ -24,16 +24,12 @@ export interface MoneyFacts {
   agentKobo: number;
   jiffoKobo: number;
   /** Item amount the agent sent but the customer never locked, if any: chargeable from the wallet. */
-  unlockedItemsKobo: number;
+  chargeableKobo: number;
   customerBalanceKobo: number;
 }
 
 /** Naira for the inputs: whole when it can be, never with a currency sign. */
 const asInput = (kobo: number) => (kobo % 100 === 0 ? String(kobo / 100) : (kobo / 100).toFixed(2));
-const toKobo = (text: string) => {
-  const n = Number(text.replace(/[,\s₦]/g, '') || 0);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : NaN;
-};
 
 export function ActionsForm({
   id,
@@ -54,12 +50,14 @@ export function ActionsForm({
   const [items, setItems] = useState(asInput(facts.heldItemsKobo));
   const [charge, setCharge] = useState('0');
   const [confirming, setConfirming] = useState(false);
+  // Kept in state, so it survives a refused attempt: React clears uncontrolled fields after every action.
+  const [note, setNote] = useState('');
   const naira = (kobo: number) => money(kobo, facts.currency);
 
   const resolving = event.startsWith('resolve_');
   const custom = resolving && mode === 'custom';
-  const refund = facts.heldFeeKobo - toKobo(agent) - toKobo(jiffo);
-  const itemsBack = facts.heldItemsKobo - toKobo(items);
+  const refund = facts.heldFeeKobo - nairaToKobo(agent) - nairaToKobo(jiffo);
+  const itemsBack = facts.heldItemsKobo - nairaToKobo(items);
   const standardLine =
     event === 'resolve_complete'
       ? `Agent ${naira(facts.agentKobo)}, Jiffo ${naira(facts.jiffoKobo)}${
@@ -140,13 +138,13 @@ export function ActionsForm({
               ) : (
                 <input type="hidden" name="items" value="0" />
               )}
-              {facts.unlockedItemsKobo > 0 ? (
+              {facts.chargeableKobo > 0 ? (
                 <Amount
                   label="Charge the customer for items"
                   name="charge"
                   value={charge}
                   onChange={setCharge}
-                  hint={`Up to ${naira(facts.unlockedItemsKobo)}, the amount they never locked. Their wallet holds ${naira(
+                  hint={`Up to ${naira(facts.chargeableKobo)}, the amount they never locked. Their wallet holds ${naira(
                     facts.customerBalanceKobo,
                   )}.`}
                 />
@@ -169,6 +167,8 @@ export function ActionsForm({
         <span className="mb-1.5 block text-sm font-semibold">Why</span>
         <textarea
           name="note"
+          value={note}
+          onChange={(e) => setNote(e.currentTarget.value)}
           required
           minLength={5}
           maxLength={1000}

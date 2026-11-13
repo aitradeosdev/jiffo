@@ -260,14 +260,20 @@ export class ErrandNotifier {
 
     if (note) {
       const parties: Party[] = note.to === 'both' ? ['customer', 'agent'] : [note.to];
-      for (const party of parties) {
-        const userId = party === 'customer' ? after.customerId : agentId;
-        if (!userId) continue;
-        await this.push.notifyUser(userId, party, {
-          title: note.title,
-          body: note.body,
-          data: { type: 'errand.updated', errandId: after.id, event, status: after.status },
-        });
+      // Each side on its own, so one failed push never stops the other.
+      const sent = await Promise.allSettled(
+        parties.map((party) => {
+          const userId = party === 'customer' ? after.customerId : agentId;
+          if (!userId) return Promise.resolve();
+          return this.push.notifyUser(userId, party, {
+            title: note.title,
+            body: note.body,
+            data: { type: 'errand.updated', errandId: after.id, event, status: after.status },
+          });
+        }),
+      );
+      for (const r of sent) {
+        if (r.status === 'rejected') this.logger.warn(`Push for ${event} on ${after.id} failed: ${String(r.reason)}`);
       }
     }
   }

@@ -34,7 +34,10 @@ export function AgentErrand({ id }: { id: string }) {
       <AgentRequest errand={errand} onAccept={() => act('accept')} accepting={busy === 'accept'} error={actionError} />
     );
   }
-  if (errand.status === 'completed') return <AgentDone errand={errand} onRated={reload} />;
+  // An errand support settled as cancelled can still have paid the agent: show what it paid.
+  if (errand.status === 'completed' || (errand.status === 'cancelled' && errand.settlement)) {
+    return <AgentDone errand={errand} onRated={reload} />;
+  }
   if (movedOn || errand.status === 'cancelled' || errand.status === 'expired' || errand.status === 'requested') {
     // Cancelled by the customer, or released back to matching: this agent is done with it.
     return (

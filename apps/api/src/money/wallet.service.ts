@@ -20,6 +20,13 @@ import { InsufficientFunds, LedgerService, accountKey, transfer, type AccountRef
 
 type ErrandRow = typeof errands.$inferSelect;
 
+/**
+ * Item money the customer can be charged from their wallet when support settles: the amount the agent sent
+ * with the receipt, on a purchase errand whose item amount was never locked (nothing is held for items).
+ */
+export const chargeableItemsKobo = (errand: { buy: boolean; itemAmountKobo: number | null }, heldItemsKobo: number) =>
+  errand.buy && heldItemsKobo === 0 ? (errand.itemAmountKobo ?? 0) : 0;
+
 /** How support shares out a disputed errand's money. Amounts in kobo; whatever is left goes back to the customer. */
 export interface DisputeSplit {
   /** From the fee escrow, to the agent. */
@@ -198,15 +205,13 @@ export class WalletService {
     if (itemsRefundKobo < 0) {
       throw unprocessable('items_too_large', 'More than the item money held', { heldKobo: items });
     }
-    if (split.chargeCustomerKobo > 0) {
-      const unlocked = errand.buy && items === 0 && (errand.itemAmountKobo ?? 0) > 0;
-      if (!unlocked || split.chargeCustomerKobo > (errand.itemAmountKobo ?? 0)) {
-        throw unprocessable(
-          'charge_not_allowed',
-          "The customer's wallet can only be charged up to the item amount they never locked",
-          { itemAmountKobo: unlocked ? errand.itemAmountKobo : 0 },
-        );
-      }
+    const chargeable = chargeableItemsKobo(errand, items);
+    if (split.chargeCustomerKobo > chargeable) {
+      throw unprocessable(
+        'charge_not_allowed',
+        "The customer's wallet can only be charged up to the item amount they never locked",
+        { chargeableKobo: chargeable },
+      );
     }
     const agentId = errand.agentId;
     if (!agentId && split.agentKobo + split.itemsToAgentKobo + split.chargeCustomerKobo > 0) {
@@ -224,8 +229,9 @@ export class WalletService {
         data: {
           tier,
           agentKobo: split.agentKobo,
-          commissionKobo: split.jiffoKobo,
-          serviceFeeKobo: 0,
+          // Jiffo's share counts as the service fee first, then as commission, as at a normal hand-off.
+          serviceFeeKobo: Math.min(split.jiffoKobo, errand.serviceFeeKobo),
+          commissionKobo: split.jiffoKobo - Math.min(split.jiffoKobo, errand.serviceFeeKobo),
           itemsKobo: split.itemsToAgentKobo + split.chargeCustomerKobo,
           resolution: { refundKobo, itemsRefundKobo, chargeCustomerKobo: split.chargeCustomerKobo },
         },
@@ -426,7 +432,15 @@ export class WalletService {
   async settlements(errandIds: string[]) {
     const out = new Map<
       string,
-      { agentKobo: number; commissionKobo: number; itemsKobo: number; tipKobo: number; tier: string | null }
+      {
+        agentKobo: number;
+        commissionKobo: number;
+        itemsKobo: number;
+        tipKobo: number;
+        tier: string | null;
+        /** Settled by support, which may have shared the fee differently. */
+        bySupport: boolean;
+      }
     >();
     if (errandIds.length === 0) return out;
     const keys = errandIds.flatMap((id) => [`errand:${id}:settle`, `errand:${id}:tip`]);
@@ -446,12 +460,20 @@ export class WalletService {
       .where(inArray(journalEntries.key, keys));
     for (const r of rows) {
       if (!r.errandId) continue;
-      const entry = out.get(r.errandId) ?? { agentKobo: 0, commissionKobo: 0, itemsKobo: 0, tipKobo: 0, tier: null };
+      const entry = out.get(r.errandId) ?? {
+        agentKobo: 0,
+        commissionKobo: 0,
+        itemsKobo: 0,
+        tipKobo: 0,
+        tier: null,
+        bySupport: false,
+      };
       if (r.kind === 'settle') {
         entry.agentKobo = Number(r.data.agentKobo ?? 0);
         entry.commissionKobo = Number(r.data.commissionKobo ?? 0);
         entry.itemsKobo = Number(r.data.itemsKobo ?? 0);
         entry.tier = typeof r.data.tier === 'string' ? r.data.tier : null;
+        entry.bySupport = !!r.data.resolution;
       } else {
         entry.tipKobo = Number(r.amount);
       }

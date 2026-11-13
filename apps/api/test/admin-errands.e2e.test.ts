@@ -71,6 +71,21 @@ describe('admin errands and disputes', () => {
       ).toContain(mine.id);
     }
     expect((await list('q=nothing-matches-this')).body.errands).toEqual([]);
+    // "2345" is only the country code and one digit: it must not match every phone with a 5 in it.
+    expect((await list('q=2345')).body.errands.map((e: { id: string }) => e.id)).not.toContain(mine.id);
+
+    // Walking every page one row at a time sees each errand once, even ones made in the same instant.
+    const batch = await Promise.all(
+      [1, 2, 3, 4].map((n) => createErrand(t, customer, { description: `Paging check ${n}` })),
+    );
+    const seen: string[] = [];
+    let before: string | null = null;
+    do {
+      const page = await list(`q=Paging%20check&limit=1${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+      seen.push(...page.body.errands.map((e: { id: string }) => e.id));
+      before = page.body.next;
+    } while (before);
+    expect(seen.sort()).toEqual(batch.map((b) => b.id).sort());
 
     // Pages follow on without repeating or skipping.
     const first = await list('limit=1');
@@ -114,6 +129,8 @@ describe('admin errands and disputes', () => {
       reason: 'The agent went to the wrong shop',
     });
     expect(row.since).toBeTruthy();
+    const sinces = res.body.disputes.map((x: { since: string }) => Date.parse(x.since));
+    expect(sinces).toEqual([...sinces].sort((a, b) => a - b));
   });
 
   it('settles a dispute as complete, paying the agent as at a hand-off', async () => {
@@ -197,6 +214,7 @@ describe('admin errands and disputes', () => {
       cause: 'item_lock_timeout',
     });
 
+    expect(d.money.chargeableKobo).toBe(900_000);
     const base = {
       event: 'resolve_complete',
       version: d.errand.version,
@@ -232,6 +250,28 @@ describe('admin errands and disputes', () => {
 
     const history = await request(t.http).get('/v1/wallet/transactions').set(customer.headers).expect(200);
     expect(history.body.transactions?.[0]?.label ?? history.body[0]?.label).toBe('Settled by Jiffo support');
+  });
+
+  it('gives the agent a receipt when support pays them on an errand it cancels', async () => {
+    const errand = await disputed();
+    const d = await detail(errand.id);
+    const split = {
+      agentKobo: 100_000,
+      jiffoKobo: d.errand.serviceFeeKobo + 5_000,
+      itemsToAgentKobo: 0,
+      chargeCustomerKobo: 0,
+    };
+    await settle(errand.id, {
+      event: 'resolve_cancel',
+      version: d.errand.version,
+      note: 'Agent travelled; customer cancelled late',
+      split,
+    }).expect(200);
+    const view = await request(t.http).get(`/v1/errands/${errand.id}`).set(agent.headers).expect(200);
+    expect(view.body.status).toBe('cancelled');
+    // Jiffo's share counts as the service fee first, so only the rest shows as commission.
+    expect(view.body.settlement).toMatchObject({ agentKobo: 100_000, commissionKobo: 5_000, bySupport: true });
+    expect(await trialBalance()).toBe(0);
   });
 
   it('steps into an errand and arranges a redelivery', async () => {

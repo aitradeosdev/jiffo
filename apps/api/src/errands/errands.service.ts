@@ -56,6 +56,8 @@ export interface Settlement {
   itemsKobo: number;
   tipKobo: number;
   tier: string | null;
+  /** Settled by support, which may have shared the fee differently from a hand-off. */
+  bySupport: boolean;
   /** Bronze earnings wait before they can be withdrawn; null once available. */
   heldUntil: Date | null;
 }
@@ -460,7 +462,10 @@ export class ErrandsService implements OnModuleInit {
             )
           : Promise.resolve(null),
         role === 'agent' ? this.agentEarns(errand, errand.agentTier ?? 'bronze') : Promise.resolve(null),
-        completed && role === 'agent' ? this.settlementOf(errand) : Promise.resolve(null),
+        // Support can pay the agent on an errand it settles as cancelled, too.
+        (completed || errand.status === 'cancelled') && role === 'agent'
+          ? this.settlementOf(errand)
+          : Promise.resolve(null),
       ]);
     const items = (photoEvents.find((e) => e.event === 'send_item_amount')?.data.photos as string[] | undefined) ?? [];
     const dropoff = photoEvents.find((e) => e.event === 'send_dropoff_photo')?.data.photo as string | undefined;

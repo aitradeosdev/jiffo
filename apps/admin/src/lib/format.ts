@@ -33,6 +33,14 @@ export function ago(iso: string | Date, timeZone: string, now = Date.now()): str
   return dateTime(iso, timeZone);
 }
 
+/** Naira as someone types it ("1,500", "₦2500.50", "") to whole kobo. Empty is zero; anything else is NaN. */
+export function nairaToKobo(text: string): number {
+  const cleaned = text.replace(/[,\s₦]/g, '');
+  if (cleaned === '') return 0;
+  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return NaN;
+  return Math.round(Number(cleaned) * 100);
+}
+
 /** How long something has waited: "under a minute", "5 min", "3 h", "2 days". */
 export function waited(iso: string | Date, now = Date.now()): string {
   const minutes = Math.floor((now - new Date(iso).getTime()) / 60_000);

@@ -14,6 +14,7 @@ export const metadata: Metadata = { title: 'Errand' };
 interface Detail {
   errand: {
     id: string;
+    countryCode: string;
     status: ErrandState;
     version: number;
     description: string;
@@ -54,6 +55,7 @@ interface Detail {
     heldItemsKobo: number;
     customerBalanceKobo: number;
     standard: { agentKobo: number; jiffoKobo: number };
+    chargeableKobo: number;
     journal: Array<{
       id: string;
       kind: string;
@@ -92,7 +94,7 @@ export default async function ErrandPage({
 }) {
   const { id } = await params;
   const done = DONE[(await searchParams).done ?? ''];
-  const [me, country] = await Promise.all([getMe(), getCountry()]);
+  const [me, chosen] = await Promise.all([getMe(), getCountry()]);
   let d: Detail;
   try {
     d = await api<Detail>(`/admin/errands/${encodeURIComponent(id)}`);
@@ -100,13 +102,14 @@ export default async function ErrandPage({
     if (error instanceof ApiError && error.status === 404) notFound();
     throw error;
   }
+  // The errand's own country, whichever one the admin is looking at: its currency, clock and categories.
+  const country = me.countries.find((c) => c.code === d.errand.countryCode) ?? chosen;
   const categories = await getCategories(country.code);
   const naira = (kobo: number) => money(kobo, country.currency);
   const time = (iso: string) => dateTime(iso, country.timezone);
   const e = d.errand;
   const status = STATUS[e.status];
   const canAct = me.permissions.includes('operate') && d.actions.length > 0;
-  const unlocked = e.buy && d.money.heldItemsKobo === 0 && e.itemAmountKobo ? e.itemAmountKobo : 0;
 
   /** The useful facts an event carried, in words. */
   const factsOf = (ev: Detail['events'][number]): ReactNode[] => {
@@ -242,7 +245,9 @@ export default async function ErrandPage({
         <div className="space-y-6">
           {canAct ? (
             <Card title="Support actions">
+              {/* A new version (after any change) starts the form afresh with the actions allowed now. */}
               <ActionsForm
+                key={e.version}
                 id={e.id}
                 version={e.version}
                 actions={d.actions}
@@ -252,7 +257,7 @@ export default async function ErrandPage({
                   heldItemsKobo: d.money.heldItemsKobo,
                   agentKobo: d.money.standard.agentKobo,
                   jiffoKobo: d.money.standard.jiffoKobo,
-                  unlockedItemsKobo: unlocked,
+                  chargeableKobo: d.money.chargeableKobo,
                   customerBalanceKobo: d.money.customerBalanceKobo,
                 }}
               />

@@ -2,16 +2,13 @@
 
 import { redirect } from 'next/navigation';
 import { api, messageOf } from '@/lib/api';
+import { nairaToKobo } from '@/lib/format';
 
 export interface ActState {
   error?: string;
 }
 
-/** Naira as typed, to whole kobo. Empty means zero. */
-const kobo = (value: FormDataEntryValue | null) => {
-  const n = Number(String(value ?? '').replace(/[,\s₦]/g, '') || 0);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : NaN;
-};
+const kobo = (value: FormDataEntryValue | null) => nairaToKobo(String(value ?? ''));
 
 export async function actOnErrand(_: ActState, form: FormData): Promise<ActState> {
   const id = String(form.get('id') ?? '');

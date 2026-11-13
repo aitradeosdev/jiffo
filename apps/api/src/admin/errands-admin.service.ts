@@ -22,7 +22,7 @@ import { badRequest, notFound } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
 import { ADMIN_ERRAND_EVENTS, ErrandsService, type AdminErrandEvent } from '../errands/errands.service';
 import { UploadsService } from '../files/uploads.service';
-import { WalletService, type DisputeSplit } from '../money/wallet.service';
+import { chargeableItemsKobo, WalletService, type DisputeSplit } from '../money/wallet.service';
 import { AuditService } from './audit.service';
 import type { AdminContext } from './admin.types';
 
@@ -38,6 +38,10 @@ const STATUSES: Record<Exclude<ErrandFilter, 'all'>, readonly ErrandState[]> = {
   cancelled: ['cancelled', 'expired'],
 };
 
+/** When the errand last went into dispute. */
+const disputedSince = sql<Date>`(select max(e.created_at) from errand_events e
+  where e.errand_id = "errands"."id" and e.to_status = 'disputed')`;
+
 const customer = alias(users, 'customer');
 const agent = alias(users, 'agent');
 
@@ -49,15 +53,17 @@ const customerFields = {
 };
 const agentFields = { id: agent.id, firstName: agent.firstName, lastName: agent.lastName, phone: agent.phone };
 
-/** A list cursor: the last row's creation time and id, so rows created in the same instant are never skipped. */
-const cursorOf = (row: { createdAt: Date; id: string }) => `${row.createdAt.toISOString()}_${row.id}`;
+/**
+ * A list cursor: the last row's creation time to the microsecond, as Postgres keeps it, and its id, so no
+ * row is skipped or repeated between pages, even several created in the same millisecond.
+ */
+const createdAtExact = sql<string>`to_char(${errands.createdAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z)_([0-9a-f-]{36})$/i;
 function parseCursor(cursor: string | undefined) {
   if (!cursor) return null;
-  const [at, id] = cursor.split('_');
-  if (!at || !id || Number.isNaN(Date.parse(at)) || !/^[0-9a-f-]{36}$/i.test(id)) {
-    throw badRequest('invalid_cursor', 'That page link is not valid');
-  }
-  return { at: new Date(at), id };
+  const m = CURSOR.exec(cursor);
+  if (!m) throw badRequest('invalid_cursor', 'That page link is not valid');
+  return { at: m[1]!, id: m[2]! };
 }
 
 /** Errands as support sees them: every errand, its whole history, and support's own actions. */
@@ -79,6 +85,7 @@ export class ErrandsAdminService {
       .select({
         id: errands.id,
         createdAt: errands.createdAt,
+        cursorAt: createdAtExact,
         status: errands.status,
         description: errands.description,
         categoryKey: errands.categoryKey,
@@ -99,7 +106,9 @@ export class ErrandsAdminService {
           eq(errands.countryCode, query.country),
           query.filter === 'all' ? undefined : inArray(errands.status, [...STATUSES[query.filter]]),
           query.q ? this.search(query.q) : undefined,
-          cursor ? sql`(${errands.createdAt}, ${errands.id}) < (${cursor.at}, ${cursor.id})` : undefined,
+          cursor
+            ? sql`(${errands.createdAt}, ${errands.id}) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)`
+            : undefined,
         ),
       )
       .orderBy(desc(errands.createdAt), desc(errands.id))
@@ -107,8 +116,8 @@ export class ErrandsAdminService {
     const page = rows.slice(0, query.limit);
     const last = page.at(-1);
     return {
-      errands: page.map((r) => ({ ...r, agent: r.agent?.id ? r.agent : null })),
-      next: rows.length > query.limit && last ? cursorOf(last) : null,
+      errands: page.map(({ cursorAt: _, ...r }) => ({ ...r, agent: r.agent?.id ? r.agent : null })),
+      next: rows.length > query.limit && last ? `${last.cursorAt}_${last.id}` : null,
     };
   }
 
@@ -124,8 +133,9 @@ export class ErrandsAdminService {
     // Part of an errand id, as support reads it out from a screenshot.
     if (/^[0-9a-f-]{6,36}$/i.test(q)) clauses.push(ilike(sql`${errands.id}::text`, `${q.toLowerCase()}%`));
     // Part of a phone number, written any way: 0803..., +234 803..., 803 123 4567.
-    if (digits.length >= 4) {
-      const local = digits.replace(/^(234|0)/, '');
+    // Without the country code or leading 0, and only when enough digits are left to mean something.
+    const local = digits.replace(/^(234|0)/, '');
+    if (local.length >= 4) {
       clauses.push(ilike(customer.phone, `%${local}%`), ilike(agent.phone, `%${local}%`));
     }
     return or(...clauses);
@@ -145,14 +155,14 @@ export class ErrandsAdminService {
         itemAmountKobo: errands.itemAmountKobo,
         customer: customerFields,
         agent: agentFields,
-        since: sql<Date>`(select max(e.created_at) from errand_events e
-          where e.errand_id = "errands"."id" and e.to_status = 'disputed')`,
+        since: disputedSince,
       })
       .from(errands)
       .innerJoin(customer, eq(customer.id, errands.customerId))
       .leftJoin(agent, eq(agent.id, errands.agentId))
       .where(and(eq(errands.countryCode, country), eq(errands.status, 'disputed')))
-      .orderBy(asc(errands.updatedAt))
+      // By when the dispute opened, not the last change to the errand.
+      .orderBy(asc(disputedSince))
       .limit(200);
     if (rows.length === 0) return { disputes: [] };
     const opened = await this.db
@@ -182,7 +192,7 @@ export class ErrandsAdminService {
         return {
           ...r,
           agent: r.agent?.id ? r.agent : null,
-          since: o?.createdAt ?? r.since,
+          since: r.since,
           openedBy: o ? (o.event === 'open_dispute' ? String(o.data.by ?? o.actorRole) : o.actorRole) : null,
           cause: o?.event ?? null,
           reason:
@@ -359,6 +369,8 @@ export class ErrandsAdminService {
         heldItemsKobo: held.itemsKobo,
         customerBalanceKobo,
         standard: { agentKobo: standard.agentKobo, jiffoKobo: standard.serviceFeeKobo + standard.commissionKobo },
+        /** What a settlement may take from the customer's wallet for items they never locked. */
+        chargeableKobo: chargeableItemsKobo(errand, held.itemsKobo),
         journal: [...entries.values()],
       },
       ratings: ratings.map((r) => ({
