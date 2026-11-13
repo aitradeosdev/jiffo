@@ -60,6 +60,8 @@ jobs:
         run: pnpm typecheck
       - name: Test
         run: pnpm test
+      - name: Build both apps for web
+        run: pnpm --filter @jiffo/mobile export:web
       - name: Migrations match the schema
         working-directory: apps/api
         run: |
