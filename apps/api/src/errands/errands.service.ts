@@ -5,6 +5,7 @@ import {
   nextState,
   serviceFee,
   suggestedFee,
+  TERMINAL_STATES,
   type AgentTier,
   type CountrySettings,
   type ErrandEvent,
@@ -45,6 +46,15 @@ interface EventEffect {
 
 const HOUR_MS = 3_600_000;
 const MINUTE_MS = 60_000;
+
+/** How an errand reached completed, for the customer's receipt. */
+type CompletedBy = 'pin' | 'photo' | 'auto' | 'support';
+const COMPLETED_BY: Partial<Record<string, CompletedBy>> = {
+  confirm_pin: 'pin',
+  approve_photo: 'photo',
+  auto_release: 'auto',
+  resolve_complete: 'support',
+};
 
 /** Events checked outside the errand's transaction first, and who may send them. */
 const PRECHECKED: Partial<Record<string, 'customer' | 'agent'>> = {
@@ -311,13 +321,19 @@ export class ErrandsService implements OnModuleInit {
       photos: { items: [] as string[], dropoff: null as string | null },
       ratedByMe: false,
       tipped: false,
+      held: { feeKobo: 0, itemsKobo: 0 },
+      pendingOfferServiceFeeKobo: null as number | null,
+      completedBy: null as CompletedBy | null,
     };
     if (role === 'prospect' || !viewerId) return { ...view!, ...empty };
     // Only look for what can exist: photos once the agent has started, ratings and tips once completed.
     const mayHavePhotos =
       !['requested', 'accepted', 'started'].includes(errand.status) || errand.itemAmountKobo !== null;
     const completed = errand.status === 'completed';
-    const [photoEvents, [rating], [tip]] = await Promise.all([
+    // Money sits in escrow only between accept and the end of the errand.
+    const mayHoldMoney = errand.status !== 'requested' && !TERMINAL_STATES.has(errand.status);
+    const offer = errand.pendingOfferKobo;
+    const [photoEvents, [rating], [tip], held, offerSettings, [ending]] = await Promise.all([
       mayHavePhotos
         ? this.db
             .select({ event: errandEvents.event, data: errandEvents.data })
@@ -342,6 +358,17 @@ export class ErrandsService implements OnModuleInit {
             .from(journalEntries)
             .where(eq(journalEntries.key, `errand:${errand.id}:tip`))
         : Promise.resolve([]),
+      mayHoldMoney ? this.wallet.heldFor(errand.id, errand.countryCode) : Promise.resolve(empty.held),
+      // A new price's service fee follows the settings the errand was created under, as accepting it will.
+      offer !== null ? this.countries.settingsAt(errand.countryCode, errand.settingsVersion) : Promise.resolve(null),
+      completed
+        ? this.db
+            .select({ event: errandEvents.event })
+            .from(errandEvents)
+            .where(and(eq(errandEvents.errandId, errand.id), eq(errandEvents.toStatus, 'completed')))
+            .orderBy(desc(errandEvents.id))
+            .limit(1)
+        : Promise.resolve([]),
     ]);
     const items = (photoEvents.find((e) => e.event === 'send_item_amount')?.data.photos as string[] | undefined) ?? [];
     const dropoff = photoEvents.find((e) => e.event === 'send_dropoff_photo')?.data.photo as string | undefined;
@@ -353,6 +380,9 @@ export class ErrandsService implements OnModuleInit {
       },
       ratedByMe: !!rating,
       tipped: !!tip,
+      held,
+      pendingOfferServiceFeeKobo: offer !== null && offerSettings ? serviceFee(offer, offerSettings.fees) : null,
+      completedBy: ending ? (COMPLETED_BY[ending.event] ?? null) : null,
     };
   }
 

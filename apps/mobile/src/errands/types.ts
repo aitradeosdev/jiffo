@@ -29,6 +29,9 @@ export interface ErrandView {
   role: 'customer' | 'agent' | 'prospect';
   allowedEvents: ErrandEvent[];
   createdAt: string;
+  acceptedAt: string | null;
+  startedAt: string | null;
+  deliveredAt: string | null;
   completedAt: string | null;
   cancelledAt: string | null;
   /** Only on a single errand's view, for its customer and agent: short-lived photo links. */
@@ -36,6 +39,12 @@ export interface ErrandView {
   ratedByMe?: boolean;
   /** Customer only: a tip was already given on this errand. */
   tipped?: boolean;
+  /** Single errand view: what is held in escrow now. */
+  held?: { feeKobo: number; itemsKobo: number };
+  /** Single errand view: the service fee a pending new price would bring, under the errand's own settings. */
+  pendingOfferServiceFeeKobo?: number | null;
+  /** Single errand view, once completed: how the hand-off happened. */
+  completedBy?: 'pin' | 'photo' | 'auto' | 'support' | null;
 }
 
 export interface Quote {
@@ -55,6 +64,15 @@ export interface PlacePick {
   /** The state the place is in, when Jiffo is live there. */
   stateCode: string | null;
 }
+
+/** The prototype's five steps; the third reads "On the way" when nothing is bought. */
+export const stepsFor = (buy: boolean) => [
+  'Accepted',
+  'Service started',
+  buy ? 'Items bought' : 'On the way',
+  'At drop-off',
+  'Completed',
+];
 
 /** Which of the five steps a status is on (-1 while still looking for an agent). */
 export function stepOf(status: ErrandState): number {

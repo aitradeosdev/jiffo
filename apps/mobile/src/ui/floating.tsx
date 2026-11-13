@@ -91,6 +91,8 @@ export function Sheet({
   handle = true,
   top,
   aboveTabs,
+  onHandlePress,
+  handleLabel,
 }: {
   children: ReactNode;
   onHeight?: (h: number) => void;
@@ -100,6 +102,9 @@ export function Sheet({
   top?: ReactNode;
   /** The tab bar already keeps clear of the home indicator. */
   aboveTabs?: boolean;
+  /** Makes the handle a button, such as to show more or less of the sheet. */
+  onHandlePress?: () => void;
+  handleLabel?: string;
 }) {
   const c = useColors();
   const { sh3 } = useShadows();
@@ -117,7 +122,19 @@ export function Sheet({
         },
       ]}
     >
-      {handle ? <View style={[styles.handle, { backgroundColor: c.surface3 }]} /> : null}
+      {handle && onHandlePress ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={handleLabel}
+          onPress={onHandlePress}
+          style={styles.grab}
+          hitSlop={{ left: 60, right: 60 }}
+        >
+          <View style={[styles.handle, { backgroundColor: c.surface3 }]} />
+        </Pressable>
+      ) : handle ? (
+        <View style={[styles.handle, { backgroundColor: c.surface3 }]} />
+      ) : null}
       {top}
       <ScrollView
         style={styles.sheetScroll}
@@ -219,6 +236,7 @@ const styles = StyleSheet.create({
   sheetScroll: { flexGrow: 0, flexShrink: 1 },
   sheetBody: { gap: 16 },
   handle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center' },
+  grab: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: 6, marginVertical: -6 },
   shimmer: { height: 4, borderRadius: 2, overflow: 'hidden' },
   sweep: { position: 'absolute', top: 0, bottom: 0, left: 0 },
   phead: {

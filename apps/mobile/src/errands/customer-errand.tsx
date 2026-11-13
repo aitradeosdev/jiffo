@@ -1,94 +1,30 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, View } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
-import { goBack } from '../nav';
-import type { ErrandEvent } from '@jiffo/shared';
-import { useSession } from '@/auth/session';
-import { ApiError, errorMessage } from '@/api/client';
-import { useResource } from '@/api/useResource';
-import { useErrandSubscription, useRealtimeEvent } from '@/realtime/realtime';
-import { STATUS_TEXT, type ErrandView } from '@/errands/types';
-import { naira } from '@/money';
-import { space } from '@/theme/tokens';
-import { Button, Screen, Text } from '@/ui/kit';
-import { Card, Chip, Icon, Row } from '@/ui/parts';
-import { Photos } from '@/ui/photos';
-import { AfterCompletion } from '@/errands/after-completion';
-import { Matching } from '@/errands/matching';
+import { ActivityIndicator, View } from 'react-native';
+import { useColors } from '@/theme/theme';
+import { Text } from '@/ui/kit';
+import { EndedErrand } from './ended';
+import { Matching } from './matching';
+import { CustomerRate } from './rate';
+import { CustomerTrip } from './trip';
+import { useErrand, useHandoffPin } from './use-errand';
 
-const SUBTEXT: Partial<Record<ErrandView['status'], string>> = {
-  requested: 'Nearby agents can see it and accept. Nothing is held until one does.',
-  accepted: 'Your agent can still propose a new price until they start.',
-  started: 'The fee is now fixed.',
-  item_pending: 'Check the receipt and photos, then lock the amount. It is paid only at hand-off.',
-  items_locked: 'Your agent is on the way to the drop-off.',
-  delivered: 'Give your PIN to the agent once you have everything.',
-  photo_pending: 'Nothing is paid until you approve, or 24 hours pass.',
-  unreachable: 'Arrange redelivery within 24 hours.',
-  disputed: 'Support will contact you. The money stays held until they decide.',
-};
-
-/** The customer's view of one errand. Its actions come from the server's allowedEvents. */
+/**
+ * The customer's view of one errand: matching while it waits for an agent, the live tracker while it
+ * runs, the receipt with rating and tip once delivered, and a short summary if it ended unfinished.
+ * Its actions come from the server's allowedEvents.
+ */
 export function CustomerErrand({ id }: { id: string }) {
-  const { api } = useSession();
-  const { data: errand, error, reload, setData } = useResource<ErrandView>(id ? `/v1/errands/${id}` : null);
-  const [busy, setBusy] = useState<ErrandEvent | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [pin, setPin] = useState<string | null>(null);
-  /** How much a refused fee raise was short by, to offer a top-up. */
-  const [shortKobo, setShortKobo] = useState<number | null>(null);
-  useErrandSubscription(id);
-  // Coming back (from a top-up, say), an old refusal no longer applies.
-  useFocusEffect(
-    useCallback(() => {
-      setActionError(null);
-      setShortKobo(null);
-    }, []),
-  );
-  // The same update arrives on the errand's room and the customer's own room: reload once per new version.
-  useRealtimeEvent<{ errandId: string; version: number }>('errand.updated', (u) => {
-    if (u.errandId === id && (!errand || u.version > errand.version)) reload();
-  });
-
-  // Photo links expire after 15 minutes: refresh every 10 while there are photos to show.
-  const hasPhotos = !!errand?.photos && (errand.photos.items.length > 0 || !!errand.photos.dropoff);
-  useEffect(() => {
-    if (!hasPhotos) return;
-    const timer = setInterval(reload, 10 * 60_000);
-    return () => clearInterval(timer);
-  }, [hasPhotos, reload]);
-
-  // The hand-off PIN only exists once the agent marks the errand delivered.
-  useEffect(() => {
-    if (errand?.status !== 'delivered') return setPin(null);
-    api
-      .get<{ pin: string }>(`/v1/errands/${errand.id}/pin`)
-      .then((r) => setPin(r.pin))
-      .catch(() => setPin(null));
-  }, [api, errand?.id, errand?.status]);
+  const c = useColors();
+  const state = useErrand(id);
+  const { errand, error, reload, can, act, busy, actionError, shortKobo } = state;
+  const pin = useHandoffPin(errand);
 
   if (!errand) {
-    return <Screen>{error ? <Text tone="danger">{error}</Text> : <ActivityIndicator />}</Screen>;
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.bg, padding: 24 }}>
+        {error ? <Text tone="danger">{error}</Text> : <ActivityIndicator />}
+      </View>
+    );
   }
-
-  const can = (e: ErrandEvent) => errand.allowedEvents.includes(e);
-  const act = async (event: ErrandEvent, data?: Record<string, unknown>) => {
-    setBusy(event);
-    setActionError(null);
-    setShortKobo(null);
-    try {
-      setData(await api.post<ErrandView>(`/v1/errands/${errand.id}/events`, { event, version: errand.version, data }));
-    } catch (e) {
-      setActionError(errorMessage(e));
-      if (e instanceof ApiError && e.code === 'insufficient_funds') {
-        setShortKobo(Number(e.details.neededKobo ?? 0) - Number(e.details.balanceKobo ?? 0));
-      }
-      reload();
-    } finally {
-      setBusy(null);
-    }
-  };
-
   if (errand.status === 'requested') {
     return (
       <Matching
@@ -102,138 +38,7 @@ export function CustomerErrand({ id }: { id: string }) {
       />
     );
   }
-
-  return (
-    <Screen>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={goBack} hitSlop={12}>
-          <Icon name="arrow-left" size={24} />
-        </Pressable>
-        <Text variant="heading" accessibilityLiveRegion="polite">
-          {STATUS_TEXT[errand.status]}
-        </Text>
-      </View>
-      {SUBTEXT[errand.status] ? <Text tone="ink2">{SUBTEXT[errand.status]}</Text> : null}
-
-      {pin ? (
-        <Card tone="brand">
-          <Text variant="small" tone="ink2">
-            Your hand-off PIN
-          </Text>
-          <Text variant="title" style={{ letterSpacing: 10 }} accessibilityLabel={`PIN ${pin.split('').join(' ')}`}>
-            {pin}
-          </Text>
-          <Text variant="small" tone="ink2">
-            Only share it when you have everything. It releases the payment.
-          </Text>
-        </Card>
-      ) : null}
-
-      {errand.pendingOfferKobo !== null && can('accept_offer') ? (
-        <Card tone="urgent">
-          <Text variant="label">
-            New price from {errand.agent?.firstName ?? 'your agent'}: {naira(errand.pendingOfferKobo)}
-          </Text>
-          <Text variant="small" tone="ink2">
-            Was {naira(errand.feeKobo)}. Decline to keep the old price, or get a new agent.
-          </Text>
-          <View style={{ flexDirection: 'row', gap: space.sm }}>
-            <Button
-              label="Accept"
-              onPress={() => act('accept_offer')}
-              loading={busy === 'accept_offer'}
-              style={{ flex: 1 }}
-            />
-            <Button
-              kind="secondary"
-              label="Decline"
-              onPress={() => act('decline_offer')}
-              loading={busy === 'decline_offer'}
-              style={{ flex: 1 }}
-            />
-          </View>
-        </Card>
-      ) : null}
-
-      {can('lock_item_amount') && errand.itemAmountKobo !== null ? (
-        <Card tone="urgent">
-          <Text variant="label">Lock {naira(errand.itemAmountKobo)} for your items</Text>
-          <Photos urls={errand.photos?.items ?? []} label="Receipt and item photo" />
-          <Text variant="small" tone="ink2">
-            It's held separately and paid to your agent only at hand-off.
-          </Text>
-          <Button
-            label={`Lock ${naira(errand.itemAmountKobo)}`}
-            onPress={() => act('lock_item_amount')}
-            loading={busy === 'lock_item_amount'}
-          />
-        </Card>
-      ) : null}
-
-      {can('approve_photo') ? (
-        <Card tone="urgent">
-          <Text variant="label">Your agent left the items at the drop-off</Text>
-          <Photos urls={errand.photos?.dropoff ? [errand.photos.dropoff] : []} label="Drop-off photo" />
-          <Button
-            label="Approve the drop-off"
-            onPress={() => act('approve_photo')}
-            loading={busy === 'approve_photo'}
-          />
-        </Card>
-      ) : null}
-
-      {errand.agent ? (
-        <Row
-          icon="user"
-          title={errand.agent.firstName ?? 'Your agent'}
-          subtitle="Your agent"
-          right={<Chip label="Message" icon="chat" onPress={() => router.push(`/errand/${errand.id}/chat`)} />}
-        />
-      ) : null}
-
-      {errand.status === 'completed' ? <AfterCompletion errand={errand} onDone={reload} /> : null}
-
-      <View>
-        {errand.stops.map((s) => (
-          <Row
-            key={s.seq}
-            icon={s.kind === 'dropoff' ? 'flag' : 'map-pin'}
-            title={s.label ?? s.address}
-            subtitle={s.label ? s.address : null}
-          />
-        ))}
-      </View>
-      <Text tone="ink2">{errand.description}</Text>
-
-      <View style={{ gap: space.xs }}>
-        <Text>
-          Errand fee {naira(errand.feeKobo)} · service fee {naira(errand.serviceFeeKobo)}
-        </Text>
-        {errand.itemAmountKobo !== null ? <Text>Items {naira(errand.itemAmountKobo)}</Text> : null}
-      </View>
-
-      {actionError ? (
-        <Text tone="danger" accessibilityLiveRegion="polite">
-          {actionError}
-        </Text>
-      ) : null}
-
-      <View style={{ gap: space.sm }}>
-        {can('redeliver') ? (
-          <Button label="Ask for redelivery" onPress={() => act('redeliver')} loading={busy === 'redeliver'} />
-        ) : null}
-        {can('release_agent') ? (
-          <Button
-            kind="secondary"
-            label="Get a new agent"
-            onPress={() => act('release_agent')}
-            loading={busy === 'release_agent'}
-          />
-        ) : null}
-        {can('cancel') ? (
-          <Button kind="plain" label="Cancel errand" onPress={() => act('cancel')} loading={busy === 'cancel'} />
-        ) : null}
-      </View>
-    </Screen>
-  );
+  if (errand.status === 'completed') return <CustomerRate errand={errand} onDone={reload} />;
+  if (errand.status === 'cancelled' || errand.status === 'expired') return <EndedErrand errand={errand} />;
+  return <CustomerTrip errand={errand} pin={pin} actions={{ can, act, busy, actionError }} />;
 }

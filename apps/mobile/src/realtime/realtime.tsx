@@ -67,16 +67,26 @@ export function useRealtimeEvent<T>(event: string, handler: (payload: T) => void
   }, [socket, event]);
 }
 
+/** How many mounted screens follow each errand, per connection, so one closing doesn't drop the others. */
+const following = new WeakMap<object, Map<string, number>>();
+
 /** Follows one errand's updates and chat while the screen is mounted. */
 export function useErrandSubscription(errandId: string | undefined) {
   const socket = useContext(RealtimeContext);
   useEffect(() => {
     if (!socket || !errandId) return;
+    let counts = following.get(socket);
+    if (!counts) following.set(socket, (counts = new Map()));
     const join = () => socket.emit('errand.subscribe', { errandId });
     socket.on('ready', join);
-    if (socket.connected) join();
+    const n = counts.get(errandId) ?? 0;
+    counts.set(errandId, n + 1);
+    if (n === 0 && socket.connected) join();
     return () => {
       socket.off('ready', join);
+      const left = (counts.get(errandId) ?? 1) - 1;
+      if (left > 0) return void counts.set(errandId, left);
+      counts.delete(errandId);
       socket.emit('errand.unsubscribe', { errandId });
     };
   }, [socket, errandId]);

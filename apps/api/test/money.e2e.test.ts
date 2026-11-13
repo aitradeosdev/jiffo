@@ -213,6 +213,8 @@ describe('money', () => {
       const before = await revenue();
       await runToDelivered(errand.id);
       expect((await balanceOf(t, buyer)).balanceKobo).toBe(1_000_000 - FEE - SERVICE);
+      const view = await request(t.http).get(`/v1/errands/${errand.id}`).set(buyer.headers).expect(200);
+      expect(view.body.held).toEqual({ feeKobo: FEE + SERVICE, itemsKobo: 0 });
       await act(t, agent, errand.id, 'mark_delivered');
       await act(t, agent, errand.id, 'confirm_pin', { pin: await pin(buyer, errand.id) });
 
@@ -337,8 +339,9 @@ describe('money', () => {
       expect((await act(t, buyer, errand.id, 'lock_item_amount', {}, 409)).error.code).toBe('insufficient_funds');
 
       await fund(t, buyer, 2_000_000);
-      await act(t, buyer, errand.id, 'lock_item_amount');
+      const locked = await act(t, buyer, errand.id, 'lock_item_amount');
       expect((await balanceOf(t, buyer)).balanceKobo).toBe(4_000_000 - FEE - SERVICE - 3_000_000);
+      expect(locked.held).toEqual({ feeKobo: FEE + SERVICE, itemsKobo: 3_000_000 });
 
       const agentBefore = (await balanceOf(t, agent)).availableKobo;
       const revenueBefore = await revenue();
