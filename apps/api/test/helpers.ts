@@ -10,7 +10,8 @@ import { DB, type Db } from '../src/db/database.module';
 import { ERRAND_TIMERS, type MemoryErrandTimers } from '../src/timers/errand-timers';
 import { RECURRING_JOBS, type MemoryRecurringJobs } from '../src/timers/recurring-jobs';
 import { PAYMENTS, type FakePaymentsAdapter } from '../src/adapters/payments';
-import { deposits } from '../src/db/schema';
+import { admins, adminSessions, deposits, type AdminRole } from '../src/db/schema';
+import { sha256 } from '../src/common/crypto';
 import { eq } from 'drizzle-orm';
 import type { AppName } from '../src/db/schema';
 
@@ -162,4 +163,23 @@ export async function photo(
     .send(JPEG)
     .expect(200);
   return res.body.key as string;
+}
+
+/** A signed-in admin of the given role, made directly in the database (the sign-in itself is tested in admin.e2e). */
+export async function adminAs(t: TestApp, role: AdminRole) {
+  const [admin] = await t.db
+    .insert(admins)
+    .values({
+      email: `${randomUUID()}@jiffoapp.com`,
+      name: `Test ${role}`,
+      role,
+      status: 'active',
+      totpEnabledAt: new Date(),
+    })
+    .returning({ id: admins.id, name: admins.name });
+  const token = randomUUID();
+  await t.db
+    .insert(adminSessions)
+    .values({ adminId: admin!.id, tokenHash: sha256(token), expiresAt: new Date(Date.now() + 3_600_000) });
+  return { id: admin!.id, name: admin!.name, headers: { Authorization: `Bearer ${token}` } };
 }
