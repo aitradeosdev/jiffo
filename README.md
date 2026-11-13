@@ -111,7 +111,7 @@ Outside services are chosen by environment variable, one implementation per port
 | Maps          | Google (Places and Routes), or fake          | `MAPS_PROVIDER`      |
 | Files         | S3 (private bucket, signed links), or memory | `STORAGE_PROVIDER`   |
 
-Identity checks for agents use the same pattern (`IDENTITY_PROVIDER`). Only a fake provider exists until the real one's keys and SDK are set up; in production the fake is never used, so no agent can be approved without a real check. Voice calls follow later.
+Identity checks for agents use the same pattern (`IDENTITY_PROVIDER`: `fake` or `none`). Only a fake provider exists until the real one's keys and SDK are set up; in production the fake is never used, so no agent can be approved without a real check, and with `none` agents can't send applications. Voice calls follow later.
 
 With the fake payment provider, set `FAKE_PAYMENTS_AUTOPAY_SECONDS` to have top-ups land by themselves, so the apps can be tried end to end without moving money. The fake maps provider knows a handful of Lagos places (search for Shoprite, Medplus, Circle Mall, Admiralty Way, Adeola Odeku or Ikeja).
 

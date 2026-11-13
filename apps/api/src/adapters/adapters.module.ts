@@ -26,10 +26,16 @@ import { FakeIdentityAdapter, IDENTITY, UnconfiguredIdentityAdapter, type Identi
     {
       provide: IDENTITY,
       inject: [APP_CONFIG],
-      // Only the fake for now; the real provider's adapter comes with its keys and SDK before launch. The fake
-      // never runs in production, where it would approve every agent.
-      useFactory: (c: AppConfig): IdentityAdapter =>
-        c.NODE_ENV === 'production' ? new UnconfiguredIdentityAdapter() : new FakeIdentityAdapter(),
+      // The real provider's adapter comes with its keys and SDK before launch. The fake never runs in
+      // production, where it would approve every agent.
+      useFactory: (c: AppConfig): IdentityAdapter => {
+        switch (c.IDENTITY_PROVIDER) {
+          case 'fake':
+            return c.NODE_ENV === 'production' ? new UnconfiguredIdentityAdapter() : new FakeIdentityAdapter();
+          default:
+            return new UnconfiguredIdentityAdapter();
+        }
+      },
     },
     {
       provide: MESSAGING,

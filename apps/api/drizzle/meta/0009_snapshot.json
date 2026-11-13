@@ -1,5 +1,5 @@
 {
-  "id": "b1f04d24-8d52-4e19-b8c2-f5faf10b2c9d",
+  "id": "fcc14ebc-a67e-4df7-8a52-7ac9f5adbff9",
   "prevId": "db2f57d8-d86c-4220-b5b7-d3ed4eec37ab",
   "version": "7",
   "dialect": "postgresql",
@@ -513,6 +513,12 @@
         },
         "nin_fingerprint": {
           "name": "nin_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_nin_fingerprint": {
+          "name": "pending_nin_fingerprint",
           "type": "text",
           "primaryKey": false,
           "notNull": false

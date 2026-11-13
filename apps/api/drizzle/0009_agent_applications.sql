@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS "agent_applications" (
 	"state_code" text,
 	"area" text,
 	"nin_fingerprint" text,
+	"pending_nin_fingerprint" text,
 	"identity_reference" text,
 	"identity_outcome" text,
 	"identity_checked_at" timestamp with time zone,
@@ -39,4 +40,9 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "agent_applications_nin_uq" ON "agent_applications" USING btree ("nin_fingerprint") WHERE "agent_applications"."nin_fingerprint" is not null;--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "agent_applications_status_idx" ON "agent_applications" USING btree ("country_code","status");
+CREATE INDEX IF NOT EXISTS "agent_applications_status_idx" ON "agent_applications" USING btree ("country_code","status");--> statement-breakpoint
+-- Agents who joined before applications existed have had no identity check: they wait for support to look.
+INSERT INTO "agent_applications" ("user_id", "country_code", "status", "decision_note")
+SELECT DISTINCT u."id", u."country_code", 'review', 'Joined before agent applications; needs a check by support'
+FROM "users" u JOIN "devices" d ON d."user_id" = u."id" AND d."app" = 'agent'
+ON CONFLICT DO NOTHING;

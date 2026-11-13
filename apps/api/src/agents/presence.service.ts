@@ -34,13 +34,18 @@ export class PresenceService {
     private readonly applications: AgentApplicationService,
   ) {}
 
-  async report(auth: AuthContext, body: { online: boolean; lat?: number; lng?: number }) {
-    // Going online is for approved agents; going offline always works.
-    if (body.online) await this.applications.assertApproved(auth.userId);
+  async report(auth: AuthContext, input: { online: boolean; lat?: number; lng?: number }) {
     const running = await this.db
       .select({ id: errands.id, customerId: errands.customerId })
       .from(errands)
       .where(and(eq(errands.agentId, auth.userId), inArray(errands.status, [...TRAVEL_STATES])));
+    let body = input;
+    // Going online is for approved agents; going offline always works. An agent not approved yet who still
+    // has an errand running keeps sharing where they are for it, but isn't counted as online.
+    if (input.online && !(await this.applications.approved(auth.userId))) {
+      if (running.length === 0) await this.applications.assertApproved(auth.userId);
+      body = { ...input, online: false };
+    }
     const sharing = body.online || running.length > 0;
     const located = sharing && body.lat !== undefined && body.lng !== undefined;
     const now = new Date();

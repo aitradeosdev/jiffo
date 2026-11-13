@@ -690,8 +690,13 @@ export const agentApplications = pgTable(
       .default('draft'),
     stateCode: text('state_code'),
     area: text('area'),
-    /** HMAC of the NIN: equal NINs give equal fingerprints, and the NIN can't be read back. */
+    /**
+     * HMAC of the NIN: equal NINs give equal fingerprints, and the NIN can't be read back. It is claimed here
+     * only once the provider has confirmed the NIN and that the selfie matches its owner; until then it waits
+     * in pendingNinFingerprint, so typing someone else's NIN reserves nothing.
+     */
     ninFingerprint: text('nin_fingerprint'),
+    pendingNinFingerprint: text('pending_nin_fingerprint'),
     identityReference: text('identity_reference'),
     identityOutcome: text('identity_outcome', { enum: ['passed', 'failed', 'review'] }),
     identityCheckedAt: timestamp('identity_checked_at', { withTimezone: true }),

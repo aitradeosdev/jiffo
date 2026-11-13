@@ -1,8 +1,9 @@
 import { and, eq } from 'drizzle-orm';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { IDENTITY, IdentityUnavailable, type IdentityAdapter } from '../src/adapters/identity';
 import { agentApplications, states } from '../src/db/schema';
-import { createErrand, createTestApp, fund, signIn, type Person, type TestApp } from './helpers';
+import { act, createErrand, createTestApp, fund, signIn, type Person, type TestApp } from './helpers';
 
 describe('agent application', () => {
   let t: TestApp;
@@ -114,15 +115,94 @@ describe('agent application', () => {
     expect((await call(agent, 'patch', '', { area: 'Ikoyi' })).status).toBe(409);
   });
 
-  it('refuses a NIN another agent already uses', async () => {
+  it('sends a second account on the same NIN to support, without saying the NIN is taken', async () => {
     const first = await newAgent();
     const shared = nin();
-    await call(first, 'patch', '', { stateCode: 'LA', area: 'Lekki' }).expect(200);
-    await call(first, 'post', '/identity', { nin: shared, bvn: '22212345678', consent: true }).expect(200);
+    await complete(first, shared);
+    expect((await call(first, 'post', '/submit').expect(200)).body.status).toBe('approved');
+
     const second = await newAgent();
-    const res = await call(second, 'post', '/identity', { nin: shared, bvn: '22212345679', consent: true });
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('nin_in_use');
+    // Starting answers the same as for any NIN, so it can't be used to find out whose NIN is whose.
+    await call(second, 'post', '/identity', { nin: shared, bvn: '22212345679', consent: true }).expect(200);
+    await complete(second, shared);
+    const res = await call(second, 'post', '/submit').expect(200);
+    expect(res.body.status).toBe('review');
+    expect(res.body.checks.find((c: { key: string }) => c.key === 'duplicate')).toMatchObject({ outcome: 'review' });
+    const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, second.userId));
+    expect(row!.ninFingerprint).toBeNull();
+  });
+
+  it("doesn't let an account hold a NIN it only started with", async () => {
+    const owner = nin();
+    const squatter = await newAgent();
+    await call(squatter, 'patch', '', { stateCode: 'LA', area: 'Lekki' }).expect(200);
+    await call(squatter, 'post', '/identity', { nin: owner, bvn: '22212345678', consent: true }).expect(200);
+    // The NIN's owner signs up later and is approved as usual.
+    const agent = await newAgent();
+    await complete(agent, owner);
+    expect((await call(agent, 'post', '/submit').expect(200)).body.status).toBe('approved');
+  });
+
+  it("approves only when the provider's overall answer passed too", async () => {
+    const agent = await newAgent();
+    await complete(agent);
+    await t.db
+      .update(agentApplications)
+      .set({ identityOutcome: 'review' })
+      .where(eq(agentApplications.userId, agent.userId));
+    expect((await call(agent, 'post', '/submit').expect(200)).body.status).toBe('review');
+
+    // A missing identity check counts as one to look at, not as passed.
+    const other = await newAgent();
+    await complete(other);
+    const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, other.userId));
+    await t.db
+      .update(agentApplications)
+      .set({ checks: row!.checks.filter((c) => c.key !== 'selfie') })
+      .where(eq(agentApplications.userId, other.userId));
+    const res = await call(other, 'post', '/submit').expect(200);
+    expect(res.body.status).toBe('review');
+    expect(res.body.checks.find((c: { key: string }) => c.key === 'selfie')).toMatchObject({ outcome: 'review' });
+  });
+
+  it('closes the application for edits once it is sent, and reopens it if the check never started', async () => {
+    const identity = t.app.get<IdentityAdapter>(IDENTITY);
+    const agent = await newAgent();
+    await complete(agent);
+    const spy = vi.spyOn(identity, 'startAddress').mockRejectedValueOnce(new IdentityUnavailable());
+    expect((await call(agent, 'post', '/submit')).status).toBe(503);
+    spy.mockRestore();
+    expect((await app(agent)).body.status).toBe('draft');
+
+    expect((await call(agent, 'post', '/submit').expect(200)).body.status).toBe('approved');
+    for (const [method, path, body] of [
+      ['patch', '', { area: 'Ikoyi' }],
+      [
+        'put',
+        '/address',
+        { address: '1 Other Road, Ikoyi', emergency: { name: 'Ngozi Bakare', phone: '+2348034471902' } },
+      ],
+      ['post', '/terms', { accepted: true }],
+      ['post', '/identity', { nin: nin(), bvn: '22212345678', consent: true }],
+      ['post', '/identity/finish', {}],
+      ['post', '/submit', {}],
+    ] as const) {
+      const res = await call(agent, method, path, body);
+      expect(res.status, `${method} ${path}`).toBe(409);
+    }
+  });
+
+  it('lets an agent waiting for a decision keep sharing where they are for an errand already running', async () => {
+    const agent = await signIn(t, 'agent');
+    const errand = await createErrand(t, customer);
+    await act(t, agent, errand.id, 'accept');
+    await t.db.update(agentApplications).set({ status: 'review' }).where(eq(agentApplications.userId, agent.userId));
+    const res = await request(t.http)
+      .put('/v1/agent/presence')
+      .set(agent.headers)
+      .send({ online: true, lat: 6.44, lng: 3.47 })
+      .expect(200);
+    expect(res.body).toEqual({ online: false, sharingLocation: true });
   });
 
   it('sends unclear results to support instead of turning anyone away', async () => {
