@@ -14,14 +14,14 @@ const VARIANTS = {
     name: 'Jiffo',
     slug: 'jiffo',
     scheme: 'jiffo',
-    bundleId: process.env.CUSTOMER_BUNDLE_ID ?? 'app.jiffo.customer',
+    bundleId: process.env.CUSTOMER_BUNDLE_ID ?? 'com.jiffoapp.customer',
     background: '#0A7A4A',
   },
   agent: {
     name: 'Jiffo Agent',
     slug: 'jiffo-agent',
     scheme: 'jiffo-agent',
-    bundleId: process.env.AGENT_BUNDLE_ID ?? 'app.jiffo.agent',
+    bundleId: process.env.AGENT_BUNDLE_ID ?? 'com.jiffoapp.agent',
     background: '#0B0B0B',
   },
 } as const;

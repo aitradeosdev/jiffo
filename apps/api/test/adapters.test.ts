@@ -103,7 +103,7 @@ describe('Paystack payments', () => {
     const account = await adapter.createTransferDeposit({
       reference: 'jd-1',
       amountKobo: 500_000,
-      email: 'u@customers.jiffo.app',
+      email: 'u@customers.jiffoapp.com',
       expiresAt,
     });
     expect(account).toEqual({
@@ -115,7 +115,7 @@ describe('Paystack payments', () => {
     expect(calls[0]!.url).toBe('https://api.example.test/charge');
     expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe('Bearer sk_test_1');
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({
-      email: 'u@customers.jiffo.app',
+      email: 'u@customers.jiffoapp.com',
       amount: 500_000,
       reference: 'jd-1',
       bank_transfer: { account_expires_at: '2026-11-13T10:30:00.000Z' },
