@@ -1,0 +1,83 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/figtree';
+
+/* The apps' colours, so the panel looks like the same product. Dark mode follows the computer's setting. */
+:root {
+  --bg: #f6f6f6;
+  --surface: #ffffff;
+  --surface-2: #f3f3f3;
+  --line: #e8e8e8;
+  --ink: #000000;
+  --ink-2: #4b4b4b;
+  --ink-3: #6b6b6b;
+  --on-ink: #ffffff;
+  --brand: #0a7a4a;
+  --brand-soft: #e5f4ec;
+  --brand-ink: #08603b;
+  /* Chart marks: checked for lightness and contrast against each mode's surface. */
+  --chart: #0a7a4a;
+  --warn: #9a4a00;
+  --warn-soft: #fff1e0;
+  --danger: #c62828;
+  --danger-soft: #fdebeb;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0b0b;
+    --surface: #141414;
+    --surface-2: #1f1f1f;
+    --line: #2b2b2b;
+    --ink: #ffffff;
+    --ink-2: #d0d0d0;
+    --ink-3: #a3a3a3;
+    --on-ink: #000000;
+    --brand: #3dd68c;
+    --brand-soft: #0f2b1d;
+    --brand-ink: #7fe6b2;
+    --chart: #22a869;
+    --warn: #fbbf6b;
+    --warn-soft: #33220a;
+    --danger: #f87171;
+    --danger-soft: #351414;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --font-sans: 'Figtree Variable', ui-sans-serif, system-ui, sans-serif;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-on-ink: var(--on-ink);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-ink: var(--brand-ink);
+  --color-chart: var(--chart);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-feature-settings: 'tnum' 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Keyboard focus is always visible; mouse clicks don't leave a ring behind. */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}

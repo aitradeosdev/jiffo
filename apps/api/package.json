@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "node dist/db/migrate-cli.js"
+    "db:migrate": "node dist/db/migrate-cli.js",
+    "admin": "node dist/admin/admin-cli.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1168.0",

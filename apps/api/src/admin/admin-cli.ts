@@ -1,0 +1,73 @@
+import { parseArgs } from 'node:util';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import { loadConfig } from '../config/app-config';
+import * as schema from '../db/schema';
+import { ADMIN_ROLES, admins } from '../db/schema';
+import { isAdminRole } from '@jiffo/shared';
+import { AdminAuthService, normaliseEmail } from './admin-auth.service';
+
+const USAGE = `Jiffo admin accounts, from the server.
+
+  invite --email <email> --name <name> --role <${ADMIN_ROLES.join('|')}>
+      Adds a teammate and prints their invite link. Use it to make the first owner;
+      after that, owners invite people from the panel.
+
+  reset --email <email>
+      Clears a teammate's password and authenticator app and prints a new invite link.
+      For when the only owner has lost their phone or password.
+`;
+
+async function main() {
+  const { positionals, values } = parseArgs({
+    allowPositionals: true,
+    options: { email: { type: 'string' }, name: { type: 'string' }, role: { type: 'string' } },
+  });
+  const command = positionals[0];
+  const email = values.email ? normaliseEmail(values.email) : '';
+  if ((command !== 'invite' && command !== 'reset') || !email.includes('@')) {
+    process.stdout.write(USAGE);
+    process.exitCode = 1;
+    return;
+  }
+
+  const config = loadConfig();
+  const pool = new Pool({ connectionString: config.DATABASE_URL, max: 1 });
+  const db = drizzle(pool, { schema });
+  const auth = new AdminAuthService(db, config);
+  try {
+    if (command === 'invite') {
+      const role = values.role ?? '';
+      if (!values.name?.trim() || !isAdminRole(role)) {
+        process.stdout.write(USAGE);
+        process.exitCode = 1;
+        return;
+      }
+      const invite = await db.transaction((tx) =>
+        auth.addAdmin(tx, { email, name: values.name!, role, invitedBy: null }),
+      );
+      process.stdout.write(
+        `Invited ${email} as ${role}. Send them this link (it works for ${invite.expiresInHours} hours):\n${invite.inviteUrl}\n`,
+      );
+    } else {
+      const invite = await db.transaction(async (tx) => {
+        const [admin] = await tx.select({ id: admins.id }).from(admins).where(eq(admins.email, email));
+        if (!admin) throw new Error(`${email} is not on the team`);
+        return auth.resetAccess(tx, admin.id);
+      });
+      process.stdout.write(
+        `Reset ${email}. Send them this link (it works for ${invite.expiresInHours} hours):\n${invite.inviteUrl}\n`,
+      );
+    }
+  } finally {
+    await pool.end();
+  }
+}
+
+main().catch((error: unknown) => {
+  // The shared helpers refuse with API errors; print their message, not the HTTP wrapper's.
+  const body = (error as { getResponse?: () => { error?: { message?: string } } }).getResponse?.();
+  console.error(body?.error?.message ?? (error instanceof Error ? error.message : error));
+  process.exit(1);
+});

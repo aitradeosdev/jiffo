@@ -50,6 +50,13 @@
       "when": 1794557151578,
       "tag": "0006_agent_presence",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794572709590,
+      "tag": "0007_admin",
+      "breakpoints": true
     }
   ]
 }

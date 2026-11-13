@@ -28,6 +28,7 @@ export default async function setup() {
     PUSH_PROVIDER: 'memory',
     TIMER_PROVIDER: 'memory',
     TRUST_PROXY_HOPS: '1',
+    ADMIN_PANEL_SECRET: 'test-panel-secret-0123456789abcdef0123',
   });
 
   return async () => {
