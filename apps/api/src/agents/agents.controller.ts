@@ -22,7 +22,7 @@ export class AgentsController {
 
   @Get()
   get(@CurrentAuth() auth: AuthContext) {
-    return this.agents.getProfile(auth);
+    return this.agents.profile(auth.userId);
   }
 
   @Patch()

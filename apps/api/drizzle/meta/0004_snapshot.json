@@ -1,5 +1,5 @@
 {
-  "id": "ada5b3c8-1d28-4d46-975a-2bafd673fe31",
+  "id": "35acb5a0-0054-438b-a3d7-772545106c47",
   "prevId": "22554ae6-91b9-46ff-89cf-b275a5563426",
   "version": "7",
   "dialect": "postgresql",
@@ -80,7 +80,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "agent_profiles_tier_ck": {
+          "name": "agent_profiles_tier_ck",
+          "value": "\"agent_profiles\".\"tier\" in ('bronze', 'silver', 'gold', 'platinum')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.categories": {
@@ -1127,6 +1132,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "agent_tier": {
+          "name": "agent_tier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "pin_cipher": {
           "name": "pin_cipher",
           "type": "text",
@@ -1295,7 +1306,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "errands_agent_tier_ck": {
+          "name": "errands_agent_tier_ck",
+          "value": "\"errands\".\"agent_tier\" is null or \"errands\".\"agent_tier\" in ('bronze', 'silver', 'gold', 'platinum')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.journal_entries": {

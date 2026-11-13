@@ -1,7 +1,8 @@
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { agentProfiles, earningHolds } from '../src/db/schema';
+import { agentProfiles, categories, earningHolds } from '../src/db/schema';
+import { and } from 'drizzle-orm';
 import { LedgerService } from '../src/money/ledger.service';
 import { act, balanceOf, createErrand, createTestApp, fund, signIn, type Person, type TestApp } from './helpers';
 
@@ -29,6 +30,8 @@ describe('agent profile', () => {
     const agent = await signIn(t, 'agent');
     const res = await request(t.http).get('/v1/agent/profile').set(agent.headers).expect(200);
     expect(res.body).toEqual({ tier: 'bronze', categoryKeys: null, takesPurchases: true });
+    // Reading the profile writes nothing.
+    expect(await t.db.select().from(agentProfiles).where(eq(agentProfiles.userId, agent.userId))).toHaveLength(0);
     await request(t.http).get('/v1/agent/profile').set(customer.headers).expect(403);
   });
 
@@ -61,6 +64,48 @@ describe('agent profile', () => {
     expect(bad.body.error).toMatchObject({ code: 'category_not_available', unknown: ['rockets'] });
     await request(t.http).patch('/v1/agent/profile').set(agent.headers).send({ categoryKeys: [] }).expect(400);
     await request(t.http).patch('/v1/agent/profile').set(agent.headers).send({ tier: 'platinum' }).expect(400);
+  });
+
+  it('falls back to every category when all the chosen ones are switched off', async () => {
+    const agent = await signIn(t, 'agent');
+    await request(t.http)
+      .patch('/v1/agent/profile')
+      .set(agent.headers)
+      .send({ categoryKeys: ['laundry'] })
+      .expect(200);
+    const parcel = await createErrand(t, customer);
+    expect(ids(await board(agent))).not.toContain(parcel.id);
+    const laundry = and(eq(categories.countryCode, 'NG'), eq(categories.key, 'laundry'));
+    await t.db.update(categories).set({ active: false }).where(laundry);
+    try {
+      expect(
+        (await request(t.http).get('/v1/agent/profile').set(agent.headers).expect(200)).body.categoryKeys,
+      ).toBeNull();
+      expect(ids(await board(agent))).toContain(parcel.id);
+    } finally {
+      await t.db.update(categories).set({ active: true }).where(laundry);
+    }
+  });
+
+  it('refuses a tier that does not exist, even from direct SQL', async () => {
+    const agent = await signIn(t, 'agent');
+    await expect(
+      t.db.insert(agentProfiles).values({ userId: agent.userId, tier: 'Silver' as 'silver' }),
+    ).rejects.toThrow(/agent_profiles_tier_ck/);
+  });
+
+  it('keeps the tier the agent had when they accepted, whatever admin changes later', async () => {
+    const agent = await signIn(t, 'agent');
+    await setTier(agent, 'silver');
+    const errand = await createErrand(t, customer);
+    await act(t, agent, errand.id, 'accept');
+    await setTier(agent, 'bronze');
+    await act(t, agent, errand.id, 'start');
+    await act(t, agent, errand.id, 'mark_delivered');
+    const pin = (await request(t.http).get(`/v1/errands/${errand.id}/pin`).set(customer.headers).expect(200)).body.pin;
+    await act(t, agent, errand.id, 'confirm_pin', { pin });
+    // Silver terms: 12.5% commission and no hold, though the agent is Bronze now.
+    expect(await balanceOf(t, agent)).toMatchObject({ tier: 'bronze', availableKobo: 250_000 - 31_250, heldKobo: 0 });
   });
 
   it('pays a Silver agent at the Silver rate, with earnings available at once', async () => {

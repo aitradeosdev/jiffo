@@ -13,6 +13,7 @@ import { conflict, unprocessable } from '../common/errors';
 import { nameWords, plainName } from '../common/names';
 import { LedgerService, transfer } from './ledger.service';
 import { WalletService } from './wallet.service';
+import { AgentsService } from '../agents/agents.service';
 
 type PayoutRow = typeof payouts.$inferSelect;
 const BANKS_TTL_MS = 24 * 3_600_000;
@@ -47,6 +48,7 @@ export class PayoutsService {
     @Inject(PAYMENTS) private readonly payments: PaymentsAdapter,
     private readonly ledger: LedgerService,
     private readonly wallet: WalletService,
+    private readonly agents: AgentsService,
     private readonly countries: CountriesService,
     private readonly push: PushService,
     private readonly realtime: RealtimeGateway,
@@ -128,7 +130,7 @@ export class PayoutsService {
     const [{ settings }, { currency, timezone }, tier] = await Promise.all([
       this.countries.currentSettings(auth.countryCode),
       this.countries.basics(auth.countryCode),
-      this.wallet.agentTier(auth.userId),
+      this.agents.tier(auth.userId),
     ]);
     const account = await this.currentAccount(auth.userId);
     if (!account) throw conflict('payout_account_missing', 'Add your bank account first');
