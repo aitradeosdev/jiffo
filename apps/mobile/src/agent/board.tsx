@@ -13,7 +13,7 @@ import { naira } from '../money';
 import { useColors } from '../theme/theme';
 import { space } from '../theme/tokens';
 import { Button, Text, Wordmark } from '../ui/kit';
-import { Card, CategoryIcon, Chip, Empty, Row, Section } from '../ui/parts';
+import { Card, Chip, Empty, Row, Section } from '../ui/parts';
 
 type BoardErrand = ErrandView & { distanceMeters: number };
 type Sort = 'near' | 'fee' | 'buy';
@@ -128,7 +128,7 @@ export function AgentBoard() {
             return (
               <Row
                 key={j.id}
-                iconNode={<CategoryIcon icon={cat?.icon ?? 'spark'} />}
+                icon={cat?.icon ?? 'spark'}
                 title={j.description}
                 subtitle={[
                   cat?.name,

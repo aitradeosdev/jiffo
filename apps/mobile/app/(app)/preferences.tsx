@@ -5,7 +5,7 @@ import { errorMessage } from '@/api/client';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { useResource } from '@/api/useResource';
 import { Button, Screen, Text } from '@/ui/kit';
-import { CategoryIcon, Icon, Row, ToggleRow } from '@/ui/parts';
+import { CheckMark, Row, ToggleRow } from '@/ui/parts';
 
 interface Profile {
   tier: string;
@@ -67,9 +67,9 @@ export default function Preferences() {
       {all.map((c) => (
         <Row
           key={c.key}
-          iconNode={<CategoryIcon icon={c.icon} />}
+          icon={c.icon}
           title={c.name}
-          right={chosen?.has(c.key) ? <Icon name="check-square" /> : <Icon name="square" />}
+          right={<CheckMark on={!!chosen?.has(c.key)} />}
           onPress={() => toggle(c.key)}
         />
       ))}

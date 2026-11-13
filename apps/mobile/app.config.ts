@@ -57,6 +57,17 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           cameraPermission: 'Jiffo uses the camera for receipts, item photos and drop-off photos.',
         },
       ],
+      [
+        'expo-location',
+        {
+          locationWhenInUsePermission:
+            variant === 'agent'
+              ? 'Jiffo Agent uses your location to show errands near you.'
+              : 'Jiffo uses your location to show where you are on the map.',
+        },
+      ],
+      // Android draws Google Maps and needs a key at build time; iOS uses Apple Maps, which needs none.
+      ['react-native-maps', { androidGoogleMapsApiKey: process.env.GOOGLE_MAPS_ANDROID_API_KEY }],
     ],
     experiments: { typedRoutes: false },
     extra: {

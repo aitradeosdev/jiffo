@@ -224,6 +224,39 @@ describe('money', () => {
       expect(await trialBalance()).toBe(0);
     });
 
+    it('lets the customer raise the fee while matching, within what the wallet covers', async () => {
+      const buyer = await signIn(t, 'customer');
+      await fund(t, buyer, FEE + SERVICE + 22_000);
+      const errand = await createErrand(t, buyer);
+      expect(errand.allowedEvents).toEqual(['cancel', 'raise_fee']);
+
+      const raised = await act(t, buyer, errand.id, 'raise_fee', { amountKobo: FEE + 20_000 });
+      expect(raised).toMatchObject({ status: 'requested', feeKobo: FEE + 20_000, serviceFeeKobo: SERVICE + 2_000 });
+      expect((await balanceOf(t, buyer)).balanceKobo).toBe(FEE + SERVICE + 22_000); // still nothing held
+
+      const lower = await act(t, buyer, errand.id, 'raise_fee', { amountKobo: FEE }, 422);
+      expect(lower.error.code).toBe('fee_not_raised');
+      const tooMuch = await act(t, buyer, errand.id, 'raise_fee', { amountKobo: FEE + 40_000 }, 409);
+      expect(tooMuch.error).toMatchObject({ code: 'insufficient_funds', neededKobo: FEE + 40_000 + SERVICE + 4_000 });
+      await act(t, agent, errand.id, 'raise_fee', { amountKobo: FEE + 30_000 }, 404);
+      // A stranger gets "not found" even with a malformed request; a stale screen is told to refresh
+      // before any money check.
+      await act(t, await signIn(t, 'customer'), errand.id, 'raise_fee', {}, 404);
+      const stale = await request(t.http)
+        .post(`/v1/errands/${errand.id}/events`)
+        .set(buyer.headers)
+        .send({ event: 'raise_fee', version: 0, data: { amountKobo: FEE + 40_000 } })
+        .expect(409);
+      expect(stale.body.error.code).toBe('errand_changed');
+
+      // The agent who accepts gets the raised fee, and that is what is held.
+      const accepted = await act(t, agent, errand.id, 'accept');
+      expect(accepted.allowedEvents).not.toContain('raise_fee');
+      expect((await balanceOf(t, buyer)).balanceKobo).toBe(0);
+      await act(t, buyer, errand.id, 'raise_fee', { amountKobo: FEE + 21_000 }, 409);
+      expect(await trialBalance()).toBe(0);
+    });
+
     it('moves the held amount when a new price is accepted, and refuses a rise the wallet can’t cover', async () => {
       const buyer = await signIn(t, 'customer');
       await fund(t, buyer, FEE + SERVICE + 50_000);

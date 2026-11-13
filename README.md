@@ -39,7 +39,7 @@ cd apps/mobile
 EXPO_PUBLIC_API_URL=http://<your computer's LAN address>:3000 pnpm start
 ```
 
-Open it in Expo Go, or press `w` for the web version. Use `pnpm start:agent` for the agent app. Switching between the two needs the bundler cache cleared, which both scripts do.
+Open it in Expo Go, or press `w` for the web version. The web version draws a stand-in map; phones show real maps (Apple Maps on iOS, Google Maps on Android). Android builds need `GOOGLE_MAPS_ANDROID_API_KEY` set to a key with the Maps SDK for Android enabled. Use `pnpm start:agent` for the agent app. Switching between the two needs the bundler cache cleared, which both scripts do.
 
 `pnpm --filter @jiffo/mobile export:web` builds both apps for the web, the same way CI does.
 

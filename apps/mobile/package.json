@@ -5,7 +5,6 @@
   "dependencies": {
     "@expo-google-fonts/figtree": "^0.4.1",
     "@expo/metro-runtime": "~58.0.17",
-    "@expo/vector-icons": "^15.1.1",
     "@jiffo/shared": "workspace:*",
     "expo": "~58.0.25",
     "expo-clipboard": "~58.0.4",
@@ -24,8 +23,10 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-native": "0.88.1",
+    "react-native-maps": "1.29.11",
     "react-native-safe-area-context": "~5.11.1",
     "react-native-screens": "~4.30.1",
+    "react-native-svg": "15.16.0",
     "react-native-web": "^0.21.4",
     "socket.io-client": "^4.8.4"
   },
@@ -40,7 +41,8 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "export:web": "expo export --clear --platform web --output-dir dist/customer && APP_VARIANT=agent expo export --clear --platform web --output-dir dist/agent"
+    "export:web": "expo export --clear --platform web --output-dir dist/customer && APP_VARIANT=agent expo export --clear --platform web --output-dir dist/agent",
+    "sync:art": "node scripts/sync-prototype-art.mjs"
   },
   "private": true,
   "description": "Jiffo customer and agent apps (one codebase, two store apps)"

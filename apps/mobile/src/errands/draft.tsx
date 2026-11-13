@@ -14,6 +14,8 @@ export interface Draft {
   dropoff: PlacePick | null;
   /** Chosen on the review screen; null means the suggested fee. */
   feeKobo: number | null;
+  /** ISO time for a scheduled errand; null means now. */
+  scheduledFor: string | null;
 }
 
 const EMPTY: Draft = {
@@ -25,12 +27,13 @@ const EMPTY: Draft = {
   stop: null,
   dropoff: null,
   feeKobo: null,
+  scheduledFor: null,
 };
 
 const DraftContext = createContext<{
   draft: Draft;
   update: (changes: Partial<Draft>) => void;
-  reset: () => void;
+  reset: (keep?: Partial<Draft>) => void;
 } | null>(null);
 
 /** The errand being written, shared by the plan, place search and review screens. */
@@ -46,7 +49,7 @@ export function DraftProvider({ children }: { children: ReactNode }) {
           ...changes,
           ...('pickup' in changes || 'stop' in changes || 'dropoff' in changes ? { feeKobo: null } : {}),
         })),
-      reset: () => setDraft(EMPTY),
+      reset: (keep?: Partial<Draft>) => setDraft({ ...EMPTY, ...keep }),
     }),
     [draft],
   );

@@ -156,6 +156,12 @@ describe('structure', () => {
     }
   });
 
+  it('lets the customer raise the fee or cancel while matching', () => {
+    expect(allowedEvents('requested', ctx('customer'))).toEqual(['cancel', 'raise_fee']);
+    expect(nextState('requested', 'raise_fee', ctx('customer'))).toBe('requested');
+    expectError(() => nextState('accepted', 'raise_fee', ctx('customer')), 'invalid_state');
+  });
+
   it('shows the agent the right actions after accepting', () => {
     expect(allowedEvents('accepted', ctx('agent'))).toEqual(['withdraw', 'send_offer', 'start']);
     expect(allowedEvents('accepted', ctx('agent', { pendingOffer: true }))).toEqual(['withdraw']);
