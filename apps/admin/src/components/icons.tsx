@@ -90,3 +90,11 @@ export const MoneyIcon = () => (
     <path d="M6.5 9.5v.01M17.5 14.5v.01" />
   </Icon>
 );
+
+export const SettingsIcon = () => (
+  <Icon>
+    <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+    <circle cx="16" cy="7" r="2" />
+    <circle cx="10" cy="17" r="2" />
+  </Icon>
+);

@@ -144,6 +144,15 @@ pnpm admin invite --email you@jiffoapp.com --name "Your Name" --role owner
 
 Open the printed link to choose a password. The first sign-in sets up an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password), and every sign-in after that needs its code. Owners invite everyone else from the Team page. If the only owner loses their phone, `pnpm admin reset --email ...` prints a new link.
 
+What's in it:
+
+- **Overview:** today's errands, agents online, revenue, top-ups and the fees Jiffo absorbs, withdrawals, and anything that needs attention.
+- **Errands and disputes:** search every errand, read its full history (timeline, chat, photos, money), and settle disputes, the standard way or by splitting the money held.
+- **People:** customers and agents, with their activity and money; set agent tiers, suspend and reactivate accounts, and adjust balances.
+- **Money:** what Jiffo holds and earns, top-ups, withdrawals and the nightly check against the payment provider.
+- **Settings:** prices, fees, commission, timers, limits and identity rules as versioned settings, plus categories and states.
+- **Team and audit log:** who can use the panel, and every change anyone made in it.
+
 | Role       | Can                                                    |
 | ---------- | ------------------------------------------------------ |
 | Owner      | Everything, including the team, settings and audit log |

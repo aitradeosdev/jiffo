@@ -5,6 +5,7 @@ import { Card, Empty, PageHeader, tableClass, tdClass, thClass } from '@/compone
 import { adminRoleLabel, agentTierLabel } from '@jiffo/shared';
 import { api, getCountry, getMe } from '@/lib/api';
 import { dateTime, money } from '@/lib/format';
+import { FIELD_BY_PATH } from '@/lib/settings-fields';
 
 export const metadata: Metadata = { title: 'Audit log' };
 
@@ -50,6 +51,24 @@ function describe(entry: Entry, names: Map<string, string>, currencyOf: (code: s
       return `${entry.data.direction === 'debit' ? 'Took back' : 'Added'} ${money(Number(entry.data.amountKobo ?? 0), currencyOf(entry.countryCode))} ${
         entry.data.direction === 'debit' ? 'from' : 'to'
       } ${entry.targetLabel ?? 'an account'}'s ${entry.data.account === 'agent_available' ? 'agent balance' : 'wallet'}`;
+    case 'settings.save': {
+      const changes = (entry.data.changes as Array<{ path: string }> | undefined) ?? [];
+      return `Saved settings version ${String(entry.data.version)}: ${changes
+        .map((c) => FIELD_BY_PATH.get(c.path)?.label ?? c.path)
+        .join(', ')}`;
+    }
+    case 'category.create':
+      return `Added the category “${String(entry.data.name)}”`;
+    case 'category.update':
+      return `Changed the category “${String(entry.data.name)}”`;
+    case 'category.delete':
+      return `Removed the category “${String(entry.data.name)}”`;
+    case 'state.update':
+      return `Changed ${String(entry.data.name)}: ${((entry.data.changes as Array<{ path: string; to: unknown }>) ?? [])
+        .map((c) =>
+          c.path === 'enabled' ? (c.to ? 'errands open' : 'errands closed') : `agent sign-ups ${String(c.to)}`,
+        )
+        .join(', ')}`;
     case 'person.suspend':
       return `Suspended ${entry.targetLabel ?? 'an account'}`;
     case 'person.reactivate':
