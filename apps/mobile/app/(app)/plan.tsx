@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
+import { goBack } from '@/nav';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { useDraft, type StopField } from '@/errands/draft';
 import { useColors } from '@/theme/theme';
@@ -50,7 +51,7 @@ export default function Plan() {
   return (
     <Screen footer={<Button label="Continue" disabled={!ready} onPress={() => router.push('/review')} />}>
       <View style={styles.head}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={12}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => goBack()} hitSlop={12}>
           <Icon name="arrow-left" size={24} />
         </Pressable>
         <Text variant="heading">Plan your errand</Text>

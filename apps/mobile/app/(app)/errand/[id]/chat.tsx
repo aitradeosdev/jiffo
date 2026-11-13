@@ -10,7 +10,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { goBack } from '@/nav';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Crypto from 'expo-crypto';
 import { useSession } from '@/auth/session';
@@ -104,7 +105,7 @@ export default function Chat() {
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top', 'bottom']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={[styles.head, { borderBottomColor: c.line }]}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={12}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => goBack()} hitSlop={12}>
             <Icon name="arrow-left" size={24} />
           </Pressable>
           <Text variant="heading">Chat</Text>

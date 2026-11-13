@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { goBack } from '@/nav';
 import * as Clipboard from 'expo-clipboard';
 import { useSession } from '@/auth/session';
 import { errorMessage } from '@/api/client';
@@ -69,7 +70,7 @@ export default function TopUp() {
 
   if (deposit?.status === 'succeeded') {
     return (
-      <Screen footer={<Button label="Done" onPress={() => router.back()} />}>
+      <Screen footer={<Button label="Done" onPress={() => goBack()} />}>
         <View style={{ alignItems: 'center', gap: space.md, paddingTop: space.xxl }}>
           <Icon name="check-circle" size={48} />
           <Text variant="title">{naira(deposit.paidKobo ?? deposit.amountKobo)} received</Text>
@@ -85,7 +86,7 @@ export default function TopUp() {
       setCopied(true);
     };
     return (
-      <Screen footer={<Button kind="secondary" label="I'll do it later" onPress={() => router.back()} />}>
+      <Screen footer={<Button kind="secondary" label="I'll do it later" onPress={() => goBack()} />}>
         <Text variant="title">Transfer {naira(deposit.amountKobo)}</Text>
         <Text tone="ink2">
           Send exactly this amount from any bank app to the account below. It's for this top-up only.
