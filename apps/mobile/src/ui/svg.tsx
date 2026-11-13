@@ -1,7 +1,6 @@
 import { SvgXml } from 'react-native-svg';
 import { useColors } from '../theme/theme';
-import type { Palette } from '../theme/tokens';
-import { ART, ICONS, WORDMARK } from './art.generated';
+import { ICONS, WORDMARK } from './art.generated';
 
 /** Older icon names the screens used, mapped onto the prototype's icon set. */
 const ALIASES: Record<string, string> = {
@@ -47,38 +46,14 @@ export function SvgIcon({
   return <SvgXml xml={xml} width={size} height={size} color={color ?? c.ink} />;
 }
 
-const TOKENS: Record<string, keyof Palette> = {
-  'ill-a': 'illA',
-  'ill-b': 'illB',
-  'ill-c': 'illC',
-  'ill-d': 'illD',
-  'ill-e': 'illE',
-  'ill-f': 'illF',
-  brand: 'brand',
-  'brand-soft': 'brandSoft',
-  'surface-3': 'surface3',
-};
-const paint = (xml: string, c: Palette) =>
-  xml.replace(/\{([a-z0-9-]+)\}/g, (_, t: string) => (TOKENS[t] ? c[TOKENS[t]] : '#999999'));
-
-export const hasArt = (name: string) => name in ART;
-
-/** A category illustration (groceries, parcel, pharmacy, queue), in the theme's colours. */
-export function Art({ name, size = 40 }: { name: string; size?: number }) {
-  const c = useColors();
-  const xml = ART[name];
-  if (!xml) return null;
-  return <SvgXml xml={paint(xml, c)} width={size} height={size} />;
-}
-
 /** The Jiffo wordmark as vector: letters in ink, the speed ball in brand green. */
 export function WordmarkSvg({ height = 24, color, accent }: { height?: number; color?: string; accent?: string }) {
   const c = useColors();
-  const xml = accent ? WORDMARK.replace(/\{brand\}/g, accent) : WORDMARK;
+  const xml = WORDMARK.replace(/\{brand\}/g, accent ?? c.brand);
   // viewBox is 408.73 × 193.6
   return (
     <SvgXml
-      xml={paint(xml, c)}
+      xml={xml}
       width={(height * 408.73) / 193.6}
       height={height}
       color={color ?? c.ink}

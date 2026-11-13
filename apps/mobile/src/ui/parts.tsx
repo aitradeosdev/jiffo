@@ -64,6 +64,7 @@ export function Row({
   onPress,
   tone,
   disabled,
+  selected,
 }: {
   icon?: IconName;
   iconNode?: ReactNode;
@@ -74,6 +75,8 @@ export function Row({
   onPress?: () => void;
   tone?: RowTone;
   disabled?: boolean;
+  /** For a row in a pick-one list: tells screen readers which is chosen. */
+  selected?: boolean;
 }) {
   const c = useColors();
   const body = (
@@ -97,7 +100,7 @@ export function Row({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
-      accessibilityState={{ disabled: !!disabled }}
+      accessibilityState={{ disabled: !!disabled, selected }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [styles.row, (pressed || disabled) && { opacity: 0.55 }]}

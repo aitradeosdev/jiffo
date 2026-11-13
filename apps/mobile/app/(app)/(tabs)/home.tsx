@@ -17,7 +17,7 @@ import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
 import { Button, Text, Wordmark } from '@/ui/kit';
 import { Icon, List, Row } from '@/ui/parts';
-import { Art } from '@/ui/svg';
+import { CategoryArt } from '@/ui/category-art';
 import { Fab, FloatPill, Sheet, useShadows } from '@/ui/floating';
 import { JiffoMap } from '@/ui/map/map';
 import type { MapHandle } from '@/ui/map/types';
@@ -187,7 +187,7 @@ function CustomerHome() {
                   <View
                     style={[styles.sugBox, { backgroundColor: c.surface2, transform: [{ scale: pressed ? 0.95 : 1 }] }]}
                   >
-                    <Art name={k.key} size={48} />
+                    <CategoryArt categoryKey={k.key} icon={k.icon} size={58} />
                   </View>
                   <Text style={styles.sugText} numberOfLines={1}>
                     {SHORT[k.key] ?? k.name}
@@ -216,7 +216,7 @@ function CustomerHome() {
                 <Icon name="right" size={14} weight={2.4} color="#0A3B26" />
               </View>
             </View>
-            <Art name="groceries" size={96} />
+            <CategoryArt categoryKey="groceries" size={100} />
           </Pressable>
         ) : null}
       </Sheet>

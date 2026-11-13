@@ -24,13 +24,7 @@ export const light = {
   dangerSoft: '#FDEBEB',
   onDanger: '#FFFFFF',
   scrim: 'rgba(0,0,0,0.48)',
-  /** Illustration colours, from the prototypes. */
-  illA: '#0A7A4A',
-  illB: '#86D3A9',
-  illC: '#F5B342',
-  illD: '#E2E2E2',
-  illE: '#E0602B',
-  illF: '#FFFFFF',
+  /** The promo card's background. */
   promo: '#0A3B26',
 };
 
@@ -61,12 +55,6 @@ export const dark: Palette = {
   dangerSoft: '#351414',
   onDanger: '#1A0404',
   scrim: 'rgba(0,0,0,0.66)',
-  illA: '#3DD68C',
-  illB: '#1E6B45',
-  illC: '#F0A93B',
-  illD: '#2B2B2B',
-  illE: '#F07A45',
-  illF: '#1F1F1F',
   promo: '#0F2B1D',
 };
 

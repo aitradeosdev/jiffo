@@ -6,7 +6,8 @@ import { VARIANT } from '@/config';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
 import { Button, Text } from '@/ui/kit';
-import { Art, WordmarkSvg } from '@/ui/svg';
+import { WordmarkSvg } from '@/ui/svg';
+import { CategoryArt } from '@/ui/category-art';
 
 const COPY = {
   customer: {
@@ -57,7 +58,7 @@ export default function Welcome() {
         >
           {TILES.map((t) => (
             <View key={t.art} style={[styles.tile, t.style, { width: tile, height: tile, borderRadius: tile * 0.21 }]}>
-              <Art name={t.art} size={tile * 0.7} />
+              <CategoryArt categoryKey={t.art} size={tile * 0.78} />
             </View>
           ))}
         </View>
