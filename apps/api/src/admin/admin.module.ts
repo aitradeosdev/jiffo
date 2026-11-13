@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ErrandsModule } from '../errands/errands.module';
 import { ErrandsAdminService } from './errands-admin.service';
+import { PeopleAdminService } from './people-admin.service';
+import { PushModule } from '../push/push.module';
 import { AdminAuthController } from './admin-auth.controller';
 import { AdminAuthService } from './admin-auth.service';
 import { AdminController } from './admin.controller';
@@ -11,9 +13,17 @@ import { TeamService } from './team.service';
 
 /** Everything the admin panel calls, under /v1/admin. */
 @Module({
-  imports: [ErrandsModule],
+  imports: [ErrandsModule, PushModule],
   controllers: [AdminAuthController, AdminController],
-  providers: [AdminAuthService, AdminGuard, AuditService, ErrandsAdminService, OverviewService, TeamService],
+  providers: [
+    AdminAuthService,
+    AdminGuard,
+    AuditService,
+    ErrandsAdminService,
+    OverviewService,
+    PeopleAdminService,
+    TeamService,
+  ],
   exports: [AdminAuthService, AdminGuard, AuditService],
 })
 export class AdminModule {}
