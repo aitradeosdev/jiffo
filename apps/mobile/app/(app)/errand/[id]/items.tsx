@@ -24,7 +24,7 @@ export default function ItemAmount() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const c = useColors();
   const { api } = useSession();
-  const { errand, act, busy } = useErrand(id);
+  const { errand, act, busy, actionError } = useErrand(id);
   const [receipt, setReceipt] = useState<Shot | null>(null);
   const [items, setItems] = useState<Shot | null>(null);
   const [noReceipt, setNoReceipt] = useState(false);
@@ -92,9 +92,9 @@ export default function ItemAmount() {
           You&apos;ve paid with your own money. Once {name} locks it, it&apos;s paid back to you at hand-off,
           withdrawable at once.
         </Text>
-        {error ? (
+        {error || actionError ? (
           <Text tone="danger" accessibilityLiveRegion="polite">
-            {error}
+            {error ?? actionError}
           </Text>
         ) : null}
       </ScrollView>

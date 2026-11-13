@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { and, desc, eq, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import {
   canRevealPin,
   commissionBpsFor,
@@ -492,25 +492,28 @@ export class ErrandsService implements OnModuleInit {
     }
   }
 
-  /** How a finished errand paid its agent, and when held earnings become withdrawable. */
+  /** How a finished errand paid its agent, and when its held fee share becomes withdrawable. */
   private async settlementOf(errand: ErrandRow): Promise<Settlement | null> {
-    const [paid, [hold]] = await Promise.all([
+    const [paid, holds] = await Promise.all([
       this.wallet.settlements([errand.id]),
       this.db
-        .select({ availableAt: earningHolds.availableAt })
+        .select({ amountKobo: earningHolds.amountKobo, availableAt: earningHolds.availableAt })
         .from(earningHolds)
         .where(
           and(
             eq(earningHolds.errandId, errand.id),
             eq(earningHolds.userId, errand.agentId!),
             isNull(earningHolds.releasedAt),
+            // A hold that is due already counts as available, as the wallet shows it.
+            gt(earningHolds.availableAt, new Date()),
           ),
-        )
-        .orderBy(desc(earningHolds.availableAt))
-        .limit(1),
+        ),
     ]);
     const p = paid.get(errand.id);
-    return p ? { ...p, heldUntil: hold?.availableAt ?? null } : null;
+    if (!p) return null;
+    // The fee share's own hold, not a later tip's.
+    const feeHold = holds.find((h) => h.amountKobo === p.agentKobo);
+    return { ...p, heldUntil: feeHold?.availableAt ?? null };
   }
 
   /** What the agent keeps from the fee after commission at their tier, under the errand's own settings. */

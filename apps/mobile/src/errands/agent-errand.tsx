@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { useColors } from '../theme/theme';
@@ -15,6 +16,10 @@ import { useErrand } from './use-errand';
 export function AgentErrand({ id }: { id: string }) {
   const c = useColors();
   const { errand, error, reload, can, act, busy, actionError } = useErrand(id);
+  // Once this agent has had the errand, it never turns back into a request for them: if the customer
+  // released them, or they left, it went back to matching for other agents.
+  const wasMine = useRef(false);
+  if (errand?.role === 'agent') wasMine.current = true;
 
   if (!errand) {
     return (
@@ -23,13 +28,14 @@ export function AgentErrand({ id }: { id: string }) {
       </View>
     );
   }
-  if (errand.role === 'prospect') {
+  const movedOn = wasMine.current && errand.role === 'prospect';
+  if (errand.role === 'prospect' && !movedOn) {
     return (
       <AgentRequest errand={errand} onAccept={() => act('accept')} accepting={busy === 'accept'} error={actionError} />
     );
   }
   if (errand.status === 'completed') return <AgentDone errand={errand} onRated={reload} />;
-  if (errand.status === 'cancelled' || errand.status === 'expired' || errand.status === 'requested') {
+  if (movedOn || errand.status === 'cancelled' || errand.status === 'expired' || errand.status === 'requested') {
     // Cancelled by the customer, or released back to matching: this agent is done with it.
     return (
       <View style={[styles.center, { backgroundColor: c.surface, gap: 12, padding: 24 }]}>
@@ -38,7 +44,9 @@ export function AgentErrand({ id }: { id: string }) {
           {errand.status === 'cancelled' ? 'The customer cancelled' : 'This errand moved on'}
         </Text>
         <Text variant="sub" tone="ink3" style={{ textAlign: 'center' }}>
-          Nothing more to do here. Anything you&apos;d earned on it stays yours.
+          {errand.status === 'cancelled'
+            ? 'Nothing more to do here.'
+            : 'It went back to other agents. Nothing more to do here.'}
         </Text>
         <Button label="Back to the board" onPress={() => router.replace('/home')} />
       </View>

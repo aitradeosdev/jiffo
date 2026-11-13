@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -480,6 +480,10 @@ function NewPriceSheet({
 }) {
   const c = useColors();
   const [amount, setAmount] = useState(errand.feeKobo + 5 * FEE_STEP_KOBO);
+  // Each time it opens, start from the fee agreed now.
+  useEffect(() => {
+    if (visible) setAmount(errand.feeKobo + 5 * FEE_STEP_KOBO);
+  }, [visible, errand.feeKobo]);
   const name = errand.customer?.firstName ?? 'The customer';
   // Commission is a share of the fee, so what the agent keeps scales with the new price.
   const keeps = errand.agentEarnsKobo ? Math.round((amount * errand.agentEarnsKobo) / errand.feeKobo) : null;

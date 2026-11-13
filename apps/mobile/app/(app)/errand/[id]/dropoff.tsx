@@ -17,7 +17,7 @@ type Shot = { uri: string; mimeType: string };
 export default function DropoffPhoto() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { api } = useSession();
-  const { errand, act } = useErrand(id);
+  const { errand, act, actionError } = useErrand(id);
   const [shot, setShot] = useState<Shot | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +79,11 @@ export default function DropoffPhoto() {
           />
         )}
         <Text style={styles.note}>Make sure it is sharp and shows where you left the items.</Text>
-        {error ? <Text style={[styles.note, { color: '#F87171' }]}>{error}</Text> : null}
+        {error || actionError ? (
+          <Text style={[styles.note, { color: '#F87171' }]} accessibilityLiveRegion="polite">
+            {error ?? actionError}
+          </Text>
+        ) : null}
       </View>
       <View style={styles.actions}>
         <Button label="Retake" onPress={take} tint={{ bg: '#2B2B2B', fg: '#FFFFFF' }} style={styles.half} />

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { goBack } from '@/nav';
@@ -31,40 +31,58 @@ export default function Preferences() {
   const [buys, setBuys] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const all = config?.categories ?? [];
+  // The switches as the agent left them, read without waiting for a render, and saves one at a time.
+  const current = useRef<{ chosen: Set<string> | null; buys: boolean }>({ chosen: null, buys: true });
+  const queue = useRef<Promise<void>>(Promise.resolve());
 
+  // Fill the switches once, from what is saved; after that the screen is the source until a save fails.
+  const seed = useCallback(
+    (saved: Profile) => {
+      if (!config) return;
+      const next = {
+        chosen: new Set(saved.categoryKeys ?? config.categories.map((k) => k.key)),
+        buys: saved.takesPurchases,
+      };
+      current.current = next;
+      setChosen(next.chosen);
+      setBuys(next.buys);
+    },
+    [config],
+  );
   useEffect(() => {
-    if (!profile.data || !config) return;
-    setChosen(new Set(profile.data.categoryKeys ?? config.categories.map((k) => k.key)));
-    setBuys(profile.data.takesPurchases);
-  }, [profile.data, config]);
+    if (profile.data && current.current.chosen === null) seed(profile.data);
+  }, [profile.data, seed]);
 
-  // Saves straight away; on failure the switches go back to what is saved.
-  const save = async (next: { chosen?: Set<string>; buys?: boolean }) => {
-    const before = { chosen, buys };
+  // Saves straight away, in order. If one fails, the switches go back to what the server has.
+  const save = (next: { chosen?: Set<string>; buys?: boolean }) => {
+    current.current = { ...current.current, ...next };
     if (next.chosen) setChosen(next.chosen);
     if (next.buys !== undefined) setBuys(next.buys);
     setError(null);
-    try {
-      await api.patch('/v1/agent/profile', {
-        // Every category on means "all", so new categories reach the agent too.
-        ...(next.chosen ? { categoryKeys: next.chosen.size === all.length ? null : [...next.chosen] } : {}),
-        ...(next.buys !== undefined ? { takesPurchases: next.buys } : {}),
-      });
-    } catch (e) {
-      setError(errorMessage(e));
-      setChosen(before.chosen);
-      setBuys(before.buys);
-    }
+    queue.current = queue.current.then(async () => {
+      try {
+        await api.patch('/v1/agent/profile', {
+          // Every category on means "all", so new categories reach the agent too.
+          ...(next.chosen ? { categoryKeys: next.chosen.size === all.length ? null : [...next.chosen] } : {}),
+          ...(next.buys !== undefined ? { takesPurchases: next.buys } : {}),
+        });
+      } catch (e) {
+        setError(errorMessage(e));
+        const saved = await api.get<Profile>('/v1/agent/profile').catch(() => null);
+        if (saved) seed(saved);
+      }
+    });
   };
 
   const toggle = (key: string) => {
-    if (!chosen) return;
-    const next = new Set(chosen);
+    const chosenNow = current.current.chosen;
+    if (!chosenNow) return;
+    const next = new Set(chosenNow);
     if (next.has(key)) {
       if (next.size === 1) return setError('Keep at least one category on, or you would see no errands.');
       next.delete(key);
     } else next.add(key);
-    void save({ chosen: next });
+    save({ chosen: next });
   };
 
   return (
