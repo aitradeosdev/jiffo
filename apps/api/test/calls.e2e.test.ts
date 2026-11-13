@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CallsUnavailable } from '../src/adapters/calls';
+import { ChatService } from '../src/chat/chat.service';
 import { errandCalls, errands } from '../src/db/schema';
 import { act, createErrand, createTestApp, fund, signIn, type Person, type TestApp } from './helpers';
 
@@ -70,6 +71,17 @@ describe('masked calls', () => {
     expect((await call(other, errand.id)).status).toBe(404);
     await t.db.update(errands).set({ status: 'completed' }).where(eq(errands.id, errand.id));
     expect((await call(customer, errand.id)).body.error.code).toBe('call_not_available');
+  });
+
+  it('answers that the phone is ringing even if the chat note fails afterwards', async () => {
+    const { errand } = await accepted();
+    const chat = t.app.get(ChatService);
+    const spy = vi.spyOn(chat, 'system').mockRejectedValueOnce(new Error('chat is down'));
+    const res = await call(customer, errand.id);
+    spy.mockRestore();
+    expect(res.status).toBe(200);
+    const [row] = await t.db.select().from(errandCalls).where(eq(errandCalls.errandId, errand.id));
+    expect(row).toMatchObject({ id: res.body.callId, providerRef: expect.stringMatching(/^fake_call_/) });
   });
 
   it("says when calls aren't available, and keeps nothing", async () => {

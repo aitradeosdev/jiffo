@@ -22,20 +22,6 @@ export type ErrandState = (typeof ERRAND_STATES)[number];
 
 export const TERMINAL_STATES: ReadonlySet<ErrandState> = new Set(['completed', 'cancelled', 'expired']);
 
-/**
- * The customer and agent can call each other through Jiffo: while the agent is on the errand and it hasn't
- * ended. In a dispute, support talks to each side instead.
- */
-export const CALLABLE_STATES: ReadonlySet<ErrandState> = new Set([
-  'accepted',
-  'started',
-  'item_pending',
-  'items_locked',
-  'delivered',
-  'photo_pending',
-  'unreachable',
-]);
-
 /** The agent is out doing the errand: their app shares where they are, and the customer can see it. */
 export const AGENT_OUT_STATES = [
   'accepted',
@@ -46,6 +32,12 @@ export const AGENT_OUT_STATES = [
   'photo_pending',
   'unreachable',
 ] as const satisfies readonly ErrandState[];
+
+/**
+ * The customer and agent can call each other through Jiffo while the agent is out on the errand, until it
+ * ends. In a dispute, support talks to each side instead.
+ */
+export const CALLABLE_STATES: ReadonlySet<ErrandState> = new Set(AGENT_OUT_STATES);
 
 export type Actor = 'customer' | 'agent' | 'system' | 'admin';
 

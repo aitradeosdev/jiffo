@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 import { CALLABLE_STATES, type ErrandState } from '@jiffo/shared';
 import { useSession } from '../auth/session';
-import { errorMessage } from '../api/client';
+import { ApiError, errorMessage } from '../api/client';
+import { useCountryConfig } from '../api/useCountryConfig';
 import { useColors } from '../theme/theme';
 import { Button, Text } from '../ui/kit';
 import { ModalSheet } from '../ui/modal-sheet';
@@ -17,7 +18,10 @@ export const canCall = (status: ErrandState) => CALLABLE_STATES.has(status);
  */
 export function CallButton({ errandId, name, style }: { errandId: string; name: string; style?: ViewStyle }) {
   const c = useColors();
+  const { config } = useCountryConfig();
   const [open, setOpen] = useState(false);
+  // No button until the server has a calls provider set up.
+  if (!config?.features?.calls) return null;
   return (
     <>
       <Pressable
@@ -60,6 +64,11 @@ function CallSheet({
       await api.post(`/v1/errands/${errandId}/call`);
       setState('ringing');
     } catch (e) {
+      // A call placed moments ago (a second tap): the phone is about to ring, which is what was wanted.
+      if (e instanceof ApiError && e.code === 'call_just_placed') {
+        setState('ringing');
+        return;
+      }
       setError(errorMessage(e));
       setState('idle');
     }

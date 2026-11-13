@@ -14,7 +14,10 @@ export interface CallsAdapter {
 
 export const CALLS = Symbol('CALLS');
 
-/** For development and tests: no phone rings. The calls are kept so tests can see them. */
+/** "+234 ••• ••• 1902": enough to tell numbers apart in a log, without writing them down. */
+const masked = (phone: string) => `${phone.slice(0, 4)} ••• ••• ${phone.slice(-4)}`;
+
+/** For development and tests: no phone rings. The latest calls are kept so tests can see them. */
 export class FakeCallsAdapter implements CallsAdapter {
   readonly name = 'fake';
   private readonly logger = new Logger('FakeCalls');
@@ -22,13 +25,15 @@ export class FakeCallsAdapter implements CallsAdapter {
 
   async bridge(input: { reference: string; from: string; to: string }) {
     this.calls.push(input);
-    this.logger.log(`Call ${input.reference}: ringing ${input.from}, then ${input.to}`);
+    if (this.calls.length > 100) this.calls.shift();
+    this.logger.log(`Call ${input.reference}: ringing ${masked(input.from)}, then ${masked(input.to)}`);
     return { providerRef: `fake_call_${randomUUID()}` };
   }
 }
 
 /** Until a provider is set up: every call is refused with a message the apps can show. */
 export class UnconfiguredCallsAdapter implements CallsAdapter {
+  /** The apps hide the call button when the provider is this one. */
   readonly name = 'none';
   bridge(): Promise<never> {
     return Promise.reject(new CallsUnavailable());

@@ -16,6 +16,8 @@ export interface CountryConfig {
   settings: PublicSettings;
   states: Array<{ code: string; name: string; agentSignups: 'open' | 'waitlist' }>;
   categories: Array<{ key: string; name: string; icon: string; description: string; buyDefault: boolean }>;
+  /** What the server has set up; missing on an older server. */
+  features?: { calls: boolean };
 }
 
 export interface CodeSent {
