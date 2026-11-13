@@ -20,6 +20,14 @@ const EnvSchema = z
     FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
     CHAT_PROVIDER: z.enum(['builtin']).default('builtin'),
     MAPS_PROVIDER: z.enum(['google', 'fake']).default('fake'),
+    /** memory keeps files in the API process: development and tests only. */
+    STORAGE_PROVIDER: z.enum(['s3', 'memory']).default('memory'),
+    S3_BUCKET: z.string().optional(),
+    S3_REGION: z.string().default('af-south-1'),
+    /** For S3-compatible stores other than AWS. */
+    S3_ENDPOINT: z.string().url().optional(),
+    /** The API's own address as the apps reach it. Used for development file links. */
+    PUBLIC_API_URL: z.string().url().default('http://localhost:3000'),
     GOOGLE_MAPS_API_KEY: z.string().optional(),
     PAYMENTS_PROVIDER: z.enum(['paystack', 'fake']).default('fake'),
     PAYSTACK_SECRET_KEY: z.string().optional(),
@@ -59,6 +67,9 @@ const EnvSchema = z
       need(!!env.TERMII_API_KEY, 'TERMII_API_KEY', 'required when MESSAGING_PROVIDER is termii');
       need(!!env.TERMII_SENDER_ID, 'TERMII_SENDER_ID', 'required when MESSAGING_PROVIDER is termii');
     }
+    if (env.STORAGE_PROVIDER === 's3') {
+      need(!!env.S3_BUCKET, 'S3_BUCKET', 'required when STORAGE_PROVIDER is s3');
+    }
     if (env.MAPS_PROVIDER === 'google') {
       need(!!env.GOOGLE_MAPS_API_KEY, 'GOOGLE_MAPS_API_KEY', 'required when MAPS_PROVIDER is google');
     }
@@ -82,6 +93,7 @@ const EnvSchema = z
       need(env.TIMER_PROVIDER !== 'memory', 'TIMER_PROVIDER', 'must be bullmq in production');
       need(env.PAYMENTS_PROVIDER !== 'fake', 'PAYMENTS_PROVIDER', 'must be a real provider in production');
       need(env.MAPS_PROVIDER !== 'fake', 'MAPS_PROVIDER', 'must be a real provider in production');
+      need(env.STORAGE_PROVIDER !== 'memory', 'STORAGE_PROVIDER', 'must be s3 in production');
       // Behind a load balancer, 0 would make every client share one IP and one sign-in limit.
       need(
         env.TRUST_PROXY_HOPS !== undefined,

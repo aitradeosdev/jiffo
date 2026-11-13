@@ -50,6 +50,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       'expo-font',
       ['expo-splash-screen', { image: `./assets/${variant}/icon.png`, imageWidth: 120, backgroundColor: v.background }],
       'expo-notifications',
+      [
+        'expo-image-picker',
+        {
+          photosPermission: 'Jiffo uses your photos so you can share them with your agent in chat.',
+          cameraPermission: 'Jiffo uses the camera for receipts, item photos and drop-off photos.',
+        },
+      ],
     ],
     experiments: { typedRoutes: false },
     extra: {

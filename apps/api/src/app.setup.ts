@@ -9,6 +9,10 @@ export function configureApp(app: INestApplication) {
   const express = app as NestExpressApplication;
   express.set('trust proxy', config.TRUST_PROXY_HOPS ?? 0);
   express.disable('x-powered-by');
+  // Development storage receives photo uploads as raw bytes, like S3 would.
+  if (config.STORAGE_PROVIDER === 'memory') {
+    express.useBodyParser('raw', { type: ['image/*', 'application/octet-stream'], limit: '10mb' });
+  }
   app.setGlobalPrefix('v1', { exclude: ['health'] });
   app.useGlobalFilters(new ApiExceptionFilter());
   app.enableCors({

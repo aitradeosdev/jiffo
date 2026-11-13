@@ -13,7 +13,7 @@ import {
 import type { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db, type Tx } from '../db/database.module';
-import { errandEvents, errandStops, errands, users } from '../db/schema';
+import { errandEvents, errandRatings, errandStops, errands, journalEntries, users } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
 import type { AuthContext } from '../auth/auth.types';
 import { decrypt, encrypt, numericCode, safeEqual } from '../common/crypto';
@@ -22,6 +22,8 @@ import { ERRAND_TIMERS, type ErrandTimerJob, type ErrandTimers } from '../timers
 import { CustomerFundsLow, WalletService } from '../money/wallet.service';
 import { AgentsService } from '../agents/agents.service';
 import { MAPS, type MapsAdapter } from '../adapters/maps';
+import { UploadsService } from '../files/uploads.service';
+import { participantRole } from './access';
 import { ErrandNotifier, type TransitionResult } from './errand-notifier';
 import { EVENT_DATA, type CreateErrandInput, type ErrandEventInput } from './errand-input';
 import {
@@ -55,6 +57,7 @@ export class ErrandsService implements OnModuleInit {
     private readonly wallet: WalletService,
     private readonly agents: AgentsService,
     @Inject(MAPS) private readonly maps: MapsAdapter,
+    private readonly uploads: UploadsService,
   ) {}
 
   onModuleInit() {
@@ -64,8 +67,8 @@ export class ErrandsService implements OnModuleInit {
   /* ---------- Reading ---------- */
 
   private roleFor(errand: ErrandRow, auth: AuthContext): ViewerRole | null {
-    if (auth.app === 'customer') return errand.customerId === auth.userId ? 'customer' : null;
-    if (errand.agentId === auth.userId) return 'agent';
+    const participant = participantRole(errand, auth);
+    if (participant || auth.app === 'customer') return participant;
     const open = errand.status === 'requested' && errand.customerId !== auth.userId;
     if (open && errand.countryCode === auth.countryCode) return 'prospect';
     return null;
@@ -107,7 +110,7 @@ export class ErrandsService implements OnModuleInit {
 
   async get(errandId: string, auth: AuthContext) {
     const { errand, role } = await this.load(errandId, auth);
-    return this.viewOne(errand, role);
+    return this.viewOne(errand, role, auth.userId);
   }
 
   /** The caller's own errands: as the customer in the customer app, as the agent in the agent app. */
@@ -266,7 +269,7 @@ export class ErrandsService implements OnModuleInit {
       return errand!;
     });
 
-    return this.viewOne(created, 'customer');
+    return this.viewOne(created, 'customer', auth.userId);
   }
 
   /* ---------- Changing ---------- */
@@ -297,9 +300,59 @@ export class ErrandsService implements OnModuleInit {
     return { settings, currency, tier };
   }
 
-  private async viewOne(errand: ErrandRow, role: ViewerRole) {
+  /**
+   * One errand in full: the list view, plus for its customer and agent the receipt, item and drop-off
+   * photos (short-lived links) and whether they have rated it.
+   */
+  private async viewOne(errand: ErrandRow, role: ViewerRole, viewerId?: string) {
     const [view] = await this.views([errand], () => role);
-    return view!;
+    const empty = {
+      photos: { items: [] as string[], dropoff: null as string | null },
+      ratedByMe: false,
+      tipped: false,
+    };
+    if (role === 'prospect' || !viewerId) return { ...view!, ...empty };
+    // Only look for what can exist: photos once the agent has started, ratings and tips once completed.
+    const mayHavePhotos =
+      !['requested', 'accepted', 'started'].includes(errand.status) || errand.itemAmountKobo !== null;
+    const completed = errand.status === 'completed';
+    const [photoEvents, [rating], [tip]] = await Promise.all([
+      mayHavePhotos
+        ? this.db
+            .select({ event: errandEvents.event, data: errandEvents.data })
+            .from(errandEvents)
+            .where(
+              and(
+                eq(errandEvents.errandId, errand.id),
+                inArray(errandEvents.event, ['send_item_amount', 'send_dropoff_photo']),
+              ),
+            )
+            .orderBy(desc(errandEvents.id))
+        : Promise.resolve([]),
+      completed
+        ? this.db
+            .select({ id: errandRatings.id })
+            .from(errandRatings)
+            .where(and(eq(errandRatings.errandId, errand.id), eq(errandRatings.raterId, viewerId)))
+        : Promise.resolve([]),
+      completed && role === 'customer'
+        ? this.db
+            .select({ id: journalEntries.id })
+            .from(journalEntries)
+            .where(eq(journalEntries.key, `errand:${errand.id}:tip`))
+        : Promise.resolve([]),
+    ]);
+    const items = (photoEvents.find((e) => e.event === 'send_item_amount')?.data.photos as string[] | undefined) ?? [];
+    const dropoff = photoEvents.find((e) => e.event === 'send_dropoff_photo')?.data.photo as string | undefined;
+    return {
+      ...view!,
+      photos: {
+        items: await Promise.all(items.map((k) => this.uploads.url(k))),
+        dropoff: dropoff ? await this.uploads.url(dropoff) : null,
+      },
+      ratedByMe: !!rating,
+      tipped: !!tip,
+    };
   }
 
   /** Runs one event from the customer or agent app through the state machine. */
@@ -320,6 +373,25 @@ export class ErrandsService implements OnModuleInit {
     );
     if (!money) throw notFound('errand_not_found', 'Errand not found');
     const { settings } = money;
+    // Photos are checked before the errand is locked, because the check may call the file store. First
+    // make sure the caller may do this at all, so a stranger or a wrong state gets the right answer.
+    if (input.event === 'send_item_amount' || input.event === 'send_dropoff_photo') {
+      const [current] = await this.db.select().from(errands).where(eq(errands.id, errandId));
+      if (!current || this.roleFor(current, auth) !== 'agent') throw notFound('errand_not_found', 'Errand not found');
+      nextState(current.status, input.event, transitionContext(current, 'agent'));
+    }
+    if (input.event === 'send_item_amount') {
+      const { photos } = this.parse('send_item_amount', input.data);
+      await this.uploads.assertUploaded(photos, {
+        ownerId: auth.userId,
+        errandId,
+        purposes: ['receipt', 'item_photo'],
+      });
+    }
+    if (input.event === 'send_dropoff_photo') {
+      const { photo } = this.parse('send_dropoff_photo', input.data);
+      await this.uploads.assertUploaded([photo], { ownerId: auth.userId, errandId, purposes: ['dropoff_photo'] });
+    }
 
     const outcome = await this.db.transaction(async (tx) => {
       const [errand] = await tx.select().from(errands).where(eq(errands.id, errandId)).for('update');
@@ -347,7 +419,7 @@ export class ErrandsService implements OnModuleInit {
 
     if ('error' in outcome) throw outcome.error;
     await this.notifier.transitioned(outcome.result);
-    return this.viewOne(outcome.result.after, outcome.role);
+    return this.viewOne(outcome.result.after, outcome.role, auth.userId);
   }
 
   /** A timer came due. It applies only if the errand has not moved since the timer was set. */

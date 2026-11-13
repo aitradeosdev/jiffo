@@ -10,6 +10,8 @@ import { ErrandsModule } from './errands/errands.module';
 import { HealthController } from './health/health.controller';
 import { MoneyModule } from './money/money.module';
 import { PlacesModule } from './places/places.module';
+import { FilesModule } from './files/files.module';
+import { RatingsModule } from './ratings/ratings.module';
 import { PushModule } from './push/push.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { TimersModule } from './timers/timers.module';
@@ -30,6 +32,8 @@ import { UsersModule } from './users/users.module';
     ChatModule,
     MoneyModule,
     PlacesModule,
+    FilesModule,
+    RatingsModule,
     ErrandsModule,
   ],
   controllers: [HealthController],

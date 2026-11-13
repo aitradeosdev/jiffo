@@ -10,7 +10,9 @@ import { STATUS_TEXT, type ErrandView } from '@/errands/types';
 import { naira } from '@/money';
 import { space } from '@/theme/tokens';
 import { Button, Screen, Text } from '@/ui/kit';
-import { Card, Icon, Row } from '@/ui/parts';
+import { Card, Chip, Icon, Row } from '@/ui/parts';
+import { Photos } from '@/ui/photos';
+import { AfterCompletion } from '@/errands/after-completion';
 
 const SUBTEXT: Partial<Record<ErrandView['status'], string>> = {
   requested: 'Nearby agents can see it and accept. Nothing is held until one does.',
@@ -37,6 +39,14 @@ export default function ErrandScreen() {
   useRealtimeEvent<{ errandId: string; version: number }>('errand.updated', (u) => {
     if (u.errandId === id && (!errand || u.version > errand.version)) reload();
   });
+
+  // Photo links expire after 15 minutes: refresh every 10 while there are photos to show.
+  const hasPhotos = !!errand?.photos && (errand.photos.items.length > 0 || !!errand.photos.dropoff);
+  useEffect(() => {
+    if (!hasPhotos) return;
+    const timer = setInterval(reload, 10 * 60_000);
+    return () => clearInterval(timer);
+  }, [hasPhotos, reload]);
 
   // The hand-off PIN only exists once the agent marks the errand delivered.
   useEffect(() => {
@@ -125,6 +135,7 @@ export default function ErrandScreen() {
       {can('lock_item_amount') && errand.itemAmountKobo !== null ? (
         <Card tone="urgent">
           <Text variant="label">Lock {naira(errand.itemAmountKobo)} for your items</Text>
+          <Photos urls={errand.photos?.items ?? []} label="Receipt and item photo" />
           <Text variant="small" tone="ink2">
             It's held separately and paid to your agent only at hand-off.
           </Text>
@@ -139,6 +150,7 @@ export default function ErrandScreen() {
       {can('approve_photo') ? (
         <Card tone="urgent">
           <Text variant="label">Your agent left the items at the drop-off</Text>
+          <Photos urls={errand.photos?.dropoff ? [errand.photos.dropoff] : []} label="Drop-off photo" />
           <Button
             label="Approve the drop-off"
             onPress={() => act('approve_photo')}
@@ -147,7 +159,20 @@ export default function ErrandScreen() {
         </Card>
       ) : null}
 
-      {errand.agent ? <Row icon="user" title={errand.agent.firstName ?? 'Your agent'} subtitle="Your agent" /> : null}
+      {errand.agent ? (
+        <Row
+          icon="user"
+          title={errand.agent.firstName ?? 'Your agent'}
+          subtitle="Your agent"
+          right={
+            errand.status !== 'requested' ? (
+              <Chip label="Message" icon="message-circle" onPress={() => router.push(`/errand/${errand.id}/chat`)} />
+            ) : null
+          }
+        />
+      ) : null}
+
+      {errand.status === 'completed' ? <AfterCompletion errand={errand} onDone={reload} /> : null}
 
       <View>
         {errand.stops.map((s) => (

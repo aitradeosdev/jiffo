@@ -9,6 +9,7 @@ import {
   balanceOf,
   createErrand,
   createTestApp,
+  photo,
   deliverWebhook,
   fund,
   signIn,
@@ -296,7 +297,10 @@ describe('money', () => {
       await fund(t, buyer, 2_000_000);
       const errand = await createErrand(t, buyer, { categoryKey: 'groceries' });
       await runToDelivered(errand.id);
-      await act(t, agent, errand.id, 'send_item_amount', { amountKobo: 3_000_000, photos: ['r.jpg'] });
+      await act(t, agent, errand.id, 'send_item_amount', {
+        amountKobo: 3_000_000,
+        photos: [await photo(t, agent, errand.id, 'receipt')],
+      });
       expect((await act(t, buyer, errand.id, 'lock_item_amount', {}, 409)).error.code).toBe('insufficient_funds');
 
       await fund(t, buyer, 2_000_000);
@@ -306,7 +310,9 @@ describe('money', () => {
       const agentBefore = (await balanceOf(t, agent)).availableKobo;
       const revenueBefore = await revenue();
       await act(t, agent, errand.id, 'mark_delivered');
-      await act(t, agent, errand.id, 'send_dropoff_photo', { photo: 'p.jpg' });
+      await act(t, agent, errand.id, 'send_dropoff_photo', {
+        photo: await photo(t, agent, errand.id, 'dropoff_photo'),
+      });
       await act(t, buyer, errand.id, 'approve_photo');
       // Item money is withdrawable at once and carries no commission.
       expect((await balanceOf(t, agent)).availableKobo - agentBefore).toBe(3_000_000);
@@ -319,7 +325,10 @@ describe('money', () => {
       await fund(t, buyer, 2_000_000);
       const errand = await createErrand(t, buyer, { categoryKey: 'groceries' });
       await runToDelivered(errand.id);
-      await act(t, agent, errand.id, 'send_item_amount', { amountKobo: 500_000, photos: ['r.jpg'] });
+      await act(t, agent, errand.id, 'send_item_amount', {
+        amountKobo: 500_000,
+        photos: [await photo(t, agent, errand.id, 'receipt')],
+      });
       await act(t, buyer, errand.id, 'lock_item_amount');
       await act(t, buyer, errand.id, 'open_dispute', { reason: 'Wrong items' });
       expect((await balanceOf(t, buyer)).balanceKobo).toBe(2_000_000 - FEE - SERVICE - 500_000);

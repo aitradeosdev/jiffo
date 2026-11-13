@@ -82,9 +82,11 @@ All routes are under `/v1` except `GET /health`. Errors always look like `{ "err
 | Profile        | `GET /me`, `PATCH /me`, `PUT /devices/current/push-token`                                                                                                                                                                                           |
 | Agent profile  | `GET /agent/profile`, `PATCH /agent/profile`: categories and purchase errands the agent takes; the tier is set by admin                                                                                                                             |
 | Country config | `GET /config/:country`: currency, states, categories and the public settings                                                                                                                                                                        |
+| Photos         | `POST /uploads`: a signed link to upload a receipt, item, drop-off or chat photo for an errand. Events and messages accept only photos their sender uploaded for that errand.                                                                       |
+| Ratings        | `POST /errands/:id/rating`: once each way after completion                                                                                                                                                                                          |
 | Places         | `GET /places/autocomplete`, `GET /places/:id` (with the state it is in)                                                                                                                                                                             |
 | Errands        | `POST /errands/quote` (distance and suggested fee), `POST /errands`, `GET /errands`, `GET /errands/board` (agent app), `GET /errands/:id`, `GET /errands/:id/events`, `GET /errands/:id/pin` (customer, once delivered), `POST /errands/:id/events` |
-| Chat           | `GET /errands/:id/messages`, `POST /errands/:id/messages`                                                                                                                                                                                           |
+| Chat           | `GET /errands/:id/messages`, `POST /errands/:id/messages` (text or a photo)                                                                                                                                                                         |
 | Wallet         | `GET /wallet`, `GET /wallet/transactions`, `POST /wallet/deposits` and `GET /wallet/deposits/:id` (customer app), `POST /wallet/withdrawals` (agent app), `POST /errands/:id/tip`                                                                   |
 | Payouts        | `GET /banks`, `GET /payout-account`, `PUT /payout-account` (agent app)                                                                                                                                                                              |
 | Webhooks       | `POST /webhooks/paystack`: signature-checked, stored, applied once                                                                                                                                                                                  |
@@ -96,16 +98,17 @@ Every errand change goes through one endpoint, `POST /errands/:id/events`, with 
 
 Outside services are chosen by environment variable, one implementation per port:
 
-| Port          | Now                                         | Variable             |
-| ------------- | ------------------------------------------- | -------------------- |
-| SMS codes     | Termii, or console for development          | `MESSAGING_PROVIDER` |
-| Push          | Firebase Cloud Messaging, or console        | `PUSH_PROVIDER`      |
-| Chat          | Built-in (Postgres and the realtime socket) | `CHAT_PROVIDER`      |
-| Errand timers | BullMQ on Redis                             | `TIMER_PROVIDER`     |
-| Payments      | Paystack, or fake for development           | `PAYMENTS_PROVIDER`  |
-| Maps          | Google (Places and Routes), or fake         | `MAPS_PROVIDER`      |
+| Port          | Now                                          | Variable             |
+| ------------- | -------------------------------------------- | -------------------- |
+| SMS codes     | Termii, or console for development           | `MESSAGING_PROVIDER` |
+| Push          | Firebase Cloud Messaging, or console         | `PUSH_PROVIDER`      |
+| Chat          | Built-in (Postgres and the realtime socket)  | `CHAT_PROVIDER`      |
+| Errand timers | BullMQ on Redis                              | `TIMER_PROVIDER`     |
+| Payments      | Paystack, or fake for development            | `PAYMENTS_PROVIDER`  |
+| Maps          | Google (Places and Routes), or fake          | `MAPS_PROVIDER`      |
+| Files         | S3 (private bucket, signed links), or memory | `STORAGE_PROVIDER`   |
 
-Identity checks, voice calls and storage arrive in later steps on the same pattern.
+Identity checks and voice calls arrive in later steps on the same pattern.
 
 With the fake payment provider, set `FAKE_PAYMENTS_AUTOPAY_SECONDS` to have top-ups land by themselves, so the apps can be tried end to end without moving money. The fake maps provider knows a handful of Lagos places (search for Shoprite, Medplus, Circle Mall, Admiralty Way, Adeola Odeku or Ikeja).
 
