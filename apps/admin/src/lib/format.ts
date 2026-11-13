@@ -33,6 +33,15 @@ export function ago(iso: string | Date, timeZone: string, now = Date.now()): str
   return dateTime(iso, timeZone);
 }
 
+/** How long something has waited: "under a minute", "5 min", "3 h", "2 days". */
+export function waited(iso: string | Date, now = Date.now()): string {
+  const minutes = Math.floor((now - new Date(iso).getTime()) / 60_000);
+  if (minutes < 1) return 'under a minute';
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 48 * 60) return `${Math.floor(minutes / 60)} h`;
+  return `${Math.floor(minutes / (24 * 60))} days`;
+}
+
 /** "Mon 10" for a YYYY-MM-DD day. */
 export function shortDay(day: string): string {
   const date = new Date(`${day}T12:00:00Z`);

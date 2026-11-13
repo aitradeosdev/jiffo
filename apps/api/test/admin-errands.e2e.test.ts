@@ -156,6 +156,10 @@ describe('admin errands and disputes', () => {
     expect(last).toMatchObject({ event: 'resolve_complete', actorRole: 'admin', actorName: ops.name });
     expect(last.data.note).toBe('Photos show the right items were delivered');
     expect(done.chat.some((m: { body: string }) => m.body === 'Support settled this errand as complete')).toBe(true);
+    // The customer and agent learn that support settled it, but not support's own notes.
+    const seen = await request(t.http).get(`/v1/errands/${errand.id}/events`).set(customer.headers).expect(200);
+    expect(seen.body.at(-1)).toMatchObject({ event: 'resolve_complete', actorRole: 'admin', data: { by: 'support' } });
+    expect(JSON.stringify(seen.body)).not.toContain('Photos show the right items');
     const audit = await t.db.select().from(adminAudit).where(eq(adminAudit.targetId, errand.id));
     expect(audit).toEqual([
       expect.objectContaining({ adminId: ops.id, action: 'errand.resolve_complete', countryCode: 'NG' }),

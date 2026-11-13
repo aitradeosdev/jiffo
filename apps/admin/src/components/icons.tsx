@@ -61,3 +61,17 @@ export const CheckIcon = () => (
     <path d="M20 6L9 17l-5-5" />
   </Icon>
 );
+
+export const ErrandsIcon = () => (
+  <Icon>
+    <path d="M5 8h14l-1 12H6z" />
+    <path d="M9 8V6.5a3 3 0 0 1 6 0V8" />
+  </Icon>
+);
+
+export const DisputesIcon = () => (
+  <Icon>
+    <path d="M5 21V4.5" />
+    <path d="M5 5h11.5l-2 4 2 4H5" />
+  </Icon>
+);

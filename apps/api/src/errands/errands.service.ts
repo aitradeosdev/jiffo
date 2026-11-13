@@ -249,7 +249,8 @@ export class ErrandsService implements OnModuleInit {
       fromStatus: e.fromStatus,
       toStatus: e.toStatus,
       actorRole: e.actorRole,
-      data: e.data,
+      // Support's notes and splits are internal; the apps only learn that support acted.
+      data: e.actorRole === 'admin' ? { by: 'support' } : e.data,
       createdAt: e.createdAt,
     }));
   }

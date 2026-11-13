@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { ColumnChart } from '@/components/column-chart';
 import { AlertIcon, CheckIcon } from '@/components/icons';
@@ -49,7 +50,11 @@ export default async function OverviewPage() {
 
   const attention: ReactNode[] = [];
   if (o.attention.disputes)
-    attention.push(`${plural(o.attention.disputes, 'errand')} in dispute, waiting for a decision`);
+    attention.push(
+      <Link href="/disputes" className="underline">
+        {plural(o.attention.disputes, 'errand')} in dispute, waiting for a decision
+      </Link>,
+    );
   if (o.attention.failedPayouts7d)
     attention.push(`${plural(o.attention.failedPayouts7d, 'withdrawal')} failed in the last 7 days`);
   if (o.attention.senderMismatch7d)
