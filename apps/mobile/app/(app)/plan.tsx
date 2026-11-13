@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { goBack } from '@/nav';
@@ -8,7 +8,7 @@ import { useDraft, type StopField } from '@/errands/draft';
 import { liveSchedule, staleSchedule, whenLabel } from '@/errands/when';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
-import { Button, Text } from '@/ui/kit';
+import { Button, noWebOutline, Text } from '@/ui/kit';
 import { Chip, Icon, IconCircle, Toggle } from '@/ui/parts';
 import { PageFooter, PageHeader } from '@/ui/floating';
 import { StopMark } from '@/ui/map/pins';
@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     fontFamily: fonts.regular,
     textAlignVertical: 'top',
-    ...(Platform.OS === 'web' ? { outlineWidth: 0 } : {}),
+    ...noWebOutline,
   },
   buyrow: {
     flexDirection: 'row',

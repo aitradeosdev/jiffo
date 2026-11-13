@@ -72,12 +72,13 @@ export function Art({ name, size = 40 }: { name: string; size?: number }) {
 }
 
 /** The Jiffo wordmark as vector: letters in ink, the speed ball in brand green. */
-export function WordmarkSvg({ height = 24, color }: { height?: number; color?: string }) {
+export function WordmarkSvg({ height = 24, color, accent }: { height?: number; color?: string; accent?: string }) {
   const c = useColors();
+  const xml = accent ? WORDMARK.replace(/\{brand\}/g, accent) : WORDMARK;
   // viewBox is 408.73 × 193.6
   return (
     <SvgXml
-      xml={paint(WORDMARK, c)}
+      xml={paint(xml, c)}
       width={(height * 408.73) / 193.6}
       height={height}
       color={color ?? c.ink}

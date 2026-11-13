@@ -22,6 +22,12 @@ import { WordmarkSvg } from './svg';
 type Tone = 'ink' | 'ink2' | 'ink3' | 'brand' | 'brandInk' | 'urgent' | 'danger' | 'onBrand' | 'onInk';
 type Variant = 'title' | 'heading' | 'sec' | 'body' | 'label' | 'small' | 'sub' | 'note' | 'price';
 
+/**
+ * Text boxes that draw their own focus border: no browser focus ring on the web build. Chrome draws an
+ * "auto" outline whatever its width, so the style has to be none.
+ */
+export const noWebOutline = (Platform.OS === 'web' ? { outlineWidth: 0, outlineStyle: 'none' } : {}) as TextStyle;
+
 /** The prototype's type scale: .t1, .t2, .sec, body, list titles, .sub and .note. */
 const VARIANTS: Record<Variant, TextStyle> = {
   title: { fontFamily: fonts.bold, fontSize: 24, lineHeight: 28, letterSpacing: -0.48 },
@@ -219,5 +225,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   // The field draws its own focus border; the browser's outline would sit inside it on web.
-  input: { flex: 1, fontSize: 17, minHeight: 52, ...(Platform.OS === 'web' ? { outlineWidth: 0 } : {}) },
+  input: { flex: 1, fontSize: 17, minHeight: 52, ...noWebOutline },
 });
