@@ -36,6 +36,16 @@ const tokenStore = {
   set: (tokens: Tokens | null) => secureStorage.set(TOKENS_KEY, tokens ? JSON.stringify(tokens) : null),
 };
 
+/** Told when the server ends the session; set by the session provider. */
+let onSignedOut: () => void = () => undefined;
+
+/**
+ * The one API client in the app. Screens get it through useSession; the agent app's background location
+ * task uses it directly. Sharing it means a token refresh is never done twice at once, which the server
+ * would take as a stolen refresh token.
+ */
+export const sharedApi = createApiClient({ baseUrl: API_URL, store: tokenStore, onSignedOut: () => onSignedOut() });
+
 /** A random id for this install, kept across sign-ins, so the server ties sessions and push to this phone. */
 async function deviceKey() {
   const existing = await secureStorage.get(DEVICE_KEY);
@@ -53,10 +63,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setStatus('signedOut');
   });
 
-  const api = useMemo(
-    () => createApiClient({ baseUrl: API_URL, store: tokenStore, onSignedOut: () => signedOut.current() }),
-    [],
-  );
+  const api = sharedApi;
+  useEffect(() => {
+    onSignedOut = () => signedOut.current();
+    return () => {
+      onSignedOut = () => undefined;
+    };
+  }, []);
 
   // At launch: a stored session is trusted until the server says otherwise (401). Offline, a server
   // error or a rate limit keeps the person signed in and tries again, so nobody is sent back to SMS

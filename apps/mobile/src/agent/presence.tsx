@@ -1,13 +1,22 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Linking } from 'react-native';
+import { Linking, View } from 'react-native';
 import * as Location from 'expo-location';
 import { useSession } from '../auth/session';
 import { useRealtimeEvent } from '../realtime/realtime';
 import { errorMessage } from '../api/client';
 import type { Coords } from '../location';
+import { Button, Text } from '../ui/kit';
+import { ModalSheet } from '../ui/modal-sheet';
+import {
+  askForBackground,
+  rememberOnline,
+  shouldExplainBackground,
+  skipBackground,
+  startBackgroundLocation,
+  stopBackgroundLocation,
+} from './background-location';
+import { REPORT_EVERY_MS } from './background-rules';
 
-/** How often a moving agent's position is sent at most. */
-const REPORT_EVERY_MS = 10_000;
 /** Sent this often even when the agent isn't moving, so a parked agent stays visible and online. */
 const HEARTBEAT_MS = 60_000;
 
@@ -29,8 +38,9 @@ interface Presence {
 const PresenceContext = createContext<Presence | null>(null);
 
 /**
- * The agent going online and offline, and their position while online or on an errand. Location is read
- * only while the app is open (foreground); nothing is tracked once the agent is offline and free.
+ * The agent going online and offline, and their position while online or on an errand. The app sends it
+ * while open; with "Allow all the time", the phone keeps sending it in the background too (when the agent
+ * switches to their maps app). Nothing is tracked once the agent is offline and free.
  */
 export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   const { api } = useSession();
@@ -40,6 +50,8 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [blocked, setBlocked] = useState(false);
   const [onErrand, setOnErrand] = useState(false);
+  /** Explaining background location before the phone asks for it. */
+  const [explain, setExplain] = useState(false);
   const lastSent = useRef(0);
   const onlineRef = useRef(online);
   onlineRef.current = online;
@@ -72,11 +84,13 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
         setBlocked(!!permission && !permission.granted && !permission.canAskAgain);
         setError("You're offline because Jiffo Agent can't read your location. Go online again when it's on.");
         await api.put('/v1/agent/presence', { online: false }).catch(() => undefined);
+        await rememberOnline(false);
         return;
       }
       const here = { lat: position.coords.latitude, lng: position.coords.longitude };
       setCoords(here);
       setOnlineState(true);
+      await rememberOnline(true);
     })();
   }, [api, refresh]);
   useRealtimeEvent('errand.updated', () => {
@@ -123,10 +137,13 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
           const here = { lat: position.coords.latitude, lng: position.coords.longitude };
           setCoords(here);
           await send({ online: true, ...here });
+          // The first time: say why the phone is about to ask for location all the time.
+          if (await shouldExplainBackground()) setExplain(true);
         } else {
           await send({ online: false });
         }
         setOnlineState(next);
+        await rememberOnline(next);
       } catch (e) {
         setError(errorMessage(e));
       } finally {
@@ -170,6 +187,17 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
     };
   }, [tracking, send]);
 
+  // In the background, the phone carries on while there is something to share, if the agent allowed it.
+  useEffect(() => {
+    (tracking ? startBackgroundLocation() : stopBackgroundLocation()).catch(() => undefined);
+  }, [tracking]);
+
+  const answerExplain = async (allow: boolean) => {
+    setExplain(false);
+    if (allow && (await askForBackground()) && tracking) await startBackgroundLocation().catch(() => undefined);
+    if (!allow) await skipBackground();
+  };
+
   const value = useMemo<Presence>(
     () => ({
       online,
@@ -183,7 +211,27 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
     }),
     [online, coords, switching, error, blocked, setOnline, onErrand],
   );
-  return <PresenceContext.Provider value={value}>{children}</PresenceContext.Provider>;
+  return (
+    <PresenceContext.Provider value={value}>
+      {children}
+      <ModalSheet visible={explain} onClose={() => void answerExplain(false)} label="Location while you use other apps">
+        <View style={{ gap: 8 }}>
+          <Text variant="heading">Share your location while you use other apps</Text>
+          <Text tone="ink2">
+            When you&apos;re online or on an errand, Jiffo Agent keeps sharing your location even when the app is closed
+            or not in use, for example while you follow directions in your maps app. Customers see it only during their
+            errand, and it stops when you go offline with nothing running.
+          </Text>
+          <Text variant="note" tone="ink3">
+            Your phone asks next. Choose &ldquo;Allow all the time&rdquo;. Without it, customers lose track of you when
+            you leave the app.
+          </Text>
+        </View>
+        <Button label="Continue" onPress={() => void answerExplain(true)} />
+        <Button label="Not now" kind="plain" onPress={() => void answerExplain(false)} />
+      </ModalSheet>
+    </PresenceContext.Provider>
+  );
 }
 
 export function usePresence() {

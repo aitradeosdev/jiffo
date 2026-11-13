@@ -44,6 +44,8 @@ Open it in Expo Go, or press `w` for the web version. The web version draws a st
 
 A new agent fills in the application before seeing the board: their state and area, identity (NIN, BVN and a selfie), address and an emergency contact, a payout account, errand preferences, and the agent terms. In development the identity provider is a stand-in: a NIN ending in 1111 sends the selfie to review, 1818 is someone under 18, 0000 fails the NIN, and any other passes. With `FAKE_PAYMENTS_AUTOPAY_SECONDS` set, the fake bank also takes any account number to be in the agent's name.
 
+While an agent is online or on an errand, the agent app keeps sending their location when they switch to their maps app or lock the phone, if they chose "Allow all the time" (the app explains why before the phone asks). On Android a notification shows while it does. It stops when they go offline with nothing running. This needs a development or store build; Expo Go and the web version send the location only while the app is open.
+
 `pnpm --filter @jiffo/mobile export:web` builds both apps for the web, the same way CI does.
 
 ## Running the backend

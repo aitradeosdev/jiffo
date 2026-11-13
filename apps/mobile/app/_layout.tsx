@@ -11,6 +11,8 @@ import {
   useFonts,
 } from '@expo-google-fonts/figtree';
 import { SessionProvider } from '@/auth/session';
+// Defines the agent app's background location task at start-up, as the phone may run it with no screen open.
+import '@/agent/background-location';
 import { RealtimeProvider } from '@/realtime/realtime';
 import { usePushRegistration } from '@/push/push';
 import { ThemeProvider, useColors, useScheme } from '@/theme/theme';
