@@ -57,6 +57,15 @@ export class WalletService {
     private readonly agents: AgentsService,
   ) {}
 
+  /** What is held for one errand right now: the fee with its service fee, and locked item money. */
+  async heldFor(errandId: string, countryCode: string) {
+    const [feeKobo, itemsKobo] = await Promise.all([
+      this.ledger.balance(this.db, feeEscrow(errandId), countryCode),
+      this.ledger.balance(this.db, itemEscrow(errandId), countryCode),
+    ]);
+    return { feeKobo, itemsKobo };
+  }
+
   async customerBalance(userId: string, countryCode: string) {
     return this.ledger.balance(this.db, wallet(userId), countryCode);
   }

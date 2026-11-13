@@ -32,15 +32,18 @@ export function SvgIcon({
   size = 22,
   color,
   strokeWidth = 1.85,
+  filled,
 }: {
   name: string;
   size?: number;
   color?: string;
   strokeWidth?: number;
+  /** Fill the shape too, as the prototype does for chosen stars. */
+  filled?: boolean;
 }) {
   const c = useColors();
   const body = ICONS[name] ?? ICONS[ALIASES[name] ?? ''] ?? ICONS.info;
-  const xml = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+  const xml = `<svg viewBox="0 0 24 24" fill="${filled ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
   return <SvgXml xml={xml} width={size} height={size} color={color ?? c.ink} />;
 }
 

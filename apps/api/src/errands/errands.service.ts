@@ -5,6 +5,7 @@ import {
   nextState,
   serviceFee,
   suggestedFee,
+  TERMINAL_STATES,
   type AgentTier,
   type CountrySettings,
   type ErrandEvent,
@@ -311,13 +312,16 @@ export class ErrandsService implements OnModuleInit {
       photos: { items: [] as string[], dropoff: null as string | null },
       ratedByMe: false,
       tipped: false,
+      held: { feeKobo: 0, itemsKobo: 0 },
     };
     if (role === 'prospect' || !viewerId) return { ...view!, ...empty };
     // Only look for what can exist: photos once the agent has started, ratings and tips once completed.
     const mayHavePhotos =
       !['requested', 'accepted', 'started'].includes(errand.status) || errand.itemAmountKobo !== null;
     const completed = errand.status === 'completed';
-    const [photoEvents, [rating], [tip]] = await Promise.all([
+    // Money sits in escrow only between accept and the end of the errand.
+    const mayHoldMoney = errand.status !== 'requested' && !TERMINAL_STATES.has(errand.status);
+    const [photoEvents, [rating], [tip], held] = await Promise.all([
       mayHavePhotos
         ? this.db
             .select({ event: errandEvents.event, data: errandEvents.data })
@@ -342,6 +346,7 @@ export class ErrandsService implements OnModuleInit {
             .from(journalEntries)
             .where(eq(journalEntries.key, `errand:${errand.id}:tip`))
         : Promise.resolve([]),
+      mayHoldMoney ? this.wallet.heldFor(errand.id, errand.countryCode) : Promise.resolve(empty.held),
     ]);
     const items = (photoEvents.find((e) => e.event === 'send_item_amount')?.data.photos as string[] | undefined) ?? [];
     const dropoff = photoEvents.find((e) => e.event === 'send_dropoff_photo')?.data.photo as string | undefined;
@@ -353,6 +358,7 @@ export class ErrandsService implements OnModuleInit {
       },
       ratedByMe: !!rating,
       tipped: !!tip,
+      held,
     };
   }
 

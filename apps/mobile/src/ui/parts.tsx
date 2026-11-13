@@ -13,13 +13,15 @@ export function Icon({
   size = 20,
   color,
   weight,
+  filled,
 }: {
   name: IconName;
   size?: number;
   color?: string;
   weight?: number;
+  filled?: boolean;
 }) {
-  return <SvgIcon name={name} size={size} color={color} strokeWidth={weight} />;
+  return <SvgIcon name={name} size={size} color={color} strokeWidth={weight} filled={filled} />;
 }
 
 /** A category's icon by the key admin gives it (cart, food, pill, bag, shirt, box, users, spark). */
@@ -46,7 +48,7 @@ export function IconCircle({
   const fg = tone === 'brand' ? c.brandInk : tone === 'urgent' ? c.urgent : tone === 'ink' ? c.onInk : c.ink;
   return (
     <View style={[styles.rowIcon, { width: size, height: size, borderRadius: size / 2, backgroundColor: bg }]}>
-      {children ?? (icon ? <Icon name={icon} size={19} color={fg} /> : null)}
+      {children ?? (icon ? <Icon name={icon} size={Math.round(size * 0.475)} color={fg} /> : null)}
     </View>
   );
 }
