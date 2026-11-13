@@ -236,7 +236,17 @@ describe('admin: providers', () => {
     const [deposit] = await t.db.select().from(deposits).where(eq(deposits.id, started.body.id));
     expect(deposit!.provider).toBe('flutterwave');
 
-    vi.spyOn(FlutterwavePaymentsAdapter.prototype, 'verifyDeposit').mockResolvedValue({
+    const verify = vi.spyOn(FlutterwavePaymentsAdapter.prototype, 'verifyDeposit');
+    // The webhook can arrive before the API shows the payment: answered as not done, so it comes again.
+    verify.mockResolvedValueOnce({
+      status: 'pending',
+      amountKobo: 0,
+      feesKobo: 0,
+      currency: 'NGN',
+      senderName: null,
+      senderBank: null,
+    });
+    verify.mockResolvedValue({
       status: 'success',
       amountKobo: 250_000,
       feesKobo: 3_500,
@@ -252,6 +262,8 @@ describe('admin: providers', () => {
         .set('verif-hash', hash)
         .send(hook);
     await send('wrong').expect(401);
+    await send('hash-abc-123').expect(500);
+    expect((await balanceOf(t, customer)).balanceKobo).toBe(0);
     await send('hash-abc-123').expect(200);
     expect((await balanceOf(t, customer)).balanceKobo).toBe(250_000);
     await api('post', '/payments/active').send({ provider: null }).expect(200);

@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { unavailable } from '../common/errors';
 
 export interface TransferDeposit {
@@ -61,13 +61,23 @@ export interface PaymentsAdapter {
    */
   resolveAccount(bankCode: string, accountNumber: string, expectedName?: string): Promise<{ accountName: string }>;
   createRecipient(input: { name: string; bankCode: string; accountNumber: string }): Promise<{ recipientCode: string }>;
+  /** The bank details come along for providers that pay straight to them (Flutterwave). */
   transfer(input: {
     reference: string;
     amountKobo: number;
     recipientCode: string;
+    bankCode: string;
+    accountNumber: string;
     reason: string;
   }): Promise<TransferResult>;
-  verifyTransfer(reference: string): Promise<{ status: TransferStatus; reason?: string; feeKobo?: number }>;
+  /**
+   * A transfer's status. `transferCode` is the provider's own id from transfer(), when known, for providers
+   * that look transfers up by it; without it, by our reference.
+   */
+  verifyTransfer(
+    reference: string,
+    transferCode?: string | null,
+  ): Promise<{ status: TransferStatus; reason?: string; feeKobo?: number }>;
   /** Cash the provider holds for us, for the daily reconciliation. */
   balance(currency: string): Promise<number>;
   /** Checks the signature and returns the event, or null when the signature is wrong. */
@@ -75,6 +85,27 @@ export interface PaymentsAdapter {
 }
 
 export const PAYMENTS = Symbol('PAYMENTS');
+
+/** How long a payments provider may take to answer before the request counts as not reaching it. */
+const PAYMENTS_TIMEOUT_MS = 20_000;
+
+/**
+ * A request to a payments provider and its JSON answer. No answer at all (network, timeout) is said as
+ * payments being unreachable; reading the answer is left to the provider's adapter.
+ */
+async function paymentsRequest<T>(fetchImpl: typeof fetch, url: string, init: RequestInit) {
+  let res: Response;
+  try {
+    res = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(PAYMENTS_TIMEOUT_MS) });
+  } catch {
+    throw unavailable('payments_unavailable', 'Payments are not reachable right now. Try again shortly.');
+  }
+  return { res, json: (await res.json().catch(() => null)) as T | null };
+}
+
+/** A webhook's key for recognising a repeat: the provider's id, or, without one, the body itself. */
+const eventKeyOf = (event: string | undefined, id: unknown, rawBody: Buffer) =>
+  `${event ?? 'unknown'}:${id ? String(id) : createHash('sha256').update(rawBody).digest('hex')}`;
 
 const header = (headers: Record<string, string | string[] | undefined>, name: string) => {
   const value = headers[name];
@@ -89,10 +120,10 @@ const signatureMatches = (secret: string, rawBody: Buffer, signature: string | u
 };
 
 /** Paystack's event names mapped to the two things the core cares about. */
-function classify(body: { event?: string; data?: Record<string, unknown> }): PaymentWebhook {
+function classify(body: { event?: string; data?: Record<string, unknown> }, rawBody: Buffer): PaymentWebhook {
   const data = body.data ?? {};
   const reference = String(data.reference ?? '');
-  const eventKey = `${body.event}:${String(data.id ?? reference)}`;
+  const eventKey = eventKeyOf(body.event, data.id ?? reference, rawBody);
   const raw = body as Record<string, unknown>;
   if (body.event === 'charge.success' && reference) return { kind: 'deposit', eventKey, reference, raw };
   if (body.event?.startsWith('transfer.') && reference) return { kind: 'transfer', eventKey, reference, raw };
@@ -125,17 +156,11 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
   }
 
   private async callWithMeta<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<PaystackEnvelope<T>> {
-    let res: Response;
-    try {
-      res = await this.fetchImpl(`${this.baseUrl}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${this.secretKey}`, 'content-type': 'application/json' },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-    } catch {
-      throw unavailable('payments_unavailable', 'Payments are not reachable right now. Try again shortly.');
-    }
-    const json = (await res.json().catch(() => null)) as PaystackEnvelope<T> | null;
+    const { res, json } = await paymentsRequest<PaystackEnvelope<T>>(this.fetchImpl, `${this.baseUrl}${path}`, {
+      method,
+      headers: { authorization: `Bearer ${this.secretKey}`, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
     if (!res.ok || !json?.status)
       throw new PaystackError(res.status, json?.message ?? `Paystack answered ${res.status}`);
     return json;
@@ -253,7 +278,7 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
 
   parseWebhook(rawBody: Buffer, headers: Record<string, string | string[] | undefined>) {
     if (!signatureMatches(this.secretKey, rawBody, header(headers, 'x-paystack-signature'))) return null;
-    return classify(JSON.parse(rawBody.toString('utf8')));
+    return classify(JSON.parse(rawBody.toString('utf8')), rawBody);
   }
 }
 
@@ -437,7 +462,7 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
 
   parseWebhook(rawBody: Buffer, headers: Record<string, string | string[] | undefined>) {
     if (!signatureMatches(this.webhookSecret, rawBody, header(headers, 'x-paystack-signature'))) return null;
-    return classify(JSON.parse(rawBody.toString('utf8')));
+    return classify(JSON.parse(rawBody.toString('utf8')), rawBody);
   }
 }
 
@@ -460,11 +485,38 @@ const toNaira = (kobo: number) => Number((kobo / 100).toFixed(2));
 
 const FLW_TRANSFER: Record<string, TransferStatus> = { SUCCESSFUL: 'success', FAILED: 'failed' };
 
+/** A Flutterwave transfer as the core sees it. */
+const fromFlwTransfer = (t: { status: string; fee?: number | null; complete_message?: string }) => ({
+  status: FLW_TRANSFER[t.status] ?? ('pending' as TransferStatus),
+  reason: t.complete_message || t.status,
+  feeKobo: t.fee === undefined || t.fee === null ? undefined : toKobo(t.fee),
+});
+
+/**
+ * Flutterwave's dates, such as "2026-11-13 3:00:00 PM", carry no time zone: they are Lagos time (UTC+1,
+ * no summer time). A date with its own zone is read as it is. Null when it can't be read.
+ */
+export function parseFlutterwaveDate(text: string | undefined): Date | null {
+  if (!text) return null;
+  const local = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i.exec(text.trim());
+  if (local) {
+    const [, y, mo, d, h, mi, sec, ampm] = local;
+    let hour = Number(h);
+    if (ampm) hour = (hour % 12) + (ampm.toUpperCase() === 'PM' ? 12 : 0);
+    return new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), hour - 1, Number(mi), Number(sec ?? 0)));
+  }
+  const zoned = new Date(text);
+  return Number.isNaN(zoned.getTime()) ? null : zoned;
+}
+
+/** How long a one-time Flutterwave account lasts when its expiry can't be read. */
+const FLW_ACCOUNT_MINUTES = 60;
+
 /**
  * Flutterwave (v3). Top-ups are one-time bank-transfer account numbers; payouts are transfers straight to
- * the agent's bank details, so a "recipient" is just the bank code and account number. Webhooks carry the
- * secret hash set in the Flutterwave dashboard, and every one is checked again with the API before money
- * moves. Endpoints follow Flutterwave's official Node SDK and v3 API reference.
+ * the agent's bank details. Webhooks carry the secret hash set in the Flutterwave dashboard, and every one is
+ * checked again with the API before money moves. Endpoints follow Flutterwave's official Node SDK and its
+ * v3 API reference.
  */
 export class FlutterwavePaymentsAdapter implements PaymentsAdapter {
   readonly name = 'flutterwave';
@@ -480,18 +532,11 @@ export class FlutterwavePaymentsAdapter implements PaymentsAdapter {
   ) {}
 
   private async call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
-    let res: Response;
-    try {
-      res = await this.fetchImpl(`${this.baseUrl}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${this.secretKey}`, 'content-type': 'application/json' },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(20_000),
-      });
-    } catch {
-      throw unavailable('payments_unavailable', 'Payments are not reachable right now. Try again shortly.');
-    }
-    const json = (await res.json().catch(() => null)) as FlutterwaveEnvelope<T> | null;
+    const { res, json } = await paymentsRequest<FlutterwaveEnvelope<T>>(this.fetchImpl, `${this.baseUrl}${path}`, {
+      method,
+      headers: { authorization: `Bearer ${this.secretKey}`, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
     if (!res.ok || json?.status !== 'success') {
       throw new FlutterwaveError(res.status, json?.message ?? `Flutterwave answered ${res.status}`);
     }
@@ -499,26 +544,24 @@ export class FlutterwavePaymentsAdapter implements PaymentsAdapter {
   }
 
   async createTransferDeposit(input: { reference: string; amountKobo: number; email: string; expiresAt: Date }) {
-    const data = await this.call<{
-      account_number: string;
-      bank_name: string;
-      expiry_date?: string;
-      note?: string;
-    }>('POST', '/v3/virtual-account-numbers', {
-      email: input.email,
-      is_permanent: false,
-      tx_ref: input.reference,
-      amount: toNaira(input.amountKobo),
-      narration: this.businessName,
-    });
-    // Their expiry is shown when it can be read and isn't later than ours; otherwise ours, which is shorter.
-    const theirs = data.expiry_date ? new Date(data.expiry_date) : null;
-    const expiresAt = theirs && !Number.isNaN(theirs.getTime()) && theirs < input.expiresAt ? theirs : input.expiresAt;
+    const data = await this.call<{ account_number: string; bank_name: string; expiry_date?: string }>(
+      'POST',
+      '/v3/virtual-account-numbers',
+      {
+        email: input.email,
+        is_permanent: false,
+        tx_ref: input.reference,
+        amount: toNaira(input.amountKobo),
+        narration: this.businessName,
+      },
+    );
+    // The earlier of theirs and ours, so nobody is shown a time after the account stops taking money.
+    const theirs = parseFlutterwaveDate(data.expiry_date) ?? new Date(Date.now() + FLW_ACCOUNT_MINUTES * 60_000);
     return {
       accountNumber: data.account_number,
       accountName: this.businessName,
       bankName: data.bank_name,
-      expiresAt,
+      expiresAt: theirs < input.expiresAt ? theirs : input.expiresAt,
     };
   }
 
@@ -533,8 +576,8 @@ export class FlutterwavePaymentsAdapter implements PaymentsAdapter {
     try {
       data = await this.call('GET', `/v3/transactions/verify_by_reference?tx_ref=${encodeURIComponent(reference)}`);
     } catch (error) {
-      // No payment yet under this reference: still waiting for the transfer.
-      if (error instanceof FlutterwaveError && (error.status === 400 || error.status === 404)) {
+      // Flutterwave has no payment under this reference yet: still waiting. Any other refusal is an error.
+      if (error instanceof FlutterwaveError && /no transaction/i.test(error.message)) {
         return { status: 'pending', amountKobo: 0, feesKobo: 0, currency: 'NGN', senderName: null, senderBank: null };
       }
       throw error;
@@ -563,48 +606,56 @@ export class FlutterwavePaymentsAdapter implements PaymentsAdapter {
     return { accountName: data.account_name };
   }
 
-  /** Flutterwave pays straight to bank details: nothing to register. */
+  /** Flutterwave pays straight to bank details: nothing to register, so the code only marks the account. */
   async createRecipient(input: { name: string; bankCode: string; accountNumber: string }) {
     return { recipientCode: `${input.bankCode}:${input.accountNumber}` };
   }
 
-  async transfer(input: { reference: string; amountKobo: number; recipientCode: string; reason: string }) {
-    const [bankCode, accountNumber] = input.recipientCode.split(':');
-    if (!bankCode || !accountNumber)
-      throw new FlutterwaveError(422, 'The payout account is not set up for Flutterwave');
-    const data = await this.call<{ id: number; status: string; fee?: number; complete_message?: string }>(
-      'POST',
-      '/v3/transfers',
-      {
-        account_bank: bankCode,
-        account_number: accountNumber,
+  async transfer(input: {
+    reference: string;
+    amountKobo: number;
+    bankCode: string;
+    accountNumber: string;
+    reason: string;
+  }) {
+    let data: { id: number; status: string; fee?: number | null; complete_message?: string };
+    try {
+      data = await this.call('POST', '/v3/transfers', {
+        account_bank: input.bankCode,
+        account_number: input.accountNumber,
         amount: toNaira(input.amountKobo),
         narration: input.reason,
         currency: 'NGN',
         debit_currency: 'NGN',
         reference: input.reference,
-      },
-    );
-    return {
-      status: FLW_TRANSFER[data.status] ?? 'pending',
-      transferCode: String(data.id),
-      reason: data.complete_message || data.status,
-      feeKobo: data.fee === undefined ? undefined : toKobo(data.fee),
-    };
+      });
+    } catch (error) {
+      // A reference Flutterwave already has means an earlier try may have gone through: not a refusal,
+      // so the payout is never given back on it; it is looked up instead.
+      if (error instanceof FlutterwaveError && /duplicate|already exist/i.test(error.message)) {
+        throw unavailable('payments_unavailable', `Flutterwave already has transfer ${input.reference}`);
+      }
+      throw error;
+    }
+    return { transferCode: String(data.id), ...fromFlwTransfer(data) };
   }
 
-  async verifyTransfer(reference: string) {
-    const data = await this.call<Array<{ reference: string; status: string; fee?: number; complete_message?: string }>>(
-      'GET',
-      `/v3/transfers?reference=${encodeURIComponent(reference)}`,
-    );
+  async verifyTransfer(reference: string, transferCode?: string | null) {
+    if (transferCode) {
+      return fromFlwTransfer(
+        await this.call<{ status: string; fee?: number | null; complete_message?: string }>(
+          'GET',
+          `/v3/transfers/${encodeURIComponent(transferCode)}`,
+        ),
+      );
+    }
+    const data = await this.call<
+      Array<{ reference: string; status: string; fee?: number | null; complete_message?: string }>
+    >('GET', `/v3/transfers?reference=${encodeURIComponent(reference)}`);
     const found = data.find((t) => t.reference === reference);
-    if (!found) throw new FlutterwaveError(404, `No Flutterwave transfer with reference ${reference}`);
-    return {
-      status: FLW_TRANSFER[found.status] ?? 'pending',
-      reason: found.complete_message || found.status,
-      feeKobo: found.fee === undefined ? undefined : toKobo(found.fee),
-    };
+    // Not found isn't proof it was never made: the state is unknown, which never gives the money back.
+    if (!found) throw new Error(`Flutterwave did not list transfer ${reference}`);
+    return fromFlwTransfer(found);
   }
 
   async balance(currency: string) {
@@ -619,7 +670,7 @@ export class FlutterwavePaymentsAdapter implements PaymentsAdapter {
     const body = JSON.parse(rawBody.toString('utf8')) as { event?: string; data?: Record<string, unknown> };
     const data = body.data ?? {};
     const raw = body as Record<string, unknown>;
-    const eventKey = `${body.event}:${String(data.id ?? data.tx_ref ?? data.reference ?? '')}`;
+    const eventKey = eventKeyOf(body.event, data.id ?? data.tx_ref ?? data.reference, rawBody);
     if (body.event === 'charge.completed' && data.tx_ref) {
       return { kind: 'deposit', eventKey, reference: String(data.tx_ref), raw };
     }

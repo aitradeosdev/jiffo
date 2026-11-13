@@ -279,6 +279,8 @@ export class PayoutsService {
         reference: payout.reference,
         amountKobo: payout.sendKobo,
         recipientCode: account.recipientCode,
+        bankCode: account.bankCode,
+        accountNumber: account.accountNumber,
         reason: 'Jiffo earnings',
       });
     } catch (error) {
@@ -347,7 +349,7 @@ export class PayoutsService {
     }
     const via = this.providers.named('payments', payout.provider ?? this.payments.name);
     if (!via) throw new Error(`Payout ${reference} went through ${payout.provider}, which is no longer set up`);
-    const { status, reason, feeKobo } = await via.verifyTransfer(reference);
+    const { status, reason, feeKobo } = await via.verifyTransfer(reference, payout.providerTransferCode);
     if (status === 'success') return this.succeed(payout.id, feeKobo ?? 0);
     if (status === 'failed') return this.fail(payout.id, reason ?? 'failed');
     return payout;
