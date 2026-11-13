@@ -9,6 +9,7 @@ import { IDENTITY, IdentityUnavailable, type CheckOutcome, type IdentityAdapter 
 import { badRequest, conflict, forbidden, unavailable, unprocessable } from '../common/errors';
 import { nameWords } from '../common/names';
 import { PushService } from '../push/push.service';
+import { CountriesService } from '../countries/countries.service';
 
 type Application = typeof agentApplications.$inferSelect;
 type Check = { key: string; outcome: string; note?: string };
@@ -65,6 +66,7 @@ export class AgentApplicationService {
     @Inject(IDENTITY) private readonly identity: IdentityAdapter,
     @Inject(APP_CONFIG) config: AppConfig,
     private readonly push: PushService,
+    private readonly countries: CountriesService,
   ) {
     this.ninKey = Buffer.from(
       hkdfSync('sha256', Buffer.from(config.PIN_KEY, 'hex'), Buffer.alloc(0), 'jiffo nin fingerprint', 32),
@@ -125,9 +127,16 @@ export class AgentApplicationService {
   /** The checklist as the agent app shows it. Checks still running are asked about again, now and then. */
   async view(userId: string) {
     let app = await this.load(userId);
-    if (app.status === 'checking' && Date.now() - app.updatedAt.getTime() > POLL_EVERY_MS)
-      app = await this.refresh(app);
-    const [user, payout, profile, state] = await Promise.all([
+    const stale = Date.now() - app.updatedAt.getTime() > POLL_EVERY_MS;
+    if (app.status === 'checking' && stale) app = await this.refresh(app);
+    // An identity check whose result wasn't back when the app last asked: the provider is asked again here.
+    if (app.status === 'draft' && app.identityReference && app.identityOutcome === null && stale) {
+      await this.settleIdentity(app).catch((error: unknown) =>
+        this.logger.warn(`Identity check for ${userId} could not be read: ${String(error)}`),
+      );
+      app = await this.load(userId);
+    }
+    const [user, payout, profile, state, { settings }] = await Promise.all([
       this.db.select().from(users).where(eq(users.id, userId)),
       this.db
         .select({ accountName: payoutAccounts.accountName })
@@ -140,6 +149,7 @@ export class AgentApplicationService {
             .from(states)
             .where(and(eq(states.countryCode, app.countryCode), eq(states.code, app.stateCode)))
         : Promise.resolve([]),
+      this.countries.currentSettings(app.countryCode),
     ]);
     const u = user[0]!;
     const steps = {
@@ -153,6 +163,8 @@ export class AgentApplicationService {
     return {
       status: app.status,
       steps,
+      /** Started with the provider, and its result not back yet. */
+      identityChecking: app.identityReference !== null && app.identityOutcome === null,
       stateCode: app.stateCode,
       stateName: state[0]?.name ?? null,
       waitlisted: state[0]?.agentSignups === 'waitlist',
@@ -164,6 +176,9 @@ export class AgentApplicationService {
       legalName: app.legalName,
       checks: app.checks.map((c) => ({ ...c, label: CHECK_LABELS[c.key] ?? c.key })),
       submittedAt: app.submittedAt,
+      /** Who runs the checks, as the app names them, and how soon support usually looks at one in review. */
+      provider: settings.identity.provider,
+      reviewHours: settings.identity.reviewTargetHours,
       /** Said to the agent only when support declined the application. */
       decisionNote: app.status === 'rejected' ? app.decisionNote : null,
     };
@@ -217,8 +232,21 @@ export class AgentApplicationService {
       throw conflict('application_submitted', 'Your application is already sent. We will text you when it is checked.');
     }
     if (!app.identityReference) throw conflict('identity_not_started', 'Start with your NIN and BVN');
+    return this.settleIdentity(app);
+  }
+
+  /** Asks the provider for the identity result, and keeps it once it is back. */
+  private async settleIdentity(app: Application) {
+    const userId = app.userId;
     const result = await this.provider(() => this.identity.identityResult(app.identityReference!));
-    if (result.status === 'pending') return { status: 'pending' as const };
+    if (result.status === 'pending') {
+      // Remembered, so the checklist doesn't ask the provider again before POLL_EVERY_MS.
+      await this.db
+        .update(agentApplications)
+        .set({ updatedAt: new Date() })
+        .where(eq(agentApplications.userId, userId));
+      return { status: 'pending' as const };
+    }
 
     const passed = (key: string) => result.checks.some((c) => c.key === key && c.outcome === 'passed');
     const own = passed('nin') && passed('selfie');

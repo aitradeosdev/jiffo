@@ -4,6 +4,7 @@ import { goBack } from '@/nav';
 import { useSession } from '@/auth/session';
 import { ApiError, errorMessage } from '@/api/client';
 import { useResource } from '@/api/useResource';
+import { useOptionalApplication } from '@/agent/application';
 import { Button, Field, Screen, Text } from '@/ui/kit';
 import { Icon, Row } from '@/ui/parts';
 
@@ -12,9 +13,11 @@ interface Bank {
   name: string;
 }
 
-/** The agent's own-name bank account. The bank's name for it must match the agent's name. */
+/** The agent's own-name bank account. The bank's name for it must match the agent's name on their NIN. */
 export default function PayoutAccount() {
   const { api, user } = useSession();
+  // Once the provider has checked the NIN, the account must be in the name on it; before, the name in the app.
+  const legalName = useOptionalApplication()?.legalName ?? null;
   const banks = useResource<Bank[]>('/v1/banks');
   const [bank, setBank] = useState<Bank | null>(null);
   const [search, setSearch] = useState('');
@@ -37,7 +40,7 @@ export default function PayoutAccount() {
       const held = e instanceof ApiError ? e.details.accountName : undefined;
       setError(
         typeof held === 'string'
-          ? `The bank has this account as ${held}. It must be in your name, ${user?.firstName} ${user?.lastName}.`
+          ? `The bank has this account as ${held}. It must be in your own name, ${legalName ?? `${user?.firstName} ${user?.lastName}`}.`
           : errorMessage(e),
       );
     } finally {

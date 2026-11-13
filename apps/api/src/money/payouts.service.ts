@@ -96,14 +96,18 @@ export class PayoutsService {
     const bank = (await this.listBanks()).find((b) => b.code === bankCode);
     if (!bank) throw unprocessable('bank_not_supported', 'Choose a bank from the list');
 
+    const legalName = await this.applications.legalName(auth.userId);
     let accountName: string;
     try {
-      ({ accountName } = await this.payments.resolveAccount(bankCode, accountNumber));
+      ({ accountName } = await this.payments.resolveAccount(
+        bankCode,
+        accountNumber,
+        legalName ?? `${me.firstName} ${me.lastName}`,
+      ));
     } catch (error) {
       if (error instanceof PaystackError) throw unprocessable('account_not_found', 'Check the account number and bank');
       throw error;
     }
-    const legalName = await this.applications.legalName(auth.userId);
     const held = nameWords(accountName);
     const own = legalName
       ? matchesLegalName(accountName, legalName)

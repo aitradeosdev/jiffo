@@ -76,6 +76,8 @@ describe('agent application', () => {
     expect((await app(agent)).body).toMatchObject({
       status: 'draft',
       steps: { basics: false, identity: false, address: false, bank: false, prefs: false, learn: false },
+      provider: null,
+      reviewHours: 24,
     });
   });
 
@@ -190,6 +192,27 @@ describe('agent application', () => {
       const res = await call(agent, method, path, body);
       expect(res.status, `${method} ${path}`).toBe(409);
     }
+  });
+
+  it('records an identity result that comes back after the app stopped asking', async () => {
+    const identity = t.app.get<IdentityAdapter>(IDENTITY);
+    const agent = await newAgent();
+    await call(agent, 'patch', '', { stateCode: 'LA', area: 'Lekki' }).expect(200);
+    await call(agent, 'post', '/identity', { nin: nin(), bvn: '22212345678', consent: true }).expect(200);
+    const spy = vi.spyOn(identity, 'identityResult').mockResolvedValueOnce({ status: 'pending', checks: [] });
+    expect((await call(agent, 'post', '/identity/finish').expect(200)).body.status).toBe('pending');
+    spy.mockRestore();
+    // Asked moments ago: the provider isn't asked again yet.
+    expect((await app(agent)).body).toMatchObject({ identityChecking: true, steps: { identity: false } });
+    await t.db
+      .update(agentApplications)
+      .set({ updatedAt: new Date(Date.now() - 60_000) })
+      .where(eq(agentApplications.userId, agent.userId));
+    expect((await app(agent)).body).toMatchObject({
+      identityChecking: false,
+      steps: { identity: true },
+      legalName: 'TUNDE BAKARE',
+    });
   });
 
   it('lets an agent waiting for a decision keep sharing where they are for an errand already running', async () => {
