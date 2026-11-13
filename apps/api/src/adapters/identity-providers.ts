@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { safeEqual } from '../common/crypto';
 import {
   headerOf,
@@ -8,6 +8,7 @@ import {
   type IdentityAdapter,
   type IdentityPerson,
   type IdentityResult,
+  type PageInput,
 } from './identity';
 
 /** What a provider adapter needs from the API around it. */
@@ -23,6 +24,9 @@ const TIMEOUT_MS = 20_000;
 
 /** An identity provider refused or failed a request. */
 export class IdentityProviderError extends Error {}
+
+/** What the agent sent from a provider's page can't be used; the message says what to do. */
+export class IdentityPageError extends Error {}
 
 /** Where the provider's page sends the agent when they finish: back into the agent app. */
 export const identityDoneUrl = (ctx: ProviderContext) => `${ctx.publicApiUrl}/v1/identity/done`;
@@ -426,5 +430,241 @@ connect.open();
     const { status, json } = await this.call<{ entity?: { wallet_balance?: string } }>('GET', '/api/v1/balance');
     if (status >= 400) throw new Error(`Dojah answered ${status}`);
     return `Connected. Balance: ₦${json?.entity?.wallet_balance ?? '?'}`;
+  }
+}
+
+/** Youverify's liveness check for the browser, pinned, and checked against this hash when it loads. */
+const YOUVERIFY_LIVENESS_SCRIPT = {
+  src: 'https://unpkg.com/youverify-liveness-web@1.2.3/dist/index.umd.cjs',
+  integrity: 'sha384-EYCLcgCiqUaHbqIIrBh8NRWMvGeQpV2WRaX0eJ5gneRwqGt+mpp+H0WwljtXMMgd',
+};
+/** How long a liveness session lasts once the page is open (Youverify allows up to 10 minutes). */
+const YOUVERIFY_SESSION_SECONDS = 600;
+
+interface YouverifyNin {
+  status?: string;
+  reason?: string | null;
+  selfieValidation?: boolean;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  dateOfBirth?: string;
+  idNumber?: string;
+}
+
+const escapeHtml = (text: string) =>
+  text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+/**
+ * Youverify: their liveness check in a page Jiffo serves, then their NIN check with face match. The page
+ * asks for the NIN and runs the liveness check, and sends the NIN and the liveness session to the API. The
+ * API asks Youverify for that session's result and passes Youverify's own link to the selfie into the NIN
+ * check, so the selfie never passes through Jiffo. They don't check addresses here: their visits need the
+ * address in parts (building number, street, landmark) the app doesn't ask for, so the team checks them.
+ */
+export class YouverifyIdentityAdapter implements IdentityAdapter {
+  readonly name = 'youverify';
+  readonly flow = 'hosted' as const;
+  private readonly base: string;
+
+  constructor(
+    private readonly secretKey: string,
+    /** The public merchant key, for starting liveness sessions; Youverify makes it public by design. */
+    private readonly publicMerchantKey: string,
+    private readonly sandbox: boolean,
+    private readonly ctx: ProviderContext,
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {
+    this.base = sandbox ? 'https://api.sandbox.youverify.co' : 'https://api.youverify.co';
+  }
+
+  private async call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+    const res = await this.fetchImpl(`${this.base}${path}`, {
+      method,
+      headers: { token: this.secretKey, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    }).catch((error: Error) => {
+      throw new IdentityProviderError(`Youverify didn't answer: ${error.message}`);
+    });
+    const json = (await res.json().catch(() => null)) as { data?: T; message?: string } | null;
+    if (!res.ok || !json) throw new IdentityProviderError(`Youverify answered ${res.status}: ${json?.message ?? ''}`);
+    return json.data as T;
+  }
+
+  /** The page the app opens: Jiffo's address, signed so only links the API made are served. */
+  async startIdentity(input: { reference: string }) {
+    const ref = encodeURIComponent(input.reference);
+    return {
+      reference: input.reference,
+      url: `${this.ctx.publicApiUrl}/v1/identity/hosted/youverify?ref=${ref}&sig=${this.ctx.sign(`youverify:${input.reference}`)}`,
+    };
+  }
+
+  /** A liveness session for one page: its id, and a token for the browser to start it with. */
+  private async newSession(reference: string) {
+    const session = await this.call<{ sessionId?: string }>('POST', '/v2/api/identity/sdk/session/generate', {
+      publicMerchantID: this.publicMerchantKey,
+      ttlSeconds: YOUVERIFY_SESSION_SECONDS,
+      metadata: { reference },
+    });
+    const token = await this.call<{ authToken?: string }>('POST', '/v2/api/identity/sdk/liveness/token', {
+      publicMerchantID: this.publicMerchantKey,
+      deviceCorrelationId: randomUUID(),
+    });
+    if (!session?.sessionId || !token?.authToken) throw new IdentityProviderError("Youverify didn't start a session");
+    return { sessionId: session.sessionId, sessionToken: token.authToken };
+  }
+
+  /**
+   * The page: the NIN, then Youverify's liveness check. On success it sends the NIN and the session (signed
+   * by the API, so only a session started here counts), never the selfie the check hands back to the page.
+   */
+  async page(reference: string) {
+    const { sessionId, sessionToken } = await this.newSession(reference);
+    const options = { sessionId, sessionToken, sandboxEnvironment: this.sandbox, branding: { name: 'Jiffo' } };
+    const submit = {
+      url: `${this.ctx.publicApiUrl}/v1/identity/hosted/youverify/submit`,
+      ref: reference,
+      sig: this.ctx.sign(`youverify:${reference}`),
+      session: sessionId,
+      sessionSig: this.ctx.sign(`youverify-session:${reference}:${sessionId}`),
+      done: identityDoneUrl(this.ctx),
+    };
+    const json = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c');
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Check your identity</title>
+<style>
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;padding:24px;background:#fff;color:#0b0b0b}
+h1{font-size:28px;line-height:1.15;margin:24px 0 8px}p{color:#555;line-height:1.45;margin:8px 0}
+label{display:block;font-weight:600;margin:28px 0 8px}
+input{width:100%;box-sizing:border-box;font-size:20px;letter-spacing:2px;padding:14px;border:1px solid #ccc;border-radius:12px;background:inherit;color:inherit}
+button{width:100%;margin-top:24px;padding:16px;font-size:17px;font-weight:600;border:0;border-radius:14px;background:#0b0b0b;color:#fff}
+button:disabled{opacity:.4}.note{font-size:13px;color:#777}.error{color:#c0262d;min-height:1em}
+@media (prefers-color-scheme:dark){body{background:#0b0b0b;color:#f2f2f2}p{color:#aaa}input{border-color:#333}button{background:#f2f2f2;color:#0b0b0b}}
+</style></head>
+<body>
+<h1>Check your identity</h1>
+<p>Enter your NIN, then take a selfie. Youverify checks them with NIMC.</p>
+<label for="nin">National Identification Number</label>
+<input id="nin" inputmode="numeric" autocomplete="off" placeholder="11 digits">
+<p class="note">On your NIN slip or card, or dial *346# to see it.</p>
+<p class="note">By continuing you agree to Youverify checking your NIN with NIMC and taking a selfie to match your ID photo.</p>
+<p id="error" class="error" role="alert"></p>
+<button id="go" disabled>Take selfie</button>
+<script src="${escapeHtml(YOUVERIFY_LIVENESS_SCRIPT.src)}" integrity="${YOUVERIFY_LIVENESS_SCRIPT.integrity}" crossorigin="anonymous"></script>
+<script>
+var options = ${json(options)};
+var submit = ${json(submit)};
+var nin = document.getElementById('nin'), go = document.getElementById('go'), error = document.getElementById('error');
+var say = function (text) { error.textContent = text; };
+nin.addEventListener('input', function () {
+  nin.value = nin.value.replace(/\\D/g, '').slice(0, 11);
+  go.disabled = nin.value.length !== 11;
+});
+if (window.YouverifyLiveness && YouverifyLiveness.preload) YouverifyLiveness.preload();
+options.onSuccess = function () {
+  // The selfie stays with Youverify: only the NIN and the session go to Jiffo.
+  go.disabled = true; say('Checking…');
+  fetch(submit.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+    ref: submit.ref, sig: submit.sig, nin: nin.value, session: submit.session, sessionSig: submit.sessionSig
+  }) }).then(function (res) {
+    if (res.ok) { location.href = submit.done; return; }
+    return res.json().then(function (body) {
+      say((body && body.error && body.error.message) || 'That didn\\'t work. Try again.'); go.disabled = false;
+    });
+  }).catch(function () { say('No connection. Try again.'); go.disabled = false; });
+};
+options.onFailure = function (data) {
+  var key = data && data.error && data.error.key;
+  // A session that ran out: the page starts a new one.
+  if (key === 'invalid_or_expired_session' || key === 'session_token_error') { location.reload(); return; }
+  say("The selfie check didn't pass. Try again in good light, facing the camera.");
+  setTimeout(function () { location.reload(); }, 2500);
+};
+go.addEventListener('click', function () {
+  if (!window.YouverifyLiveness) { say("The selfie check couldn't load. Check your connection and try again."); return; }
+  say('');
+  new YouverifyLiveness(options).start();
+});
+</script></body></html>`;
+  }
+
+  /** Results come from the page; until it has sent one, the check is still running. */
+  async identityResult(): Promise<IdentityResult> {
+    return { status: 'pending', checks: [] };
+  }
+
+  /** The liveness result for a session, asked of Youverify a few times while it settles. */
+  private async liveness(sessionId: string) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const found = await this.call<{ docs?: Array<{ sessionId?: string; passed?: boolean; faceImage?: string }> }>(
+        'GET',
+        `/v2/api/identity/liveness?sessionId=${encodeURIComponent(sessionId)}&limit=1`,
+      );
+      const doc = found?.docs?.find((d) => d.sessionId === sessionId);
+      if (doc) return doc;
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+    throw new IdentityProviderError('Youverify has no selfie check for this session yet');
+  }
+
+  async submitPage(reference: string, input: PageInput): Promise<IdentityResult> {
+    const session = input.session ?? '';
+    const expected = this.ctx.sign(`youverify-session:${reference}:${session}`);
+    if (!session || !input.sessionSig || !safeEqual(input.sessionSig, expected)) {
+      throw new IdentityPageError('This selfie check was started elsewhere. Start again.');
+    }
+    const live = await this.liveness(session);
+    if (!live.passed || !live.faceImage) {
+      return {
+        status: 'done',
+        outcome: 'failed',
+        checks: [
+          { key: 'selfie', outcome: 'failed', note: "The liveness check didn't pass" },
+          { key: 'nin', outcome: 'review', note: 'Not checked, as the liveness check failed' },
+        ],
+      };
+    }
+    // Youverify's own link to the selfie, from their liveness check: Jiffo never fetches it.
+    const nin = await this.call<YouverifyNin>('POST', '/v2/api/identity/ng/nin', {
+      id: input.nin,
+      isSubjectConsent: true,
+      validations: { selfie: { image: live.faceImage } },
+    });
+    const found = nin?.status === 'found';
+    const ninCheck: IdentityResult['checks'][number] = found
+      ? { key: 'nin', outcome: 'passed' }
+      : nin?.status === 'not_found'
+        ? { key: 'nin', outcome: 'failed', note: 'No NIN record found' }
+        : { key: 'nin', outcome: 'review', note: `NIMC answered: ${nin?.reason ?? nin?.status ?? 'nothing'}` };
+    const selfieCheck: IdentityResult['checks'][number] = !found
+      ? { key: 'selfie', outcome: 'review', note: 'Not compared, as the NIN record was not found' }
+      : nin.selfieValidation === true
+        ? { key: 'selfie', outcome: 'passed' }
+        : { key: 'selfie', outcome: 'review', note: "Youverify didn't match the selfie to the NIN photo" };
+    const checks = [ninCheck, selfieCheck];
+    return {
+      status: 'done',
+      outcome: overall(checks),
+      legalName: found ? legalNameOf([nin.firstName, nin.middleName, nin.lastName]) : undefined,
+      dateOfBirth: found ? isoDate(nin.dateOfBirth) : undefined,
+      checks,
+      idNumber: found ? (nin.idNumber ?? input.nin) : undefined,
+    };
+  }
+
+  async startAddress(input: { person: IdentityPerson }) {
+    return { reference: `support:${input.person.phone}` };
+  }
+
+  async addressResult(): Promise<AddressResult> {
+    return ADDRESS_BY_SUPPORT;
+  }
+
+  /** For the panel's Test button: the secret key reads Youverify's list of states. */
+  async check() {
+    await this.call('GET', '/v2/api/states');
+    return 'Connected. Youverify accepted the secret key.';
   }
 }

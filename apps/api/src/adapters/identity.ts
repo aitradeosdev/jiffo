@@ -36,6 +36,13 @@ export interface AddressResult {
   note?: string;
 }
 
+/** What a page Jiffo serves for a provider sends back: the NIN the agent typed, and the provider's session. */
+export interface PageInput {
+  nin: string;
+  session?: string;
+  sessionSig?: string;
+}
+
 export interface IdentityAdapter {
   readonly name: string;
   /**
@@ -66,7 +73,12 @@ export interface IdentityAdapter {
    */
   parseWebhook?(rawBody: Buffer, headers: Headers): Promise<{ reference: string; result: IdentityResult } | null>;
   /** For providers whose widget runs in a page Jiffo serves: that page. */
-  page?(reference: string): string;
+  page?(reference: string): string | Promise<string>;
+  /**
+   * For a page Jiffo serves that sends what the agent entered back to the API (Youverify's): runs the check
+   * with it and gives the result. The NIN is passed on, never kept.
+   */
+  submitPage?(reference: string, input: PageInput): Promise<IdentityResult>;
 }
 
 export type Headers = Record<string, string | string[] | undefined>;

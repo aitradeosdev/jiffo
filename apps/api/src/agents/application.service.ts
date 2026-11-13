@@ -14,7 +14,7 @@ import {
   type IdentityAdapter,
 } from '../adapters/identity';
 import { ProvidersService } from '../providers/providers.service';
-import { IdentityProviderError } from '../adapters/identity-providers';
+import { IdentityPageError, IdentityProviderError } from '../adapters/identity-providers';
 import { badRequest, conflict, forbidden, notFound, unavailable, unprocessable } from '../common/errors';
 import { nameWords } from '../common/names';
 import { PushService } from '../push/push.service';
@@ -281,12 +281,57 @@ export class AgentApplicationService {
     return { reference, settled: (await this.applyIdentity(app, result)) !== null };
   }
 
+  /** Whether a link to a provider's page is one this API made. */
+  private signedLink(provider: string, reference: string, signature: string) {
+    return safeEqual(signature, this.providers.context.sign(`${provider}:${reference}`));
+  }
+
   /** The page a provider's widget runs in, for a link this API made. */
-  hostedPage(provider: string, reference: string, signature: string) {
+  async hostedPage(provider: string, reference: string, signature: string) {
     const adapter = this.providers.named('identity', provider);
-    const expected = this.providers.context.sign(`${provider}:${reference}`);
-    if (!adapter?.page || !safeEqual(signature, expected)) return null;
-    return adapter.page(reference);
+    if (!adapter?.page || !this.signedLink(provider, reference, signature)) return null;
+    const page = adapter.page.bind(adapter);
+    return this.provider(async () => page(reference));
+  }
+
+  /**
+   * What the agent sent from a provider's page that Jiffo serves: the check runs with it, and its result
+   * settles the application at once. The NIN is passed to the provider and only its fingerprint is kept.
+   */
+  async submitPage(
+    provider: string,
+    input: { ref: string; sig: string; nin: string; session?: string; sessionSig?: string },
+  ) {
+    const adapter = this.providers.named('identity', provider);
+    if (!adapter?.submitPage || !this.signedLink(provider, input.ref, input.sig)) return null;
+    const nin = normaliseIdNumber('nin', input.nin);
+    if (!nin) throw badRequest('invalid_nin', 'A NIN is 11 digits');
+    const [app] = await this.db
+      .select()
+      .from(agentApplications)
+      .where(
+        and(
+          eq(agentApplications.identityProvider, provider),
+          eq(agentApplications.identityReference, input.ref),
+          eq(agentApplications.status, 'draft'),
+          isNull(agentApplications.identityOutcome),
+        ),
+      );
+    if (!app) throw conflict('identity_changed', 'This check is finished or was started again. Go back to the app.');
+    const submit = adapter.submitPage.bind(adapter);
+    let result: IdentityResult;
+    try {
+      result = await this.provider(() =>
+        submit(input.ref, { nin, session: input.session, sessionSig: input.sessionSig }),
+      );
+    } catch (error) {
+      if (error instanceof IdentityPageError) throw badRequest('identity_page', error.message);
+      throw error;
+    }
+    const settled = await this.applyIdentity(app, result);
+    if (!settled)
+      throw conflict('identity_changed', 'This check is finished or was started again. Go back to the app.');
+    return { status: settled.status, outcome: settled.outcome };
   }
 
   /**

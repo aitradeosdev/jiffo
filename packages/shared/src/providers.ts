@@ -267,6 +267,31 @@ export const PROVIDERS: ProviderInfo[] = [
     ],
   },
   {
+    key: 'youverify',
+    category: 'identity',
+    name: 'Youverify',
+    about:
+      "Youverify's liveness check and NIN check with face match, on a page Jiffo serves. Addresses are checked by our team.",
+    fields: [
+      { key: 'secretKey', label: 'API secret key', secret: true, required: true },
+      {
+        key: 'publicMerchantKey',
+        label: 'Public merchant key',
+        secret: false,
+        required: true,
+        hint: 'Starts the liveness check in the browser; Youverify makes it public by design.',
+      },
+      {
+        key: 'mode',
+        label: 'Mode',
+        secret: false,
+        required: false,
+        placeholder: 'live',
+        hint: "Type sandbox to use Youverify's sandbox, with its sandbox keys.",
+      },
+    ],
+  },
+  {
     key: 'fcm',
     category: 'push',
     name: 'Firebase Cloud Messaging',

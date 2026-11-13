@@ -1,6 +1,12 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { DojahIdentityAdapter, isoDate, SmileIdIdentityAdapter } from '../src/adapters/identity-providers';
+import {
+  DojahIdentityAdapter,
+  IdentityPageError,
+  isoDate,
+  SmileIdIdentityAdapter,
+  YouverifyIdentityAdapter,
+} from '../src/adapters/identity-providers';
 
 type Call = { url: string; init: RequestInit };
 function fakeFetch(respond: (call: Call) => Response) {
@@ -217,5 +223,121 @@ describe('Dojah', () => {
     expect(isoDate('1995-04-12')).toBe('1995-04-12');
     expect(isoDate('12-04-1995')).toBe('1995-04-12');
     expect(isoDate('April')).toBeUndefined();
+  });
+});
+
+describe('Youverify', () => {
+  const make = (impl: typeof fetch) => new YouverifyIdentityAdapter('yv-secret', 'pmk-1', true, ctx, impl);
+  const envelope = (data: unknown, status = 200) => json({ success: status < 400, data }, status);
+
+  it('serves a page with a liveness session it started, and the NIN field', async () => {
+    const { impl, calls } = fakeFetch(({ url }) =>
+      url.endsWith('/session/generate') ? envelope({ sessionId: 'sess-1' }) : envelope({ authToken: 'tok-1' }),
+    );
+    const youverify = make(impl);
+    expect((await youverify.startIdentity({ reference: 'jid-4' })).url).toBe(
+      'https://api.jiffo.test/v1/identity/hosted/youverify?ref=jid-4&sig=sig(youverify:jid-4)',
+    );
+    const page = await youverify.page('jid-4');
+    expect(calls[0]!.url).toBe('https://api.sandbox.youverify.co/v2/api/identity/sdk/session/generate');
+    expect(calls[0]!.init.headers).toMatchObject({ token: 'yv-secret' });
+    expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({
+      publicMerchantID: 'pmk-1',
+      metadata: { reference: 'jid-4' },
+    });
+    expect(page).toContain('"sessionId":"sess-1"');
+    expect(page).toContain('"sessionToken":"tok-1"');
+    expect(page).toContain('"sessionSig":"sig(youverify-session:jid-4:sess-1)"');
+    expect(page).toContain('integrity="sha384-');
+    expect(page).toContain('National Identification Number');
+    expect(page).not.toContain('yv-secret');
+    // The page sends the NIN and the session, never the selfie.
+    expect(page).not.toMatch(/faceImage/);
+  });
+
+  describe('a submitted page', () => {
+    const input = { nin: '12345678901', session: 'sess-1', sessionSig: 'sig(youverify-session:jid-4:sess-1)' };
+    const respond = (live: object | null, nin: object) =>
+      fakeFetch(({ url }) =>
+        url.includes('/identity/liveness')
+          ? envelope({ docs: live ? [{ sessionId: 'sess-1', ...live }] : [] })
+          : envelope(nin),
+      );
+
+    it('passes the liveness selfie link into the NIN check, and maps the answer', async () => {
+      const { impl, calls } = respond(
+        { passed: true, faceImage: 'https://cdn.youverify.co/face.jpg' },
+        {
+          status: 'found',
+          selfieValidation: true,
+          firstName: 'Tunde',
+          middleName: 'Ade',
+          lastName: 'Bakare',
+          dateOfBirth: '1995-04-12',
+          idNumber: '12345678901',
+        },
+      );
+      expect(await make(impl).submitPage('jid-4', input)).toEqual({
+        status: 'done',
+        outcome: 'passed',
+        legalName: 'TUNDE ADE BAKARE',
+        dateOfBirth: '1995-04-12',
+        checks: [
+          { key: 'nin', outcome: 'passed' },
+          { key: 'selfie', outcome: 'passed' },
+        ],
+        idNumber: '12345678901',
+      });
+      expect(calls[0]!.url).toBe('https://api.sandbox.youverify.co/v2/api/identity/liveness?sessionId=sess-1&limit=1');
+      expect(calls[1]!.url).toBe('https://api.sandbox.youverify.co/v2/api/identity/ng/nin');
+      expect(JSON.parse(String(calls[1]!.init.body))).toEqual({
+        id: '12345678901',
+        isSubjectConsent: true,
+        validations: { selfie: { image: 'https://cdn.youverify.co/face.jpg' } },
+      });
+    });
+
+    it('fails a liveness check that did not pass, without a NIN check', async () => {
+      const { impl, calls } = respond({ passed: false, faceImage: 'x' }, {});
+      expect(await make(impl).submitPage('jid-4', input)).toMatchObject({ outcome: 'failed' });
+      expect(calls).toHaveLength(1);
+    });
+
+    it('sends an unmatched selfie to review, and a NIN not found fails', async () => {
+      const live = { passed: true, faceImage: 'https://cdn.youverify.co/face.jpg' };
+      const unmatched = respond(live, { status: 'found', selfieValidation: false, firstName: 'A', lastName: 'B' });
+      expect(await make(unmatched.impl).submitPage('jid-4', input)).toMatchObject({
+        outcome: 'review',
+        checks: [
+          { key: 'nin', outcome: 'passed' },
+          { key: 'selfie', outcome: 'review' },
+        ],
+      });
+      const missing = respond(live, { status: 'not_found' });
+      const result = await make(missing.impl).submitPage('jid-4', input);
+      expect(result).toMatchObject({
+        outcome: 'failed',
+        checks: [{ key: 'nin', outcome: 'failed' }, expect.anything()],
+      });
+      expect(result.idNumber).toBeUndefined();
+    });
+
+    it('takes only a session the API started for this check', async () => {
+      const { impl, calls } = respond({ passed: true, faceImage: 'x' }, {});
+      await expect(make(impl).submitPage('jid-4', { ...input, session: 'someone-elses' })).rejects.toBeInstanceOf(
+        IdentityPageError,
+      );
+      await expect(make(impl).submitPage('jid-5', input)).rejects.toBeInstanceOf(IdentityPageError);
+      expect(calls).toHaveLength(0);
+    });
+  });
+
+  it('tests the secret key on a harmless read, and leaves addresses to the team', async () => {
+    const { impl, calls } = fakeFetch(() => envelope([{ state: 'Lagos' }]));
+    expect(await make(impl).check()).toMatch(/Connected/);
+    expect(calls[0]!.url).toBe('https://api.sandbox.youverify.co/v2/api/states');
+    const refused = fakeFetch(() => json({ success: false, statusCode: 401, message: 'Permission denied' }, 401));
+    await expect(make(refused.impl).check()).rejects.toThrow(/401/);
+    expect(await make(impl).addressResult()).toMatchObject({ outcome: 'review' });
   });
 });

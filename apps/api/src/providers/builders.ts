@@ -6,7 +6,12 @@ import { FlutterwavePaymentsAdapter, PaystackPaymentsAdapter } from '../adapters
 import { FcmPushAdapter } from '../adapters/push';
 import { S3StorageAdapter } from '../adapters/storage';
 import type { Adapters } from './env-adapters';
-import { DojahIdentityAdapter, SmileIdIdentityAdapter, type ProviderContext } from '../adapters/identity-providers';
+import {
+  DojahIdentityAdapter,
+  SmileIdIdentityAdapter,
+  YouverifyIdentityAdapter,
+  type ProviderContext,
+} from '../adapters/identity-providers';
 
 type Values = Record<string, string>;
 const sandboxMode = (v: string | undefined) => (v ?? '').trim().toLowerCase() === 'sandbox';
@@ -41,6 +46,7 @@ export const BUILDERS: {
         sandboxMode(v.mode),
         ctx,
       ),
+    youverify: (v, ctx) => new YouverifyIdentityAdapter(v.secretKey!, v.publicMerchantKey!, sandboxMode(v.mode), ctx),
   },
   calls: {
     africastalking: (v) => new AfricasTalkingCallsAdapter(v.username!, v.apiKey!, v.phoneNumber!),

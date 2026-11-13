@@ -1,4 +1,18 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpException,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { badRequest, notFound, unauthorized } from '../common/errors';
@@ -31,6 +45,14 @@ const AddressBody = z.object({
   }),
 });
 const TermsBody = z.object({ accepted: z.literal(true) });
+/** From a provider's page that Jiffo serves: the signed link it was opened with, the NIN and the session. */
+const PageBody = z.object({
+  ref: z.string().min(1).max(100),
+  sig: z.string().min(1).max(100),
+  nin: z.string().max(20),
+  session: z.string().max(200).optional(),
+  sessionSig: z.string().max(100).optional(),
+});
 
 /** The agent's application, from the agent app. */
 @Controller('agent/application')
@@ -96,15 +118,38 @@ export class IdentityProviderController {
 
   /** A provider's widget page, for a link the API signed when the check started. */
   @Get('identity/hosted/:provider')
-  hosted(
+  async hosted(
     @Param('provider') provider: string,
     @Query('ref') reference: string | undefined,
     @Query('sig') signature: string | undefined,
     @Res() res: Response,
   ) {
-    const page = reference && signature ? this.applications.hostedPage(provider, reference, signature) : null;
+    let page: string | null;
+    try {
+      page = reference && signature ? await this.applications.hostedPage(provider, reference, signature) : null;
+    } catch (error) {
+      // The provider couldn't start the check: said in the browser, with a way to try again.
+      if (!(error instanceof HttpException) || error.getStatus() !== 503) throw error;
+      res
+        .status(503)
+        .type('html')
+        .set('cache-control', 'no-store')
+        .send(
+          `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Try again</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1 style="font-size:24px">The check couldn't start</h1><p>Try again in a moment.</p><p><a href="javascript:location.reload()">Try again</a></p></body></html>`,
+        );
+      return;
+    }
     if (!page) throw notFound('not_found', 'Not found');
     res.type('html').set('cache-control', 'no-store').send(page);
+  }
+
+  /** What the agent entered on a provider's page that Jiffo serves, sent from that page. */
+  @Post('identity/hosted/:provider/submit')
+  @HttpCode(200)
+  async submitPage(@Param('provider') provider: string, @Body(new ZodBody(PageBody)) body: z.infer<typeof PageBody>) {
+    const result = await this.applications.submitPage(provider, body);
+    if (!result) throw notFound('not_found', 'Not found');
+    return result;
   }
 
   /** Where a provider's page sends the agent when they finish: back into the agent app. */
