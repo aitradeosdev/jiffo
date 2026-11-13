@@ -2,7 +2,12 @@ import { createHmac } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { DojahIdentityAdapter, SmileIdIdentityAdapter } from '../src/adapters/identity-providers';
+import {
+  DojahIdentityAdapter,
+  IdentityProviderError,
+  SmileIdIdentityAdapter,
+  YouverifyIdentityAdapter,
+} from '../src/adapters/identity-providers';
 import { agentApplications, providerSettings } from '../src/db/schema';
 import { ProvidersService } from '../src/providers/providers.service';
 import { adminAs, createTestApp, signIn, uniqueNin, type Person, type TestApp } from './helpers';
@@ -184,6 +189,104 @@ describe("identity checks on the provider's own page", () => {
       .get('/v1/identity/done')
       .expect(200)
       .expect(/jiffo-agent:\/\/identity-done/);
+    await panel('post', '/identity/active').send({ provider: null }).expect(200);
+  });
+
+  it("runs Youverify's page: the NIN and liveness session it sends settle the check", async () => {
+    await panel('put', '/identity/youverify')
+      .send({ config: { publicMerchantKey: 'pmk-1', mode: 'sandbox' }, secrets: { secretKey: 'yv-secret' } })
+      .expect(200);
+    vi.spyOn(YouverifyIdentityAdapter.prototype, 'check').mockResolvedValue('Connected');
+    await panel('post', '/identity/youverify/test').expect(200);
+    await panel('post', '/identity/active').send({ provider: 'youverify' }).expect(200);
+
+    const agent = await newAgent();
+    const started = await request(t.http)
+      .post('/v1/agent/application/identity')
+      .set(agent.headers)
+      .send({ consent: true })
+      .expect(200);
+    const url = new URL(started.body.url);
+    const ref = url.searchParams.get('ref')!;
+    const sig = url.searchParams.get('sig')!;
+    type Session = { newSession: () => Promise<{ sessionId: string; sessionToken: string }> };
+    const session = vi.spyOn(YouverifyIdentityAdapter.prototype as unknown as Session, 'newSession');
+    // Youverify down: a page that says so, not an error in JSON.
+    session.mockRejectedValueOnce(new IdentityProviderError('down'));
+    const down = await request(t.http)
+      .get(url.pathname + url.search)
+      .expect(503);
+    expect(down.headers['content-type']).toMatch(/html/);
+    session.mockResolvedValue({ sessionId: 'sess-1', sessionToken: 'tok-1' });
+    const page = await request(t.http)
+      .get(url.pathname + url.search)
+      .expect(200);
+    expect(page.text).toContain('National Identification Number');
+    expect(page.text).not.toContain('yv-secret');
+
+    const nin = uniqueNin();
+    const submit = (body: object) => request(t.http).post('/v1/identity/hosted/youverify/submit').send(body);
+    await submit({ ref, sig: '0'.repeat(32), nin }).expect(404);
+    await submit({ ref, sig, nin: '123' })
+      .expect(400)
+      .expect(/invalid_nin/);
+    const run = vi.spyOn(YouverifyIdentityAdapter.prototype, 'submitPage').mockResolvedValue({
+      status: 'done',
+      outcome: 'passed',
+      legalName: 'TUNDE BAKARE',
+      dateOfBirth: '1995-04-12',
+      checks: [
+        { key: 'nin', outcome: 'passed' },
+        { key: 'selfie', outcome: 'passed' },
+      ],
+      idNumber: nin,
+    });
+    const body = { ref, sig, nin, session: 'sess-1', sessionSig: 'whatever-youverify-checks' };
+    // Sent twice at once: the second waits its turn rather than starting a second paid check.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const runResult = run.getMockImplementation()!;
+    run.mockImplementationOnce(async (...args) => {
+      await held;
+      return runResult(...args);
+    });
+    const first = submit(body).then((res) => res);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await submit(body)
+      .expect(409)
+      .expect(/identity_busy/);
+    release();
+    expect((await first).body).toEqual({ status: 'done', outcome: 'passed' });
+    expect(run).toHaveBeenCalledWith(ref, { nin, session: 'sess-1', sessionSig: 'whatever-youverify-checks' });
+    const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
+    expect(row).toMatchObject({ identityProvider: 'youverify', legalName: 'TUNDE BAKARE', identityOutcome: 'passed' });
+    expect(row!.ninFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(row)).not.toContain(nin);
+    const done = await request(t.http).post('/v1/agent/application/identity/finish').set(agent.headers).expect(200);
+    expect(done.body).toMatchObject({ status: 'done', outcome: 'passed' });
+    // Once settled, the page can't run the check again, nor open.
+    await submit(body).expect(409);
+    expect(run).toHaveBeenCalledTimes(1);
+    const finished = await request(t.http)
+      .get(url.pathname + url.search)
+      .expect(410);
+    expect(finished.text).toContain('This check is finished');
+
+    // Each check's page opens a limited number of times an hour: each open may start a paid session.
+    const again = await request(t.http)
+      .post('/v1/agent/application/identity')
+      .set(agent.headers)
+      .send({ consent: true })
+      .expect(200);
+    const link = new URL(again.body.url);
+    for (let i = 0; i < 20; i += 1)
+      await request(t.http)
+        .get(link.pathname + link.search)
+        .expect(200);
+    const limited = await request(t.http)
+      .get(link.pathname + link.search)
+      .expect(429);
+    expect(limited.text).toContain('opened too many times');
     await panel('post', '/identity/active').send({ provider: null }).expect(200);
   });
 });

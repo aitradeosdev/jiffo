@@ -1,4 +1,18 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpException,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { badRequest, notFound, unauthorized } from '../common/errors';
@@ -31,6 +45,14 @@ const AddressBody = z.object({
   }),
 });
 const TermsBody = z.object({ accepted: z.literal(true) });
+/** From a provider's page that Jiffo serves: the signed link it was opened with, the NIN and the session. */
+const PageBody = z.object({
+  ref: z.string().min(1).max(100),
+  sig: z.string().min(1).max(100),
+  nin: z.string().max(20),
+  session: z.string().max(200).optional(),
+  sessionSig: z.string().max(100).optional(),
+});
 
 /** The agent's application, from the agent app. */
 @Controller('agent/application')
@@ -80,6 +102,9 @@ export class AgentApplicationController {
   }
 }
 
+/** Where the agent app picks up after a provider's page (its scheme, see app.config.ts). */
+const IDENTITY_DONE_APP_URL = 'jiffo-agent://identity-done';
+
 /** What identity providers reach: their signed results, and the pages their widgets run in. */
 @Controller()
 export class IdentityProviderController {
@@ -96,21 +121,55 @@ export class IdentityProviderController {
 
   /** A provider's widget page, for a link the API signed when the check started. */
   @Get('identity/hosted/:provider')
-  hosted(
+  async hosted(
     @Param('provider') provider: string,
     @Query('ref') reference: string | undefined,
     @Query('sig') signature: string | undefined,
     @Res() res: Response,
   ) {
-    const page = reference && signature ? this.applications.hostedPage(provider, reference, signature) : null;
+    let page: string | null;
+    try {
+      page = reference && signature ? await this.applications.hostedPage(provider, reference, signature) : null;
+    } catch (error) {
+      // The provider couldn't start the check, or the page was opened too often: said in the browser.
+      if (!(error instanceof HttpException) || ![429, 503].includes(error.getStatus())) throw error;
+      const later = error.getStatus() === 429;
+      res
+        .status(error.getStatus())
+        .type('html')
+        .set('cache-control', 'no-store')
+        .send(
+          `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Try again</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1 style="font-size:24px">The check couldn't start</h1><p>${later ? 'This page was opened too many times. Try again in an hour.' : 'Try again in a moment.'}</p>${later ? '' : '<p><a href="javascript:location.reload()">Try again</a></p>'}</body></html>`,
+        );
+      return;
+    }
     if (!page) throw notFound('not_found', 'Not found');
+    if (page === 'finished') {
+      res
+        .status(410)
+        .type('html')
+        .set('cache-control', 'no-store')
+        .send(
+          `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Finished</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1 style="font-size:24px">This check is finished</h1><p>It is done, or was started again. Go back to the app.</p><p><a href="${IDENTITY_DONE_APP_URL}">Go back to Jiffo Agent</a></p></body></html>`,
+        );
+      return;
+    }
     res.type('html').set('cache-control', 'no-store').send(page);
+  }
+
+  /** What the agent entered on a provider's page that Jiffo serves, sent from that page. */
+  @Post('identity/hosted/:provider/submit')
+  @HttpCode(200)
+  async submitPage(@Param('provider') provider: string, @Body(new ZodBody(PageBody)) body: z.infer<typeof PageBody>) {
+    const result = await this.applications.submitPage(provider, body);
+    if (!result) throw notFound('not_found', 'Not found');
+    return result;
   }
 
   /** Where a provider's page sends the agent when they finish: back into the agent app. */
   @Get('identity/done')
   done(@Res() res: Response) {
-    const app = 'jiffo-agent://identity-done';
+    const app = IDENTITY_DONE_APP_URL;
     res
       .type('html')
       .send(
