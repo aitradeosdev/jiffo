@@ -4,6 +4,7 @@ import {
   canRevealPin,
   nextState,
   serviceFee,
+  suggestedFee,
   type AgentTier,
   type CountrySettings,
   type ErrandEvent,
@@ -20,6 +21,7 @@ import { ApiError, badRequest, conflict, locked, notFound, unprocessable } from 
 import { ERRAND_TIMERS, type ErrandTimerJob, type ErrandTimers } from '../timers/errand-timers';
 import { CustomerFundsLow, WalletService } from '../money/wallet.service';
 import { AgentsService } from '../agents/agents.service';
+import { MAPS, type MapsAdapter } from '../adapters/maps';
 import { ErrandNotifier, type TransitionResult } from './errand-notifier';
 import { EVENT_DATA, type CreateErrandInput, type ErrandEventInput } from './errand-input';
 import {
@@ -52,6 +54,7 @@ export class ErrandsService implements OnModuleInit {
     private readonly notifier: ErrandNotifier,
     private readonly wallet: WalletService,
     private readonly agents: AgentsService,
+    @Inject(MAPS) private readonly maps: MapsAdapter,
   ) {}
 
   onModuleInit() {
@@ -178,6 +181,21 @@ export class ErrandsService implements OnModuleInit {
   }
 
   /* ---------- Creating ---------- */
+
+  /** Distance, time and the suggested fee for a route, under the country's current pricing. */
+  async quote(auth: AuthContext, stops: Array<{ lat: number; lng: number }>) {
+    const [{ settings }, route] = await Promise.all([
+      this.countries.currentSettings(auth.countryCode),
+      this.maps.route(stops),
+    ]);
+    const suggestedFeeKobo = suggestedFee(settings.pricing, route.distanceMeters);
+    return {
+      ...route,
+      suggestedFeeKobo,
+      minFeeKobo: settings.pricing.minFeeKobo,
+      serviceFeeKobo: serviceFee(suggestedFeeKobo, settings.fees),
+    };
+  }
 
   async create(auth: AuthContext, input: CreateErrandInput) {
     const [customer] = await this.db.select().from(users).where(eq(users.id, auth.userId));

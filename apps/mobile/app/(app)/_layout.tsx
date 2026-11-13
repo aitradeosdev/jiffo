@@ -1,6 +1,7 @@
 import { Redirect, Stack, usePathname } from 'expo-router';
 import { useSession } from '@/auth/session';
 import { Connecting } from '@/ui/connecting';
+import { DraftProvider } from '@/errands/draft';
 
 /** Everything behind sign-in. A signed-out visitor goes to the welcome screen; a nameless account to the name step. */
 export default function AppLayout() {
@@ -11,5 +12,13 @@ export default function AppLayout() {
   // Signed in but the profile hasn't loaded (offline at launch): wait, so the name step is never skipped.
   if (!user) return <Connecting />;
   if (!user.firstName && path !== '/name') return <Redirect href="/name" />;
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <DraftProvider>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="place" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="category" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="topup" options={{ presentation: 'modal' }} />
+      </Stack>
+    </DraftProvider>
+  );
 }

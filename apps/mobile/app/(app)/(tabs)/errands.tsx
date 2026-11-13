@@ -1,0 +1,49 @@
+import { RefreshControl, ScrollView } from 'react-native';
+import { router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useResource } from '@/api/useResource';
+import { useRealtimeEvent } from '@/realtime/realtime';
+import { STATUS_TEXT, isActive, type ErrandView } from '@/errands/types';
+import { naira } from '@/money';
+import { useColors } from '@/theme/theme';
+import { space } from '@/theme/tokens';
+import { Button, Text } from '@/ui/kit';
+import { Empty, Row, Section } from '@/ui/parts';
+
+export default function Errands() {
+  const c = useColors();
+  const { data, loading, reload } = useResource<ErrandView[]>('/v1/errands?limit=50');
+  useRealtimeEvent('errand.updated', () => reload());
+  const active = data?.filter(isActive) ?? [];
+  const past = data?.filter((e) => !isActive(e)) ?? [];
+  const row = (e: ErrandView) => (
+    <Row
+      key={e.id}
+      icon={isActive(e) ? 'clock' : e.status === 'completed' ? 'check' : 'x'}
+      title={e.description}
+      subtitle={`${STATUS_TEXT[e.status]} · ${new Date(e.createdAt).toLocaleDateString()}`}
+      right={<Text variant="label">{naira(e.feeKobo)}</Text>}
+      onPress={() => router.push(`/errand/${e.id}`)}
+    />
+  );
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
+      <ScrollView
+        contentContainerStyle={{ padding: space.lg, gap: space.xl }}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} />}
+      >
+        <Text variant="title">Errands</Text>
+        {data && data.length === 0 ? (
+          <Empty
+            icon="list"
+            title="No errands yet"
+            body="Errands you request show here."
+            action={<Button label="Request an errand" onPress={() => router.push('/home')} />}
+          />
+        ) : null}
+        {active.length ? <Section title="Happening now">{active.map(row)}</Section> : null}
+        {past.length ? <Section title="Past">{past.map(row)}</Section> : null}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}

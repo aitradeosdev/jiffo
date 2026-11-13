@@ -4,7 +4,7 @@ import { Apps, AuthGuard, CurrentAuth } from '../auth/auth.guard';
 import type { AuthContext } from '../auth/auth.types';
 import { ZodBody } from '../common/zod-body';
 import { ErrandId } from '../common/params';
-import { BoardQuery, CreateErrandBody, ErrandEventBody, ListQuery } from './errand-input';
+import { BoardQuery, CreateErrandBody, ErrandEventBody, ListQuery, QuoteBody } from './errand-input';
 import { ErrandsService } from './errands.service';
 
 @Controller('errands')
@@ -19,6 +19,14 @@ export class ErrandsController {
     @Body(new ZodBody(CreateErrandBody)) body: z.infer<typeof CreateErrandBody>,
   ) {
     return this.errands.create(auth, body);
+  }
+
+  /** The suggested fee for a route, with the distance and time it is based on. */
+  @Post('quote')
+  @Apps('customer')
+  @HttpCode(200)
+  quote(@CurrentAuth() auth: AuthContext, @Body(new ZodBody(QuoteBody)) body: z.infer<typeof QuoteBody>) {
+    return this.errands.quote(auth, body.stops);
   }
 
   @Get()

@@ -5,8 +5,10 @@
   "dependencies": {
     "@expo-google-fonts/figtree": "^0.4.1",
     "@expo/metro-runtime": "~58.0.17",
+    "@expo/vector-icons": "^15.1.1",
     "@jiffo/shared": "workspace:*",
     "expo": "~58.0.25",
+    "expo-clipboard": "~58.0.4",
     "expo-constants": "~58.0.16",
     "expo-crypto": "~58.0.8",
     "expo-device": "~58.0.5",

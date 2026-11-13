@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { TermiiMessagingAdapter } from '../src/adapters/messaging';
 import { FcmPushAdapter } from '../src/adapters/push';
 import { PaystackPaymentsAdapter } from '../src/adapters/payments';
+import { GoogleMapsAdapter } from '../src/adapters/maps';
 import { createHmac } from 'node:crypto';
 import { decrypt, encrypt } from '../src/common/crypto';
 import { loadConfig } from '../src/config/app-config';
@@ -204,6 +205,83 @@ describe('Paystack payments', () => {
   });
 });
 
+describe('Google maps', () => {
+  it('searches with the key and field mask, biased to the country', async () => {
+    const { impl, calls } = fakeFetch(() =>
+      Response.json({
+        suggestions: [
+          {
+            placePrediction: {
+              placeId: 'abc',
+              structuredFormat: { mainText: { text: 'Shoprite' }, secondaryText: { text: 'Lekki, Lagos' } },
+            },
+          },
+        ],
+      }),
+    );
+    const maps = new GoogleMapsAdapter('key-1', impl);
+    const found = await maps.autocomplete({
+      query: 'shoprite',
+      countryCode: 'NG',
+      near: { lat: 6.4, lng: 3.4 },
+      sessionToken: 's1',
+    });
+    expect(found).toEqual([{ placeId: 'abc', title: 'Shoprite', subtitle: 'Lekki, Lagos' }]);
+    const headers = calls[0]!.init.headers as Record<string, string>;
+    expect(headers['x-goog-api-key']).toBe('key-1');
+    expect(headers['x-goog-fieldmask']).toContain('placePrediction');
+    expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({
+      input: 'shoprite',
+      includedRegionCodes: ['ng'],
+      sessionToken: 's1',
+    });
+  });
+
+  it('reads place details and falls back to an estimate when routing fails', async () => {
+    let routes = false;
+    const { impl } = fakeFetch(({ url }) => {
+      if (url.includes('computeRoutes')) {
+        routes = true;
+        return new Response('quota', { status: 429 });
+      }
+      return Response.json({
+        id: 'abc',
+        displayName: { text: 'Shoprite' },
+        formattedAddress: 'Lekki',
+        location: { latitude: 6.44, longitude: 3.47 },
+        addressComponents: [{ longText: 'Lagos', types: ['administrative_area_level_1', 'political'] }],
+      });
+    });
+    const maps = new GoogleMapsAdapter('key-1', impl);
+    expect(await maps.place('abc')).toEqual({
+      placeId: 'abc',
+      name: 'Shoprite',
+      address: 'Lekki',
+      lat: 6.44,
+      lng: 3.47,
+      region: 'Lagos',
+    });
+    const route = await maps.route([
+      { lat: 6.4474, lng: 3.4723 },
+      { lat: 6.4311, lng: 3.4158 },
+    ]);
+    expect(routes).toBe(true);
+    expect(route.distanceMeters).toBeGreaterThan(8_000);
+  });
+
+  it('reads the route distance and duration', async () => {
+    const { impl, calls } = fakeFetch(() => Response.json({ routes: [{ distanceMeters: 9_120, duration: '1260s' }] }));
+    const maps = new GoogleMapsAdapter('key-1', impl);
+    const route = await maps.route([
+      { lat: 1, lng: 1 },
+      { lat: 2, lng: 2 },
+      { lat: 3, lng: 3 },
+    ]);
+    expect(route).toEqual({ distanceMeters: 9_120, durationSeconds: 1_260 });
+    expect(JSON.parse(String(calls[0]!.init.body)).intermediates).toHaveLength(1);
+  });
+});
+
 describe('PIN encryption', () => {
   it('round-trips and detects tampering', () => {
     const key = randomBytes(32).toString('hex');
@@ -239,6 +317,8 @@ describe('config', () => {
       FCM_SERVICE_ACCOUNT_JSON: '{}',
       PAYMENTS_PROVIDER: 'paystack',
       PAYSTACK_SECRET_KEY: 'sk_test_x',
+      MAPS_PROVIDER: 'google',
+      GOOGLE_MAPS_API_KEY: 'maps-key',
     };
     expect(() => loadConfig(live)).toThrow(/TRUST_PROXY_HOPS/);
     expect(loadConfig({ ...live, TRUST_PROXY_HOPS: '1' }).TRUST_PROXY_HOPS).toBe(1);

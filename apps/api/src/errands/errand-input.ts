@@ -62,6 +62,13 @@ export const ErrandEventBody = z.object({
 });
 export type ErrandEventInput = z.infer<typeof ErrandEventBody>;
 
+export const QuoteBody = z.object({
+  stops: z
+    .array(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }))
+    .min(2)
+    .max(10),
+});
+
 export const BoardQuery = z.object({
   lat: z.coerce.number().min(-90).max(90),
   lng: z.coerce.number().min(-180).max(180),

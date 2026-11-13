@@ -284,7 +284,14 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
   providerBalanceKobo = 0;
   feeBps = 150;
 
-  constructor(readonly webhookSecret: string) {}
+  /**
+   * @param autoPayAfterMs Development only: pretend each transfer arrives this long after the account
+   * number is issued, so the apps can be tried end to end without moving money. 0 turns it off.
+   */
+  constructor(
+    readonly webhookSecret: string,
+    private readonly autoPayAfterMs = 0,
+  ) {}
 
   async createTransferDeposit(input: { reference: string; amountKobo: number; expiresAt: Date }) {
     this.deposits.set(input.reference, {
@@ -293,6 +300,11 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
       paidKobo: 0,
       senderName: null,
     });
+    if (this.autoPayAfterMs > 0) {
+      setTimeout(() => {
+        if (this.deposits.get(input.reference)?.status === 'pending') this.pay(input.reference);
+      }, this.autoPayAfterMs).unref?.();
+    }
     return {
       accountNumber: '9900000001',
       accountName: 'Jiffo Checkout',
