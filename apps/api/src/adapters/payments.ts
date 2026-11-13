@@ -440,3 +440,192 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
     return classify(JSON.parse(rawBody.toString('utf8')));
   }
 }
+
+export class FlutterwaveError extends PaymentsProviderError {
+  constructor(status: number, message: string) {
+    super(status, message);
+    this.name = 'FlutterwaveError';
+  }
+}
+
+interface FlutterwaveEnvelope<T> {
+  status: string;
+  message: string;
+  data: T;
+}
+
+/** Flutterwave works in naira; the core in kobo. */
+const toKobo = (naira: number | string | null | undefined) => Math.round(Number(naira ?? 0) * 100);
+const toNaira = (kobo: number) => Number((kobo / 100).toFixed(2));
+
+const FLW_TRANSFER: Record<string, TransferStatus> = { SUCCESSFUL: 'success', FAILED: 'failed' };
+
+/**
+ * Flutterwave (v3). Top-ups are one-time bank-transfer account numbers; payouts are transfers straight to
+ * the agent's bank details, so a "recipient" is just the bank code and account number. Webhooks carry the
+ * secret hash set in the Flutterwave dashboard, and every one is checked again with the API before money
+ * moves. Endpoints follow Flutterwave's official Node SDK and v3 API reference.
+ */
+export class FlutterwavePaymentsAdapter implements PaymentsAdapter {
+  readonly name = 'flutterwave';
+
+  constructor(
+    private readonly secretKey: string,
+    /** The "secret hash" set for webhooks in the Flutterwave dashboard. */
+    private readonly secretHash: string,
+    /** The name customers see on the account number they transfer to. */
+    private readonly businessName: string,
+    private readonly baseUrl = 'https://api.flutterwave.com',
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {}
+
+  private async call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method,
+        headers: { authorization: `Bearer ${this.secretKey}`, 'content-type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch {
+      throw unavailable('payments_unavailable', 'Payments are not reachable right now. Try again shortly.');
+    }
+    const json = (await res.json().catch(() => null)) as FlutterwaveEnvelope<T> | null;
+    if (!res.ok || json?.status !== 'success') {
+      throw new FlutterwaveError(res.status, json?.message ?? `Flutterwave answered ${res.status}`);
+    }
+    return json.data;
+  }
+
+  async createTransferDeposit(input: { reference: string; amountKobo: number; email: string; expiresAt: Date }) {
+    const data = await this.call<{
+      account_number: string;
+      bank_name: string;
+      expiry_date?: string;
+      note?: string;
+    }>('POST', '/v3/virtual-account-numbers', {
+      email: input.email,
+      is_permanent: false,
+      tx_ref: input.reference,
+      amount: toNaira(input.amountKobo),
+      narration: this.businessName,
+    });
+    // Their expiry is shown when it can be read and isn't later than ours; otherwise ours, which is shorter.
+    const theirs = data.expiry_date ? new Date(data.expiry_date) : null;
+    const expiresAt = theirs && !Number.isNaN(theirs.getTime()) && theirs < input.expiresAt ? theirs : input.expiresAt;
+    return {
+      accountNumber: data.account_number,
+      accountName: this.businessName,
+      bankName: data.bank_name,
+      expiresAt,
+    };
+  }
+
+  async verifyDeposit(reference: string): Promise<DepositStatus> {
+    let data: {
+      status: string;
+      amount: number;
+      app_fee?: number | null;
+      currency: string;
+      meta?: { originatorname?: string; bankname?: string } | null;
+    };
+    try {
+      data = await this.call('GET', `/v3/transactions/verify_by_reference?tx_ref=${encodeURIComponent(reference)}`);
+    } catch (error) {
+      // No payment yet under this reference: still waiting for the transfer.
+      if (error instanceof FlutterwaveError && (error.status === 400 || error.status === 404)) {
+        return { status: 'pending', amountKobo: 0, feesKobo: 0, currency: 'NGN', senderName: null, senderBank: null };
+      }
+      throw error;
+    }
+    const status = data.status === 'successful' ? 'success' : data.status === 'failed' ? 'failed' : 'pending';
+    return {
+      status,
+      amountKobo: toKobo(data.amount),
+      feesKobo: toKobo(data.app_fee),
+      currency: data.currency,
+      senderName: data.meta?.originatorname ?? null,
+      senderBank: data.meta?.bankname ?? null,
+    };
+  }
+
+  async listBanks() {
+    const data = await this.call<Array<{ code: string; name: string }>>('GET', '/v3/banks/NG');
+    return data.map((b) => ({ code: b.code, name: b.name }));
+  }
+
+  async resolveAccount(bankCode: string, accountNumber: string) {
+    const data = await this.call<{ account_name: string }>('POST', '/v3/accounts/resolve', {
+      account_number: accountNumber,
+      account_bank: bankCode,
+    });
+    return { accountName: data.account_name };
+  }
+
+  /** Flutterwave pays straight to bank details: nothing to register. */
+  async createRecipient(input: { name: string; bankCode: string; accountNumber: string }) {
+    return { recipientCode: `${input.bankCode}:${input.accountNumber}` };
+  }
+
+  async transfer(input: { reference: string; amountKobo: number; recipientCode: string; reason: string }) {
+    const [bankCode, accountNumber] = input.recipientCode.split(':');
+    if (!bankCode || !accountNumber)
+      throw new FlutterwaveError(422, 'The payout account is not set up for Flutterwave');
+    const data = await this.call<{ id: number; status: string; fee?: number; complete_message?: string }>(
+      'POST',
+      '/v3/transfers',
+      {
+        account_bank: bankCode,
+        account_number: accountNumber,
+        amount: toNaira(input.amountKobo),
+        narration: input.reason,
+        currency: 'NGN',
+        debit_currency: 'NGN',
+        reference: input.reference,
+      },
+    );
+    return {
+      status: FLW_TRANSFER[data.status] ?? 'pending',
+      transferCode: String(data.id),
+      reason: data.complete_message || data.status,
+      feeKobo: data.fee === undefined ? undefined : toKobo(data.fee),
+    };
+  }
+
+  async verifyTransfer(reference: string) {
+    const data = await this.call<Array<{ reference: string; status: string; fee?: number; complete_message?: string }>>(
+      'GET',
+      `/v3/transfers?reference=${encodeURIComponent(reference)}`,
+    );
+    const found = data.find((t) => t.reference === reference);
+    if (!found) throw new FlutterwaveError(404, `No Flutterwave transfer with reference ${reference}`);
+    return {
+      status: FLW_TRANSFER[found.status] ?? 'pending',
+      reason: found.complete_message || found.status,
+      feeKobo: found.fee === undefined ? undefined : toKobo(found.fee),
+    };
+  }
+
+  async balance(currency: string) {
+    const data = await this.call<{ available_balance: number }>('GET', `/v3/balances/${encodeURIComponent(currency)}`);
+    return toKobo(data.available_balance);
+  }
+
+  parseWebhook(rawBody: Buffer, headers: Record<string, string | string[] | undefined>): PaymentWebhook | null {
+    const given = Buffer.from(header(headers, 'verif-hash') ?? '');
+    const expected = Buffer.from(this.secretHash);
+    if (!this.secretHash || given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+    const body = JSON.parse(rawBody.toString('utf8')) as { event?: string; data?: Record<string, unknown> };
+    const data = body.data ?? {};
+    const raw = body as Record<string, unknown>;
+    const eventKey = `${body.event}:${String(data.id ?? data.tx_ref ?? data.reference ?? '')}`;
+    if (body.event === 'charge.completed' && data.tx_ref) {
+      return { kind: 'deposit', eventKey, reference: String(data.tx_ref), raw };
+    }
+    if (body.event === 'transfer.completed' && data.reference) {
+      return { kind: 'transfer', eventKey, reference: String(data.reference), raw };
+    }
+    return { kind: 'ignored', eventKey, event: body.event ?? 'unknown', raw };
+  }
+}

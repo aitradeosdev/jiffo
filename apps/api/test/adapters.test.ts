@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { AfricasTalkingMessagingAdapter, TermiiMessagingAdapter } from '../src/adapters/messaging';
 import { AfricasTalkingCallsAdapter, TwilioCallsAdapter } from '../src/adapters/calls';
 import { FcmPushAdapter } from '../src/adapters/push';
-import { PaystackPaymentsAdapter } from '../src/adapters/payments';
+import { FlutterwavePaymentsAdapter, PaystackPaymentsAdapter } from '../src/adapters/payments';
 import { GoogleMapsAdapter } from '../src/adapters/maps';
 import { createHmac } from 'node:crypto';
 import { decrypt, encrypt } from '../src/common/crypto';
@@ -451,5 +451,103 @@ describe('calls providers', () => {
     );
     const suspended = fakeFetch(() => new Response(JSON.stringify({ status: 'suspended' })));
     await expect(new TwilioCallsAdapter('AC1', 't', '+1', suspended.impl).check()).rejects.toThrow(/suspended/);
+  });
+});
+
+describe('Flutterwave payments', () => {
+  const ok = (data: unknown) => new Response(JSON.stringify({ status: 'success', message: 'ok', data }));
+  const make = (impl: typeof fetch) =>
+    new FlutterwavePaymentsAdapter('FLWSECK-test', 'hash-123', 'Jiffo', 'https://api.flutterwave.test', impl);
+
+  it('issues a one-time account in naira and checks the payment by our reference, in kobo', async () => {
+    const later = new Date(Date.now() + 3_600_000);
+    const { impl, calls } = fakeFetch(({ url }) =>
+      url.includes('virtual-account-numbers')
+        ? ok({
+            account_number: '7824822527',
+            bank_name: 'WEMA BANK',
+            expiry_date: new Date(Date.now() + 600_000).toISOString(),
+          })
+        : ok({ status: 'successful', amount: 5000, app_fee: 70, currency: 'NGN', meta: { originatorname: 'ADA OBI' } }),
+    );
+    const flw = make(impl);
+    const account = await flw.createTransferDeposit({
+      reference: 'jd-1',
+      amountKobo: 500_000,
+      email: 'u@customers.jiffoapp.com',
+      expiresAt: later,
+    });
+    expect(account).toMatchObject({ accountNumber: '7824822527', accountName: 'Jiffo', bankName: 'WEMA BANK' });
+    expect(account.expiresAt.getTime()).toBeLessThan(later.getTime());
+    expect(calls[0]!.url).toBe('https://api.flutterwave.test/v3/virtual-account-numbers');
+    expect(calls[0]!.init.headers).toMatchObject({ authorization: 'Bearer FLWSECK-test' });
+    expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({
+      is_permanent: false,
+      tx_ref: 'jd-1',
+      amount: 5000,
+    });
+
+    expect(await flw.verifyDeposit('jd-1')).toEqual({
+      status: 'success',
+      amountKobo: 500_000,
+      feesKobo: 7_000,
+      currency: 'NGN',
+      senderName: 'ADA OBI',
+      senderBank: null,
+    });
+    expect(calls[1]!.url).toBe('https://api.flutterwave.test/v3/transactions/verify_by_reference?tx_ref=jd-1');
+
+    // Nothing paid yet: Flutterwave finds no transaction, which means waiting.
+    const none = fakeFetch(
+      () => new Response(JSON.stringify({ status: 'error', message: 'No transaction was found' }), { status: 400 }),
+    );
+    expect((await make(none.impl).verifyDeposit('jd-2')).status).toBe('pending');
+  });
+
+  it('pays out to bank details and looks the transfer up by our reference', async () => {
+    const { impl, calls } = fakeFetch(({ url }) =>
+      url.endsWith('/v3/transfers')
+        ? ok({ id: 190626, status: 'NEW', fee: 10.75 })
+        : ok([{ reference: 'jp-1', status: 'SUCCESSFUL', fee: 10.75 }]),
+    );
+    const flw = make(impl);
+    const { recipientCode } = await flw.createRecipient({
+      name: 'TUNDE',
+      bankCode: '058',
+      accountNumber: '0123456789',
+    });
+    expect(recipientCode).toBe('058:0123456789');
+    expect(
+      await flw.transfer({ reference: 'jp-1', amountKobo: 90_000, recipientCode, reason: 'Jiffo earnings' }),
+    ).toEqual({
+      status: 'pending',
+      transferCode: '190626',
+      reason: 'NEW',
+      feeKobo: 1_075,
+    });
+    expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({
+      account_bank: '058',
+      account_number: '0123456789',
+      amount: 900,
+      reference: 'jp-1',
+      currency: 'NGN',
+    });
+    expect(await flw.verifyTransfer('jp-1')).toMatchObject({ status: 'success', feeKobo: 1_075 });
+    expect(calls[1]!.url).toBe('https://api.flutterwave.test/v3/transfers?reference=jp-1');
+  });
+
+  it('trusts a webhook only with the secret hash', () => {
+    const flw = make(fakeFetch(() => ok({})).impl);
+    const body = Buffer.from(
+      JSON.stringify({ event: 'charge.completed', data: { id: 1, tx_ref: 'jd-1', status: 'successful' } }),
+    );
+    expect(flw.parseWebhook(body, { 'verif-hash': 'hash-123' })).toMatchObject({ kind: 'deposit', reference: 'jd-1' });
+    expect(flw.parseWebhook(body, { 'verif-hash': 'nope' })).toBeNull();
+    expect(flw.parseWebhook(body, {})).toBeNull();
+    const transfer = Buffer.from(JSON.stringify({ event: 'transfer.completed', data: { id: 2, reference: 'jp-1' } }));
+    expect(flw.parseWebhook(transfer, { 'verif-hash': 'hash-123' })).toMatchObject({
+      kind: 'transfer',
+      reference: 'jp-1',
+    });
   });
 });
