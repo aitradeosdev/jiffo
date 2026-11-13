@@ -5,7 +5,7 @@ import { agentTierLabel } from '@jiffo/shared';
 import { useActionState, useState } from 'react';
 import { SubmitButton } from '@/components/submit-button';
 import { buttonClass, inputClass, Notice } from '@/components/ui';
-import { changeAccess, setTier, type PersonState } from './actions';
+import { changeAccess, decideApplication, setTier, type PersonState } from './actions';
 
 export interface TierTerms {
   tier: string;
@@ -120,6 +120,54 @@ export function AccessForm({ id, suspended }: { id: string; suspended: boolean }
           {suspended ? 'Yes, reactivate' : 'Yes, suspend'}
         </SubmitButton>
         <button type="button" className={buttonClass('ghost', true)} onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** Approve or decline an application the checks sent to review; each asks for a reason first. */
+export function DecisionForm({ id }: { id: string }) {
+  const [state, action] = useActionState<PersonState, FormData>(decideApplication, {});
+  const [decision, setDecision] = useState<'approve' | 'reject' | null>(null);
+  if (!decision) {
+    return (
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={buttonClass('primary', true)} onClick={() => setDecision('approve')}>
+          Approve
+        </button>
+        <button type="button" className={buttonClass('danger', true)} onClick={() => setDecision('reject')}>
+          Decline
+        </button>
+      </div>
+    );
+  }
+  const approve = decision === 'approve';
+  return (
+    <form action={action} className="space-y-3">
+      <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="decision" value={decision} />
+      <p className="text-sm text-ink-2">
+        {approve
+          ? 'They can go online and take errands straight away, and are told so.'
+          : 'They can’t take errands. They see your reason in the app, so write it to them.'}
+      </p>
+      <Reason
+        key={decision}
+        label={approve ? 'Why approve' : 'What to tell them'}
+        placeholder={
+          approve
+            ? 'For example: the selfie result was unclear; the provider’s photo match is fine on a second look'
+            : 'For example: the selfie is of a different person from the NIN photo'
+        }
+      />
+      <Notice>{state.error}</Notice>
+      <div className="flex gap-2">
+        <SubmitButton kind={approve ? 'primary' : 'danger'} small pendingLabel="Saving…">
+          {approve ? 'Yes, approve' : 'Yes, decline'}
+        </SubmitButton>
+        <button type="button" className={buttonClass('ghost', true)} onClick={() => setDecision(null)}>
           Cancel
         </button>
       </div>

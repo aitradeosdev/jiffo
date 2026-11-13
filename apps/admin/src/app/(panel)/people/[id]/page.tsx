@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { agentTierLabel } from '@jiffo/shared';
 import { notFound } from 'next/navigation';
@@ -7,8 +8,9 @@ import { Badge, Card, Notice, Stat } from '@/components/ui';
 import { api, ApiError, getCountry, getMe } from '@/lib/api';
 import { ACCOUNT, JOURNAL, nameOf, STATUS } from '@/lib/errands';
 import { ago, dateTime, money } from '@/lib/format';
+import { OUTCOME, statusOf, type Check } from '@/lib/applications';
 import { AdjustForm } from './adjust';
-import { AccessForm, TierForm, type TierTerms } from './forms';
+import { AccessForm, DecisionForm, TierForm, type TierTerms } from './forms';
 
 export const metadata: Metadata = { title: 'Person' };
 
@@ -53,6 +55,7 @@ interface Detail {
     rating: number | null;
     stats: Stats;
     payoutAccount: { bankName: string; accountName: string; last4: string; since: string } | null;
+    application: Application | null;
   } | null;
   customer: { walletKobo: number; rating: number | null; stats: Stats };
   ratings: Array<{ raterRole: string; stars: number; comment: string | null; errandId: string; createdAt: string }>;
@@ -75,7 +78,29 @@ interface Detail {
   liveErrands: string[];
 }
 
+/** The agent's application: the provider's results and what the agent typed, never their documents. */
+interface Application {
+  status: string;
+  stateName: string | null;
+  area: string | null;
+  legalName: string | null;
+  dateOfBirth: string | null;
+  identityOutcome: string | null;
+  identityCheckedAt: string | null;
+  addressOutcome: string | null;
+  address: string | null;
+  emergency: { name: string; phone: string | null; relationship: string | null } | null;
+  termsAcceptedAt: string | null;
+  checks: Check[];
+  submittedAt: string | null;
+  decidedAt: string | null;
+  decidedBy: string | null;
+  decisionNote: string | null;
+}
+
 const DONE: Record<string, string> = {
+  approved: 'Application approved. The agent has been told and can go online.',
+  declined: 'Application declined. The agent sees your reason in the app.',
   tier: 'Tier changed. The agent has been told.',
   suspend: 'Account suspended. They have been signed out everywhere.',
   reactivate: 'Account reactivated.',
@@ -140,6 +165,11 @@ export default async function PersonPage({
             <Badge key={a}>{a === 'agent' ? 'Agent' : 'Customer'}</Badge>
           ))}
           {d.agent ? <Badge tone="brand">{agentTierLabel(d.agent.tier)}</Badge> : null}
+          {d.agent?.application && d.agent.application.status !== 'approved' ? (
+            <Badge tone={statusOf(d.agent.application.status).tone}>
+              Application: {statusOf(d.agent.application.status).label.toLowerCase()}
+            </Badge>
+          ) : null}
           {p.status === 'suspended' ? <Badge tone="danger">Suspended</Badge> : null}
           {d.agent?.online ? <Badge tone="brand">Online now</Badge> : null}
         </div>
@@ -155,6 +185,15 @@ export default async function PersonPage({
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0 space-y-6">
+          {d.agent ? (
+            <ApplicationCard
+              id={p.id}
+              app={d.agent.application}
+              canDecide={canOperate}
+              time={time}
+              timeZone={country.timezone}
+            />
+          ) : null}
           {d.agent ? (
             <Card title="As an agent">
               {stats(d.agent.stats)}
@@ -356,5 +395,115 @@ export default async function PersonPage({
         </div>
       </div>
     </>
+  );
+}
+
+/** Years between a YYYY-MM-DD birth date and now. */
+function age(dateOfBirth: string) {
+  const born = new Date(`${dateOfBirth}T00:00:00Z`);
+  const now = new Date();
+  let years = now.getUTCFullYear() - born.getUTCFullYear();
+  if (
+    now.getUTCMonth() < born.getUTCMonth() ||
+    (now.getUTCMonth() === born.getUTCMonth() && now.getUTCDate() < born.getUTCDate())
+  )
+    years -= 1;
+  return years;
+}
+
+function ApplicationCard({
+  id,
+  app,
+  canDecide,
+  time,
+  timeZone,
+}: {
+  id: string;
+  app: Application | null;
+  canDecide: boolean;
+  time: (iso: string) => string;
+  timeZone: string;
+}) {
+  if (!app) {
+    return (
+      <Card title="Application">
+        <p className="text-sm text-ink-3">They haven&apos;t opened the agent app since applications began.</p>
+      </Card>
+    );
+  }
+  const status = statusOf(app.status);
+  const rows: Array<[string, ReactNode]> = [
+    ['Name on the NIN', app.legalName ?? '—'],
+    ['Date of birth', app.dateOfBirth ? `${app.dateOfBirth} · ${age(app.dateOfBirth)} years old` : '—'],
+    ['Works in', app.stateName ? `${app.area ?? ''}${app.area ? ', ' : ''}${app.stateName}` : '—'],
+    ['Home address', app.address ?? '—'],
+    [
+      'Emergency contact',
+      app.emergency ? (
+        <>
+          {app.emergency.name}
+          {app.emergency.relationship ? ` (${app.emergency.relationship.toLowerCase()})` : ''}
+          {app.emergency.phone ? (
+            <a href={`tel:${app.emergency.phone}`} className="num ml-2 underline">
+              {app.emergency.phone}
+            </a>
+          ) : null}
+        </>
+      ) : (
+        '—'
+      ),
+    ],
+    ['Agent terms', app.termsAcceptedAt ? `Agreed ${time(app.termsAcceptedAt)}` : 'Not yet'],
+  ];
+  return (
+    <section id="application" className="scroll-mt-6">
+      <Card title="Application" action={<Badge tone={status.tone}>{status.label}</Badge>}>
+        <p className="text-sm text-ink-3">
+          {status.about}
+          {app.submittedAt ? ` · sent ${ago(app.submittedAt, timeZone)}` : ''}
+        </p>
+        {app.checks.length ? (
+          <ul className="mt-4 divide-y divide-line rounded-xl border border-line">
+            {app.checks.map((c) => (
+              <li key={c.key} className="flex items-start justify-between gap-3 px-3.5 py-2.5">
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold">{c.label}</span>
+                  {c.note ? <span className="block text-[13px] text-ink-3">{c.note}</span> : null}
+                </span>
+                <Badge tone={OUTCOME[c.outcome]?.tone ?? 'warn'}>{OUTCOME[c.outcome]?.label ?? c.outcome}</Badge>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-3 text-sm text-ink-2">No checks have run yet.</p>
+        )}
+        <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+          {rows.map(([label, value]) => (
+            <div key={label}>
+              <dt className="text-ink-3">{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="mt-4 text-[13px] text-ink-3">
+          The NIN, BVN and selfie stay with the identity provider. Jiffo keeps the results above.
+        </p>
+        {app.decidedAt && app.decidedBy ? (
+          <div className="mt-4 rounded-xl bg-surface-2 px-3.5 py-2.5 text-sm">
+            <span className="font-semibold">
+              {status.label} by {app.decidedBy}, {time(app.decidedAt)}
+            </span>
+            {app.decisionNote ? <span className="block text-ink-2">{app.decisionNote}</span> : null}
+          </div>
+        ) : app.status === 'review' && app.decisionNote ? (
+          <p className="mt-4 text-sm text-ink-2">{app.decisionNote}</p>
+        ) : null}
+        {app.status === 'review' && canDecide ? (
+          <div className="mt-4 border-t border-line pt-4">
+            <DecisionForm id={id} />
+          </div>
+        ) : null}
+      </Card>
+    </section>
   );
 }

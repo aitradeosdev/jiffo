@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ErrandsModule } from '../errands/errands.module';
 import { ErrandsAdminService } from './errands-admin.service';
 import { PeopleAdminService } from './people-admin.service';
+import { ApplicationsAdminService } from './applications-admin.service';
 import { MoneyAdminService } from './money-admin.service';
 import { SettingsAdminService } from './settings-admin.service';
 import { PushModule } from '../push/push.module';
@@ -20,6 +21,7 @@ import { TeamService } from './team.service';
   providers: [
     AdminAuthService,
     AdminGuard,
+    ApplicationsAdminService,
     AuditService,
     ErrandsAdminService,
     MoneyAdminService,

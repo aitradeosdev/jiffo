@@ -152,6 +152,7 @@ What's in it:
 - **Overview:** today's errands, agents online, revenue, top-ups and the fees Jiffo absorbs, withdrawals, and anything that needs attention.
 - **Errands and disputes:** search every errand, read its full history (timeline, chat, photos, money), and settle disputes, the standard way or by splitting the money held.
 - **People:** customers and agents, with their activity and money; set agent tiers, suspend and reactivate accounts, and adjust balances.
+- **Applications:** agent applications by state. The ones whose checks didn't all pass wait in review, longest first; operations approves or declines each from the agent's page, seeing the provider's results and what the agent typed, never their documents. A decline's reason is shown to the agent.
 - **Money:** what Jiffo holds and earns, top-ups, withdrawals and the nightly check against the payment provider.
 - **Settings:** prices, fees, commission, timers, limits and identity rules as versioned settings, plus categories and states.
 - **Team and audit log:** who can use the panel, and every change anyone made in it.
@@ -159,7 +160,7 @@ What's in it:
 | Role       | Can                                                    |
 | ---------- | ------------------------------------------------------ |
 | Owner      | Everything, including the team, settings and audit log |
-| Operations | Errands, disputes and people                           |
+| Operations | Errands, disputes, people and agent applications       |
 | Finance    | Money: refunds, wallet adjustments and payouts         |
 | Support    | Look at everything, change nothing                     |
 

@@ -3,12 +3,21 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { IDENTITY, IdentityUnavailable, type IdentityAdapter } from '../src/adapters/identity';
 import { agentApplications, states } from '../src/db/schema';
-import { act, createErrand, createTestApp, fund, signIn, type Person, type TestApp } from './helpers';
+import {
+  act,
+  completeApplication,
+  createErrand,
+  createTestApp,
+  fund,
+  signIn,
+  uniqueNin,
+  type Person,
+  type TestApp,
+} from './helpers';
 
 describe('agent application', () => {
   let t: TestApp;
   let customer: Person;
-  let seq = 0;
 
   beforeAll(async () => {
     t = await createTestApp();
@@ -23,37 +32,13 @@ describe('agent application', () => {
     await request(t.http).patch('/v1/me').set(agent.headers).send({ lastName }).expect(200);
     return agent;
   }
-  /** A NIN nobody else in the run has, ending in the given digits. */
-  const nin = (ending = '4567') => `${String(70000 + ++seq).padStart(7, '0')}${ending}`;
+  const nin = uniqueNin;
   const app = (agent: Person) => request(t.http).get('/v1/agent/application').set(agent.headers).expect(200);
   const call = (agent: Person, method: 'post' | 'put' | 'patch', path: string, body: Record<string, unknown> = {}) =>
     request(t.http)[method](`/v1/agent/application${path}`).set(agent.headers).send(body);
 
   /** Everything except submitting. */
-  async function complete(agent: Person, ninNumber = nin()) {
-    await call(agent, 'patch', '', { stateCode: 'LA', area: 'Lekki' }).expect(200);
-    const started = await call(agent, 'post', '/identity', {
-      nin: ninNumber,
-      bvn: '22212345678',
-      consent: true,
-    }).expect(200);
-    expect(started.body).toMatchObject({ provider: 'fake', sdkToken: expect.any(String) });
-    await call(agent, 'post', '/identity/finish').expect(200);
-    await call(agent, 'put', '/address', {
-      address: '14 Fola Osibo Road, Lekki Phase 1',
-      emergency: { name: 'Ngozi Bakare', phone: '+2348034471902', relationship: 'Sibling' },
-    }).expect(200);
-    const accountNumber = `0${String(100000000 + seq).slice(-9)}`;
-    t.payments.accounts.set(`058:${accountNumber}`, 'TUNDE BAKARE');
-    await request(t.http)
-      .put('/v1/payout-account')
-      .set(agent.headers)
-      .send({ bankCode: '058', accountNumber })
-      .expect(200);
-    await request(t.http).patch('/v1/agent/profile').set(agent.headers).send({ takesPurchases: true }).expect(200);
-    await call(agent, 'post', '/terms', { accepted: true }).expect(200);
-    return ninNumber;
-  }
+  const complete = (agent: Person, ninNumber = nin()) => completeApplication(t, agent, ninNumber);
 
   it('keeps agents off the board until they are approved', async () => {
     const agent = await newAgent();

@@ -98,3 +98,10 @@ export const SettingsIcon = () => (
     <circle cx="10" cy="17" r="2" />
   </Icon>
 );
+
+export const ApplicationsIcon = () => (
+  <Icon>
+    <path d="M12 3.5 5 6.2v5.3c0 4.3 3 7.6 7 9 4-1.4 7-4.7 7-9V6.2Z" />
+    <path d="m9 12 2.2 2.2L15.5 10" />
+  </Icon>
+);

@@ -190,3 +190,36 @@ export async function adminAs(t: TestApp, role: AdminRole) {
     .values({ adminId: admin!.id, tokenHash: sha256(token), expiresAt: new Date(Date.now() + 3_600_000) });
   return { id: admin!.id, name: admin!.name, headers: { Authorization: `Bearer ${token}` } };
 }
+
+/** A NIN nobody else in the run has, ending in the given digits; the fake provider decides by the ending. */
+export const uniqueNin = (ending = '4567') => `${String(randomInt(0, 10_000_000)).padStart(7, '0')}${ending}`;
+
+/**
+ * Fills in every step of an agent's application, short of sending it: basics, identity, address, a payout
+ * account, preferences and the terms. The agent's name must be Tunde Bakare, as the fake provider's record is.
+ */
+export async function completeApplication(t: TestApp, agent: Person, nin = uniqueNin()) {
+  const call = (method: 'post' | 'put' | 'patch', path: string, body: Record<string, unknown> = {}) =>
+    request(t.http)[method](`/v1/agent/application${path}`).set(agent.headers).send(body);
+  await call('patch', '', { stateCode: 'LA', area: 'Lekki' }).expect(200);
+  const started = await call('post', '/identity', { nin, bvn: '22212345678', consent: true }).expect(200);
+  // The app hands this to the provider's SDK.
+  if (started.body.provider !== 'fake' || typeof started.body.sdkToken !== 'string') {
+    throw new Error(`identity start: ${JSON.stringify(started.body)}`);
+  }
+  await call('post', '/identity/finish').expect(200);
+  await call('put', '/address', {
+    address: '14 Fola Osibo Road, Lekki Phase 1',
+    emergency: { name: 'Ngozi Bakare', phone: '+2348034471902', relationship: 'Sibling' },
+  }).expect(200);
+  const accountNumber = `0${String(randomInt(0, 1_000_000_000)).padStart(9, '0')}`;
+  t.payments.accounts.set(`058:${accountNumber}`, 'TUNDE BAKARE');
+  await request(t.http)
+    .put('/v1/payout-account')
+    .set(agent.headers)
+    .send({ bankCode: '058', accountNumber })
+    .expect(200);
+  await request(t.http).patch('/v1/agent/profile').set(agent.headers).send({ takesPurchases: true }).expect(200);
+  await call('post', '/terms', { accepted: true }).expect(200);
+  return nin;
+}

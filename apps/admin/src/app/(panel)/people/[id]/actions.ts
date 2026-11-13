@@ -70,3 +70,19 @@ export async function changeAccess(_: PersonState, form: FormData): Promise<Pers
   back(id, what);
   return {};
 }
+
+/** Approves or declines an application in review. A decline's reason is what the agent is told. */
+export async function decideApplication(_: PersonState, form: FormData): Promise<PersonState> {
+  const id = String(form.get('id') ?? '');
+  const decision = form.get('decision') === 'approve' ? 'approve' : 'reject';
+  try {
+    await api(`/admin/people/${encodeURIComponent(id)}/application`, {
+      method: 'POST',
+      body: { decision, note: String(form.get('note') ?? '') },
+    });
+  } catch (error) {
+    return { error: messageOf(error) };
+  }
+  back(id, decision === 'approve' ? 'approved' : 'declined');
+  return {};
+}

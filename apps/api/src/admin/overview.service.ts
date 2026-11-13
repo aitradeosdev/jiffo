@@ -81,7 +81,9 @@ export class OverviewService {
           (select count(*) from payouts where country_code = ${countryCode} and status = 'failed'
             and created_at >= now() - interval '7 days') as failed_payouts,
           (select count(*) from deposits where country_code = ${countryCode} and sender_mismatch
-            and created_at >= now() - interval '7 days') as sender_mismatch`),
+            and created_at >= now() - interval '7 days') as sender_mismatch,
+          (select count(*) from agent_applications where country_code = ${countryCode}
+            and status = 'review') as applications`),
       this.db.execute(sql`
         with days as (
           select generate_series(
@@ -139,6 +141,8 @@ export class OverviewService {
         disputes: num(errands.disputed),
         failedPayouts7d: num(attention.failed_payouts),
         senderMismatch7d: num(attention.sender_mismatch),
+        /** Agent applications the checks sent to support. */
+        applications: num(attention.applications),
       },
       week: week.rows.map((r) => ({ day: String(r.day), completed: num(r.completed), revenueKobo: num(r.revenue) })),
       reconciliation: run
