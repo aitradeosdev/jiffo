@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -18,8 +19,9 @@ import { ERRAND_FILTERS, ErrandsAdminService } from './errands-admin.service';
 import { PEOPLE_ROLES, PeopleAdminService } from './people-admin.service';
 import { MAX_ADJUSTMENT_KOBO, MoneyAdminService } from './money-admin.service';
 import { SettingsAdminService } from './settings-admin.service';
+import { ProvidersAdminService } from './providers-admin.service';
 import { APPLICATION_STATUSES, ApplicationsAdminService } from './applications-admin.service';
-import { AGENT_TIERS } from '@jiffo/shared';
+import { AGENT_TIERS, PROVIDER_CATEGORIES } from '@jiffo/shared';
 import { notFound } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
 import { AdminGuard, CurrentAdmin, Needs } from './admin.guard';
@@ -107,6 +109,14 @@ const ActBody = z.object({
   split: z.object({ agentKobo: kobo, jiffoKobo: kobo, itemsToAgentKobo: kobo, chargeCustomerKobo: kobo }).optional(),
 });
 const CountryQuery = z.object({ country: z.string().length(2).toUpperCase() });
+const ProviderCategory = z.enum(PROVIDER_CATEGORIES);
+const ProviderParams = z.object({ category: ProviderCategory, provider: z.string().min(1).max(40) });
+const ProviderBody = z.object({
+  config: z.record(z.string(), z.string().max(2000)).default({}),
+  /** A secret left empty keeps the one saved before. A service account key file can be long. */
+  secrets: z.record(z.string(), z.string().max(20_000)).default({}),
+});
+const ActivateBody = z.object({ provider: z.string().min(1).max(40).nullable() });
 const ApplicationsQuery = z.object({
   country: z.string().length(2).toUpperCase(),
   status: z.enum(APPLICATION_STATUSES).default('review'),
@@ -144,7 +154,54 @@ export class AdminController {
     private readonly money: MoneyAdminService,
     private readonly settingsAdmin: SettingsAdminService,
     private readonly applications: ApplicationsAdminService,
+    private readonly providerSettings: ProvidersAdminService,
   ) {}
+
+  /* ---------- Providers: owners only, as the keys are Jiffo's accounts with them ---------- */
+
+  @Get('providers')
+  @Needs('settings')
+  providers() {
+    return this.providerSettings.list();
+  }
+
+  @Put('providers/:category/:provider')
+  @Needs('settings')
+  saveProvider(
+    @CurrentAdmin() admin: AdminContext,
+    @Param(new ZodBody(ProviderParams)) params: z.infer<typeof ProviderParams>,
+    @Body(new ZodBody(ProviderBody)) body: z.infer<typeof ProviderBody>,
+  ) {
+    return this.providerSettings.save(admin, params.category, params.provider, body);
+  }
+
+  @Post('providers/:category/:provider/test')
+  @HttpCode(200)
+  @Needs('settings')
+  testProvider(@Param(new ZodBody(ProviderParams)) params: z.infer<typeof ProviderParams>) {
+    return this.providerSettings.test(params.category, params.provider);
+  }
+
+  @Delete('providers/:category/:provider')
+  @Needs('settings')
+  removeProvider(
+    @CurrentAdmin() admin: AdminContext,
+    @Param(new ZodBody(ProviderParams)) params: z.infer<typeof ProviderParams>,
+  ) {
+    return this.providerSettings.remove(admin, params.category, params.provider);
+  }
+
+  /** Switches a provider on for its category; null goes back to the environment's choice. */
+  @Post('providers/:category/active')
+  @HttpCode(200)
+  @Needs('settings')
+  activateProvider(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('category', new ZodBody(ProviderCategory)) category: z.infer<typeof ProviderCategory>,
+    @Body(new ZodBody(ActivateBody)) body: z.infer<typeof ActivateBody>,
+  ) {
+    return this.providerSettings.activate(admin, category, body.provider);
+  }
 
   @Get('settings')
   @Needs('read')

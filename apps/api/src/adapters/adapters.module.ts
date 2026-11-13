@@ -2,107 +2,44 @@ import { Global, Module } from '@nestjs/common';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
 import { BuiltinChatAdapter } from '../chat/builtin-chat.adapter';
-import { CHAT, type ChatAdapter } from './chat';
+import { ENV_ADAPTERS, envAdapters } from '../providers/env-adapters';
+import { ProvidersService } from '../providers/providers.service';
 import {
-  ConsoleMessagingAdapter,
-  MemoryMessagingAdapter,
-  MESSAGING,
-  TermiiMessagingAdapter,
-  type MessagingAdapter,
-} from './messaging';
-import { ConsolePushAdapter, FcmPushAdapter, MemoryPushAdapter, PUSH, type PushAdapter } from './push';
-import { FakePaymentsAdapter, PAYMENTS, PaystackPaymentsAdapter, type PaymentsAdapter } from './payments';
-import { FakeMapsAdapter, GoogleMapsAdapter, MAPS, type MapsAdapter } from './maps';
-import { MemoryStorageAdapter, S3StorageAdapter, STORAGE, type StorageAdapter } from './storage';
-import { FakeIdentityAdapter, IDENTITY, UnconfiguredIdentityAdapter, type IdentityAdapter } from './identity';
-import { CALLS, FakeCallsAdapter, UnconfiguredCallsAdapter, type CallsAdapter } from './calls';
+  SwitchingCalls,
+  SwitchingIdentity,
+  SwitchingMaps,
+  SwitchingMessaging,
+  SwitchingPayments,
+  SwitchingPush,
+  SwitchingStorage,
+} from '../providers/switching';
+import { CALLS } from './calls';
+import { CHAT, type ChatAdapter } from './chat';
+import { IDENTITY } from './identity';
+import { MAPS } from './maps';
+import { MESSAGING } from './messaging';
+import { PAYMENTS } from './payments';
+import { PUSH } from './push';
+import { STORAGE } from './storage';
 
 /**
- * Picks one implementation per port from the environment. Admin-selected providers (identity, payments)
- * build on the same ports later.
+ * One service per outside provider category. Each passes its calls to the provider admin switched on in the
+ * panel, or the environment's choice while none is (see ProvidersService).
  */
 @Global()
 @Module({
   providers: [
-    {
-      provide: IDENTITY,
-      inject: [APP_CONFIG],
-      // The real provider's adapter comes with its keys and SDK before launch. The fake never runs in
-      // production, where it would approve every agent.
-      useFactory: (c: AppConfig): IdentityAdapter => {
-        switch (c.IDENTITY_PROVIDER) {
-          case 'fake':
-            return c.NODE_ENV === 'production' ? new UnconfiguredIdentityAdapter() : new FakeIdentityAdapter();
-          default:
-            return new UnconfiguredIdentityAdapter();
-        }
-      },
-    },
-    {
-      provide: CALLS,
-      inject: [APP_CONFIG],
-      // The fake never runs in production, where it would tell people a phone is ringing when none is.
-      useFactory: (c: AppConfig): CallsAdapter =>
-        c.CALLS_PROVIDER === 'fake' && c.NODE_ENV !== 'production'
-          ? new FakeCallsAdapter()
-          : new UnconfiguredCallsAdapter(),
-    },
-    {
-      provide: MESSAGING,
-      inject: [APP_CONFIG],
-      useFactory: (c: AppConfig): MessagingAdapter => {
-        switch (c.MESSAGING_PROVIDER) {
-          case 'termii':
-            return new TermiiMessagingAdapter(c.TERMII_API_KEY!, c.TERMII_SENDER_ID!, c.TERMII_BASE_URL);
-          case 'memory':
-            return new MemoryMessagingAdapter();
-          default:
-            return new ConsoleMessagingAdapter();
-        }
-      },
-    },
-    {
-      provide: PUSH,
-      inject: [APP_CONFIG],
-      useFactory: (c: AppConfig): PushAdapter => {
-        switch (c.PUSH_PROVIDER) {
-          case 'fcm':
-            return new FcmPushAdapter(c.FCM_SERVICE_ACCOUNT_JSON!);
-          case 'memory':
-            return new MemoryPushAdapter();
-          default:
-            return new ConsolePushAdapter();
-        }
-      },
-    },
-    {
-      provide: PAYMENTS,
-      inject: [APP_CONFIG],
-      useFactory: (c: AppConfig): PaymentsAdapter =>
-        c.PAYMENTS_PROVIDER === 'paystack'
-          ? new PaystackPaymentsAdapter(c.PAYSTACK_SECRET_KEY!, c.PAYSTACK_BASE_URL)
-          : new FakePaymentsAdapter(c.FAKE_PAYMENTS_SECRET, c.FAKE_PAYMENTS_AUTOPAY_SECONDS * 1000),
-    },
-    {
-      provide: MAPS,
-      inject: [APP_CONFIG],
-      useFactory: (c: AppConfig): MapsAdapter =>
-        c.MAPS_PROVIDER === 'google' ? new GoogleMapsAdapter(c.GOOGLE_MAPS_API_KEY!) : new FakeMapsAdapter(),
-    },
-    {
-      provide: STORAGE,
-      inject: [APP_CONFIG],
-      useFactory: (c: AppConfig): StorageAdapter =>
-        c.STORAGE_PROVIDER === 's3'
-          ? new S3StorageAdapter(c.S3_BUCKET!, c.S3_REGION, c.S3_ENDPOINT)
-          : new MemoryStorageAdapter(c.PUBLIC_API_URL, c.JWT_SECRET),
-    },
-    {
-      provide: CHAT,
-      inject: [DB],
-      useFactory: (db: Db): ChatAdapter => new BuiltinChatAdapter(db),
-    },
+    { provide: ENV_ADAPTERS, inject: [APP_CONFIG], useFactory: (c: AppConfig) => envAdapters(c) },
+    ProvidersService,
+    { provide: PAYMENTS, inject: [ProvidersService], useFactory: (p: ProvidersService) => new SwitchingPayments(p) },
+    { provide: MESSAGING, inject: [ProvidersService], useFactory: (p: ProvidersService) => new SwitchingMessaging(p) },
+    { provide: PUSH, inject: [ProvidersService], useFactory: (p: ProvidersService) => new SwitchingPush(p) },
+    { provide: MAPS, inject: [ProvidersService], useFactory: (p: ProvidersService) => new SwitchingMaps(p) },
+    { provide: STORAGE, inject: [ProvidersService], useFactory: (p: ProvidersService) => new SwitchingStorage(p) },
+    { provide: IDENTITY, inject: [ProvidersService], useFactory: (p: ProvidersService) => new SwitchingIdentity(p) },
+    { provide: CALLS, inject: [ProvidersService], useFactory: (p: ProvidersService) => new SwitchingCalls(p) },
+    { provide: CHAT, inject: [DB], useFactory: (db: Db): ChatAdapter => new BuiltinChatAdapter(db) },
   ],
-  exports: [CALLS, IDENTITY, MESSAGING, PUSH, PAYMENTS, MAPS, STORAGE, CHAT],
+  exports: [ENV_ADAPTERS, ProvidersService, CALLS, IDENTITY, MESSAGING, PUSH, PAYMENTS, MAPS, STORAGE, CHAT],
 })
 export class AdaptersModule {}

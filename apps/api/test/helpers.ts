@@ -4,13 +4,14 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
-import { MESSAGING, type MemoryMessagingAdapter } from '../src/adapters/messaging';
-import { PUSH, type MemoryPushAdapter } from '../src/adapters/push';
+import type { MemoryMessagingAdapter } from '../src/adapters/messaging';
+import type { MemoryPushAdapter } from '../src/adapters/push';
 import { DB, type Db } from '../src/db/database.module';
 import { ERRAND_TIMERS, type MemoryErrandTimers } from '../src/timers/errand-timers';
 import { RECURRING_JOBS, type MemoryRecurringJobs } from '../src/timers/recurring-jobs';
-import { PAYMENTS, type FakePaymentsAdapter } from '../src/adapters/payments';
-import { CALLS, type FakeCallsAdapter } from '../src/adapters/calls';
+import type { FakePaymentsAdapter } from '../src/adapters/payments';
+import type { FakeCallsAdapter } from '../src/adapters/calls';
+import { ENV_ADAPTERS, type Adapters } from '../src/providers/env-adapters';
 import { admins, adminSessions, agentApplications, deposits, type AdminRole } from '../src/db/schema';
 import { sha256 } from '../src/common/crypto';
 import { eq } from 'drizzle-orm';
@@ -34,17 +35,19 @@ export async function createTestApp(): Promise<TestApp> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = configureApp(moduleRef.createNestApplication({ logger: ['error'], rawBody: true }));
   await app.listen(0, '127.0.0.1');
+  // The stand-ins behind each provider switch, while no provider is switched on in the panel.
+  const env = app.get<Adapters>(ENV_ADAPTERS);
   return {
     app,
     http: app.getHttpServer(),
     url: await app.getUrl(),
     db: app.get(DB),
-    messaging: app.get(MESSAGING),
-    push: app.get(PUSH),
+    messaging: env.sms as MemoryMessagingAdapter,
+    push: env.push as MemoryPushAdapter,
     timers: app.get(ERRAND_TIMERS),
     jobs: app.get(RECURRING_JOBS),
-    payments: app.get(PAYMENTS),
-    calls: app.get(CALLS),
+    payments: env.payments as FakePaymentsAdapter,
+    calls: env.calls as FakeCallsAdapter,
     close: () => app.close(),
   };
 }
@@ -134,7 +137,7 @@ export async function act(
 /** Delivers a signed provider webhook to the API, as Paystack would. */
 export function deliverWebhook(t: TestApp, hook: { body: Buffer; signature: string }) {
   return request(t.http)
-    .post('/v1/webhooks/paystack')
+    .post(`/v1/webhooks/${t.payments.name}`)
     .set('content-type', 'application/json')
     .set('x-paystack-signature', hook.signature)
     .send(hook.body.toString());

@@ -572,6 +572,8 @@ export const payouts = pgTable(
     feeKobo: kobo('fee_kobo').notNull().default(0),
     /** Sent to the bank: the amount less the fee. */
     sendKobo: kobo('send_kobo').notNull(),
+    /** The payments provider the transfer went through, set when it is sent. */
+    provider: text('provider'),
     providerTransferCode: text('provider_transfer_code'),
     failureReason: text('failure_reason'),
     createdAt: createdAt(),
@@ -722,6 +724,8 @@ export const agentApplications = pgTable(
      */
     ninFingerprint: text('nin_fingerprint'),
     pendingNinFingerprint: text('pending_nin_fingerprint'),
+    /** The identity provider the check was started with; it finishes there even if admin switches. */
+    identityProvider: text('identity_provider'),
     identityReference: text('identity_reference'),
     identityOutcome: text('identity_outcome', { enum: ['passed', 'failed', 'review'] }),
     identityCheckedAt: timestamp('identity_checked_at', { withTimezone: true }),
@@ -732,6 +736,7 @@ export const agentApplications = pgTable(
     emergencyName: text('emergency_name'),
     emergencyPhone: text('emergency_phone'),
     emergencyRelationship: text('emergency_relationship'),
+    addressProvider: text('address_provider'),
     addressReference: text('address_reference'),
     addressOutcome: text('address_outcome', { enum: ['passed', 'failed', 'review'] }),
     termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
@@ -843,5 +848,39 @@ export const adminAudit = pgTable(
   (t) => [
     index('admin_audit_created_idx').on(t.createdAt),
     index('admin_audit_target_idx').on(t.targetType, t.targetId),
+  ],
+);
+
+/* ---------- Providers ---------- */
+
+/**
+ * Admin's settings for each outside provider: its fields, with the secret ones encrypted (see SecretBox),
+ * and whether it is the one in use for its category. At most one per category is active.
+ */
+export const providerSettings = pgTable(
+  'provider_settings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    category: text('category').notNull(),
+    provider: text('provider').notNull(),
+    active: boolean('active').notNull().default(false),
+    /** The fields that aren't secret. */
+    config: jsonb('config').$type<Record<string, string>>().notNull().default({}),
+    /** The secret fields as one encrypted JSON object, bound to category and provider. */
+    secrets: text('secrets'),
+    /** The last characters of each secret, to show which key is saved. */
+    secretHints: jsonb('secret_hints').$type<Record<string, string>>().notNull().default({}),
+    lastTestAt: timestamp('last_test_at', { withTimezone: true }),
+    lastTestOk: boolean('last_test_ok'),
+    lastTestMessage: text('last_test_message'),
+    updatedBy: uuid('updated_by').references(() => admins.id),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('provider_settings_uq').on(t.category, t.provider),
+    uniqueIndex('provider_settings_active_uq')
+      .on(t.category)
+      .where(sql`${t.active}`),
   ],
 );

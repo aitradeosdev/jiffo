@@ -1,11 +1,11 @@
-import { Controller, HttpCode, Inject, Logger, Post, Req } from '@nestjs/common';
+import { Controller, HttpCode, Inject, Logger, Param, Post, Req } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import { and, eq } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { providerEvents } from '../db/schema';
-import { PAYMENTS, type PaymentsAdapter } from '../adapters/payments';
-import { badRequest, unauthorized } from '../common/errors';
+import { badRequest, notFound, unauthorized } from '../common/errors';
+import { ProvidersService } from '../providers/providers.service';
 import { DepositsService } from './deposits.service';
 import { PayoutsService } from './payouts.service';
 
@@ -20,19 +20,24 @@ export class WebhooksController {
 
   constructor(
     @Inject(DB) private readonly db: Db,
-    @Inject(PAYMENTS) private readonly payments: PaymentsAdapter,
+    private readonly providers: ProvidersService,
     private readonly deposits: DepositsService,
     private readonly payouts: PayoutsService,
   ) {}
 
-  @Post('paystack')
+  /**
+   * One address per payments provider (/webhooks/paystack and so on). A provider that admin switched away
+   * from still delivers here for what it started, as long as its keys are kept.
+   */
+  @Post(':provider')
   @HttpCode(200)
-  async paystack(@Req() req: RawBodyRequest<Request>) {
+  async receive(@Param('provider') provider: string, @Req() req: RawBodyRequest<Request>) {
+    const payments = this.providers.named('payments', provider);
+    if (!payments) throw notFound('not_found', 'Not found');
     if (!req.rawBody) throw badRequest('invalid_request', 'Missing body');
-    const event = this.payments.parseWebhook(req.rawBody, req.headers);
+    const event = payments.parseWebhook(req.rawBody, req.headers);
     if (!event) throw unauthorized('invalid_signature', 'Signature does not match');
 
-    const provider = this.payments.name;
     const kind = event.kind === 'ignored' ? event.event : event.kind;
     await this.db
       .insert(providerEvents)

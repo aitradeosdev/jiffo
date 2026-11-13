@@ -68,6 +68,12 @@ export class FcmPushAdapter implements PushAdapter {
     this.account = parsed as ServiceAccount;
   }
 
+  /** For the panel's Test button: the key signs in to Google. */
+  async check() {
+    await this.token();
+    return `Signed in to the Firebase project ${this.account.project_id}`;
+  }
+
   private async token(): Promise<string> {
     if (this.accessToken && this.accessToken.expiresAt > Date.now() + 60_000) return this.accessToken.value;
     const key = await importPKCS8(this.account.private_key, 'RS256');

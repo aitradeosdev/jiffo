@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client, HeadBucketCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export interface PresignedUpload {
@@ -35,12 +35,24 @@ export class S3StorageAdapter implements StorageAdapter {
   readonly name = 's3';
   private readonly s3: S3Client;
 
+  /** Without credentials, the AWS SDK's usual chain is used (environment, instance role). */
   constructor(
     private readonly bucket: string,
     region: string,
     endpoint?: string,
+    credentials?: { accessKeyId: string; secretAccessKey: string },
   ) {
-    this.s3 = new S3Client({ region, ...(endpoint ? { endpoint, forcePathStyle: true } : {}) });
+    this.s3 = new S3Client({
+      region,
+      ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
+      ...(credentials ? { credentials } : {}),
+    });
+  }
+
+  /** For the panel's Test button: the bucket exists and these keys can reach it. */
+  async check() {
+    await this.s3.send(new HeadBucketCommand({ Bucket: this.bucket }));
+    return `Connected to the bucket ${this.bucket}`;
   }
 
   async presignUpload(input: { key: string; contentType: string; size: number; ttlSeconds: number }) {

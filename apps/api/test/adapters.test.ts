@@ -318,25 +318,12 @@ describe('config', () => {
     PIN_KEY: 'a'.repeat(64),
   };
 
-  it('needs provider credentials and real providers in production', () => {
+  it('needs provider credentials when the environment names a provider, and the secrets key in production', () => {
     expect(() => loadConfig({ ...base, MESSAGING_PROVIDER: 'termii' })).toThrow(/TERMII_API_KEY/);
-    expect(() => loadConfig({ ...base, NODE_ENV: 'production' })).toThrow(/MESSAGING_PROVIDER/);
     expect(loadConfig(base)).toMatchObject({ PORT: 3000, MESSAGING_PROVIDER: 'console', TIMER_PROVIDER: 'bullmq' });
-    const live = {
-      ...base,
-      NODE_ENV: 'production',
-      MESSAGING_PROVIDER: 'termii',
-      TERMII_API_KEY: 'k',
-      TERMII_SENDER_ID: 'Jiffo',
-      PUSH_PROVIDER: 'fcm',
-      FCM_SERVICE_ACCOUNT_JSON: '{}',
-      PAYMENTS_PROVIDER: 'paystack',
-      PAYSTACK_SECRET_KEY: 'sk_test_x',
-      MAPS_PROVIDER: 'google',
-      GOOGLE_MAPS_API_KEY: 'maps-key',
-      STORAGE_PROVIDER: 's3',
-      S3_BUCKET: 'jiffo-files',
-    };
+    // Providers can be set in the admin panel instead, so production doesn't need them in the environment.
+    const live = { ...base, NODE_ENV: 'production', SECRETS_KEY: 'a'.repeat(64) };
+    expect(() => loadConfig({ ...live, SECRETS_KEY: undefined })).toThrow(/SECRETS_KEY/);
     expect(() => loadConfig(live)).toThrow(/TRUST_PROXY_HOPS/);
     expect(() => loadConfig({ ...live, TRUST_PROXY_HOPS: '1' })).toThrow(/ADMIN_PANEL_SECRET/);
     expect(() => loadConfig({ ...live, TRUST_PROXY_HOPS: '1', ADMIN_PANEL_SECRET: 'z'.repeat(32) })).toThrow(

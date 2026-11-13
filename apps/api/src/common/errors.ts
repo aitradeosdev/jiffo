@@ -1,5 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { TransitionError } from '@jiffo/shared';
+import { ProviderNotConfigured } from '../providers/not-configured';
 import type { Response } from 'express';
 
 /** Every API error has the same shape: { error: { code, message, ...details } }. */
@@ -60,6 +61,12 @@ export class ApiExceptionFilter implements ExceptionFilter {
       res
         .status(TRANSITION_STATUS[error.code])
         .json({ error: { code: `errand_${error.code}`, message: error.message } });
+      return;
+    }
+    if (error instanceof ProviderNotConfigured) {
+      res.status(HttpStatus.SERVICE_UNAVAILABLE).json({
+        error: { code: 'provider_not_configured', message: "This isn't available yet. Please try again later." },
+      });
       return;
     }
     if (error instanceof HttpException) {

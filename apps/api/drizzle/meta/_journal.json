@@ -78,6 +78,13 @@
       "when": 1794594759956,
       "tag": "0010_errand_calls",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794598674796,
+      "tag": "0011_provider_settings",
+      "breakpoints": true
     }
   ]
 }
