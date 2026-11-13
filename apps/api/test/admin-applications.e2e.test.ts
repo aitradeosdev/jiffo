@@ -45,7 +45,7 @@ describe('admin: agent applications', () => {
     const row = res.body.applications.find((a: { id: string }) => a.id === first.agent.userId);
     expect(row).toMatchObject({ status: 'review', legalName: 'TUNDE BAKARE', stateName: 'Lagos', area: 'Lekki' });
     expect(row.flagged).toEqual([
-      expect.objectContaining({ key: 'selfie', outcome: 'review', label: 'Selfie matches the NIN photo' }),
+      expect.objectContaining({ key: 'selfie', outcome: 'review', label: 'Selfie matches the ID photo' }),
     ]);
     // Found by phone too.
     const found = await request(t.http)
