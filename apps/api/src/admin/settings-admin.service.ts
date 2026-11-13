@@ -1,37 +1,19 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
-import { CountrySettingsSchema, type CountrySettings } from '@jiffo/shared';
+import { CountrySettingsSchema, settingChanges, type CountrySettings } from '@jiffo/shared';
+import { sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
-import { admins, categories, countries, settingsVersions, states } from '../db/schema';
+import { admins, categories, settingsVersions, states } from '../db/schema';
 import { badRequest, conflict, notFound } from '../common/errors';
 import { AuditService } from './audit.service';
+import { requireCountry } from './countries';
 import type { AdminContext } from './admin.types';
 
-/** One changed setting, by its dotted path, e.g. fees.commissionBps.gold. */
-export interface SettingChange {
-  path: string;
-  from: unknown;
-  to: unknown;
-}
+/** How many versions the settings page lists. */
+const HISTORY = 50;
 
-/** Every leaf value by its dotted path. Lists are compared whole. */
-function flatten(value: unknown, prefix = '', out = new Map<string, unknown>()) {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    for (const [k, v] of Object.entries(value)) flatten(v, prefix ? `${prefix}.${k}` : k, out);
-  } else {
-    out.set(prefix, value);
-  }
-  return out;
-}
-
-export function settingChanges(before: unknown, after: unknown): SettingChange[] {
-  const a = flatten(before);
-  const b = flatten(after);
-  const paths = [...new Set([...a.keys(), ...b.keys()])].sort();
-  return paths
-    .filter((p) => JSON.stringify(a.get(p) ?? null) !== JSON.stringify(b.get(p) ?? null))
-    .map((p) => ({ path: p, from: a.get(p) ?? null, to: b.get(p) ?? null }));
-}
+const issuesOf = (error: { issues: Array<{ path: Array<string | number>; message: string }> }) =>
+  error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
 
 /** Country settings, categories and states. Changing them is for owners; every change is audited. */
 @Injectable()
@@ -41,16 +23,18 @@ export class SettingsAdminService {
     private readonly audit: AuditService,
   ) {}
 
-  private async country(code: string) {
-    const [c] = await this.db.select().from(countries).where(eq(countries.code, code));
-    if (!c) throw notFound('country_not_found', 'Country not found');
-    return c;
+  private country(code: string) {
+    return requireCountry(this.db, code);
   }
 
-  /** The current settings, and every saved version with what it changed and who saved it. */
+  /**
+   * The current settings, and the latest versions with what each changed and who saved it. Versions are read
+   * through the schema, so fields added since one was saved count as their defaults; a version that breaks a
+   * rule added later is shown as stored, with its problems, rather than taking the page down.
+   */
   async settings(code: string) {
     await this.country(code);
-    const versions = await this.db
+    const rows = await this.db
       .select({
         version: settingsVersions.version,
         data: settingsVersions.data,
@@ -60,21 +44,25 @@ export class SettingsAdminService {
       .from(settingsVersions)
       .leftJoin(admins, eq(admins.id, settingsVersions.createdBy))
       .where(eq(settingsVersions.countryCode, code))
-      .orderBy(desc(settingsVersions.version));
-    const current = versions[0];
+      .orderBy(desc(settingsVersions.version))
+      // The newest HISTORY versions, plus one more to tell what the oldest of them changed.
+      .limit(HISTORY + 1);
+    const current = rows[0];
     if (!current) throw notFound('settings_missing', `No settings saved for ${code}`);
-    // Every version read through the schema, so fields added since an old version was saved count as their
-    // defaults there, and only real edits show as changes.
-    const read = versions.map((v) => CountrySettingsSchema.parse(v.data));
+    const read = rows.map((v) => {
+      const parsed = CountrySettingsSchema.safeParse(v.data);
+      return parsed.success ? { data: parsed.data, problems: [] } : { data: v.data, problems: issuesOf(parsed.error) };
+    });
     return {
       version: current.version,
-      // Read through the schema, so fields added since a version was saved show their defaults.
-      settings: read[0],
-      history: versions.map((v, i) => ({
+      settings: read[0]!.data,
+      /** Rules the current version breaks, if the schema has grown stricter since it was saved. */
+      problems: read[0]!.problems,
+      history: rows.slice(0, HISTORY).map((v, i) => ({
         version: v.version,
         createdAt: v.createdAt,
         createdBy: v.createdBy ?? (v.version === 1 ? 'Launch settings' : null),
-        changes: read[i + 1] ? settingChanges(read[i + 1], read[i]) : [],
+        changes: read[i + 1] ? settingChanges(read[i + 1]!.data, read[i]!.data) : [],
       })),
     };
   }
@@ -87,26 +75,26 @@ export class SettingsAdminService {
   async saveSettings(admin: AdminContext, code: string, input: { basedOn: number; settings: unknown; note: string }) {
     const parsed = CountrySettingsSchema.safeParse(input.settings);
     if (!parsed.success) {
-      throw badRequest('invalid_settings', 'Some settings are not valid', {
-        issues: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
-      });
+      throw badRequest('invalid_settings', 'Some settings are not valid', { issues: issuesOf(parsed.error) });
     }
     await this.country(code);
     return this.db.transaction(async (tx) => {
+      // One save at a time per country: a second save made at the same moment then sees the first's version.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'settings:' + code}))`);
       const [latest] = await tx
         .select()
         .from(settingsVersions)
         .where(eq(settingsVersions.countryCode, code))
         .orderBy(desc(settingsVersions.version))
-        .limit(1)
-        .for('update');
+        .limit(1);
       if (!latest) throw notFound('settings_missing', `No settings saved for ${code}`);
       if (latest.version !== input.basedOn) {
         throw conflict('settings_changed', 'Someone saved newer settings. Reload and make your change again.', {
           version: latest.version,
         });
       }
-      const changes = settingChanges(CountrySettingsSchema.parse(latest.data), parsed.data);
+      const before = CountrySettingsSchema.safeParse(latest.data);
+      const changes = settingChanges(before.success ? before.data : latest.data, parsed.data);
       if (changes.length === 0) return { version: latest.version, changes };
       const version = latest.version + 1;
       await tx.insert(settingsVersions).values({
@@ -151,13 +139,22 @@ export class SettingsAdminService {
   ) {
     await this.country(input.country);
     return this.db.transaction(async (tx) => {
+      // One new category at a time per country, so two adds of the same key can't both pass the check.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'categories:' + input.country}))`);
+      // A key is never reused, even after its category is removed: old errands and agents' saved
+      // preferences still refer to it, and a new category under that key would quietly take them over.
       const [taken] = await tx
-        .select({ id: categories.id })
+        .select({ deletedAt: categories.deletedAt })
         .from(categories)
-        .where(
-          and(eq(categories.countryCode, input.country), eq(categories.key, input.key), isNull(categories.deletedAt)),
+        .where(and(eq(categories.countryCode, input.country), eq(categories.key, input.key)));
+      if (taken) {
+        throw conflict(
+          taken.deletedAt ? 'key_used_before' : 'category_exists',
+          taken.deletedAt
+            ? 'A removed category used this key, and errands still refer to it. Choose another key.'
+            : 'Another category already uses this key',
         );
-      if (taken) throw conflict('category_exists', 'Another category already uses this key');
+      }
       const [row] = await tx
         .insert(categories)
         .values({
@@ -219,7 +216,7 @@ export class SettingsAdminService {
     });
   }
 
-  /** Removes a category for good. Its key is freed; errands that used it keep showing it by key. */
+  /** Removes a category for good. Its key stays reserved, since errands that used it still refer to it. */
   async deleteCategory(admin: AdminContext, id: string) {
     return this.db.transaction(async (tx) => {
       const [row] = await tx

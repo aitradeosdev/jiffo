@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useMemo, useState } from 'react';
+import { settingChanges } from '@jiffo/shared';
 import { SubmitButton } from '@/components/submit-button';
 import { buttonClass, Card, inputClass, Notice } from '@/components/ui';
 import { FIELD_BY_PATH, getAt, SECTIONS, setAt, shown, type Field } from '@/lib/settings-fields';
@@ -39,6 +40,12 @@ function fromText(field: Field, text: string): unknown {
   return Number.isInteger(n) ? n : NaN;
 }
 
+/** What to type instead, for a value the field can't read. */
+const unreadable = (field: Field) =>
+  ['naira', 'optionalNaira', 'percent', 'optionalPercent'].includes(field.kind)
+    ? 'Enter a number, with at most two decimal places'
+    : 'Enter a whole number';
+
 const UNIT: Partial<Record<Field['kind'], string>> = {
   naira: '₦',
   optionalNaira: '₦',
@@ -48,13 +55,6 @@ const UNIT: Partial<Record<Field['kind'], string>> = {
   hours: 'h',
   seconds: 's',
 };
-
-function flatten(value: unknown, prefix = '', out = new Map<string, unknown>()) {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    for (const [k, v] of Object.entries(value)) flatten(v, prefix ? `${prefix}.${k}` : k, out);
-  } else out.set(prefix, value);
-  return out;
-}
 
 export function SettingsForm({
   country,
@@ -77,11 +77,8 @@ export function SettingsForm({
   const [confirming, setConfirming] = useState(false);
 
   const invalid = [...FIELD_BY_PATH.values()].filter((f) => Number.isNaN(getAt(settings, f.path)));
-  const changes = useMemo(() => {
-    const a = flatten(initial);
-    const b = flatten(settings);
-    return [...b.keys()].filter((p) => JSON.stringify(a.get(p)) !== JSON.stringify(b.get(p)));
-  }, [initial, settings]);
+  // The same comparison the API makes, so the review lists exactly what will be saved.
+  const changes = useMemo(() => settingChanges(initial, settings).map((c) => c.path), [initial, settings]);
   const issueFor = (path: string) =>
     state.issues?.find((i) => i.path === path || i.path.startsWith(`${path}.`))?.message;
 
@@ -113,7 +110,7 @@ export function SettingsForm({
                 const id = `f-${f.path}`;
                 const value = getAt(settings, f.path);
                 const changed = changes.includes(f.path) || changes.some((p) => p.startsWith(`${f.path}.`));
-                const problem = Number.isNaN(value) ? 'Enter a whole number' : issueFor(f.path);
+                const problem = Number.isNaN(value) ? unreadable(f) : issueFor(f.path);
                 if (f.kind === 'bool') {
                   return (
                     <label key={f.path} className="flex items-start gap-2.5 sm:col-span-2">
@@ -150,7 +147,10 @@ export function SettingsForm({
                               onChange={(e) =>
                                 setValue(
                                   f.path,
-                                  e.currentTarget.checked ? [...chosen, o.value] : chosen.filter((v) => v !== o.value),
+                                  // Always in the listed order, so ticking one off and on again changes nothing.
+                                  f
+                                    .options!.map((x) => x.value)
+                                    .filter((v) => (v === o.value ? e.currentTarget.checked : chosen.includes(v))),
                                 )
                               }
                               className="accent-current"

@@ -1,4 +1,4 @@
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, inArray } from 'drizzle-orm';
 import request from 'supertest';
 import { categories, settingsVersions } from '../src/db/schema';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -23,7 +23,9 @@ describe('admin settings', () => {
     await t.db
       .delete(settingsVersions)
       .where(and(eq(settingsVersions.countryCode, 'NG'), gt(settingsVersions.version, original.version)));
-    await t.db.delete(categories).where(and(eq(categories.countryCode, 'NG'), eq(categories.key, 'books')));
+    await t.db
+      .delete(categories)
+      .where(and(eq(categories.countryCode, 'NG'), inArray(categories.key, ['books', 'stationery'])));
     await t.close();
   });
 
@@ -69,6 +71,36 @@ describe('admin settings', () => {
     expect(audit.body.entries[0]).toMatchObject({ action: 'settings.save', data: { version: now.version } });
   });
 
+  it('saves one of two edits made at the same moment, and tells the other', async () => {
+    const now = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
+    const a = structuredClone(now.settings) as { timers: Record<string, number> };
+    const b = structuredClone(now.settings) as { timers: Record<string, number> };
+    a.timers.dropoffWaitMinutes = 12;
+    b.timers.dropoffWaitMinutes = 15;
+    const results = await Promise.all([
+      save({ basedOn: now.version, settings: a, note: 'Owner A edit' }),
+      save({ basedOn: now.version, settings: b, note: 'Owner B edit' }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    expect(results.find((r) => r.status === 409)!.body.error.code).toBe('settings_changed');
+  });
+
+  it('still shows a stored version that breaks a rule added later, with its problems', async () => {
+    const now = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
+    const broken = structuredClone(now.settings) as { fees: { serviceFeeMinKobo: number; serviceFeeCapKobo: number } };
+    broken.fees.serviceFeeMinKobo = broken.fees.serviceFeeCapKobo + 1;
+    await t.db.insert(settingsVersions).values({ countryCode: 'NG', version: now.version + 1, data: broken as never });
+    const res = await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200);
+    expect(res.body.version).toBe(now.version + 1);
+    expect(res.body.problems).toEqual([
+      { path: 'fees.serviceFeeMinKobo', message: 'The service fee minimum must not exceed the cap' },
+    ]);
+    // Fixing it saves the next version as usual.
+    const fixed = structuredClone(broken);
+    fixed.fees.serviceFeeMinKobo = 10_000;
+    await save({ basedOn: now.version + 1, settings: fixed, note: 'Fixing the fee rule' }).expect(200);
+  });
+
   it('refuses settings that break the rules', async () => {
     const now = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
     const bad = structuredClone(now.settings) as { fees: Record<string, unknown> };
@@ -104,8 +136,17 @@ describe('admin settings', () => {
     const after = await request(t.http).get('/v1/admin/categories?country=NG').set(ops.headers).expect(200);
     expect(after.body.map((c: { id: string }) => c.id)).not.toContain(id);
     await request(t.http).delete(`/v1/admin/categories/${id}`).set(owner.headers).expect(404);
-    // Its key is free again.
-    await add({ key: 'books', name: 'Books', icon: 'bag' }).expect(201);
+    // Its key stays reserved: old errands and agents' preferences still refer to it.
+    const again = await add({ key: 'books', name: 'Bookshop pickups', icon: 'bag' });
+    expect(again.status).toBe(409);
+    expect(again.body.error.code).toBe('key_used_before');
+
+    // Two adds of the same new key at once: one wins, the other is told so.
+    const both = await Promise.all([
+      add({ key: 'stationery', name: 'Stationery', icon: 'doc' }),
+      add({ key: 'stationery', name: 'Stationery', icon: 'doc' }),
+    ]);
+    expect(both.map((r) => r.status).sort()).toEqual([201, 409]);
   });
 
   it('switches states on and off', async () => {

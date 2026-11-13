@@ -37,7 +37,10 @@ export const CountrySettingsSchema = z.object({
       launchCommissionBps: bps.nullable(),
       instantWithdrawalFeeKobo: kobo,
     })
-    .refine((f) => f.serviceFeeMinKobo <= f.serviceFeeCapKobo, 'The service fee minimum must not exceed the cap'),
+    .refine((f) => f.serviceFeeMinKobo <= f.serviceFeeCapKobo, {
+      message: 'The service fee minimum must not exceed the cap',
+      path: ['serviceFeeMinKobo'],
+    }),
   timers: z.object({
     urgentWidenMinutes: minutes,
     raisePricePromptMinutes: minutes,
@@ -164,3 +167,32 @@ export function publicSettings(s: CountrySettings) {
   };
 }
 export type PublicSettings = ReturnType<typeof publicSettings>;
+
+/** One changed setting, by its dotted path, e.g. fees.commissionBps.gold. */
+export interface SettingChange {
+  path: string;
+  from: unknown;
+  to: unknown;
+}
+
+/** Every value by its dotted path. Lists are kept whole, in sorted order: they are sets of choices. */
+function flattenSettings(value: unknown, prefix = '', out = new Map<string, unknown>()) {
+  if (Array.isArray(value)) {
+    out.set(prefix, [...value].sort());
+  } else if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) flattenSettings(v, prefix ? `${prefix}.${k}` : k, out);
+  } else {
+    out.set(prefix, value ?? null);
+  }
+  return out;
+}
+
+/** What differs between two settings objects (or any two plain objects), setting by setting. */
+export function settingChanges(before: unknown, after: unknown): SettingChange[] {
+  const a = flattenSettings(before);
+  const b = flattenSettings(after);
+  return [...new Set([...a.keys(), ...b.keys()])]
+    .sort()
+    .filter((p) => JSON.stringify(a.get(p) ?? null) !== JSON.stringify(b.get(p) ?? null))
+    .map((p) => ({ path: p, from: a.get(p) ?? null, to: b.get(p) ?? null }));
+}

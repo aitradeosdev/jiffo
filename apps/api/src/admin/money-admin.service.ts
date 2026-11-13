@@ -14,6 +14,7 @@ import {
 import { conflict, notFound, unprocessable } from '../common/errors';
 import { InsufficientFunds, LedgerService, transfer, type AccountRef } from '../money/ledger.service';
 import { AuditService } from './audit.service';
+import { requireCountry } from './countries';
 import { containing, cursorOf, exactTime, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
 
@@ -54,8 +55,7 @@ export class MoneyAdminService {
 
   /** Balances now, and where revenue and provider charges came from over the last `days` days. */
   async summary(country: string, days: number) {
-    const [c] = await this.db.select().from(countries).where(eq(countries.code, country));
-    if (!c) throw notFound('country_not_found', 'Country not found');
+    const c = await requireCountry(this.db, country);
     const tz = c.timezone;
     // The same window for the totals and the chart: whole local days, today included.
     const since = sql`(date_trunc('day', now() at time zone ${tz}) - make_interval(days => ${days - 1})) at time zone ${tz}`;

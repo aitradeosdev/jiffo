@@ -10,6 +10,7 @@ export const metadata: Metadata = { title: 'Settings' };
 interface SettingsView {
   version: number;
   settings: Record<string, unknown>;
+  problems: Array<{ path: string; message: string }>;
   history: Array<{
     version: number;
     createdAt: string;
@@ -26,6 +27,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="min-w-0 space-y-4">
         {saved ? <Notice tone="brand">Saved as version {saved}. New errands use it from now on.</Notice> : null}
+        {view.problems.length ? (
+          <Notice tone="warn">
+            The settings in use break {view.problems.length === 1 ? 'a rule' : 'rules'} added since they were saved:{' '}
+            {view.problems.map((p) => `${FIELD_BY_PATH.get(p.path)?.label ?? p.path}: ${p.message}`).join('; ')}. Fix
+            and save to make a new version.
+          </Notice>
+        ) : null}
         {/* A new version starts the form afresh from what is saved. */}
         <SettingsForm
           key={view.version}
