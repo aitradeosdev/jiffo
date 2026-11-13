@@ -139,7 +139,7 @@ const DECISION_COPY: Record<Decision, { about: string; reason: string; example: 
   reject: {
     about: 'They can’t take errands, and go offline. They see your reason in the app, so write it to them.',
     reason: 'What to tell them',
-    example: 'For example: the selfie is of a different person from the NIN photo',
+    example: 'For example: the selfie is of a different person from the ID photo',
     confirm: 'Yes, decline',
   },
   reopen: {

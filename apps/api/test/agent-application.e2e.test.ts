@@ -71,7 +71,7 @@ describe('agent application', () => {
     const agent = await newAgent();
     expect(
       (await call(agent, 'post', '/identity', { nin: '123', bvn: '22212345678', consent: true })).body.error.code,
-    ).toBe('invalid_nin');
+    ).toBe('invalid_id');
     const ninNumber = await complete(agent);
     expect((await app(agent)).body.steps).toEqual({
       basics: true,
@@ -97,7 +97,7 @@ describe('agent application', () => {
     const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
     expect(JSON.stringify(row)).not.toContain(ninNumber);
     expect(JSON.stringify(row)).not.toContain('22212345678');
-    expect(row!.ninFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(row!.idFingerprint).toMatch(/^[0-9a-f]{64}$/);
     // Now they can work, and the application is closed for edits.
     await request(t.http).get('/v1/errands/board?lat=6.4480&lng=3.4700&radiusKm=5').set(agent.headers).expect(200);
     expect((await call(agent, 'patch', '', { area: 'Ikoyi' })).status).toBe(409);
@@ -117,7 +117,7 @@ describe('agent application', () => {
     expect(res.body.status).toBe('review');
     expect(res.body.checks.find((c: { key: string }) => c.key === 'duplicate')).toMatchObject({ outcome: 'review' });
     const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, second.userId));
-    expect(row!.ninFingerprint).toBeNull();
+    expect(row!.idFingerprint).toBeNull();
   });
 
   it("doesn't let an account hold a NIN it only started with", async () => {

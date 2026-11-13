@@ -12,7 +12,14 @@ import { RECURRING_JOBS, type MemoryRecurringJobs } from '../src/timers/recurrin
 import type { FakePaymentsAdapter } from '../src/adapters/payments';
 import type { FakeCallsAdapter } from '../src/adapters/calls';
 import { ENV_ADAPTERS, type Adapters } from '../src/providers/env-adapters';
-import { admins, adminSessions, agentApplications, deposits, type AdminRole } from '../src/db/schema';
+import {
+  admins,
+  adminSessions,
+  agentApplications,
+  customerVerifications,
+  deposits,
+  type AdminRole,
+} from '../src/db/schema';
 import { sha256 } from '../src/common/crypto';
 import { eq } from 'drizzle-orm';
 import type { AppName } from '../src/db/schema';
@@ -68,7 +75,7 @@ export interface Person {
 export async function signIn(
   t: TestApp,
   app: AppName,
-  options: { phone?: string; firstName?: string | null; ip?: string; unapproved?: boolean } = {},
+  options: { phone?: string; firstName?: string | null; ip?: string; unapproved?: boolean; unverified?: boolean } = {},
 ): Promise<Person> {
   const phone = options.phone ?? randomPhone();
   const ip = options.ip ?? randomIp();
@@ -90,6 +97,19 @@ export async function signIn(
     await t.db
       .insert(agentApplications)
       .values({ userId: person.userId, countryCode: 'NG', status: 'approved', decidedAt: new Date() })
+      .onConflictDoNothing();
+  }
+  // Test customers are verified, as if they had checked their ID, unless a test says otherwise.
+  if (app === 'customer' && !options.unverified) {
+    await t.db
+      .insert(customerVerifications)
+      .values({
+        userId: person.userId,
+        status: 'verified',
+        provider: 'fake',
+        reference: `cid-${randomUUID()}`,
+        idType: 'nin',
+      })
       .onConflictDoNothing();
   }
   const firstName = options.firstName === undefined ? (app === 'customer' ? 'Ada' : 'Tunde') : options.firstName;

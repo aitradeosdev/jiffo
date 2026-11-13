@@ -13,6 +13,7 @@ import { HealthController } from './health/health.controller';
 import { MoneyModule } from './money/money.module';
 import { PlacesModule } from './places/places.module';
 import { FilesModule } from './files/files.module';
+import { IdentityModule } from './identity/identity.module';
 import { RatingsModule } from './ratings/ratings.module';
 import { PushModule } from './push/push.module';
 import { RealtimeModule } from './realtime/realtime.module';
@@ -28,6 +29,7 @@ import { UsersModule } from './users/users.module';
     CountriesModule,
     AuthModule,
     UsersModule,
+    IdentityModule,
     AgentsModule,
     PushModule,
     RealtimeModule,

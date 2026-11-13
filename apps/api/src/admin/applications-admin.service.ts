@@ -24,12 +24,16 @@ type Check = { key: string; outcome: string; note?: string };
 const CHECK_LABELS: Record<string, string> = {
   nin: 'NIN matches their details',
   bvn: 'BVN matches their details',
-  selfie: 'Selfie matches the NIN photo',
+  drivers_licence: "Driver's licence matches their details",
+  voters_card: "Voter's card matches their details",
+  passport: 'Passport matches their details',
+  id_type: 'An ID we accept',
+  selfie: 'Selfie matches the ID photo',
   age: '18 or older',
-  name: 'Name in the app matches the NIN',
+  name: 'Name in the app matches the ID',
   address: 'Address confirmed',
-  bank: 'Bank account is in the NIN name',
-  duplicate: 'No other agent account on this NIN',
+  bank: 'Bank account is in the name on the ID',
+  duplicate: 'No other agent account on this ID',
 };
 const labelled = (checks: Check[]) => checks.map((c) => ({ ...c, label: CHECK_LABELS[c.key] ?? c.key }));
 

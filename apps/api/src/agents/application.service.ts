@@ -1,23 +1,17 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { and, eq, isNull, ne, sql } from 'drizzle-orm';
-import { createHmac, hkdfSync, randomUUID } from 'node:crypto';
-import { safeEqual } from '../common/crypto';
-import { normaliseIdNumber, providerInfo, yearsOld } from '@jiffo/shared';
-import { APP_CONFIG, AppConfig } from '../config/app-config';
+import { ID_TYPE_KEYS, ID_TYPES, yearsOld, type IdType } from '@jiffo/shared';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { agentApplications, agentPresence, agentProfiles, payoutAccounts, states, users } from '../db/schema';
+import { type IdentityAdapter, type IdentityRequest, type IdentityResult } from '../adapters/identity';
+import { badRequest, conflict, forbidden, notFound, unprocessable } from '../common/errors';
+import { matchesLegalName } from '../common/names';
 import {
-  IdentityUnavailable,
-  type IdentityResult,
-  type PageInput,
-  UnconfiguredIdentityAdapter,
-  type CheckOutcome,
-  type IdentityAdapter,
-} from '../adapters/identity';
-import { ProvidersService } from '../providers/providers.service';
-import { IdentityPageError, IdentityProviderError } from '../adapters/identity-providers';
-import { badRequest, conflict, forbidden, notFound, tooMany, unavailable, unprocessable } from '../common/errors';
-import { nameWords } from '../common/names';
+  ID_CHECK_LABELS,
+  IdentityChecksService,
+  type IdentityOwner,
+  type PendingCheck,
+} from '../identity/identity-checks.service';
 import { PushService } from '../push/push.service';
 import { CountriesService } from '../countries/countries.service';
 
@@ -25,68 +19,38 @@ type Application = typeof agentApplications.$inferSelect;
 type Check = { key: string; outcome: string; note?: string };
 
 /** What the checklist says about each check, in the agent's words. */
-const CHECK_LABELS: Record<string, string> = {
-  nin: 'NIN matches your details',
-  bvn: 'BVN matches your details',
-  selfie: 'Selfie matches your ID photo',
-  age: 'Age 18 or older',
-  name: 'Your name matches your NIN',
+export const CHECK_LABELS: Record<string, string> = {
+  ...ID_CHECK_LABELS,
+  name: 'Your name matches your ID',
   address: 'Address confirmed',
   bank: 'Bank account name matches your ID',
-  duplicate: 'No other agent account on this NIN',
+  duplicate: 'No other agent account on this ID',
 };
-/** The identity checks a provider can answer. */
-const IDENTITY_CHECKS = ['nin', 'bvn', 'selfie'];
-/**
- * Needed for approval: the NIN and a selfie matching its photo, and the BVN when the app sent one (a provider
- * with its own page asks for the NIN only). Any BVN check that came back must pass too.
- */
-const requiredChecks = (flow: IdentityAdapter['flow']) => (flow === 'hosted' ? ['nin', 'selfie'] : IDENTITY_CHECKS);
-/** How many times an hour one check's page may be opened: each may start a paid session. */
-const PAGE_OPENS_PER_HOUR = 20;
-const HOUR_MS = 3_600_000;
+/** The checks that come from the identity check, whichever ID it used. */
+const IDENTITY_CHECKS: string[] = [...ID_TYPE_KEYS, 'selfie', 'id_type', 'duplicate'];
+/** The check an application started, as the identity service takes it. */
+const requestOf = (app: Application): IdentityRequest => ({
+  idType: (app.identityIdType ?? 'nin') as IdType,
+  withBvn: app.identityWithBvn,
+});
 /** While checking, the provider is asked again at most this often, however often the app looks. */
 const POLL_EVERY_MS = 15_000;
-
-/**
- * Whether a name (a bank account's, or the one in the app) belongs to the person on the NIN record: it has
- * at least two words, and every one of them is in the legal name. Banks and apps drop middle names, but they
- * can't add a name that isn't on the record.
- */
-export function matchesLegalName(name: string, legalName: string) {
-  const legal = nameWords(legalName);
-  const words = [...nameWords(name)];
-  return words.length >= 2 && words.every((w) => legal.has(w));
-}
 
 /**
  * An agent's application: the checklist the agent app walks through, the provider's checks, and the decision.
  * Agents can see the board and accept errands only once it is approved.
  */
 @Injectable()
-export class AgentApplicationService {
+export class AgentApplicationService implements IdentityOwner {
   private readonly logger = new Logger(AgentApplicationService.name);
-  /** When each check's page was opened in the last hour, in this process. */
-  private readonly pageOpens = new Map<string, number[]>();
-  /** Checks whose page is being sent now, in this process. */
-  private readonly submitting = new Set<string>();
-  /** Its own key, derived from PIN_KEY, used only to fingerprint NINs. */
-  private readonly ninKey: Buffer;
 
   constructor(
     @Inject(DB) private readonly db: Db,
-    private readonly providers: ProvidersService,
-    @Inject(APP_CONFIG) config: AppConfig,
+    private readonly checks: IdentityChecksService,
     private readonly push: PushService,
     private readonly countries: CountriesService,
   ) {
-    this.ninKey = Buffer.from(
-      hkdfSync('sha256', Buffer.from(config.PIN_KEY, 'hex'), Buffer.alloc(0), 'jiffo nin fingerprint', 32),
-    );
-  }
-
-  private fingerprint(nin: string) {
-    return createHmac('sha256', this.ninKey).update(nin).digest('hex');
+    checks.register('agent', this);
   }
 
   private async load(userId: string): Promise<Application> {
@@ -100,36 +64,14 @@ export class AgentApplicationService {
   private async person(userId: string) {
     const [user] = await this.db.select().from(users).where(eq(users.id, userId));
     if (!user?.firstName || !user.lastName) {
-      throw conflict('profile_incomplete', 'Add your first and last name, as on your NIN, first');
+      throw conflict('profile_incomplete', 'Add your first and last name, as on your ID, first');
     }
     return { firstName: user.firstName, lastName: user.lastName, phone: user.phone };
   }
 
-  /**
-   * The provider a check was started with. If it is no longer set up, the check can't be finished there;
-   * that is said as identity checks being unavailable, and support can look at the application.
-   */
+  /** The provider an address check was started with, as for identity checks. */
   private startedWith(name: string | null): IdentityAdapter {
-    return (name ? this.providers.named('identity', name) : null) ?? new UnconfiguredIdentityAdapter();
-  }
-
-  /** Calls the provider, turning "no provider set up" into an answer the app can show. */
-  private async provider<T>(call: () => Promise<T>): Promise<T> {
-    try {
-      return await call();
-    } catch (error) {
-      if (error instanceof IdentityProviderError) {
-        this.logger.warn(`Identity provider: ${error.message}`);
-        throw unavailable('identity_failed', "The identity check couldn't start. Try again in a moment.");
-      }
-      if (error instanceof IdentityUnavailable) {
-        throw unavailable(
-          'identity_unavailable',
-          "Identity checks aren't available yet. We'll text you when they are.",
-        );
-      }
-      throw error;
-    }
+    return this.checks.startedWith(name);
   }
 
   /**
@@ -184,12 +126,19 @@ export class AgentApplicationService {
       prefs: profile.length > 0,
       learn: app.termsAcceptedAt !== null,
     };
-    const identity = this.providers.current('identity');
+    const options = this.checks.options('agent', settings.identity);
     return {
       status: app.status,
       steps,
-      /** "hosted": the identity provider's own page asks for the NIN, so the app opens it instead. */
-      identityFlow: identity.flow,
+      /** "hosted": a web page asks for the ID and takes the selfie, so the app opens it instead. */
+      identityFlow: options.flow,
+      /** The IDs the agent can verify with now, and whether their BVN is checked as well. */
+      idTypes: options.idTypes.map((key) => ({ key, name: ID_TYPES[key].name })),
+      withBvn: options.withBvn,
+      /** The agent picks the ID on the provider's page rather than in the app. */
+      idChosenOnPage: options.idChosenOnPage,
+      /** The ID the current or last check used. */
+      identityIdType: app.identityIdType,
       /** Started with the provider, and its result not back yet. */
       identityChecking: app.identityReference !== null && app.identityOutcome === null,
       stateCode: app.stateCode,
@@ -204,7 +153,7 @@ export class AgentApplicationService {
       checks: app.checks.map((c) => ({ ...c, label: CHECK_LABELS[c.key] ?? c.key })),
       submittedAt: app.submittedAt,
       /** Who runs the checks, as the app names them, and how soon support usually looks at one in review. */
-      provider: settings.identity.provider ?? providerInfo('identity', identity.name)?.name ?? null,
+      provider: options.providerName,
       reviewHours: settings.identity.reviewTargetHours,
       /** Said to the agent only when support declined the application. */
       decisionNote: app.status === 'rejected' ? app.decisionNote : null,
@@ -225,77 +174,38 @@ export class AgentApplicationService {
   }
 
   /**
-   * Starts the NIN, BVN and selfie checks with the provider. The numbers go to the provider and are not kept.
-   * The NIN's fingerprint waits as pending: it is claimed only once the provider confirms the NIN is theirs.
+   * Starts the identity check with the provider, for the ID the agent chose (and their BVN when it is
+   * required). Any numbers go to the provider and are not kept; the ID's fingerprint waits as pending until
+   * the provider shows the ID is theirs.
    */
-  async startIdentity(userId: string, input: { nin?: string; bvn?: string }) {
-    // The provider in use now: the check finishes with it, even if admin switches in between.
-    const identity = this.providers.current('identity');
-    // A provider with its own page asks for the numbers there; otherwise the app sends them.
-    let nin: string | null = null;
-    let bvn: string | null = null;
-    if (identity.flow === 'numbers') {
-      nin = normaliseIdNumber('nin', input.nin ?? '');
-      bvn = normaliseIdNumber('bvn', input.bvn ?? '');
-      if (!nin) throw badRequest('invalid_nin', 'A NIN is 11 digits');
-      if (!bvn) throw badRequest('invalid_bvn', 'A BVN is 11 digits');
-    }
+  async startIdentity(userId: string, input: { idType?: string; idNumber?: string; nin?: string; bvn?: string }) {
     const app = await this.load(userId);
     if (app.status !== 'draft') {
       throw conflict('application_submitted', 'Your application is already sent. We will text you when it is checked.');
     }
     const person = await this.person(userId);
-    const reference = `jid-${randomUUID()}`;
-    const started = await this.provider(() =>
-      identity.startIdentity({ person, reference, ...(nin && bvn ? { nin, bvn } : {}) }),
-    );
+    const { settings } = await this.countries.currentSettings(app.countryCode);
+    // Earlier versions of the app send only a NIN.
+    const idType = input.idType ?? (input.nin ? 'nin' : undefined);
+    const started = await this.checks.start('agent', person, settings.identity, {
+      idType,
+      idNumber: input.idNumber ?? input.nin,
+      bvn: input.bvn,
+    });
     await this.updateDraft(userId, {
-      pendingNinFingerprint: nin ? this.fingerprint(nin) : null,
-      identityProvider: identity.name,
+      pendingIdFingerprint: started.pendingFingerprint,
+      identityProvider: started.provider,
       identityReference: started.reference,
+      identityIdType: started.request.idType,
+      identityWithBvn: started.request.withBvn,
       identityOutcome: null,
       identityCheckedAt: null,
     });
-    return { sdkToken: started.sdkToken ?? null, url: started.url ?? null, provider: identity.name };
-  }
-
-  /**
-   * A provider sending a result for a check started on its page: once its signature shows it came from them,
-   * the application it belongs to is settled with it straight away. Only what settling keeps is kept (the
-   * outcome, legal name, date of birth and the NIN's fingerprint), never the payload. Null when unsigned.
-   */
-  async recordWebhook(provider: string, rawBody: Buffer, headers: Record<string, string | string[] | undefined>) {
-    const adapter = this.providers.named('identity', provider);
-    const parse = adapter?.parseWebhook?.bind(adapter);
-    if (!parse) return null;
-    // A provider that can't be reached to confirm the result answers 503, so it sends the result again.
-    const parsed = await this.provider(() => parse(rawBody, headers));
-    if (!parsed) return null;
-    const { reference, result } = parsed;
-    if (result.status !== 'done') return { reference, settled: false };
-    const [app] = await this.db
-      .select()
-      .from(agentApplications)
-      .where(
-        and(
-          eq(agentApplications.identityProvider, provider),
-          eq(agentApplications.identityReference, reference),
-          eq(agentApplications.status, 'draft'),
-          isNull(agentApplications.identityOutcome),
-        ),
-      );
-    // A check started again since, or already settled: this result is no longer wanted.
-    if (!app) return { reference, settled: false };
-    return { reference, settled: (await this.applyIdentity(app, result)) !== null };
-  }
-
-  /** Whether a link to a provider's page is one this API made. */
-  private signedLink(provider: string, reference: string, signature: string) {
-    return safeEqual(signature, this.providers.context.sign(`${provider}:${reference}`));
+    return { sdkToken: started.sdkToken, url: started.url, provider: started.provider };
   }
 
   /** The application waiting on a check started with this provider and reference, if any. */
-  private async waitingOn(provider: string, reference: string) {
+  async waiting(provider: string, reference: string): Promise<PendingCheck | null> {
     const [app] = await this.db
       .select()
       .from(agentApplications)
@@ -307,84 +217,30 @@ export class AgentApplicationService {
           isNull(agentApplications.identityOutcome),
         ),
       );
-    return app ?? null;
+    return app ? { userId: app.userId, provider, reference, request: requestOf(app) } : null;
+  }
+
+  /** A provider's result for a check still waited on, as the identity service hands it over. */
+  async settle(check: PendingCheck, result: IdentityResult) {
+    const app = await this.load(check.userId);
+    if (app.identityReference !== check.reference) return null;
+    return this.applyIdentity(app, result);
   }
 
   /**
-   * The page a provider's widget runs in, for a link this API made and a check still waiting on it: null for
-   * any other link, "finished" for a check that is done or was started again. Opening one may start a paid
-   * session with the provider, so each check's page opens a limited number of times an hour.
-   */
-  async hostedPage(provider: string, reference: string, signature: string): Promise<string | 'finished' | null> {
-    const adapter = this.providers.named('identity', provider);
-    if (!adapter?.page || !this.signedLink(provider, reference, signature)) return null;
-    if (!(await this.waitingOn(provider, reference))) return 'finished';
-    const now = Date.now();
-    for (const [key, opens] of this.pageOpens) {
-      if (opens.every((at) => now - at > HOUR_MS)) this.pageOpens.delete(key);
-    }
-    const opens = (this.pageOpens.get(reference) ?? []).filter((at) => now - at <= HOUR_MS);
-    if (opens.length >= PAGE_OPENS_PER_HOUR) {
-      throw tooMany('identity_page_limit', 'This page was opened too many times. Try again in an hour.');
-    }
-    this.pageOpens.set(reference, [...opens, now]);
-    const page = adapter.page.bind(adapter);
-    return this.provider(async () => page(reference));
-  }
-
-  /**
-   * What the agent sent from a provider's page that Jiffo serves: the check runs with it, and its result
-   * settles the application at once. The NIN is passed to the provider and only its fingerprint is kept.
-   * One at a time per check, so a second send can't start a second paid check.
-   */
-  async submitPage(provider: string, input: PageInput & { ref: string; sig: string }) {
-    const adapter = this.providers.named('identity', provider);
-    if (!adapter?.submitPage || !this.signedLink(provider, input.ref, input.sig)) return null;
-    const nin = normaliseIdNumber('nin', input.nin);
-    if (!nin) throw badRequest('invalid_nin', 'A NIN is 11 digits');
-    const finished = () =>
-      conflict('identity_changed', 'This check is finished or was started again. Go back to the app.');
-    const app = await this.waitingOn(provider, input.ref);
-    if (!app) throw finished();
-    if (this.submitting.has(input.ref)) throw conflict('identity_busy', 'This check is already being sent.');
-    this.submitting.add(input.ref);
-    try {
-      let result: IdentityResult;
-      try {
-        result = await adapter.submitPage(input.ref, { nin, session: input.session, sessionSig: input.sessionSig });
-      } catch (error) {
-        if (error instanceof IdentityPageError) throw badRequest('identity_page', error.message);
-        if (error instanceof IdentityProviderError) {
-          this.logger.warn(`Identity provider: ${error.message}`);
-          throw unavailable('identity_failed', `The check didn't go through. Send it again in a moment.`);
-        }
-        if (error instanceof IdentityUnavailable) {
-          throw unavailable('identity_unavailable', "Identity checks aren't available yet.");
-        }
-        throw error;
-      }
-      const settled = await this.applyIdentity(app, result);
-      if (!settled) throw finished();
-      return { status: settled.status, outcome: settled.outcome };
-    } finally {
-      this.submitting.delete(input.ref);
-    }
-  }
-
-  /**
-   * After the provider's SDK finishes in the app: reads the result from the provider and keeps it. When the
-   * NIN and selfie show the NIN is this person's, its fingerprint is claimed; if another agent account
-   * already holds it, the identity goes to support rather than answering who owns which NIN.
+   * After the provider's screens finish in the app: reads the result from the provider and keeps it. When the
+   * ID and selfie show the ID is this person's, its fingerprint is claimed; if another agent account already
+   * holds it, the identity goes to support rather than answering who owns which ID.
    */
   async finishIdentity(userId: string) {
     const app = await this.load(userId);
     if (app.status !== 'draft') {
       throw conflict('application_submitted', 'Your application is already sent. We will text you when it is checked.');
     }
-    if (!app.identityReference) throw conflict('identity_not_started', 'Start with your NIN and BVN');
+    if (!app.identityReference) throw conflict('identity_not_started', 'Start with your ID');
     // Already settled, as when the provider sent the result to its webhook.
     if (app.identityOutcome) {
-      const checks = app.checks.filter((c) => [...IDENTITY_CHECKS, 'duplicate'].includes(c.key));
+      const checks = app.checks.filter((c) => IDENTITY_CHECKS.includes(c.key));
       return { status: 'done' as const, outcome: app.identityOutcome, checks };
     }
     return this.settleIdentity(app);
@@ -392,9 +248,7 @@ export class AgentApplicationService {
 
   /** Asks the provider for the identity result, and keeps it once it is back. */
   private async settleIdentity(app: Application) {
-    const result = await this.provider(() =>
-      this.startedWith(app.identityProvider).identityResult(app.identityReference!),
-    );
+    const result = await this.checks.result({ provider: app.identityProvider!, reference: app.identityReference! });
     if (result.status === 'pending') {
       // Remembered, so the checklist doesn't ask the provider again before POLL_EVERY_MS.
       await this.db
@@ -408,7 +262,7 @@ export class AgentApplicationService {
     // Settled meanwhile, as by the provider's webhook: that result stands.
     const now = await this.load(app.userId);
     if (now.identityReference === app.identityReference && now.identityOutcome) {
-      const checks = now.checks.filter((c) => [...IDENTITY_CHECKS, 'duplicate'].includes(c.key));
+      const checks = now.checks.filter((c) => IDENTITY_CHECKS.includes(c.key));
       return { status: 'done' as const, outcome: now.identityOutcome, checks };
     }
     throw conflict('identity_changed', 'Your identity check was started again. Finish that one.');
@@ -416,30 +270,33 @@ export class AgentApplicationService {
 
   /**
    * Keeps a finished identity result on the application, if it is still the check the application waits for.
-   * When the NIN and selfie show the NIN is this person's, its fingerprint is claimed; if another agent
-   * account already holds it, the identity goes to support rather than answering who owns which NIN.
-   * Otherwise the fingerprint waits as pending, so support's approval claims it, or finds it already held.
+   * When the ID and selfie show the ID is this person's, its fingerprint is claimed; if another agent account
+   * already holds it, the identity goes to support rather than answering who owns which ID. Otherwise the
+   * fingerprint waits as pending, so support's approval claims it, or finds it already held.
    */
   private async applyIdentity(app: Application, result: IdentityResult) {
     const userId = app.userId;
-    // The NIN's fingerprint: of the NIN the provider read, when its own page asked; else of what the app sent.
-    const read = result.idNumber ? normaliseIdNumber('nin', result.idNumber) : null;
-    const fingerprint = read ? this.fingerprint(read) : app.pendingNinFingerprint;
-    const passed = (key: string) => result.checks.some((c) => c.key === key && c.outcome === 'passed');
-    const own = passed('nin') && passed('selfie');
+    const { settings } = await this.countries.currentSettings(app.countryCode);
+    const judged = this.checks.judge(
+      requestOf(app),
+      result,
+      this.checks.accepted('agent', settings.identity, app.identityProvider ?? 'none'),
+    );
+    // The ID's fingerprint: of the ID the provider read, when its own page asked; else of what the app sent.
+    const fingerprint = judged.fingerprint ?? app.pendingIdFingerprint;
     return this.db.transaction(async (tx) => {
-      let outcome: CheckOutcome = result.outcome ?? 'review';
-      const checks: Check[] = [...result.checks];
+      let outcome = judged.outcome;
+      const checks: Check[] = [...judged.checks];
       let claim: string | null = null;
-      if (own && fingerprint) {
-        // One claim at a time per NIN, so two accounts can't both take it at the same moment.
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'nin:' + fingerprint}))`);
+      if (judged.own && fingerprint) {
+        // One claim at a time per ID, so two accounts can't both take it at the same moment.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'id:' + fingerprint}))`);
         const [holder] = await tx
           .select({ userId: agentApplications.userId })
           .from(agentApplications)
-          .where(and(eq(agentApplications.ninFingerprint, fingerprint), ne(agentApplications.userId, userId)));
+          .where(and(eq(agentApplications.idFingerprint, fingerprint), ne(agentApplications.userId, userId)));
         if (holder) {
-          checks.push({ key: 'duplicate', outcome: 'review', note: 'Another agent account uses this NIN' });
+          checks.push({ key: 'duplicate', outcome: 'review', note: 'Another agent account uses this ID' });
           if (outcome === 'passed') outcome = 'review';
         } else {
           claim = fingerprint;
@@ -450,12 +307,13 @@ export class AgentApplicationService {
         .set({
           identityOutcome: outcome,
           identityCheckedAt: new Date(),
-          legalName: result.legalName ?? null,
-          dateOfBirth: result.dateOfBirth ?? null,
-          // Only a NIN this check showed to be theirs is held; an earlier one is let go.
-          ninFingerprint: claim,
-          pendingNinFingerprint: claim ? null : fingerprint,
-          checks: [...checks, ...app.checks.filter((c) => ![...IDENTITY_CHECKS, 'duplicate'].includes(c.key))],
+          identityIdType: judged.idType,
+          legalName: judged.legalName,
+          dateOfBirth: judged.dateOfBirth,
+          // Only an ID this check showed to be theirs is held; an earlier one is let go.
+          idFingerprint: claim,
+          pendingIdFingerprint: claim ? null : fingerprint,
+          checks: [...checks, ...app.checks.filter((c) => !IDENTITY_CHECKS.includes(c.key))],
           updatedAt: new Date(),
         })
         .where(
@@ -517,9 +375,9 @@ export class AgentApplicationService {
     const person = await this.person(userId);
     const claimed = await this.updateDraft(userId, { status: 'checking', submittedAt: new Date() });
     let reference: string;
-    const identity = this.providers.current('identity');
+    const identity = this.checks.current();
     try {
-      ({ reference } = await this.provider(() =>
+      ({ reference } = await this.checks.call(() =>
         identity.startAddress({
           person,
           area: claimed.area ?? undefined,
@@ -549,7 +407,9 @@ export class AgentApplicationService {
     if (!app.addressReference) return app;
     let address: Awaited<ReturnType<IdentityAdapter['addressResult']>>;
     try {
-      address = await this.provider(() => this.startedWith(app.addressProvider).addressResult(app.addressReference!));
+      address = await this.checks.call(() =>
+        this.startedWith(app.addressProvider).addressResult(app.addressReference!),
+      );
     } catch (error) {
       this.logger.warn(`Address check for ${app.userId} could not be read: ${String(error)}`);
       address = { status: 'pending' };
@@ -569,16 +429,18 @@ export class AgentApplicationService {
     const [user] = await this.db.select().from(users).where(eq(users.id, app.userId));
     const fullName = `${user!.firstName ?? ''} ${user!.lastName ?? ''}`;
     const legal = app.legalName ?? '';
-    const own = app.checks.filter((c) => [...IDENTITY_CHECKS, 'duplicate'].includes(c.key));
-    // The checks the provider was asked for must be there and passed, any other that came back too, and the
-    // provider's overall answer. A provider no longer set up is taken to have been asked for all of them.
-    const required = requiredChecks(this.startedWith(app.identityProvider).flow);
-    const identityChecks: Check[] = IDENTITY_CHECKS.flatMap((key) => {
-      const found = own.find((c) => c.key === key);
-      if (found) return [found];
-      return required.includes(key) ? [{ key, outcome: 'review', note: 'No result from the provider' }] : [];
-    });
-    const pass = (ok: boolean, note: string): { outcome: CheckOutcome; note?: string } =>
+    const own = app.checks.filter((c) => IDENTITY_CHECKS.includes(c.key));
+    // The checks the identity check asked for must be there and passed, any other that came back too, and
+    // the provider's overall answer.
+    const request = requestOf(app);
+    const required = [request.idType, 'selfie', ...(request.withBvn && request.idType !== 'bvn' ? ['bvn'] : [])];
+    const identityChecks: Check[] = [
+      ...own.filter((c) => c.key !== 'duplicate'),
+      ...required
+        .filter((key) => !own.some((c) => c.key === key))
+        .map((key) => ({ key, outcome: 'review', note: 'No result from the provider' })),
+    ];
+    const pass = (ok: boolean, note: string): { outcome: 'passed' | 'review'; note?: string } =>
       ok ? { outcome: 'passed' } : { outcome: 'review', note };
     const checks: Check[] = [
       ...identityChecks,
@@ -699,15 +561,15 @@ export class AgentApplicationService {
         failed: failed.map((c) => c.key),
       });
     }
-    let ninFingerprint = app.ninFingerprint;
-    if (!ninFingerprint && app.pendingNinFingerprint) {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'nin:' + app.pendingNinFingerprint}))`);
+    let idFingerprint = app.idFingerprint;
+    if (!idFingerprint && app.pendingIdFingerprint) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'id:' + app.pendingIdFingerprint}))`);
       const [holder] = await tx
         .select({ userId: agentApplications.userId, status: agentApplications.status })
         .from(agentApplications)
         .where(
           and(
-            eq(agentApplications.ninFingerprint, app.pendingNinFingerprint),
+            eq(agentApplications.idFingerprint, app.pendingIdFingerprint),
             ne(agentApplications.userId, input.userId),
           ),
         );
@@ -718,14 +580,14 @@ export class AgentApplicationService {
       if (holder) {
         await tx
           .update(agentApplications)
-          .set({ ninFingerprint: null, updatedAt: new Date() })
+          .set({ idFingerprint: null, updatedAt: new Date() })
           .where(eq(agentApplications.userId, holder.userId));
       }
-      ninFingerprint = app.pendingNinFingerprint;
+      idFingerprint = app.pendingIdFingerprint;
     }
     const [row] = await tx
       .update(agentApplications)
-      .set({ status: 'approved', ninFingerprint, ...decided })
+      .set({ status: 'approved', idFingerprint, ...decided })
       .where(eq(agentApplications.userId, input.userId))
       .returning();
     return { before: app, after: row! };

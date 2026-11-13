@@ -1,3 +1,4 @@
+import type { IdType } from './identity';
 /**
  * The services Jiffo uses from outside providers, and which providers it can use for each. Admin chooses
  * one per category and enters its keys in the panel; the keys are stored encrypted and never shown again.
@@ -48,6 +49,12 @@ export interface ProviderInfo {
   webhookPath?: string;
   /** Where in the provider's dashboard that address goes. */
   webhookHint?: string;
+  /** Identity providers: the IDs it checks, each with a selfie matched to the ID's photo. */
+  idTypes?: IdType[];
+  /** Identity providers: whether it can check a BVN in the same check as another ID. */
+  bvnAlongside?: boolean;
+  /** Identity providers: the person picks their ID on the provider's own page, set up in its dashboard. */
+  idChosenOnPage?: boolean;
 }
 
 export const PROVIDERS: ProviderInfo[] = [
@@ -193,8 +200,11 @@ export const PROVIDERS: ProviderInfo[] = [
     key: 'smileid',
     category: 'identity',
     name: 'Smile ID',
+    // NIN, BVN and voter's card against the issuer's photo; licence and passport against the document's.
+    idTypes: ['nin', 'bvn', 'voters_card', 'drivers_licence', 'passport'],
+    bvnAlongside: false,
     about:
-      "Biometric KYC with the NIN on Smile ID's own page: the NIN record and a selfie with a liveness check. Smile ID doesn't check addresses, so our team looks at those.",
+      "On Smile ID's own page: the person's ID and a selfie with a liveness check, matched to the photo the issuer or the document holds. Smile ID doesn't check addresses, so our team looks at those.",
     webhookPath: '/v1/webhooks/identity/smileid',
     webhookHint: 'Sent with each check, so nothing needs setting in the Smile ID portal.',
     fields: [
@@ -228,8 +238,11 @@ export const PROVIDERS: ProviderInfo[] = [
     key: 'dojah',
     category: 'identity',
     name: 'Dojah',
+    idTypes: ['nin', 'bvn', 'drivers_licence', 'passport'],
+    bvnAlongside: true,
+    idChosenOnPage: true,
     about:
-      "Dojah's EasyOnboard widget, with the government ID (NIN) and selfie steps you set up in the Dojah dashboard, and Dojah's agent visits for addresses.",
+      "Dojah's EasyOnboard widget, with the government data, ID and selfie steps you set up in the Dojah dashboard (the IDs offered are chosen there; add BVN to the government data step for agents), and Dojah's agent visits for addresses.",
     webhookPath: '/v1/webhooks/identity/dojah',
     webhookHint: 'Subscribe it for the kyc_widget service under Developers, Webhooks in the Dojah dashboard.',
     fields: [
@@ -270,8 +283,11 @@ export const PROVIDERS: ProviderInfo[] = [
     key: 'youverify',
     category: 'identity',
     name: 'Youverify',
+    // Youverify documents a face match for the NIN; the licence's is to be confirmed with them.
+    idTypes: ['nin', 'drivers_licence'],
+    bvnAlongside: true,
     about:
-      "Youverify's liveness check and NIN check with face match, on a page Jiffo serves. Addresses are checked by our team.",
+      "Youverify's liveness check and ID check with face match, on a page Jiffo serves, with the BVN looked up alongside when needed. Addresses are checked by our team.",
     fields: [
       { key: 'secretKey', label: 'API secret key', secret: true, required: true },
       {

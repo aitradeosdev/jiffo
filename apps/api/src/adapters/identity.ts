@@ -1,12 +1,18 @@
 import { randomUUID } from 'node:crypto';
+import { ID_TYPE_KEYS, type IdType } from '@jiffo/shared';
 
 /**
- * Identity checks for agents, done by a provider (QoreID in the prototypes) that holds the documents. Jiffo
- * never stores a NIN, BVN or selfie: it starts a check, the app runs the provider's SDK for the parts that
- * need the person (the BVN approval with NIBSS and the selfie), and Jiffo keeps only the result, the legal
- * name and the date of birth.
+ * Identity checks for customers and agents, done by a provider that holds the documents. Jiffo never stores
+ * an ID number, a document or a selfie: it starts a check, the person takes part on the provider's screens,
+ * and Jiffo keeps only the result, the legal name, the date of birth and a fingerprint of the ID.
  */
 export type CheckOutcome = 'passed' | 'failed' | 'review';
+
+/**
+ * One check's answer. "id" is the ID the person verifies with, whichever type it is; the API files it under
+ * that type. "bvn" is a BVN checked alongside another ID, for agents.
+ */
+export type CheckKey = 'id' | 'bvn' | 'selfie';
 
 export interface IdentityPerson {
   firstName: string;
@@ -14,20 +20,28 @@ export interface IdentityPerson {
   phone: string;
 }
 
+/** What a check is for: the ID the person verifies with, and whether their BVN is checked as well. */
+export interface IdentityRequest {
+  idType: IdType;
+  withBvn: boolean;
+}
+
 export interface IdentityResult {
   status: 'pending' | 'done';
   /** Overall: passed only when every check passed. */
   outcome?: CheckOutcome;
-  /** As on the NIN record. */
+  /** As on the ID's record. */
   legalName?: string;
-  /** YYYY-MM-DD, as on the NIN record. */
+  /** YYYY-MM-DD, as on the ID's record. */
   dateOfBirth?: string;
-  checks: Array<{ key: 'nin' | 'bvn' | 'selfie'; outcome: CheckOutcome; note?: string }>;
+  checks: Array<{ key: CheckKey; outcome: CheckOutcome; note?: string }>;
   /**
-   * The NIN as the provider read it, for providers whose own page asks for it. Only ever turned into the
-   * fingerprint that stops a second account on the same NIN; never stored.
+   * The ID's number as the provider read it, for providers whose own page asks for it. Only ever turned into
+   * the fingerprint that stops a second account on the same ID; never stored.
    */
   idNumber?: string;
+  /** The ID the person used, from a provider whose page lets them choose (Dojah). */
+  idType?: IdType;
 }
 
 export interface AddressResult {
@@ -36,9 +50,10 @@ export interface AddressResult {
   note?: string;
 }
 
-/** What a page Jiffo serves for a provider sends back: the NIN the agent typed, and the provider's session. */
+/** What a page Jiffo serves for a provider sends back: the numbers the person typed, and the provider's session. */
 export interface PageInput {
-  nin: string;
+  idNumber: string;
+  bvn?: string;
   session?: string;
   sessionSig?: string;
 }
@@ -46,16 +61,23 @@ export interface PageInput {
 export interface IdentityAdapter {
   readonly name: string;
   /**
-   * How the agent takes part. "numbers": the app asks for the NIN and BVN and runs the provider's screens
-   * (the development stand-in). "hosted": the provider's own web page asks for everything, and the app
-   * opens it at `url`.
+   * How the person takes part. "numbers": the app asks for the ID number and runs the provider's screens
+   * (the development stand-in). "hosted": a web page (the provider's, or one Jiffo serves for it) asks for
+   * everything, and the app opens it at `url`.
    */
   readonly flow: 'numbers' | 'hosted';
-  /** Starts the identity checks under our reference. */
+  /** The IDs it checks, each with a selfie matched to the ID's photo (from the shared catalogue). */
+  readonly idTypes: readonly IdType[];
+  /** Whether it can check a BVN in the same check as another ID. */
+  readonly bvnAlongside: boolean;
+  /** Whether the person picks their ID on the provider's page, as set up in its dashboard. */
+  readonly idChosenOnPage: boolean;
+  /** Starts the identity check under our reference. The numbers come only in the "numbers" flow. */
   startIdentity(input: {
     person: IdentityPerson;
     reference: string;
-    nin?: string;
+    request: IdentityRequest;
+    idNumber?: string;
     bvn?: string;
   }): Promise<{ reference: string; sdkToken?: string; url?: string }>;
   identityResult(reference: string): Promise<IdentityResult>;
@@ -72,14 +94,19 @@ export interface IdentityAdapter {
    * the provider to confirm it, and throws IdentityProviderError when it can't, so the provider sends it again.
    */
   parseWebhook?(rawBody: Buffer, headers: Headers): Promise<{ reference: string; result: IdentityResult } | null>;
-  /** For providers whose widget runs in a page Jiffo serves: that page. */
-  page?(reference: string): string | Promise<string>;
+  /** For providers whose widget runs in a page Jiffo serves: that page, for the check as started. */
+  page?(reference: string, request: IdentityRequest): string | Promise<string>;
   /**
-   * For a page Jiffo serves that sends what the agent entered back to the API (Youverify's): runs the check
-   * with it and gives the result. The NIN is passed on, never kept.
+   * For a page Jiffo serves that sends what the person entered back to the API (Youverify's): runs the check
+   * with it and gives the result. The numbers are passed on, never kept.
    */
-  submitPage?(reference: string, input: PageInput): Promise<IdentityResult>;
+  submitPage?(reference: string, request: IdentityRequest, input: PageInput): Promise<IdentityResult>;
 }
+
+/** References say whose check it is: customers' start with cid-, agents' with jid-. */
+export const REFERENCE_PREFIX = { customer: 'cid', agent: 'jid' } as const;
+export const referenceRole = (reference: string | undefined): 'customer' | 'agent' =>
+  reference?.startsWith(`${REFERENCE_PREFIX.customer}-`) ? 'customer' : 'agent';
 
 export type Headers = Record<string, string | string[] | undefined>;
 export const headerOf = (headers: Headers, name: string) => {
@@ -90,26 +117,37 @@ export const headerOf = (headers: Headers, name: string) => {
 export const IDENTITY = Symbol('IDENTITY');
 
 /**
- * For development and tests: checks finish at once. The NIN's last four digits pick the result, so every
- * path can be tried: 0000 fails the NIN, 1111 sends the selfie to review, 1818 is someone under 18.
+ * For development and tests: checks finish at once. The ID number's last four characters pick the result, so
+ * every path can be tried: 0000 fails the ID, 1111 sends the selfie to review, 1818 is someone under 18.
  * An address containing "unknown" goes to review.
  */
 export class FakeIdentityAdapter implements IdentityAdapter {
   readonly name = 'fake';
   readonly flow = 'numbers' as const;
+  readonly idTypes = ID_TYPE_KEYS;
+  readonly bvnAlongside = true;
+  readonly idChosenOnPage = false;
   private readonly identities = new Map<string, IdentityResult>();
   private readonly addresses = new Map<string, AddressResult>();
 
-  async startIdentity(input: { person: IdentityPerson; reference: string; nin?: string; bvn?: string }) {
+  async startIdentity(input: {
+    person: IdentityPerson;
+    reference: string;
+    request: IdentityRequest;
+    idNumber?: string;
+    bvn?: string;
+  }) {
     const reference = input.reference;
-    const ending = (input.nin ?? '').slice(-4);
+    const ending = (input.idNumber ?? '').slice(-4);
     const checks: IdentityResult['checks'] = [
       {
-        key: 'nin',
+        key: 'id',
         outcome: ending === '0000' ? 'failed' : 'passed',
-        note: ending === '0000' ? 'No record for this NIN' : undefined,
+        note: ending === '0000' ? 'No record for this ID' : undefined,
       },
-      { key: 'bvn', outcome: 'passed' },
+      ...(input.request.withBvn && input.request.idType !== 'bvn'
+        ? [{ key: 'bvn' as const, outcome: 'passed' as const }]
+        : []),
       {
         key: 'selfie',
         outcome: ending === '1111' ? 'review' : 'passed',
@@ -159,6 +197,9 @@ export class FakeIdentityAdapter implements IdentityAdapter {
 export class UnconfiguredIdentityAdapter implements IdentityAdapter {
   readonly name = 'none';
   readonly flow = 'numbers' as const;
+  readonly idTypes: readonly IdType[] = [];
+  readonly bvnAlongside = false;
+  readonly idChosenOnPage = false;
   private refuse(): never {
     throw new IdentityUnavailable();
   }

@@ -32,7 +32,8 @@ describe('Smile ID', () => {
         ? json({ token: 'jwt-1' })
         : json({ link: 'https://links.smile.test/abc', ref_id: 'r' }, 201),
     );
-    expect(await make(impl).startIdentity({ person, reference: 'jid-1' })).toEqual({
+    const nin = { idType: 'nin', withBvn: false } as const;
+    expect(await make(impl).startIdentity({ person, reference: 'jid-1', request: nin })).toEqual({
       reference: 'jid-1',
       url: 'https://links.smile.test/abc',
     });
@@ -47,7 +48,7 @@ describe('Smile ID', () => {
     expect(form.get('is_single_use')).toBe('true');
     expect(form.get('user_id')).toBe('jid-1');
     expect(form.get('callback_url')).toBe('https://api.jiffo.test/v1/webhooks/identity/smileid');
-    expect(form.get('redirect_url')).toBe('https://api.jiffo.test/v1/identity/done');
+    expect(form.get('redirect_url')).toBe('https://api.jiffo.test/v1/identity/done?for=agent');
     expect(form.get('notice_privacy_policy_url')).toBe('https://jiffo.test/privacy');
   });
 
@@ -83,7 +84,7 @@ describe('Smile ID', () => {
           legalName: 'TUNDE ADE BAKARE',
           dateOfBirth: '1995-04-12',
           checks: [
-            { key: 'nin', outcome: 'passed' },
+            { key: 'id', outcome: 'passed' },
             { key: 'selfie', outcome: 'passed' },
           ],
           idNumber: '12345678901',
@@ -97,7 +98,7 @@ describe('Smile ID', () => {
       const blocked = withStatus({ status: 'block', user_id: 'jid-1', message: 'Face did not match' });
       expect((await make(blocked.impl).parseWebhook(callback('clear'), signed()))?.result).toMatchObject({
         outcome: 'failed',
-        checks: [{ key: 'nin', outcome: 'failed', note: 'Face did not match' }, expect.anything()],
+        checks: [{ key: 'id', outcome: 'failed', note: 'Face did not match' }, expect.anything()],
       });
       const look = withStatus({ status: 'attention', user_id: 'jid-1' });
       expect((await make(look.impl).parseWebhook(callback('clear'), signed()))?.result.outcome).toBe('review');
@@ -159,6 +160,7 @@ describe('Dojah', () => {
       'https://api.jiffo.test/v1/identity/hosted/dojah?ref=jid-3&sig=sig(dojah:jid-3)',
     );
     const page = dojah.page('jid-3');
+    expect(page).toContain('https://api.jiffo.test/v1/identity/done?for=agent');
     expect(page).toContain('https://widget.dojah.io/widget.js');
     expect(page).toContain('"widget_id":"widget-1"');
     expect(page).toContain('"reference_id":"jid-3"');
@@ -173,10 +175,11 @@ describe('Dojah', () => {
       legalName: 'TUNDE ADE BAKARE',
       dateOfBirth: '1995-04-12',
       checks: [
-        { key: 'nin', outcome: 'passed' },
+        { key: 'id', outcome: 'passed' },
         { key: 'selfie', outcome: 'passed' },
       ],
       idNumber: '12345678901',
+      idType: 'nin',
     });
     expect(calls[0]!.url).toBe('https://api.dojah.io/api/v1/kyc/verification?reference_id=jid-3');
     expect(calls[0]!.init.headers).toMatchObject({ Authorization: 'sk-dojah', AppId: 'app-1' });
@@ -188,6 +191,50 @@ describe('Dojah', () => {
         .status,
     ).toBe('pending');
     expect((await make(fakeFetch(() => json({}, 404)).impl).identityResult('x')).status).toBe('pending');
+  });
+
+  it('reads whichever ID the person chose in the widget, and a BVN alongside', async () => {
+    const read = async (data: object) =>
+      make(fakeFetch(() => json({ entity: { verification_status: 'Completed', data } })).impl).identityResult('x');
+    const person = { first_name: 'Tunde', last_name: 'Bakare', date_of_birth: '1995-04-12' };
+    // A driver's licence looked up with the issuer, and a BVN in the same name.
+    const licence = await read({
+      government_data: {
+        status: true,
+        data: { drivers_license: { entity: { ...person, license_no: 'LAG12345AA12' } }, bvn: { entity: person } },
+      },
+      selfie: { status: true },
+    });
+    expect(licence).toMatchObject({ idType: 'drivers_licence', idNumber: 'LAG12345AA12', outcome: 'passed' });
+    expect(licence.checks.map((c) => c.key)).toEqual(['id', 'selfie', 'bvn']);
+    // A BVN in someone else's name goes to review.
+    const other = await read({
+      government_data: {
+        status: true,
+        data: {
+          nin: { entity: { ...person, nin: '12345678901' } },
+          bvn: { entity: { first_name: 'Ada', last_name: 'Obi' } },
+        },
+      },
+      selfie: { status: true },
+    });
+    expect(other.checks).toContainEqual({ key: 'bvn', outcome: 'review', note: 'The BVN is in another name' });
+    // A passport from the ID document step, with no lookup.
+    const passport = await read({
+      id: {
+        status: true,
+        data: { id_data: { ...person, document_type: 'International Passport', document_number: 'A12345678' } },
+      },
+      selfie: { status: true },
+    });
+    expect(passport).toMatchObject({ idType: 'passport', idNumber: 'A12345678', outcome: 'passed' });
+    // Only a BVN: it is the ID.
+    const bvn = await read({
+      government_data: { status: true, data: { bvn: { entity: { ...person, bvn: '22212345678' } } } },
+      selfie: { status: true },
+    });
+    expect(bvn).toMatchObject({ idType: 'bvn', idNumber: '22212345678' });
+    expect(bvn.checks.map((c) => c.key)).toEqual(['id', 'selfie']);
   });
 
   it('takes a webhook only with the webhook secret, and starts and reads address visits', async () => {
@@ -238,7 +285,7 @@ describe('Youverify', () => {
     expect((await youverify.startIdentity({ reference: 'jid-4' })).url).toBe(
       'https://api.jiffo.test/v1/identity/hosted/youverify?ref=jid-4&sig=sig(youverify:jid-4)',
     );
-    const page = await youverify.page('jid-4');
+    const page = await youverify.page('jid-4', { idType: 'nin', withBvn: false });
     expect(calls[0]!.url).toBe('https://api.sandbox.youverify.co/v2/api/identity/sdk/session/generate');
     expect(calls[0]!.init.headers).toMatchObject({ token: 'yv-secret' });
     expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({
@@ -254,14 +301,16 @@ describe('Youverify', () => {
     expect(page).toContain('"publicKey":"pmk-1"');
     expect(page).toContain('National Identification Number');
     // Pasted with spaces, the NIN keeps only its digits.
-    expect(page).toContain("nin.value.replace(/[^0-9]/g, '').slice(0, 11)");
+    expect(page).toContain("input.value.replace(/[^0-9]/g, '').slice(0, 11)");
+    expect(page).not.toContain('id="bvn"');
     expect(page).not.toContain('yv-secret');
     // The page sends the NIN and the session, never the selfie.
     expect(page).not.toMatch(/faceImage/);
   });
 
   describe('a submitted page', () => {
-    const input = { nin: '12345678901', session: 'sess-1', sessionSig: 'sig(youverify-session:jid-4:sess-1)' };
+    const input = { idNumber: '12345678901', session: 'sess-1', sessionSig: 'sig(youverify-session:jid-4:sess-1)' };
+    const nin = { idType: 'nin', withBvn: false } as const;
     const respond = (live: object | null, nin: object) =>
       fakeFetch(({ url }) =>
         url.includes('/identity/liveness')
@@ -282,13 +331,13 @@ describe('Youverify', () => {
           idNumber: '12345678901',
         },
       );
-      expect(await make(impl).submitPage('jid-4', input)).toEqual({
+      expect(await make(impl).submitPage('jid-4', nin, input)).toEqual({
         status: 'done',
         outcome: 'passed',
         legalName: 'TUNDE ADE BAKARE',
         dateOfBirth: '1995-04-12',
         checks: [
-          { key: 'nin', outcome: 'passed' },
+          { key: 'id', outcome: 'passed' },
           { key: 'selfie', outcome: 'passed' },
         ],
         idNumber: '12345678901',
@@ -304,17 +353,17 @@ describe('Youverify', () => {
 
     it('fails a liveness check that did not pass, without a NIN check', async () => {
       const { impl, calls } = respond({ passed: false, faceImage: 'x' }, {});
-      expect(await make(impl).submitPage('jid-4', input)).toMatchObject({ outcome: 'failed' });
+      expect(await make(impl).submitPage('jid-4', nin, input)).toMatchObject({ outcome: 'failed' });
       expect(calls).toHaveLength(1);
     });
 
     it('sends an unmatched selfie to review, and a NIN not found fails', async () => {
       const live = { passed: true, faceImage: 'https://cdn.youverify.co/face.jpg' };
       const unmatched = respond(live, { status: 'found', selfieValidation: false, firstName: 'A', lastName: 'B' });
-      expect(await make(unmatched.impl).submitPage('jid-4', input)).toMatchObject({
+      expect(await make(unmatched.impl).submitPage('jid-4', nin, input)).toMatchObject({
         outcome: 'review',
         checks: [
-          { key: 'nin', outcome: 'passed' },
+          { key: 'id', outcome: 'passed' },
           { key: 'selfie', outcome: 'review' },
         ],
       });
@@ -325,27 +374,102 @@ describe('Youverify', () => {
         lastName: 'B',
         validations: { selfie: { selfieVerification: { match: true } } },
       });
-      expect((await make(nested.impl).submitPage('jid-4', input)).outcome).toBe('passed');
+      expect((await make(nested.impl).submitPage('jid-4', nin, input)).outcome).toBe('passed');
       const silent = respond(live, { status: 'failed', reason: 'NIMC timeout' });
-      expect((await make(silent.impl).submitPage('jid-4', input)).checks).toEqual([
-        { key: 'nin', outcome: 'review', note: 'NIMC answered: NIMC timeout' },
+      expect((await make(silent.impl).submitPage('jid-4', nin, input)).checks).toEqual([
+        { key: 'id', outcome: 'review', note: 'NIMC answered: NIMC timeout' },
         { key: 'selfie', outcome: 'review', note: "Not compared, as NIMC didn't answer" },
       ]);
       const missing = respond(live, { status: 'not_found' });
-      const result = await make(missing.impl).submitPage('jid-4', input);
+      const result = await make(missing.impl).submitPage('jid-4', nin, input);
       expect(result).toMatchObject({
         outcome: 'failed',
-        checks: [{ key: 'nin', outcome: 'failed' }, expect.anything()],
+        checks: [{ key: 'id', outcome: 'failed' }, expect.anything()],
       });
       expect(result.idNumber).toBeUndefined();
     });
 
+    it("checks a driver's licence, and a BVN alongside in the same name", async () => {
+      const calls: Call[] = [];
+      const impl = (async (url: string | URL, init: RequestInit = {}) => {
+        calls.push({ url: String(url), init });
+        const path = String(url);
+        if (path.includes('/identity/liveness')) {
+          return envelope({
+            docs: [{ sessionId: 'sess-1', passed: true, faceImage: 'https://cdn.youverify.co/f.jpg' }],
+          });
+        }
+        if (path.endsWith('/drivers-license')) {
+          return envelope({ status: 'found', selfieValidation: true, firstName: 'Tunde', lastName: 'Bakare' });
+        }
+        return envelope({ status: 'found', firstName: 'TUNDE', lastName: 'BAKARE' });
+      }) as typeof fetch;
+      const licence = { idType: 'drivers_licence', withBvn: true } as const;
+      const result = await make(impl).submitPage('jid-4', licence, {
+        ...input,
+        idNumber: 'LAG12345AA12',
+        bvn: '22212345678',
+      });
+      expect(result).toMatchObject({ outcome: 'passed', idNumber: 'LAG12345AA12', legalName: 'TUNDE BAKARE' });
+      expect(result.checks.map((c) => c.key)).toEqual(['id', 'selfie', 'bvn']);
+      expect(calls.map((c) => c.url.replace('https://api.sandbox.youverify.co', ''))).toEqual([
+        '/v2/api/identity/liveness?sessionId=sess-1&limit=1',
+        '/v2/api/identity/ng/drivers-license',
+        '/v2/api/identity/ng/bvn',
+      ]);
+      expect(JSON.parse(String(calls[1]!.init.body))).toMatchObject({
+        id: 'LAG12345AA12',
+        validation: { selfie: { image: 'https://cdn.youverify.co/f.jpg' } },
+      });
+      // A licence that isn't found: the BVN isn't looked up (or paid for), and the match is read where the
+      // licence's answer puts it.
+      const missing: Call[] = [];
+      const notFound = (async (url: string | URL, init: RequestInit = {}) => {
+        missing.push({ url: String(url), init });
+        return String(url).includes('/identity/liveness')
+          ? envelope({ docs: [{ sessionId: 'sess-1', passed: true, faceImage: 'https://cdn.youverify.co/f.jpg' }] })
+          : envelope({ status: 'not_found' });
+      }) as typeof fetch;
+      const lost = await make(notFound).submitPage('jid-4', licence, {
+        ...input,
+        idNumber: 'LAG12345AA12',
+        bvn: '22212345678',
+      });
+      expect(lost.checks).toContainEqual({
+        key: 'bvn',
+        outcome: 'review',
+        note: 'Not compared, as the ID record was not found',
+      });
+      expect(missing.some((c) => c.url.endsWith('/ng/bvn'))).toBe(false);
+      const nested = (async (url: string | URL) =>
+        String(url).includes('/identity/liveness')
+          ? envelope({ docs: [{ sessionId: 'sess-1', passed: true, faceImage: 'https://cdn.youverify.co/f.jpg' }] })
+          : envelope({
+              status: 'found',
+              firstName: 'Tunde',
+              lastName: 'Bakare',
+              validation: { selfie: { selfieVerification: { match: true } } },
+            })) as typeof fetch;
+      const plain = { idType: 'drivers_licence', withBvn: false } as const;
+      expect((await make(nested).submitPage('jid-4', plain, { ...input, idNumber: 'LAG12345AA12' })).outcome).toBe(
+        'passed',
+      );
+      // The page asks for both.
+      const page = await make(
+        fakeFetch(({ url }) =>
+          url.endsWith('/session/generate') ? envelope({ sessionId: 'sess-1' }) : envelope({ authToken: 'tok-1' }),
+        ).impl,
+      ).page('jid-4', licence);
+      expect(page).toContain('Driver&#39;s licence number');
+      expect(page).toContain('id="bvn"');
+    });
+
     it('takes only a session the API started for this check', async () => {
       const { impl, calls } = respond({ passed: true, faceImage: 'x' }, {});
-      await expect(make(impl).submitPage('jid-4', { ...input, session: 'someone-elses' })).rejects.toBeInstanceOf(
+      await expect(make(impl).submitPage('jid-4', nin, { ...input, session: 'someone-elses' })).rejects.toBeInstanceOf(
         IdentityPageError,
       );
-      await expect(make(impl).submitPage('jid-5', input)).rejects.toBeInstanceOf(IdentityPageError);
+      await expect(make(impl).submitPage('jid-5', nin, input)).rejects.toBeInstanceOf(IdentityPageError);
       expect(calls).toHaveLength(0);
     });
   });
