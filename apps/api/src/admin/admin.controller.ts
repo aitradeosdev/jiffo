@@ -115,7 +115,7 @@ const ApplicationsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });
 /** The note is shown to the agent when their application is declined. */
-const DecisionBody = z.object({ decision: z.enum(['approve', 'reject']), note: Note });
+const DecisionBody = z.object({ decision: z.enum(['approve', 'reject', 'reopen']), note: Note });
 const InviteBody = z.object({
   email: z.string().email().max(200),
   name: z.string().trim().min(1).max(80),
@@ -255,7 +255,7 @@ export class AdminController {
     return this.applications.counts(query.country);
   }
 
-  /** Approve or decline an agent application that the checks sent to review. */
+  /** Approve or decline an agent application the checks sent to review, or reopen a declined one. */
   @Post('people/:id/application')
   @HttpCode(200)
   @Needs('operate')

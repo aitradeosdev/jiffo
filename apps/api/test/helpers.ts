@@ -191,8 +191,19 @@ export async function adminAs(t: TestApp, role: AdminRole) {
   return { id: admin!.id, name: admin!.name, headers: { Authorization: `Bearer ${token}` } };
 }
 
+let serial = 0;
+/**
+ * Digits no other call in the run gets: the time to the millisecond and a counter. Test files run one after
+ * another, so they never share a millisecond.
+ */
+const uniqueDigits = (length: number) => {
+  serial = (serial + 1) % 100;
+  const stamp = String(Date.now() % 10 ** (length - 2)).padStart(length - 2, '0');
+  return `${stamp}${String(serial).padStart(2, '0')}`;
+};
+
 /** A NIN nobody else in the run has, ending in the given digits; the fake provider decides by the ending. */
-export const uniqueNin = (ending = '4567') => `${String(randomInt(0, 10_000_000)).padStart(7, '0')}${ending}`;
+export const uniqueNin = (ending = '4567') => `${uniqueDigits(7)}${ending}`;
 
 /**
  * Fills in every step of an agent's application, short of sending it: basics, identity, address, a payout
@@ -212,7 +223,7 @@ export async function completeApplication(t: TestApp, agent: Person, nin = uniqu
     address: '14 Fola Osibo Road, Lekki Phase 1',
     emergency: { name: 'Ngozi Bakare', phone: '+2348034471902', relationship: 'Sibling' },
   }).expect(200);
-  const accountNumber = `0${String(randomInt(0, 1_000_000_000)).padStart(9, '0')}`;
+  const accountNumber = `0${uniqueDigits(9)}`;
   t.payments.accounts.set(`058:${accountNumber}`, 'TUNDE BAKARE');
   await request(t.http)
     .put('/v1/payout-account')

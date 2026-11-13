@@ -56,7 +56,6 @@ export function ListControls({
   );
 }
 
-/** Newest and Older links under a paged list. */
 /** Links to the first page and the next. Lists that run oldest first pass their own words. */
 export function Pager({
   newest,

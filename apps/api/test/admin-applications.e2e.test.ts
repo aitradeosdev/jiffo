@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminAudit } from '../src/db/schema';
+import { adminAudit, agentApplications, agentPresence } from '../src/db/schema';
 import { adminAs, completeApplication, createTestApp, signIn, uniqueNin, type Person, type TestApp } from './helpers';
 
 describe('admin: agent applications', () => {
@@ -16,11 +16,14 @@ describe('admin: agent applications', () => {
   });
   afterAll(() => t.close());
 
-  /** An agent whose selfie the provider couldn't match, so the application waits for support. */
-  async function inReview() {
+  /**
+   * An agent whose selfie the provider couldn't match (a NIN ending 1111), or another result the NIN's
+   * ending picks, so the application waits for support.
+   */
+  async function inReview(nin = uniqueNin('1111')) {
     const agent = await signIn(t, 'agent', { unapproved: true });
     await request(t.http).patch('/v1/me').set(agent.headers).send({ lastName: 'Bakare' }).expect(200);
-    const nin = await completeApplication(t, agent, uniqueNin('1111'));
+    await completeApplication(t, agent, nin);
     const sent = await request(t.http).post('/v1/agent/application/submit').set(agent.headers).expect(200);
     expect(sent.body.status).toBe('review');
     return { agent, nin };
@@ -103,6 +106,53 @@ describe('admin: agent applications', () => {
       decidedBy: 'Test operations',
       decisionNote: 'The selfie is of a different person',
     });
+  });
+
+  it('claims the NIN for an agent support approves, so no second approved account can use it', async () => {
+    const nin = uniqueNin('1111');
+    const first = await inReview(nin);
+    await decide(first.agent, { decision: 'approve', note: 'Selfie compared by hand' }).expect(200);
+    const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, first.agent.userId));
+    expect(row!.ninFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    // A second account on the same NIN can't be approved while the first holds it.
+    const second = await inReview(nin);
+    const res = await decide(second.agent, { decision: 'approve', note: 'Selfie compared by hand' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatchObject({ code: 'nin_held', userId: first.agent.userId });
+  });
+
+  it('only declines an application with a failed check', async () => {
+    const { agent } = await inReview(uniqueNin('1818'));
+    const res = await decide(agent, { decision: 'approve', note: 'Looks old enough to me' });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatchObject({ code: 'check_failed', failed: ['age'] });
+    await decide(agent, { decision: 'reject', note: 'Agents must be 18 or older' }).expect(200);
+  });
+
+  it('takes a declined agent offline, and can reopen the application for them to send again', async () => {
+    const { agent } = await inReview();
+    await t.db
+      .insert(agentPresence)
+      .values({ userId: agent.userId, countryCode: 'NG', online: true, lat: 6.44, lng: 3.47, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: agentPresence.userId, set: { online: true } });
+    await decide(agent, { decision: 'reject', note: 'The selfie is too dark to compare' }).expect(200);
+    const [presence] = await t.db.select().from(agentPresence).where(eq(agentPresence.userId, agent.userId));
+    expect(presence!.online).toBe(false);
+
+    expect((await decide(agent, { decision: 'reopen', note: 'Asked to retake the selfie' })).status).toBe(200);
+    const view = await request(t.http).get('/v1/agent/application').set(agent.headers).expect(200);
+    expect(view.body).toMatchObject({ status: 'draft', submittedAt: null, decisionNote: null });
+    await request(t.http).patch('/v1/agent/application').set(agent.headers).send({ area: 'Ikoyi' }).expect(200);
+    expect((await decide(agent, { decision: 'reopen', note: 'Again, by mistake' })).body.error.code).toBe(
+      'not_declined',
+    );
+  });
+
+  it('can approve an application declined by mistake', async () => {
+    const { agent } = await inReview();
+    await decide(agent, { decision: 'reject', note: 'Wrong person, I think' }).expect(200);
+    await decide(agent, { decision: 'approve', note: 'Declined the wrong agent; this one is fine' }).expect(200);
+    await board(agent).expect(200);
   });
 
   it("refuses a decision on an application that isn't in review", async () => {

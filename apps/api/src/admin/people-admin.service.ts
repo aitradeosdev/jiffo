@@ -146,7 +146,6 @@ export class PeopleAdminService {
       payout,
       live,
       tiers,
-      application,
     ] = await Promise.all([
       this.db
         .select({
@@ -244,10 +243,10 @@ export class PeopleAdminService {
         .where(and(eq(payoutAccounts.userId, id), isNull(payoutAccounts.replacedAt))),
       this.liveErrands(id),
       this.tierTerms(user.countryCode),
-      this.applications.detail(id),
     ]);
     const balance = (type: string) => Number(balances.find((b) => b.type === type)?.balance ?? 0);
     const isAgent = apps.some((a) => a.app === 'agent');
+    const application = isAgent ? await this.applications.detail(id) : null;
     const avg = (role: 'customer' | 'agent') => averages.find((a) => a.raterRole === role)?.average ?? null;
     const p = payout[0];
     return {

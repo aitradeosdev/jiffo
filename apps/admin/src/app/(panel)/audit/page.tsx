@@ -77,6 +77,8 @@ function describe(entry: Entry, names: Map<string, string>, currencyOf: (code: s
       return `Approved ${entry.targetLabel ?? 'an agent'}'s application`;
     case 'application.reject':
       return `Declined ${entry.targetLabel ?? 'an agent'}'s application`;
+    case 'application.reopen':
+      return `Reopened ${entry.targetLabel ?? 'an agent'}'s application for them to send again`;
     case 'errand.admin_cancel':
       return `Cancelled “${entry.targetLabel ?? 'an errand'}” before an agent took it`;
     case 'errand.admin_intervene':

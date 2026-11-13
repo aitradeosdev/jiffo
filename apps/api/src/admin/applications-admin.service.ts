@@ -2,20 +2,22 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { admins, agentApplications, states, users } from '../db/schema';
-import { conflict, notFound } from '../common/errors';
+import { AgentApplicationService } from '../agents/application.service';
 import { PushService } from '../push/push.service';
 import { AuditService } from './audit.service';
 import { requireCountry } from './countries';
-import { containing, cursorOf, idPrefix, parseCursor, phoneDigits } from './list-helpers';
+import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
 
 export const APPLICATION_STATUSES = ['review', 'checking', 'draft', 'approved', 'rejected'] as const;
 export type ApplicationStatus = (typeof APPLICATION_STATUSES)[number];
 
-/** Since when an application has been waiting: when it was sent, or, for one never sent, when it began. */
-const since = sql`coalesce(${agentApplications.submittedAt}, ${agentApplications.createdAt})`;
-const sinceExact = sql<string>`to_char(coalesce("agent_applications"."submitted_at", "agent_applications"."created_at")
-  at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+/**
+ * Since when an application has been waiting: when it was sent, or, for one never sent, when it began.
+ * Written with table names, as inside a select list Drizzle leaves columns unqualified and users has a
+ * created_at too.
+ */
+const since = sql`coalesce("agent_applications"."submitted_at", "agent_applications"."created_at")`;
 
 type Check = { key: string; outcome: string; note?: string };
 /** Each check as support reads it. The agent app has its own words, addressed to the agent. */
@@ -41,6 +43,7 @@ export class ApplicationsAdminService {
     @Inject(DB) private readonly db: Db,
     private readonly push: PushService,
     private readonly audit: AuditService,
+    private readonly applications: AgentApplicationService,
   ) {}
 
   /** How many applications are in each state, for the tabs. */
@@ -77,7 +80,7 @@ export class ApplicationsAdminService {
         decidedAt: agentApplications.decidedAt,
         decisionNote: agentApplications.decisionNote,
         createdAt: agentApplications.createdAt,
-        cursorAt: sinceExact,
+        cursorAt: exactTime(since),
       })
       .from(agentApplications)
       .innerJoin(users, eq(users.id, agentApplications.userId))
@@ -169,42 +172,44 @@ export class ApplicationsAdminService {
   }
 
   /**
-   * Support's decision on an application in review. Approving lets the agent go online; declining tells them
-   * why, in the note, which the agent sees. Either way it is in the audit log.
+   * Support's decision on an application: approve, decline or reopen, with a reason. The rules are the
+   * application's own; this adds the audit entry and tells the agent.
    */
-  async decide(admin: AdminContext, userId: string, input: { decision: 'approve' | 'reject'; note: string }) {
-    const approve = input.decision === 'approve';
-    const result = await this.db.transaction(async (tx) => {
-      const [app] = await tx.select().from(agentApplications).where(eq(agentApplications.userId, userId)).for('update');
-      if (!app) throw notFound('application_not_found', 'This person has no agent application');
-      if (app.status !== 'review') {
-        throw conflict('not_in_review', 'Only an application in review can be decided', { status: app.status });
-      }
-      const [after] = await tx
-        .update(agentApplications)
-        .set({
-          status: approve ? 'approved' : 'rejected',
-          decidedAt: new Date(),
-          decidedBy: admin.adminId,
-          decisionNote: input.note,
-          updatedAt: new Date(),
-        })
-        .where(eq(agentApplications.userId, userId))
-        .returning();
+  async decide(
+    admin: AdminContext,
+    userId: string,
+    input: { decision: 'approve' | 'reject' | 'reopen'; note: string },
+  ) {
+    const { before, after } = await this.db.transaction(async (tx) => {
+      const result = await this.applications.decide(tx, { userId, adminId: admin.adminId, ...input });
       await this.audit.record(tx, admin, {
-        action: approve ? 'application.approve' : 'application.reject',
+        action: `application.${input.decision}`,
         targetType: 'person',
         targetId: userId,
-        countryCode: app.countryCode,
-        data: { note: input.note, flagged: app.checks.filter((c) => c.outcome !== 'passed').map((c) => c.key) },
+        countryCode: result.before.countryCode,
+        data: {
+          note: input.note,
+          from: result.before.status,
+          flagged: result.before.checks.filter((c) => c.outcome !== 'passed').map((c) => c.key),
+        },
       });
-      return after!;
+      return result;
     });
     await this.push.notifyUser(userId, 'agent', {
-      title: approve ? "You're approved" : 'About your application',
-      body: approve ? 'Go online to see errands near you.' : "Open Jiffo Agent to see our team's decision.",
-      data: { type: 'agent.application', status: result.status },
+      title:
+        after.status === 'approved'
+          ? "You're approved"
+          : after.status === 'draft'
+            ? 'You can send your application again'
+            : 'About your application',
+      body:
+        after.status === 'approved'
+          ? 'Go online to see errands near you.'
+          : after.status === 'draft'
+            ? 'Open Jiffo Agent to change it and send it again.'
+            : "Open Jiffo Agent to see our team's decision.",
+      data: { type: 'agent.application', status: after.status, from: before.status },
     });
-    return { status: result.status, decidedAt: result.decidedAt };
+    return { status: after.status, decidedAt: after.decidedAt };
   }
 }

@@ -15,3 +15,13 @@ export function normaliseIdNumber(type: IdType, value: string): string | null {
   const clean = value.replace(/\s+/g, '').toUpperCase();
   return ID_TYPES[type].pattern.test(clean) ? clean : null;
 }
+
+/** Whole years from a YYYY-MM-DD date of birth to `now`, counting a birthday only once it has come. */
+export function yearsOld(dateOfBirth: string, now = new Date()): number {
+  const born = new Date(`${dateOfBirth}T00:00:00Z`);
+  const years = now.getUTCFullYear() - born.getUTCFullYear();
+  const beforeBirthday =
+    now.getUTCMonth() < born.getUTCMonth() ||
+    (now.getUTCMonth() === born.getUTCMonth() && now.getUTCDate() < born.getUTCDate());
+  return beforeBirthday ? years - 1 : years;
+}

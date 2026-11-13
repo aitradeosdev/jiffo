@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { agentTierLabel } from '@jiffo/shared';
+import { agentTierLabel, yearsOld } from '@jiffo/shared';
 import { notFound } from 'next/navigation';
 import type { ErrandState } from '@jiffo/shared';
 import { Badge, Card, Notice, Stat } from '@/components/ui';
@@ -101,6 +101,7 @@ interface Application {
 const DONE: Record<string, string> = {
   approved: 'Application approved. The agent has been told and can go online.',
   declined: 'Application declined. The agent sees your reason in the app.',
+  reopened: 'Application reopened. The agent can change it and send it again.',
   tier: 'Tier changed. The agent has been told.',
   suspend: 'Account suspended. They have been signed out everywhere.',
   reactivate: 'Account reactivated.',
@@ -398,19 +399,6 @@ export default async function PersonPage({
   );
 }
 
-/** Years between a YYYY-MM-DD birth date and now. */
-function age(dateOfBirth: string) {
-  const born = new Date(`${dateOfBirth}T00:00:00Z`);
-  const now = new Date();
-  let years = now.getUTCFullYear() - born.getUTCFullYear();
-  if (
-    now.getUTCMonth() < born.getUTCMonth() ||
-    (now.getUTCMonth() === born.getUTCMonth() && now.getUTCDate() < born.getUTCDate())
-  )
-    years -= 1;
-  return years;
-}
-
 function ApplicationCard({
   id,
   app,
@@ -434,7 +422,7 @@ function ApplicationCard({
   const status = statusOf(app.status);
   const rows: Array<[string, ReactNode]> = [
     ['Name on the NIN', app.legalName ?? '—'],
-    ['Date of birth', app.dateOfBirth ? `${app.dateOfBirth} · ${age(app.dateOfBirth)} years old` : '—'],
+    ['Date of birth', app.dateOfBirth ? `${app.dateOfBirth} · ${yearsOld(app.dateOfBirth)} years old` : '—'],
     ['Works in', app.stateName ? `${app.area ?? ''}${app.area ? ', ' : ''}${app.stateName}` : '—'],
     ['Home address', app.address ?? '—'],
     [
@@ -498,9 +486,13 @@ function ApplicationCard({
         ) : app.status === 'review' && app.decisionNote ? (
           <p className="mt-4 text-sm text-ink-2">{app.decisionNote}</p>
         ) : null}
-        {app.status === 'review' && canDecide ? (
+        {(app.status === 'review' || app.status === 'rejected') && canDecide ? (
           <div className="mt-4 border-t border-line pt-4">
-            <DecisionForm id={id} />
+            <DecisionForm
+              id={id}
+              status={app.status}
+              failed={app.checks.filter((c) => c.outcome === 'failed').map((c) => c.label)}
+            />
           </div>
         ) : null}
       </Card>

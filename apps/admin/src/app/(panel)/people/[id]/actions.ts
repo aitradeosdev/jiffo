@@ -71,10 +71,17 @@ export async function changeAccess(_: PersonState, form: FormData): Promise<Pers
   return {};
 }
 
-/** Approves or declines an application in review. A decline's reason is what the agent is told. */
+const DECISIONS = { approve: 'approved', reject: 'declined', reopen: 'reopened' } as const;
+
+/**
+ * Approves or declines an application in review, or reopens a declined one. A decline's reason is what the
+ * agent is told.
+ */
 export async function decideApplication(_: PersonState, form: FormData): Promise<PersonState> {
   const id = String(form.get('id') ?? '');
-  const decision = form.get('decision') === 'approve' ? 'approve' : 'reject';
+  const asked = String(form.get('decision') ?? '');
+  if (!(asked in DECISIONS)) return { error: 'Choose what to do' };
+  const decision = asked as keyof typeof DECISIONS;
   try {
     await api(`/admin/people/${encodeURIComponent(id)}/application`, {
       method: 'POST',
@@ -83,6 +90,6 @@ export async function decideApplication(_: PersonState, form: FormData): Promise
   } catch (error) {
     return { error: messageOf(error) };
   }
-  back(id, decision === 'approve' ? 'approved' : 'declined');
+  back(id, DECISIONS[decision]);
   return {};
 }
