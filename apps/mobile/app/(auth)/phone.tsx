@@ -4,9 +4,16 @@ import { useSession } from '@/auth/session';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { formatNational, nationalDigits, plausibleNumber, toE164 } from '@/auth/phone';
 import { ApiError, errorMessage } from '@/api/client';
-import { Button, Field, Screen, Text } from '@/ui/kit';
+import { StyleSheet, View } from 'react-native';
+import { goBack } from '@/nav';
+import { COUNTRY } from '@/config';
+import { useColors } from '@/theme/theme';
+import { fonts } from '@/theme/tokens';
+import { Button, Text } from '@/ui/kit';
+import { Flag, ObScreen, Question, TextBox } from '@/ui/onboarding';
 
 export default function Phone() {
+  const c = useColors();
   const { requestCode } = useSession();
   const { config, error: configError } = useCountryConfig();
   const prefix = config?.country.phonePrefix;
@@ -37,24 +44,44 @@ export default function Phone() {
   }
 
   return (
-    <Screen footer={<Button label="Send code" onPress={send} disabled={!ready} loading={busy} />}>
-      <Text variant="title">What's your number?</Text>
-      <Field
-        label="Phone number"
-        prefix={prefix ?? '…'}
-        value={formatNational(digits)}
-        onChangeText={(t) => setDigits(nationalDigits(t, prefix ?? ''))}
-        keyboardType="phone-pad"
-        autoComplete="tel"
-        textContentType="telephoneNumber"
-        placeholder="803 123 4567"
-        autoFocus
-        error={error ?? (prefix ? null : configError)}
-        onSubmitEditing={() => ready && send()}
+    <ObScreen
+      onBack={goBack}
+      progress={0.25}
+      footer={<Button label="Continue" onPress={send} disabled={!ready} loading={busy} />}
+    >
+      <Question
+        title="What's your phone number?"
+        sub="We'll text you a 6-digit code to check it's yours. Standard rates may apply."
       />
-      <Text variant="small" tone="ink3">
-        We'll text you a 6-digit code. Standard rates may apply.
-      </Text>
-    </Screen>
+      <View style={styles.row}>
+        <View style={[styles.ccode, { backgroundColor: c.surface2 }]}>
+          <Flag country={COUNTRY} />
+          <Text style={styles.ccText}>{prefix ?? '…'}</Text>
+        </View>
+        <TextBox
+          accessibilityLabel="Phone number"
+          style={{ flex: 1 }}
+          value={formatNational(digits)}
+          onChangeText={(t) => setDigits(nationalDigits(t, prefix ?? ''))}
+          keyboardType="phone-pad"
+          autoComplete="tel"
+          textContentType="telephoneNumber"
+          placeholder="803 123 4567"
+          autoFocus
+          onSubmitEditing={() => ready && send()}
+        />
+      </View>
+      {(error ?? (prefix ? null : configError)) ? (
+        <Text tone="danger" accessibilityLiveRegion="polite">
+          {error ?? configError}
+        </Text>
+      ) : null}
+    </ObScreen>
   );
 }
+
+const styles = StyleSheet.create({
+  row: { flexDirection: 'row', gap: 8 },
+  ccode: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 54, paddingHorizontal: 12, borderRadius: 10 },
+  ccText: { fontFamily: fonts.semibold, fontSize: 16 },
+});

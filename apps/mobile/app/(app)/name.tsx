@@ -3,21 +3,29 @@ import { router } from 'expo-router';
 import { useSession } from '@/auth/session';
 import { VARIANT } from '@/config';
 import { errorMessage } from '@/api/client';
-import { Button, Field, Screen, Text } from '@/ui/kit';
+import { StyleSheet, View } from 'react-native';
+import { Button, Text } from '@/ui/kit';
+import { ObScreen, Question, TextBox } from '@/ui/onboarding';
 
 export default function Name() {
   const { updateProfile, user } = useSession();
   const [first, setFirst] = useState(user?.firstName ?? '');
   const [last, setLast] = useState(user?.lastName ?? '');
+  const [email, setEmail] = useState(user?.email ?? '');
+  const emailOk = email.trim() === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const ready = first.trim().length > 0 && last.trim().length > 0;
+  const ready = first.trim().length > 0 && last.trim().length > 0 && emailOk;
 
   async function save() {
     setBusy(true);
     setError(null);
     try {
-      await updateProfile({ firstName: first.trim(), lastName: last.trim() });
+      await updateProfile({
+        firstName: first.trim(),
+        lastName: last.trim(),
+        ...(email.trim() ? { email: email.trim() } : {}),
+      });
       router.replace('/home');
     } catch (e) {
       setError(errorMessage(e));
@@ -27,30 +35,64 @@ export default function Name() {
   }
 
   return (
-    <Screen footer={<Button label="Continue" onPress={save} disabled={!ready} loading={busy} />}>
-      <Text variant="title">What's your name?</Text>
-      <Text tone="ink2">
-        {VARIANT === 'agent'
-          ? 'Use the name on your ID and bank account. Payouts only go to an account in this name.'
-          : 'Agents see your first name when they take your errand.'}
-      </Text>
-      <Field
-        label="First name"
-        value={first}
-        onChangeText={setFirst}
-        autoComplete="given-name"
-        textContentType="givenName"
-        autoFocus
+    <ObScreen progress={0.75} footer={<Button label="Continue" onPress={save} disabled={!ready} loading={busy} />}>
+      <Question
+        title="What's your name?"
+        sub={
+          VARIANT === 'agent'
+            ? 'Use the name on your ID and bank account. Payouts only go to an account in this name.'
+            : 'Agents see your first name when they take your errand.'
+        }
       />
-      <Field
-        label="Last name"
-        value={last}
-        onChangeText={setLast}
-        autoComplete="family-name"
-        textContentType="familyName"
-        error={error}
-        onSubmitEditing={() => ready && save()}
-      />
-    </Screen>
+      <View style={styles.pair}>
+        <TextBox
+          accessibilityLabel="First name"
+          style={{ flex: 1 }}
+          placeholder="First name"
+          value={first}
+          onChangeText={setFirst}
+          autoComplete="given-name"
+          textContentType="givenName"
+          autoFocus
+        />
+        <TextBox
+          accessibilityLabel="Last name"
+          style={{ flex: 1 }}
+          placeholder="Last name"
+          value={last}
+          onChangeText={setLast}
+          autoComplete="family-name"
+          textContentType="familyName"
+        />
+      </View>
+      <View style={{ gap: 6 }}>
+        <Text variant="small" tone="ink3">
+          Email (optional)
+        </Text>
+        <TextBox
+          accessibilityLabel="Email"
+          placeholder="you@example.com"
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoComplete="email"
+          textContentType="emailAddress"
+          onSubmitEditing={() => ready && save()}
+        />
+        <Text variant="note" tone="ink3">
+          For receipts. No marketing unless you ask for it.
+        </Text>
+      </View>
+      {error ? (
+        <Text tone="danger" accessibilityLiveRegion="polite">
+          {error}
+        </Text>
+      ) : null}
+    </ObScreen>
   );
 }
+
+const styles = StyleSheet.create({
+  pair: { flexDirection: 'row', gap: 8 },
+});

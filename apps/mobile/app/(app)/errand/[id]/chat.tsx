@@ -27,7 +27,7 @@ import { AGENT_STATUS, stepOf, type ErrandView } from '@/errands/types';
 import { useErrand, useHandoffPin } from '@/errands/use-errand';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
-import { Text } from '@/ui/kit';
+import { noWebOutline, Text } from '@/ui/kit';
 import { Avatar, Icon } from '@/ui/parts';
 
 export interface ChatMessage {
@@ -372,6 +372,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     maxHeight: 120,
     fontFamily: fonts.regular,
-    ...(Platform.OS === 'web' ? { outlineWidth: 0 } : {}),
+    ...noWebOutline,
   },
 });
