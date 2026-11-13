@@ -42,6 +42,8 @@ EXPO_PUBLIC_API_URL=http://<your computer's LAN address>:3000 pnpm start
 
 Open it in Expo Go, or press `w` for the web version. The web version draws a stand-in map; phones show real maps (Apple Maps on iOS, Google Maps on Android). Android builds need `GOOGLE_MAPS_ANDROID_API_KEY` set to a key with the Maps SDK for Android enabled. Use `pnpm start:agent` for the agent app. Switching between the two needs the bundler cache cleared, which both scripts do.
 
+A new agent fills in the application before seeing the board: their state and area, identity (NIN, BVN and a selfie), address and an emergency contact, a payout account, errand preferences, and the agent terms. In development the identity provider is a stand-in: a NIN ending in 1111 sends the selfie to review, 1818 is someone under 18, 0000 fails the NIN, and any other passes. With `FAKE_PAYMENTS_AUTOPAY_SECONDS` set, the fake bank also takes any account number to be in the agent's name.
+
 `pnpm --filter @jiffo/mobile export:web` builds both apps for the web, the same way CI does.
 
 ## Running the backend

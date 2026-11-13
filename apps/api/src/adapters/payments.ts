@@ -354,6 +354,15 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
     ];
   }
 
+  /**
+   * Development only: with auto-pay on, an account the fake bank doesn't know is taken to be in the given
+   * name, so a payout account can be added when trying the app end to end.
+   */
+  assumeHolder(bankCode: string, accountNumber: string, name: string) {
+    const key = `${bankCode}:${accountNumber}`;
+    if (this.autoPayAfterMs > 0 && !this.accounts.has(key)) this.accounts.set(key, name.toUpperCase());
+  }
+
   async resolveAccount(bankCode: string, accountNumber: string) {
     const name = this.accounts.get(`${bankCode}:${accountNumber}`);
     if (!name) throw new PaystackError(422, 'Could not resolve account name');

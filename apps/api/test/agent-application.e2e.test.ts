@@ -76,6 +76,8 @@ describe('agent application', () => {
     expect((await app(agent)).body).toMatchObject({
       status: 'draft',
       steps: { basics: false, identity: false, address: false, bank: false, prefs: false, learn: false },
+      provider: null,
+      reviewHours: 24,
     });
   });
 

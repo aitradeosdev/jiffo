@@ -12,9 +12,9 @@ interface Bank {
   name: string;
 }
 
-/** The agent's own-name bank account. The bank's name for it must match the agent's name. */
+/** The agent's own-name bank account. The bank's name for it must match the agent's name on their NIN. */
 export default function PayoutAccount() {
-  const { api, user } = useSession();
+  const { api } = useSession();
   const banks = useResource<Bank[]>('/v1/banks');
   const [bank, setBank] = useState<Bank | null>(null);
   const [search, setSearch] = useState('');
@@ -37,7 +37,7 @@ export default function PayoutAccount() {
       const held = e instanceof ApiError ? e.details.accountName : undefined;
       setError(
         typeof held === 'string'
-          ? `The bank has this account as ${held}. It must be in your name, ${user?.firstName} ${user?.lastName}.`
+          ? `The bank has this account as ${held}. It must be in your own name, as on your NIN.`
           : errorMessage(e),
       );
     } finally {

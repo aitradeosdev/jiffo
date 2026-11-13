@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router, useLocalSearchParams } from 'expo-router';
 import { goBack } from '@/nav';
 import { useSession } from '@/auth/session';
 import { errorMessage } from '@/api/client';
@@ -10,7 +11,7 @@ import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
 import { Button, Text } from '@/ui/kit';
 import { IconCircle, List, Row, Toggle } from '@/ui/parts';
-import { PageHeader } from '@/ui/floating';
+import { PageFooter, PageHeader } from '@/ui/floating';
 
 interface Profile {
   tier: string;
@@ -25,6 +26,9 @@ interface Profile {
 export default function Preferences() {
   const c = useColors();
   const { api } = useSession();
+  // Opened from the application: the step is done once the choices are saved, with a Save button for it.
+  const applying = useLocalSearchParams<{ apply?: string }>().apply === '1';
+  const [saving, setSaving] = useState(false);
   const { config } = useCountryConfig();
   const profile = useResource<Profile>('/v1/agent/profile');
   const [chosen, setChosen] = useState<Set<string> | null>(null);
@@ -85,17 +89,37 @@ export default function Preferences() {
     save({ chosen: next });
   };
 
+  // Saves the switches as they are, so starting with everything on counts as a choice.
+  const saveAll = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await queue.current;
+      const now = current.current;
+      await api.patch('/v1/agent/profile', {
+        categoryKeys: !now.chosen || now.chosen.size === all.length ? null : [...now.chosen],
+        takesPurchases: now.buys,
+      });
+      router.dismissTo('/apply');
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <SafeAreaView style={[styles.fill, { backgroundColor: c.surface }]} edges={['top', 'bottom']}>
       <PageHeader title="" onBack={goBack} />
       <ScrollView contentContainerStyle={styles.body}>
         <View style={{ gap: 6 }}>
           <Text variant="title" accessibilityRole="header">
-            Errand preferences
+            {applying ? 'Which errands do you want?' : 'Errand preferences'}
           </Text>
           <Text variant="small" tone="ink3">
-            Urgent requests and the board only show errands that match. Changes apply to new requests, not errands
-            you&apos;ve accepted.
+            {applying
+              ? "Everything is on to start. You'll only get requests that match, and you can change this any time."
+              : "Urgent requests and the board only show errands that match. Changes apply to new requests, not errands you've accepted."}
           </Text>
         </View>
 
@@ -138,6 +162,11 @@ export default function Preferences() {
           ))}
         </List>
       </ScrollView>
+      {applying ? (
+        <PageFooter>
+          <Button label="Save" onPress={saveAll} loading={saving} disabled={!chosen} />
+        </PageFooter>
+      ) : null}
     </SafeAreaView>
   );
 }
