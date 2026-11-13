@@ -15,7 +15,8 @@ import { nameWords, plainName } from '../common/names';
 import { LedgerService, transfer } from './ledger.service';
 import { WalletService } from './wallet.service';
 import { AgentsService } from '../agents/agents.service';
-import { AgentApplicationService, matchesLegalName } from '../agents/application.service';
+import { AgentApplicationService } from '../agents/application.service';
+import { matchesLegalName } from '../common/names';
 
 type PayoutRow = typeof payouts.$inferSelect;
 const BANKS_TTL_MS = 24 * 3_600_000;

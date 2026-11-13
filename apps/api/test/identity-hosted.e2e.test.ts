@@ -59,13 +59,15 @@ describe("identity checks on the provider's own page", () => {
     const started = await request(t.http)
       .post('/v1/agent/application/identity')
       .set(agent.headers)
-      .send({ consent: true })
+      .send({ consent: true, idType: 'bvn' })
       .expect(200);
     expect(started.body).toMatchObject({
       provider: 'smileid',
       url: expect.stringMatching(/^https:\/\/links\.smile\.test\/jid-/),
     });
-    expect(link.mock.calls[0]![0]).not.toHaveProperty('nin');
+    // Smile ID can't check a BVN alongside another ID, so with the BVN rule on the BVN is the ID.
+    expect(link.mock.calls[0]![0]).toMatchObject({ request: { idType: 'bvn', withBvn: true } });
+    expect(link.mock.calls[0]![0]).not.toHaveProperty('idNumber', expect.anything());
     const reference = String(started.body.url).split('/').pop()!;
 
     // Nothing back yet.
@@ -103,9 +105,9 @@ describe("identity checks on the provider's own page", () => {
       legalName: 'TUNDE BAKARE',
       dateOfBirth: '1995-04-12',
       identityOutcome: 'passed',
-      pendingNinFingerprint: null,
+      pendingIdFingerprint: null,
     });
-    expect(row!.ninFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(row!.idFingerprint).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(row)).not.toContain(nin);
     const done = await request(t.http).post('/v1/agent/application/identity/finish').set(agent.headers).expect(200);
     expect(done.body).toMatchObject({ status: 'done', outcome: 'passed' });
@@ -115,7 +117,7 @@ describe("identity checks on the provider's own page", () => {
     const again = await request(t.http)
       .post('/v1/agent/application/identity')
       .set(second.headers)
-      .send({ consent: true })
+      .send({ consent: true, idType: 'bvn' })
       .expect(200);
     const secondRef = String(again.body.url).split('/').pop()!;
     status.mockResolvedValue({ status: 'clear', user_id: secondRef });
@@ -131,8 +133,8 @@ describe("identity checks on the provider's own page", () => {
     const [dup] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, second.userId));
     expect(dup).toMatchObject({
       identityOutcome: 'review',
-      ninFingerprint: null,
-      pendingNinFingerprint: row!.ninFingerprint,
+      idFingerprint: null,
+      pendingIdFingerprint: row!.idFingerprint,
     });
     expect(dup!.checks).toContainEqual(expect.objectContaining({ key: 'duplicate', outcome: 'review' }));
 
@@ -140,7 +142,7 @@ describe("identity checks on the provider's own page", () => {
     const fresh = await request(t.http)
       .post('/v1/agent/application/identity')
       .set(second.headers)
-      .send({ consent: true })
+      .send({ consent: true, idType: 'bvn' })
       .expect(200);
     expect(String(fresh.body.url)).not.toContain(secondRef);
     status.mockResolvedValue({ status: 'block', user_id: secondRef });
@@ -204,7 +206,7 @@ describe("identity checks on the provider's own page", () => {
     const started = await request(t.http)
       .post('/v1/agent/application/identity')
       .set(agent.headers)
-      .send({ consent: true })
+      .send({ consent: true, idType: 'nin' })
       .expect(200);
     const url = new URL(started.body.url);
     const ref = url.searchParams.get('ref')!;
@@ -226,22 +228,30 @@ describe("identity checks on the provider's own page", () => {
 
     const nin = uniqueNin();
     const submit = (body: object) => request(t.http).post('/v1/identity/hosted/youverify/submit').send(body);
-    await submit({ ref, sig: '0'.repeat(32), nin }).expect(404);
-    await submit({ ref, sig, nin: '123' })
+    await submit({ ref, sig: '0'.repeat(32), idNumber: nin }).expect(404);
+    await submit({ ref, sig, idNumber: '123' })
       .expect(400)
-      .expect(/invalid_nin/);
+      .expect(/invalid_id/);
     const run = vi.spyOn(YouverifyIdentityAdapter.prototype, 'submitPage').mockResolvedValue({
       status: 'done',
       outcome: 'passed',
       legalName: 'TUNDE BAKARE',
       dateOfBirth: '1995-04-12',
       checks: [
-        { key: 'nin', outcome: 'passed' },
+        { key: 'id', outcome: 'passed' },
+        { key: 'bvn', outcome: 'passed' },
         { key: 'selfie', outcome: 'passed' },
       ],
       idNumber: nin,
     });
-    const body = { ref, sig, nin, session: 'sess-1', sessionSig: 'whatever-youverify-checks' };
+    const body = {
+      ref,
+      sig,
+      idNumber: nin,
+      bvn: '22212345678',
+      session: 'sess-1',
+      sessionSig: 'whatever-youverify-checks',
+    };
     // Sent twice at once: the second waits its turn rather than starting a second paid check.
     let release!: () => void;
     const held = new Promise<void>((resolve) => (release = resolve));
@@ -257,10 +267,14 @@ describe("identity checks on the provider's own page", () => {
       .expect(/identity_busy/);
     release();
     expect((await first).body).toEqual({ status: 'done', outcome: 'passed' });
-    expect(run).toHaveBeenCalledWith(ref, { nin, session: 'sess-1', sessionSig: 'whatever-youverify-checks' });
+    expect(run).toHaveBeenCalledWith(
+      ref,
+      { idType: 'nin', withBvn: true },
+      { idNumber: nin, bvn: '22212345678', session: 'sess-1', sessionSig: 'whatever-youverify-checks' },
+    );
     const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
     expect(row).toMatchObject({ identityProvider: 'youverify', legalName: 'TUNDE BAKARE', identityOutcome: 'passed' });
-    expect(row!.ninFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(row!.idFingerprint).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(row)).not.toContain(nin);
     const done = await request(t.http).post('/v1/agent/application/identity/finish').set(agent.headers).expect(200);
     expect(done.body).toMatchObject({ status: 'done', outcome: 'passed' });
@@ -276,7 +290,7 @@ describe("identity checks on the provider's own page", () => {
     const again = await request(t.http)
       .post('/v1/agent/application/identity')
       .set(agent.headers)
-      .send({ consent: true })
+      .send({ consent: true, idType: 'nin' })
       .expect(200);
     const link = new URL(again.body.url);
     for (let i = 0; i < 20; i += 1)

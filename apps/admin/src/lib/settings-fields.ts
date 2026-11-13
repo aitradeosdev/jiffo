@@ -114,18 +114,25 @@ export const SECTIONS: Section[] = [
     about: 'Which documents people can verify with, and how.',
     fields: [
       {
-        path: 'identity.mode',
-        label: 'Checked by',
-        kind: 'select',
-        options: [
-          { value: 'manual', label: 'Support, by hand' },
-          { value: 'provider', label: 'An identity provider' },
-        ],
+        path: 'identity.customerIdTypes',
+        label: 'IDs customers can verify with',
+        kind: 'multi',
+        options: ID_TYPES,
+        help: 'The customer picks one. Only those the identity provider in use checks are offered.',
       },
-      { path: 'identity.provider', label: 'Provider', kind: 'optionalText', help: 'When checked by a provider.' },
-      { path: 'identity.customerIdTypes', label: 'Documents for customers', kind: 'multi', options: ID_TYPES },
-      { path: 'identity.agentIdTypes', label: 'Documents for agents', kind: 'multi', options: ID_TYPES },
-      { path: 'identity.requireBvnForAgents', label: 'Agents must also give their BVN', kind: 'bool' },
+      {
+        path: 'identity.agentIdTypes',
+        label: 'IDs agents can verify with',
+        kind: 'multi',
+        options: ID_TYPES,
+        help: 'The agent picks one. Only those the identity provider in use checks are offered.',
+      },
+      {
+        path: 'identity.requireBvnForAgents',
+        label: 'Agents must also give their BVN',
+        kind: 'bool',
+        help: "Checked alongside their ID, or used as their ID with a provider that can't check both.",
+      },
       {
         path: 'identity.addressCheck',
         label: 'Address check',

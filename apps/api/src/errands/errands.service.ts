@@ -26,6 +26,7 @@ import { CustomerFundsLow, WalletService, type DisputeSplit } from '../money/wal
 import { AgentsService } from '../agents/agents.service';
 import { PresenceService, TRAVEL_STATES } from '../agents/presence.service';
 import { AgentApplicationService } from '../agents/application.service';
+import { CustomerIdentityService } from '../identity/customer-identity.service';
 import { MAPS, type MapsAdapter } from '../adapters/maps';
 import { UploadsService } from '../files/uploads.service';
 import { participantRole } from './access';
@@ -108,6 +109,7 @@ export class ErrandsService implements OnModuleInit {
     private readonly uploads: UploadsService,
     private readonly presence: PresenceService,
     private readonly applications: AgentApplicationService,
+    private readonly customerIdentity: CustomerIdentityService,
   ) {}
 
   onModuleInit() {
@@ -296,6 +298,8 @@ export class ErrandsService implements OnModuleInit {
   async create(auth: AuthContext, input: CreateErrandInput) {
     const [customer] = await this.db.select().from(users).where(eq(users.id, auth.userId));
     if (!customer?.firstName) throw conflict('profile_incomplete', 'Add your name before sending an errand');
+    // Every customer is verified, so agents know who they run errands for.
+    await this.customerIdentity.assertVerified(auth.userId);
     const country = customer.countryCode;
     const [{ version, settings }, state, category] = await Promise.all([
       this.countries.currentSettings(country),

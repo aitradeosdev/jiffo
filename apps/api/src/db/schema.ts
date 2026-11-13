@@ -722,14 +722,18 @@ export const agentApplications = pgTable(
     stateCode: text('state_code'),
     area: text('area'),
     /**
-     * HMAC of the NIN: equal NINs give equal fingerprints, and the NIN can't be read back. It is claimed here
-     * only once the provider has confirmed the NIN and that the selfie matches its owner; until then it waits
-     * in pendingNinFingerprint, so typing someone else's NIN reserves nothing.
+     * HMAC of the ID's type and number: equal IDs give equal fingerprints, and the number can't be read back.
+     * It is claimed here only once the provider has confirmed the ID and that the selfie matches its owner;
+     * until then it waits in pendingIdFingerprint, so typing someone else's ID reserves nothing. (The columns
+     * are named for the NIN, the only ID they held at first.)
      */
-    ninFingerprint: text('nin_fingerprint'),
-    pendingNinFingerprint: text('pending_nin_fingerprint'),
+    idFingerprint: text('nin_fingerprint'),
+    pendingIdFingerprint: text('pending_nin_fingerprint'),
     /** The identity provider the check was started with; it finishes there even if admin switches. */
     identityProvider: text('identity_provider'),
+    /** The ID the agent verifies with, and whether their BVN is checked as well. */
+    identityIdType: text('identity_id_type'),
+    identityWithBvn: boolean('identity_with_bvn').notNull().default(false),
     identityReference: text('identity_reference'),
     identityOutcome: text('identity_outcome', { enum: ['passed', 'failed', 'review'] }),
     identityCheckedAt: timestamp('identity_checked_at', { withTimezone: true }),
@@ -755,9 +759,52 @@ export const agentApplications = pgTable(
   },
   (t) => [
     uniqueIndex('agent_applications_nin_uq')
-      .on(t.ninFingerprint)
-      .where(sql`${t.ninFingerprint} is not null`),
+      .on(t.idFingerprint)
+      .where(sql`${t.idFingerprint} is not null`),
     index('agent_applications_status_idx').on(t.countryCode, t.status),
+  ],
+);
+
+/**
+ * A customer's identity check, with the provider switched on in the panel. Customers add money and request
+ * errands once verified. Like an agent's, it keeps only the result, the legal name, the date of birth and a
+ * fingerprint of the ID; never the ID number, the document or the selfie.
+ */
+export const customerVerifications = pgTable(
+  'customer_verifications',
+  {
+    userId: uuid('user_id')
+      .primaryKey()
+      .references(() => users.id),
+    /**
+     * checking: started, the result not back. verified: the customer can use everything. review: support
+     * decides. failed: the check didn't pass; the customer can try again. declined: support said no.
+     */
+    status: text('status', { enum: ['checking', 'verified', 'review', 'failed', 'declined'] }).notNull(),
+    provider: text('provider').notNull(),
+    reference: text('reference').notNull(),
+    idType: text('id_type').notNull(),
+    /** The provider's overall answer, once back. */
+    outcome: text('outcome', { enum: ['passed', 'failed', 'review'] }),
+    checks: jsonb('checks').$type<Array<{ key: string; outcome: string; note?: string }>>().notNull().default([]),
+    legalName: text('legal_name'),
+    dateOfBirth: text('date_of_birth'),
+    /** As on agent applications: claimed once the ID is shown to be theirs, else waiting as pending. */
+    idFingerprint: text('id_fingerprint'),
+    pendingIdFingerprint: text('pending_id_fingerprint'),
+    checkedAt: timestamp('checked_at', { withTimezone: true }),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    decidedBy: uuid('decided_by'),
+    decisionNote: text('decision_note'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('customer_verifications_id_uq')
+      .on(t.idFingerprint)
+      .where(sql`${t.idFingerprint} is not null`),
+    uniqueIndex('customer_verifications_reference_uq').on(t.provider, t.reference),
+    index('customer_verifications_status_idx').on(t.status),
   ],
 );
 

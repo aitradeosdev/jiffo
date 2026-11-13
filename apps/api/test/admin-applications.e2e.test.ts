@@ -113,7 +113,7 @@ describe('admin: agent applications', () => {
     const first = await inReview(nin);
     await decide(first.agent, { decision: 'approve', note: 'Selfie compared by hand' }).expect(200);
     const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, first.agent.userId));
-    expect(row!.ninFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(row!.idFingerprint).toMatch(/^[0-9a-f]{64}$/);
     // A second account on the same NIN can't be approved while the first holds it.
     const second = await inReview(nin);
     const res = await decide(second.agent, { decision: 'approve', note: 'Selfie compared by hand' });

@@ -7,9 +7,22 @@ import {
   type Headers,
   type IdentityAdapter,
   type IdentityPerson,
+  type IdentityRequest,
   type IdentityResult,
   type PageInput,
 } from './identity';
+import { providerInfo, type IdType } from '@jiffo/shared';
+import { matchesLegalName } from '../common/names';
+
+/** What a provider checks, from the shared catalogue the admin panel shows too. */
+const capabilities = (key: string) => {
+  const info = providerInfo('identity', key);
+  return {
+    idTypes: (info?.idTypes ?? []) as readonly IdType[],
+    bvnAlongside: info?.bvnAlongside ?? false,
+    idChosenOnPage: info?.idChosenOnPage ?? false,
+  };
+};
 
 /** What a provider adapter needs from the API around it. */
 export interface ProviderContext {
@@ -28,8 +41,9 @@ export class IdentityProviderError extends Error {}
 /** What the agent sent from a provider's page can't be used; the message says what to do. */
 export class IdentityPageError extends Error {}
 
-/** Where the provider's page sends the agent when they finish: back into the agent app. */
-export const identityDoneUrl = (ctx: ProviderContext) => `${ctx.publicApiUrl}/v1/identity/done`;
+/** Where the provider's page sends the person when they finish: back into their app (by the reference). */
+export const identityDoneUrl = (ctx: ProviderContext, reference: string) =>
+  `${ctx.publicApiUrl}/v1/identity/done?for=${reference.startsWith('cid-') ? 'customer' : 'agent'}`;
 
 /** A legal name in one form, whatever parts the provider gives. */
 const legalNameOf = (parts: Array<string | null | undefined>) =>
@@ -86,9 +100,21 @@ interface SmileCallback {
   } | null;
 }
 
+/** Each ID as Smile ID names it, and how it is checked: against the issuer's photo, or the document's. */
+const SMILE_ID_TYPES: Record<IdType, { id_type: string; verification_method: string }> = {
+  nin: { id_type: 'NIN_V2', verification_method: 'biometric_kyc' },
+  bvn: { id_type: 'BVN', verification_method: 'biometric_kyc' },
+  voters_card: { id_type: 'VOTER_ID', verification_method: 'biometric_kyc' },
+  drivers_licence: { id_type: 'DRIVERS_LICENSE', verification_method: 'document_verification' },
+  passport: { id_type: 'PASSPORT', verification_method: 'document_verification' },
+};
+
 export class SmileIdIdentityAdapter implements IdentityAdapter {
   readonly name = 'smileid';
   readonly flow = 'hosted' as const;
+  readonly idTypes = capabilities('smileid').idTypes;
+  readonly bvnAlongside = capabilities('smileid').bvnAlongside;
+  readonly idChosenOnPage = capabilities('smileid').idChosenOnPage;
   private readonly base: string;
 
   constructor(
@@ -117,16 +143,20 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
     return json.token;
   }
 
-  async startIdentity(input: { person: IdentityPerson; reference: string }) {
+  async startIdentity(input: { person: IdentityPerson; reference: string; request: IdentityRequest }) {
+    if (input.request.withBvn && input.request.idType !== 'bvn') {
+      throw new IdentityProviderError("Smile ID can't check a BVN alongside another ID");
+    }
     const token = await this.token();
     const form = new FormData();
     const json = (value: unknown) => new Blob([JSON.stringify(value)], { type: 'application/json' });
-    form.append('id_types', json([{ country: 'NG', id_type: 'NIN_V2', verification_method: 'biometric_kyc' }]));
-    form.append('name', 'Jiffo agent identity check');
+    // One ID per link: the one the person chose in the app, so the result is known to be for it.
+    form.append('id_types', json([{ country: 'NG', ...SMILE_ID_TYPES[input.request.idType] }]));
+    form.append('name', 'Jiffo identity check');
     form.append('notice_privacy_policy_url', this.privacyPolicyUrl);
     form.append('is_single_use', 'true');
     form.append('callback_url', `${this.ctx.publicApiUrl}/v1/webhooks/identity/smileid`);
-    form.append('redirect_url', identityDoneUrl(this.ctx));
+    form.append('redirect_url', identityDoneUrl(this.ctx, input.reference));
     form.append('user_id', input.reference);
     form.append('partner_params', json({ reference: input.reference }));
     const res = await this.fetchImpl(`${this.base}/v3/smile_links`, {
@@ -190,9 +220,9 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
       legalName:
         fields?.full_name?.toUpperCase() ?? legalNameOf([fields?.first_name, fields?.other_names, fields?.last_name]),
       dateOfBirth: isoDate(fields?.date_of_birth),
-      // One Biometric KYC answer covers both: the NIN record and the selfie against its photo.
+      // One answer covers both: the ID's record or document, and the selfie against its photo.
       checks: [
-        { key: 'nin', outcome, ...(note ? { note } : {}) },
+        { key: 'id', outcome, ...(note ? { note } : {}) },
         { key: 'selfie', outcome, ...(note ? { note } : {}) },
       ],
       idNumber: fields?.id_number,
@@ -242,10 +272,14 @@ interface DojahVerification {
   data?: {
     government_data?: {
       status?: boolean;
+      data?: Record<string, { entity?: DojahPerson } | null | undefined>;
+    } | null;
+    /** The ID document step, for a document that isn't looked up with the issuer. */
+    id?: {
+      status?: boolean;
       data?: {
-        nin?: { entity?: DojahPerson } | null;
-        bvn?: { entity?: DojahPerson } | null;
-      };
+        id_data?: DojahPerson & { document_type?: string; document_number?: string };
+      } | null;
     } | null;
     selfie?: { status?: boolean } | null;
   };
@@ -256,7 +290,36 @@ interface DojahPerson {
   last_name?: string;
   date_of_birth?: string;
   nin?: string;
+  bvn?: string;
+  /** Dojah's ID-number fields for the other IDs; the docs show none, so several names are tried. */
+  id_number?: string;
+  license_no?: string;
+  number?: string;
 }
+
+/** Where Dojah's government data puts each ID, as far as its docs and samples show. */
+const DOJAH_GOVERNMENT_IDS: Array<[key: string, idType: IdType]> = [
+  ['nin', 'nin'],
+  ['drivers_license', 'drivers_licence'],
+  ['driver_license', 'drivers_licence'],
+  ['passport', 'passport'],
+  ['international_passport', 'passport'],
+  ['vin', 'voters_card'],
+  ['voter_id', 'voters_card'],
+];
+/** An ID document's type, as Dojah's ID step names it. */
+const dojahDocumentType = (name: string | undefined): IdType | undefined =>
+  !name
+    ? undefined
+    : /driv/i.test(name)
+      ? 'drivers_licence'
+      : /passport/i.test(name)
+        ? 'passport'
+        : /vot/i.test(name)
+          ? 'voters_card'
+          : /national|nin/i.test(name)
+            ? 'nin'
+            : undefined;
 
 /**
  * Dojah EasyOnboard. Its widget, set up in the Dojah dashboard with the government ID (NIN, and BVN if you
@@ -266,6 +329,9 @@ interface DojahPerson {
 export class DojahIdentityAdapter implements IdentityAdapter {
   readonly name = 'dojah';
   readonly flow = 'hosted' as const;
+  readonly idTypes = capabilities('dojah').idTypes;
+  readonly bvnAlongside = capabilities('dojah').bvnAlongside;
+  readonly idChosenOnPage = capabilities('dojah').idChosenOnPage;
   private readonly base: string;
 
   constructor(
@@ -320,7 +386,7 @@ export class DojahIdentityAdapter implements IdentityAdapter {
       config: { widget_id: this.widgetId },
       reference_id: reference,
     };
-    const done = identityDoneUrl(this.ctx);
+    const done = identityDoneUrl(this.ctx, reference);
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Identity check</title><script src="https://widget.dojah.io/widget.js"></script></head>
 <body style="font-family:system-ui,sans-serif;padding:24px"><p>Opening the identity check…</p>
@@ -346,6 +412,10 @@ connect.open();
   }
 
   /** Dojah's result as the core sees it. Completed means finished, not passed: each step is looked at. */
+  /**
+   * The person picks their ID in Dojah's widget, as set up in the Dojah dashboard. The ID is the one looked up
+   * with the issuer (a BVN counts as the ID only when it is the only one), else the ID document's step.
+   */
   private toResult(v: DojahVerification): IdentityResult {
     const state = v.verification_status;
     if (!state || state === 'Ongoing' || state === 'Pending') return { status: 'pending', checks: [] };
@@ -355,28 +425,69 @@ connect.open();
         status: 'done',
         outcome: 'failed',
         checks: [
-          { key: 'nin', outcome: 'failed', note },
+          { key: 'id', outcome: 'failed', note },
           { key: 'selfie', outcome: 'failed', note },
         ],
       };
     }
     const gov = v.data?.government_data;
-    const person = gov?.data?.nin?.entity ?? gov?.data?.bvn?.entity;
+    const govData = gov?.data ?? {};
+    const looked = DOJAH_GOVERNMENT_IDS.find(([key]) => govData[key]?.entity);
+    const bvn = govData.bvn?.entity;
+    const document = v.data?.id?.data?.id_data;
     const step = (ok: boolean | undefined, note: string) =>
       ok === true ? { outcome: 'passed' as const } : { outcome: 'review' as const, note };
+    let idType: IdType | undefined;
+    let person: DojahPerson | undefined;
+    let idCheck: IdentityResult['checks'][number];
+    if (looked) {
+      [, idType] = looked;
+      person = govData[looked[0]]!.entity;
+      idCheck = { key: 'id', ...step(gov?.status, 'ID not confirmed by Dojah') };
+    } else if (document && dojahDocumentType(document.document_type)) {
+      idType = dojahDocumentType(document.document_type);
+      person = document;
+      idCheck = { key: 'id', ...step(v.data?.id?.status, 'ID document not confirmed by Dojah') };
+    } else if (bvn) {
+      idType = 'bvn';
+      person = bvn;
+      idCheck = { key: 'id', ...step(gov?.status, 'BVN not confirmed by Dojah') };
+    } else {
+      idCheck = { key: 'id', outcome: 'review', note: 'No ID result from Dojah' };
+    }
     const checks: IdentityResult['checks'] = [
-      { key: 'nin', ...step(gov?.status && !!gov.data?.nin, 'NIN not confirmed by Dojah') },
+      idCheck,
       { key: 'selfie', ...step(v.data?.selfie?.status, 'Selfie not confirmed by Dojah') },
     ];
-    if (gov?.data?.bvn) checks.push({ key: 'bvn', ...step(gov.status, 'BVN not confirmed by Dojah') });
+    // A BVN looked up alongside another ID: it must belong to the same person.
+    if (bvn && idType !== 'bvn') {
+      const same =
+        !person ||
+        matchesLegalName(
+          legalNameOf([bvn.first_name, bvn.last_name]) ?? '',
+          legalNameOf([person.first_name, person.middle_name, person.last_name]) ?? '',
+        );
+      checks.push(
+        gov?.status && same
+          ? { key: 'bvn', outcome: 'passed' }
+          : { key: 'bvn', outcome: 'review', note: same ? 'BVN not confirmed by Dojah' : 'The BVN is in another name' },
+      );
+    }
     const outcome = state === 'Completed' ? overall(checks) : 'review';
+    const number =
+      idType === 'nin'
+        ? person?.nin
+        : idType === 'bvn'
+          ? person?.bvn
+          : (document?.document_number ?? person?.id_number ?? person?.license_no ?? person?.number);
     return {
       status: 'done',
       outcome,
       legalName: legalNameOf([person?.first_name, person?.middle_name, person?.last_name]),
       dateOfBirth: isoDate(person?.date_of_birth),
       checks,
-      idNumber: gov?.data?.nin?.entity?.nin,
+      idNumber: number,
+      idType,
     };
   }
 
@@ -464,9 +575,56 @@ const escapeHtml = (text: string) =>
  * check, so the selfie never passes through Jiffo. They don't check addresses here: their visits need the
  * address in parts (building number, street, landmark) the app doesn't ask for, so the team checks them.
  */
+/** How each ID is asked for on a page Jiffo serves. */
+const ID_FIELDS: Record<IdType, { label: string; note: string; digits: boolean; pattern: string; issuer: string }> = {
+  nin: {
+    label: 'National Identification Number',
+    note: 'On your NIN slip or card, or dial *346# to see it.',
+    digits: true,
+    pattern: '^\\d{11}$',
+    issuer: 'NIMC',
+  },
+  bvn: {
+    label: 'Bank Verification Number',
+    note: 'Dial *565*0# on the phone number linked to your bank to see it.',
+    digits: true,
+    pattern: '^\\d{11}$',
+    issuer: 'NIBSS',
+  },
+  drivers_licence: {
+    label: "Driver's licence number",
+    note: 'On the front of your licence.',
+    digits: false,
+    pattern: '^[A-Z0-9]{9,14}$',
+    issuer: 'FRSC',
+  },
+  voters_card: {
+    label: 'Voter identification number (VIN)',
+    note: 'On your voter’s card.',
+    digits: false,
+    pattern: '^[A-Z0-9]{19}$',
+    issuer: 'INEC',
+  },
+  passport: {
+    label: 'Passport number',
+    note: 'On the photo page of your passport.',
+    digits: false,
+    pattern: '^[A-Z0-9]{8,9}$',
+    issuer: 'the Immigration Service',
+  },
+};
+/** Youverify's lookup for each ID it checks here. */
+const YOUVERIFY_PATHS: Partial<Record<IdType, string>> = {
+  nin: '/v2/api/identity/ng/nin',
+  drivers_licence: '/v2/api/identity/ng/drivers-license',
+};
+
 export class YouverifyIdentityAdapter implements IdentityAdapter {
   readonly name = 'youverify';
   readonly flow = 'hosted' as const;
+  readonly idTypes = capabilities('youverify').idTypes;
+  readonly bvnAlongside = capabilities('youverify').bvnAlongside;
+  readonly idChosenOnPage = capabilities('youverify').idChosenOnPage;
   private readonly base: string;
 
   constructor(
@@ -525,8 +683,11 @@ export class YouverifyIdentityAdapter implements IdentityAdapter {
    * The page: the NIN, then Youverify's liveness check. On success it sends the NIN and the session (signed
    * by the API, so only a session started here counts), never the selfie the check hands back to the page.
    */
-  async page(reference: string) {
+  async page(reference: string, request: IdentityRequest) {
     const { sessionId, sessionToken } = await this.newSession(reference);
+    const id = ID_FIELDS[request.idType];
+    const withBvn = request.withBvn && request.idType !== 'bvn';
+    const fields = { id: { digits: id.digits, pattern: id.pattern }, bvn: withBvn };
     const options = {
       sessionId,
       sessionToken,
@@ -543,7 +704,7 @@ export class YouverifyIdentityAdapter implements IdentityAdapter {
       sig: this.ctx.sign(`youverify:${reference}`),
       session: sessionId,
       sessionSig: this.ctx.sign(`youverify-session:${reference}:${sessionId}`),
-      done: identityDoneUrl(this.ctx),
+      done: identityDoneUrl(this.ctx, reference),
     };
     const json = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c');
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -559,45 +720,61 @@ button:disabled{opacity:.4}.note{font-size:13px;color:#777}.error{color:#c0262d;
 </style></head>
 <body>
 <h1>Check your identity</h1>
-<p>Enter your NIN, then take a selfie. Youverify checks them with NIMC.</p>
-<label for="nin">National Identification Number</label>
-<input id="nin" inputmode="numeric" autocomplete="off" placeholder="11 digits">
-<p class="note">On your NIN slip or card, or dial *346# to see it.</p>
-<p class="note">By continuing you agree to Youverify checking your NIN with NIMC and taking a selfie to match your ID photo.</p>
+<p>Enter your ${escapeHtml(id.label.replace(/^./, (c) => c.toLowerCase()))}${withBvn ? ' and your BVN' : ''}, then take a selfie.</p>
+<label for="idn">${escapeHtml(id.label)}</label>
+<input id="idn" inputmode="${id.digits ? 'numeric' : 'text'}" autocapitalize="characters" autocomplete="off" placeholder="${id.digits ? '11 digits' : ''}">
+<p class="note">${escapeHtml(id.note)}</p>
+${
+  withBvn
+    ? `<label for="bvn">${ID_FIELDS.bvn.label}</label>
+<input id="bvn" inputmode="numeric" autocomplete="off" placeholder="11 digits">
+<p class="note">${ID_FIELDS.bvn.note}</p>
+`
+    : ''
+}<p class="note">By continuing you agree to Youverify checking your ID with ${escapeHtml(id.issuer)}${withBvn ? ' and your BVN with NIBSS' : ''}, and taking a selfie to match your ID photo.</p>
 <p id="error" class="error" role="alert"></p>
 <button id="go" disabled>Take selfie</button>
 <script src="${escapeHtml(YOUVERIFY_LIVENESS_SCRIPT.src)}" integrity="${YOUVERIFY_LIVENESS_SCRIPT.integrity}" crossorigin="anonymous"></script>
 <script>
 var options = ${json(options)};
 var submit = ${json(submit)};
-var nin = document.getElementById('nin'), go = document.getElementById('go'), error = document.getElementById('error');
+var fields = ${json(fields)};
+var idn = document.getElementById('idn'), bvn = document.getElementById('bvn');
+var go = document.getElementById('go'), error = document.getElementById('error');
 var say = function (text) { error.textContent = text; };
 // After a liveness check passed, the button sends the result again rather than starting another check.
 var passed = false;
-nin.addEventListener('input', function () {
-  nin.value = nin.value.replace(/[^0-9]/g, '').slice(0, 11);
-  go.disabled = nin.value.length !== 11;
+var clean = function (input, digits) {
+  input.value = digits ? input.value.replace(/[^0-9]/g, '').slice(0, 11) : input.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 19);
+};
+var ready = function () {
+  return new RegExp(fields.id.pattern).test(idn.value) && (!bvn || /^[0-9]{11}$/.test(bvn.value));
+};
+[idn, bvn].forEach(function (input) {
+  if (!input) return;
+  input.addEventListener('input', function () { clean(input, input === bvn || fields.id.digits); go.disabled = !ready(); });
 });
 if (window.YouverifyLiveness && YouverifyLiveness.preload) YouverifyLiveness.preload();
 var send = function () {
-  go.disabled = true; nin.disabled = true; say('Checking…');
+  go.disabled = true; idn.disabled = true; if (bvn) bvn.disabled = true; say('Checking…');
   var timeout = window.AbortSignal && AbortSignal.timeout ? AbortSignal.timeout(90000) : undefined;
   fetch(submit.url, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: timeout, body: JSON.stringify({
-    ref: submit.ref, sig: submit.sig, nin: nin.value, session: submit.session, sessionSig: submit.sessionSig
+    ref: submit.ref, sig: submit.sig, idNumber: idn.value, bvn: bvn ? bvn.value : undefined,
+    session: submit.session, sessionSig: submit.sessionSig
   }) }).then(function (res) {
     if (res.ok) { location.href = submit.done; return; }
     return res.json().catch(function () { return null; }).then(function (body) {
       var problem = body && body.error;
       if (problem && problem.code === 'identity_changed') { location.href = submit.done; return; }
-      // A NIN typed wrong: the selfie check still stands, so the agent corrects it and sends again.
-      if (problem && problem.code === 'invalid_nin') nin.disabled = false;
+      // A number typed wrong: the selfie check still stands, so the person corrects it and sends again.
+      if (problem && problem.code === 'invalid_id') { idn.disabled = false; if (bvn) bvn.disabled = false; }
       say((problem && problem.message) || "That didn't go through. Send it again.");
       go.disabled = false;
     });
   }).catch(function () { say("That didn't go through. Check your connection and send it again."); go.disabled = false; });
 };
 options.onSuccess = function () {
-  // The selfie stays with Youverify: only the NIN and the session go to Jiffo.
+  // The selfie stays with Youverify: only the numbers and the session go to Jiffo.
   passed = true; go.textContent = 'Send again'; send();
 };
 options.onFailure = function (data) {
@@ -639,12 +816,16 @@ go.addEventListener('click', function () {
     throw new IdentityProviderError('Youverify has no selfie check for this session yet');
   }
 
-  async submitPage(reference: string, input: PageInput): Promise<IdentityResult> {
+  async submitPage(reference: string, request: IdentityRequest, input: PageInput): Promise<IdentityResult> {
     const session = input.session ?? '';
     const expected = this.ctx.sign(`youverify-session:${reference}:${session}`);
     if (!session || !input.sessionSig || !safeEqual(input.sessionSig, expected)) {
       throw new IdentityPageError('This selfie check was started elsewhere. Start again.');
     }
+    const path = YOUVERIFY_PATHS[request.idType];
+    if (!path) throw new IdentityPageError("Youverify doesn't check this ID. Go back and choose another.");
+    const withBvn = request.withBvn && request.idType !== 'bvn';
+    if (withBvn && !input.bvn) throw new IdentityPageError('Enter your BVN too.');
     const live = await this.liveness(session);
     if (!live.passed || !live.faceImage) {
       return {
@@ -652,44 +833,74 @@ go.addEventListener('click', function () {
         outcome: 'failed',
         checks: [
           { key: 'selfie', outcome: 'failed', note: "The liveness check didn't pass" },
-          { key: 'nin', outcome: 'review', note: 'Not checked, as the liveness check failed' },
+          { key: 'id', outcome: 'review', note: 'Not checked, as the liveness check failed' },
         ],
       };
     }
-    // Youverify's own link to the selfie, from their liveness check: Jiffo never fetches it.
-    const nin = await this.call<YouverifyNin>('POST', '/v2/api/identity/ng/nin', {
-      id: input.nin,
+    const issuer = ID_FIELDS[request.idType].issuer;
+    // Youverify's own link to the selfie, from their liveness check: Jiffo never fetches it. The NIN lookup
+    // documents it under "validations"; the licence's schema names the object "validation".
+    const selfie = { selfie: { image: live.faceImage } };
+    const record = await this.call<YouverifyNin>('POST', path, {
+      id: input.idNumber,
       isSubjectConsent: true,
-      validations: { selfie: { image: live.faceImage } },
+      ...(request.idType === 'nin' ? { validations: selfie } : { validation: selfie }),
     });
-    const found = nin?.status === 'found';
-    const ninCheck: IdentityResult['checks'][number] = found
-      ? { key: 'nin', outcome: 'passed' }
-      : nin?.status === 'not_found'
-        ? { key: 'nin', outcome: 'failed', note: 'No NIN record found' }
-        : { key: 'nin', outcome: 'review', note: `NIMC answered: ${nin?.reason ?? nin?.status ?? 'nothing'}` };
-    const matched = nin?.selfieValidation === true || nin?.validations?.selfie?.selfieVerification?.match === true;
+    const found = record?.status === 'found';
+    const idCheck: IdentityResult['checks'][number] = found
+      ? { key: 'id', outcome: 'passed' }
+      : record?.status === 'not_found'
+        ? { key: 'id', outcome: 'failed', note: 'No record found for this ID' }
+        : {
+            key: 'id',
+            outcome: 'review',
+            note: `${issuer} answered: ${record?.reason ?? record?.status ?? 'nothing'}`,
+          };
+    const matched =
+      record?.selfieValidation === true || record?.validations?.selfie?.selfieVerification?.match === true;
     const selfieCheck: IdentityResult['checks'][number] = !found
       ? {
           key: 'selfie',
           outcome: 'review',
           note:
-            nin?.status === 'not_found'
-              ? 'Not compared, as the NIN record was not found'
-              : "Not compared, as NIMC didn't answer",
+            record?.status === 'not_found'
+              ? 'Not compared, as the ID record was not found'
+              : `Not compared, as ${issuer} didn't answer`,
         }
       : matched
         ? { key: 'selfie', outcome: 'passed' }
-        : { key: 'selfie', outcome: 'review', note: "Youverify didn't match the selfie to the NIN photo" };
-    const checks = [ninCheck, selfieCheck];
+        : { key: 'selfie', outcome: 'review', note: "Youverify didn't match the selfie to the ID photo" };
+    const legalName = found ? legalNameOf([record.firstName, record.middleName, record.lastName]) : undefined;
+    const checks = [idCheck, selfieCheck];
+    if (withBvn) checks.push(await this.bvnCheck(input.bvn!, legalName));
     return {
       status: 'done',
       outcome: overall(checks),
-      legalName: found ? legalNameOf([nin.firstName, nin.middleName, nin.lastName]) : undefined,
-      dateOfBirth: found ? isoDate(nin.dateOfBirth) : undefined,
+      legalName,
+      dateOfBirth: found ? isoDate(record.dateOfBirth) : undefined,
       checks,
-      idNumber: found ? (nin.idNumber ?? input.nin) : undefined,
+      idNumber: found ? (record.idNumber ?? input.idNumber) : undefined,
     };
+  }
+
+  /** A BVN looked up alongside the ID: it must be found, and in the name on the ID's record. */
+  private async bvnCheck(bvn: string, legalName: string | undefined): Promise<IdentityResult['checks'][number]> {
+    const record = await this.call<YouverifyNin>('POST', '/v2/api/identity/ng/bvn', {
+      id: bvn,
+      isSubjectConsent: true,
+    });
+    if (record?.status === 'not_found') return { key: 'bvn', outcome: 'failed', note: 'No BVN record found' };
+    if (record?.status !== 'found') {
+      return {
+        key: 'bvn',
+        outcome: 'review',
+        note: `NIBSS answered: ${record?.reason ?? record?.status ?? 'nothing'}`,
+      };
+    }
+    const name = legalNameOf([record.firstName, record.lastName]) ?? '';
+    return legalName && matchesLegalName(name, legalName)
+      ? { key: 'bvn', outcome: 'passed' }
+      : { key: 'bvn', outcome: 'review', note: 'The BVN is in another name' };
   }
 
   async startAddress(input: { person: IdentityPerson }) {

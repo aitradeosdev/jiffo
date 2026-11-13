@@ -1,6 +1,6 @@
 import { Global, Inject, Module, OnModuleInit } from '@nestjs/common';
 import { RECURRING_JOBS, type RecurringJobs } from '../timers/recurring-jobs';
-import { AgentApplicationController, IdentityProviderController } from './application.controller';
+import { AgentApplicationController } from './application.controller';
 import { AgentApplicationService } from './application.service';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
@@ -9,7 +9,7 @@ import { PresenceService } from './presence.service';
 
 @Global()
 @Module({
-  controllers: [AgentsController, PresenceController, AgentApplicationController, IdentityProviderController],
+  controllers: [AgentsController, PresenceController, AgentApplicationController],
   providers: [AgentsService, PresenceService, AgentApplicationService],
   exports: [AgentsService, PresenceService, AgentApplicationService],
 })

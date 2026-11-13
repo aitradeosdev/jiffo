@@ -109,6 +109,15 @@ export class SwitchingIdentity implements IdentityAdapter {
   get flow() {
     return this.providers.current('identity').flow;
   }
+  get idTypes() {
+    return this.providers.current('identity').idTypes;
+  }
+  get bvnAlongside() {
+    return this.providers.current('identity').bvnAlongside;
+  }
+  get idChosenOnPage() {
+    return this.providers.current('identity').idChosenOnPage;
+  }
   startIdentity(...a: Parameters<IdentityAdapter['startIdentity']>) {
     return this.providers.current('identity').startIdentity(...a);
   }

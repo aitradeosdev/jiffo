@@ -72,9 +72,9 @@ export const CountrySettingsSchema = z.object({
     minWithdrawalKobo: kobo.default(10_000),
   }),
   identity: z.object({
-    mode: z.enum(['manual', 'provider']),
-    provider: z.string().min(1).nullable(),
+    /** IDs a customer may verify with, one of them; the identity provider in use must check it. */
     customerIdTypes: z.array(z.enum(ID_TYPE_KEYS)).min(1),
+    /** IDs an agent may verify with, one of them. */
     agentIdTypes: z.array(z.enum(ID_TYPE_KEYS)).min(1),
     requireBvnForAgents: z.boolean(),
     addressCheck: z.enum(['physical', 'digital']),
@@ -131,8 +131,6 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
     minWithdrawalKobo: 10_000,
   },
   identity: {
-    mode: 'manual',
-    provider: null,
     customerIdTypes: ['nin', 'drivers_licence', 'voters_card', 'passport'],
     agentIdTypes: ['nin', 'bvn'],
     requireBvnForAgents: true,
@@ -160,7 +158,6 @@ export function publicSettings(s: CountrySettings) {
       minWithdrawalKobo: s.limits.minWithdrawalKobo,
     },
     identity: {
-      mode: s.identity.mode,
       customerIdTypes: s.identity.customerIdTypes,
       agentIdTypes: s.identity.agentIdTypes,
     },

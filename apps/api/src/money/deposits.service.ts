@@ -14,6 +14,7 @@ import { notFound, tooMany, unprocessable } from '../common/errors';
 import { nameWords, plainName } from '../common/names';
 import { ENV_ADAPTERS, type Adapters } from '../providers/env-adapters';
 import { ProvidersService } from '../providers/providers.service';
+import { CustomerIdentityService } from '../identity/customer-identity.service';
 import { LedgerService } from './ledger.service';
 
 const MINUTE_MS = 60_000;
@@ -61,6 +62,7 @@ export class DepositsService {
     private readonly realtime: RealtimeGateway,
     @Inject(ENV_ADAPTERS) env: Adapters,
     private readonly providers: ProvidersService,
+    private readonly customerIdentity: CustomerIdentityService,
   ) {
     // The fake bank of development settles top-ups by itself; it then tells this service, as a webhook would.
     if (env.payments instanceof FakePaymentsAdapter) {
@@ -73,6 +75,8 @@ export class DepositsService {
   }
 
   async create(auth: AuthContext, amountKobo: number) {
+    // Money comes in only from verified customers.
+    await this.customerIdentity.assertVerified(auth.userId);
     const { settings } = await this.countries.currentSettings(auth.countryCode);
     const { minDepositKobo, maxDepositKobo } = settings.limits;
     if (amountKobo < minDepositKobo || (maxDepositKobo !== null && amountKobo > maxDepositKobo)) {
