@@ -11,6 +11,7 @@ import {
   type MessagingAdapter,
 } from './messaging';
 import { ConsolePushAdapter, FcmPushAdapter, MemoryPushAdapter, PUSH, type PushAdapter } from './push';
+import { FakePaymentsAdapter, PAYMENTS, PaystackPaymentsAdapter, type PaymentsAdapter } from './payments';
 
 /**
  * Picks one implementation per port from the environment. Admin-selected providers (identity, payments)
@@ -48,11 +49,19 @@ import { ConsolePushAdapter, FcmPushAdapter, MemoryPushAdapter, PUSH, type PushA
       },
     },
     {
+      provide: PAYMENTS,
+      inject: [APP_CONFIG],
+      useFactory: (c: AppConfig): PaymentsAdapter =>
+        c.PAYMENTS_PROVIDER === 'paystack'
+          ? new PaystackPaymentsAdapter(c.PAYSTACK_SECRET_KEY!, c.PAYSTACK_BASE_URL)
+          : new FakePaymentsAdapter(c.FAKE_PAYMENTS_SECRET),
+    },
+    {
       provide: CHAT,
       inject: [DB],
       useFactory: (db: Db): ChatAdapter => new BuiltinChatAdapter(db),
     },
   ],
-  exports: [MESSAGING, PUSH, CHAT],
+  exports: [MESSAGING, PUSH, PAYMENTS, CHAT],
 })
 export class AdaptersModule {}

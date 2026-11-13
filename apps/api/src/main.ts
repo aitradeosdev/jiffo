@@ -8,7 +8,7 @@ import { runMigrations } from './db/migrate';
 async function bootstrap() {
   const config = loadConfig();
   if (config.RUN_MIGRATIONS) await runMigrations(config.DATABASE_URL);
-  const app = configureApp(await NestFactory.create(AppModule, { bufferLogs: false }));
+  const app = configureApp(await NestFactory.create(AppModule, { rawBody: true }));
   await app.listen(config.PORT);
 }
 

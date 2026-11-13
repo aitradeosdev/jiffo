@@ -8,6 +8,10 @@ import { MESSAGING, type MemoryMessagingAdapter } from '../src/adapters/messagin
 import { PUSH, type MemoryPushAdapter } from '../src/adapters/push';
 import { DB, type Db } from '../src/db/database.module';
 import { ERRAND_TIMERS, type MemoryErrandTimers } from '../src/timers/errand-timers';
+import { RECURRING_JOBS, type MemoryRecurringJobs } from '../src/timers/recurring-jobs';
+import { PAYMENTS, type FakePaymentsAdapter } from '../src/adapters/payments';
+import { deposits } from '../src/db/schema';
+import { eq } from 'drizzle-orm';
 import type { AppName } from '../src/db/schema';
 
 export interface TestApp {
@@ -18,12 +22,14 @@ export interface TestApp {
   messaging: MemoryMessagingAdapter;
   push: MemoryPushAdapter;
   timers: MemoryErrandTimers;
+  jobs: MemoryRecurringJobs;
+  payments: FakePaymentsAdapter;
   close: () => Promise<void>;
 }
 
 export async function createTestApp(): Promise<TestApp> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  const app = configureApp(moduleRef.createNestApplication({ logger: ['error'] }));
+  const app = configureApp(moduleRef.createNestApplication({ logger: ['error'], rawBody: true }));
   await app.listen(0, '127.0.0.1');
   return {
     app,
@@ -33,6 +39,8 @@ export async function createTestApp(): Promise<TestApp> {
     messaging: app.get(MESSAGING),
     push: app.get(PUSH),
     timers: app.get(ERRAND_TIMERS),
+    jobs: app.get(RECURRING_JOBS),
+    payments: app.get(PAYMENTS),
     close: () => app.close(),
   };
 }
@@ -110,4 +118,25 @@ export async function act(
     throw new Error(`${event}: expected ${status}, got ${res.status} ${JSON.stringify(res.body)}`);
   }
   return res.body;
+}
+
+/** Delivers a signed provider webhook to the API, as Paystack would. */
+export function deliverWebhook(t: TestApp, hook: { body: Buffer; signature: string }) {
+  return request(t.http)
+    .post('/v1/webhooks/paystack')
+    .set('content-type', 'application/json')
+    .set('x-paystack-signature', hook.signature)
+    .send(hook.body.toString());
+}
+
+/** Tops up a customer's wallet the real way: a deposit, the transfer arriving, and the webhook. */
+export async function fund(t: TestApp, person: Person, amountKobo = 5_000_000) {
+  const res = await request(t.http).post('/v1/wallet/deposits').set(person.headers).send({ amountKobo }).expect(201);
+  const [row] = await t.db.select().from(deposits).where(eq(deposits.id, res.body.id));
+  await deliverWebhook(t, t.payments.pay(row!.reference)).expect(200);
+  return res.body.id as string;
+}
+
+export async function balanceOf(t: TestApp, person: Person) {
+  return (await request(t.http).get('/v1/wallet').set(person.headers).expect(200)).body;
 }

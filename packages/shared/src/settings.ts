@@ -40,6 +40,8 @@ export const CountrySettingsSchema = z.object({
     disputeResponseHours: minutes,
     disputeDecisionHours: minutes,
     bronzePayoutHoldHours: minutes,
+    /** How long the one-time account number for a bank-transfer top-up stays open. */
+    depositAccountMinutes: minutes.default(30),
   }),
   limits: z.object({
     newCustomerItemLimitKobo: kobo,
@@ -51,6 +53,10 @@ export const CountrySettingsSchema = z.object({
     otpPerHour: z.number().int().positive(),
     otpResendSeconds: z.number().int().positive(),
     otpTtlSeconds: z.number().int().positive(),
+    minDepositKobo: kobo.default(10_000),
+    /** No deposit limit by default; admin can set one. */
+    maxDepositKobo: kobo.nullable().default(null),
+    minWithdrawalKobo: kobo.default(10_000),
   }),
   identity: z.object({
     mode: z.enum(['manual', 'provider']),
@@ -95,6 +101,7 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
     disputeResponseHours: 24,
     disputeDecisionHours: 48,
     bronzePayoutHoldHours: 24,
+    depositAccountMinutes: 30,
   },
   limits: {
     newCustomerItemLimitKobo: 5_000_000,
@@ -106,6 +113,9 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
     otpPerHour: 5,
     otpResendSeconds: 60,
     otpTtlSeconds: 300,
+    minDepositKobo: 10_000,
+    maxDepositKobo: null,
+    minWithdrawalKobo: 10_000,
   },
   identity: {
     mode: 'manual',
@@ -130,6 +140,12 @@ export function publicSettings(s: CountrySettings) {
       serviceFeeCapKobo: s.fees.serviceFeeCapKobo,
     },
     timers: s.timers,
+    /** Only the amounts the apps check before sending; fraud limits stay on the server. */
+    wallet: {
+      minDepositKobo: s.limits.minDepositKobo,
+      maxDepositKobo: s.limits.maxDepositKobo,
+      minWithdrawalKobo: s.limits.minWithdrawalKobo,
+    },
     identity: {
       mode: s.identity.mode,
       customerIdTypes: s.identity.customerIdTypes,

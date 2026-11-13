@@ -3,7 +3,17 @@ import { io, type Socket } from 'socket.io-client';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { devices, otpChallenges } from '../src/db/schema';
-import { act, createErrand, createTestApp, randomIp, randomPhone, signIn, type Person, type TestApp } from './helpers';
+import {
+  act,
+  createErrand,
+  createTestApp,
+  fund,
+  randomIp,
+  randomPhone,
+  signIn,
+  type Person,
+  type TestApp,
+} from './helpers';
 
 describe('chat, realtime and push', () => {
   let t: TestApp;
@@ -14,6 +24,7 @@ describe('chat, realtime and push', () => {
   beforeAll(async () => {
     t = await createTestApp();
     [customer, agent] = await Promise.all([signIn(t, 'customer'), signIn(t, 'agent')]);
+    await fund(t, customer, 50_000_000);
     for (const [person, token] of [
       [customer, 'customer-push-token-1'],
       [agent, 'agent-push-token-1'],
@@ -139,6 +150,7 @@ describe('chat, realtime and push', () => {
 
   it('clears push tokens the provider reports as dead, and stops pushing after logout', async () => {
     const person = await signIn(t, 'customer');
+    await fund(t, person);
     await request(t.http)
       .put('/v1/devices/current/push-token')
       .set(person.headers)

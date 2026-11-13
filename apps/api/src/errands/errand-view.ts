@@ -40,6 +40,7 @@ export function errandView(
     urgent: errand.urgent,
     description: errand.description,
     feeKobo: errand.feeKobo,
+    serviceFeeKobo: errand.serviceFeeKobo,
     pendingOfferKobo: errand.pendingOfferKobo,
     itemAmountKobo: errand.itemAmountKobo,
     scheduledFor: errand.scheduledFor,

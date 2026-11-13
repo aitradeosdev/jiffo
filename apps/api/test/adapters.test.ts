@@ -2,6 +2,8 @@ import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { TermiiMessagingAdapter } from '../src/adapters/messaging';
 import { FcmPushAdapter } from '../src/adapters/push';
+import { PaystackPaymentsAdapter } from '../src/adapters/payments';
+import { createHmac } from 'node:crypto';
 import { decrypt, encrypt } from '../src/common/crypto';
 import { loadConfig } from '../src/config/app-config';
 import { BullMqErrandTimers, type ErrandTimerJob } from '../src/timers/errand-timers';
@@ -82,6 +84,126 @@ describe('FCM push', () => {
   });
 });
 
+describe('Paystack payments', () => {
+  const ok = (data: unknown, meta?: unknown) => Response.json({ status: true, message: 'ok', data, meta });
+
+  it('asks for a one-time transfer account with our reference and expiry', async () => {
+    const { impl, calls } = fakeFetch(() =>
+      ok({
+        status: 'pending_bank_transfer',
+        account_number: '9876543210',
+        account_name: 'PAYSTACK-TITAN CHECKOUT',
+        bank: { name: 'Paystack-Titan', slug: 'paystack-titan' },
+        account_expires_at: '2026-11-13T10:30:00.000Z',
+      }),
+    );
+    const adapter = new PaystackPaymentsAdapter('sk_test_1', 'https://api.example.test', impl);
+    const expiresAt = new Date('2026-11-13T10:30:00.000Z');
+    const account = await adapter.createTransferDeposit({
+      reference: 'jd-1',
+      amountKobo: 500_000,
+      email: 'u@customers.jiffo.app',
+      expiresAt,
+    });
+    expect(account).toEqual({
+      accountNumber: '9876543210',
+      accountName: 'PAYSTACK-TITAN CHECKOUT',
+      bankName: 'Paystack-Titan',
+      expiresAt,
+    });
+    expect(calls[0]!.url).toBe('https://api.example.test/charge');
+    expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe('Bearer sk_test_1');
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({
+      email: 'u@customers.jiffo.app',
+      amount: 500_000,
+      reference: 'jd-1',
+      bank_transfer: { account_expires_at: '2026-11-13T10:30:00.000Z' },
+    });
+  });
+
+  it('reads the verified amount, fees and sender', async () => {
+    const { impl, calls } = fakeFetch(() =>
+      ok({
+        status: 'success',
+        amount: 499_000,
+        fees: 7_485,
+        currency: 'NGN',
+        authorization: { sender_name: 'ADA OBI', sender_bank: 'GTBank' },
+      }),
+    );
+    const status = await new PaystackPaymentsAdapter('sk', 'https://api.example.test', impl).verifyDeposit('jd-1');
+    expect(calls[0]!.url).toBe('https://api.example.test/transaction/verify/jd-1');
+    expect(status).toEqual({
+      status: 'success',
+      amountKobo: 499_000,
+      feesKobo: 7_485,
+      currency: 'NGN',
+      senderName: 'ADA OBI',
+      senderBank: 'GTBank',
+    });
+  });
+
+  it('maps transfer statuses and errors', async () => {
+    let answer = 'reversed';
+    const { impl } = fakeFetch(({ url }) =>
+      url.includes('/transfer/verify')
+        ? ok({ status: answer })
+        : Response.json({ status: false, message: 'Insufficient balance' }, { status: 400 }),
+    );
+    const adapter = new PaystackPaymentsAdapter('sk', 'https://api.example.test', impl);
+    expect((await adapter.verifyTransfer('jp-1')).status).toBe('failed');
+    answer = 'otp';
+    expect((await adapter.verifyTransfer('jp-1')).status).toBe('pending');
+    answer = 'success';
+    expect((await adapter.verifyTransfer('jp-1')).status).toBe('success');
+    await expect(
+      adapter.transfer({ reference: 'jp-2', amountKobo: 1, recipientCode: 'RCP', reason: 'x' }),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: 'Insufficient balance',
+    });
+  });
+
+  it('pages through the bank list', async () => {
+    const { impl, calls } = fakeFetch(({ url }) =>
+      url.includes('next=')
+        ? ok([{ code: '044', name: 'Access Bank', active: true }], { next: null })
+        : ok(
+            [
+              { code: '058', name: 'GTBank', active: true },
+              { code: '999', name: 'Closed', active: false },
+            ],
+            { next: 'abc' },
+          ),
+    );
+    const banks = await new PaystackPaymentsAdapter('sk', 'https://api.example.test', impl).listBanks();
+    expect(banks).toEqual([
+      { code: '058', name: 'GTBank' },
+      { code: '044', name: 'Access Bank' },
+    ]);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('checks the webhook signature against the raw body', () => {
+    const adapter = new PaystackPaymentsAdapter('sk_live_secret');
+    const body = Buffer.from(JSON.stringify({ event: 'charge.success', data: { id: 42, reference: 'jd-9' } }));
+    const signature = createHmac('sha512', 'sk_live_secret').update(body).digest('hex');
+    expect(adapter.parseWebhook(body, { 'x-paystack-signature': signature })).toMatchObject({
+      kind: 'deposit',
+      reference: 'jd-9',
+      eventKey: 'charge.success:42',
+    });
+    expect(adapter.parseWebhook(body, { 'x-paystack-signature': 'nope' })).toBeNull();
+    expect(adapter.parseWebhook(Buffer.from(body.toString() + ' '), { 'x-paystack-signature': signature })).toBeNull();
+    const transfer = Buffer.from(JSON.stringify({ event: 'transfer.failed', data: { id: 7, reference: 'jp-3' } }));
+    const sig = createHmac('sha512', 'sk_live_secret').update(transfer).digest('hex');
+    expect(adapter.parseWebhook(transfer, { 'x-paystack-signature': sig })).toMatchObject({
+      kind: 'transfer',
+      reference: 'jp-3',
+    });
+  });
+});
+
 describe('PIN encryption', () => {
   it('round-trips and detects tampering', () => {
     const key = randomBytes(32).toString('hex');
@@ -115,6 +237,8 @@ describe('config', () => {
       TERMII_SENDER_ID: 'Jiffo',
       PUSH_PROVIDER: 'fcm',
       FCM_SERVICE_ACCOUNT_JSON: '{}',
+      PAYMENTS_PROVIDER: 'paystack',
+      PAYSTACK_SECRET_KEY: 'sk_test_x',
     };
     expect(() => loadConfig(live)).toThrow(/TRUST_PROXY_HOPS/);
     expect(loadConfig({ ...live, TRUST_PROXY_HOPS: '1' }).TRUST_PROXY_HOPS).toBe(1);

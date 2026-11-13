@@ -7,6 +7,7 @@ import {
   createErrand,
   createTestApp,
   errandBody,
+  fund,
   LAGOS_STOPS,
   signIn,
   type Person,
@@ -22,6 +23,7 @@ describe('errands', () => {
   beforeAll(async () => {
     t = await createTestApp();
     [customer, agent, otherAgent] = await Promise.all([signIn(t, 'customer'), signIn(t, 'agent'), signIn(t, 'agent')]);
+    await fund(t, customer, 50_000_000);
   });
   afterAll(() => t.close());
 
@@ -260,6 +262,7 @@ describe('errands', () => {
   describe('lists and the board', () => {
     it('lists each person’s own errands per app', async () => {
       const person = await signIn(t, 'customer');
+      await fund(t, person);
       const a = await createErrand(t, person);
       const b = await createErrand(t, person);
       const mine = await request(t.http).get('/v1/errands').set(person.headers).expect(200);
@@ -270,6 +273,7 @@ describe('errands', () => {
 
     it('shows open errands near the agent, nearest first', async () => {
       const person = await signIn(t, 'customer');
+      await fund(t, person);
       const lekki = await createErrand(t, person);
       const ikeja = await createErrand(t, person, {
         stops: [
