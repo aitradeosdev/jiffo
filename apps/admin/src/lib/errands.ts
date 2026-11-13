@@ -72,6 +72,8 @@ export const JOURNAL: Record<string, string> = {
   tip: 'Tip',
 };
 
+export const TIER: Record<string, string> = { bronze: 'Bronze', silver: 'Silver', gold: 'Gold', platinum: 'Platinum' };
+
 export interface PersonRef {
   id: string;
   firstName: string | null;

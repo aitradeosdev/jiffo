@@ -279,7 +279,9 @@ export default async function ErrandPage({
                   {p ? (
                     <dd>
                       <p className="font-bold">
-                        {nameOf(p)}
+                        <Link href={`/people/${p.id}`} className="hover:underline">
+                          {nameOf(p)}
+                        </Link>
                         {p.status === 'suspended' ? (
                           <span className="ml-2">
                             <Badge tone="danger">Suspended</Badge>

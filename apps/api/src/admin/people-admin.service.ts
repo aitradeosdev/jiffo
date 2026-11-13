@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, ilike, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
-import { TERMINAL_STATES, type AgentTier } from '@jiffo/shared';
+import { AGENT_TIERS, commissionBpsFor, holdsEarnings, TERMINAL_STATES, type AgentTier } from '@jiffo/shared';
 import { DB, type Db, type Tx } from '../db/database.module';
 import {
   admins,
@@ -17,6 +17,7 @@ import {
   users,
 } from '../db/schema';
 import { badRequest, conflict, notFound } from '../common/errors';
+import { CountriesService } from '../countries/countries.service';
 import { ErrandsService } from '../errands/errands.service';
 import { PushService } from '../push/push.service';
 import { AuditService } from './audit.service';
@@ -43,7 +44,18 @@ export class PeopleAdminService {
     private readonly errandsService: ErrandsService,
     private readonly push: PushService,
     private readonly audit: AuditService,
+    private readonly countries: CountriesService,
   ) {}
+
+  /** What each tier means under the country's current settings: commission, and when earnings can be withdrawn. */
+  private async tierTerms(countryCode: string) {
+    const { settings } = await this.countries.currentSettings(countryCode);
+    return AGENT_TIERS.map((tier) => ({
+      tier,
+      commissionBps: commissionBpsFor(settings.fees, tier),
+      holdHours: holdsEarnings(tier) ? settings.timers.bronzePayoutHoldHours : 0,
+    }));
+  }
 
   /** Newest first. Searched by name, phone, email or part of the account id. */
   async list(query: { country: string; role: PeopleRole; q?: string; before?: string; limit: number }) {
@@ -205,6 +217,7 @@ export class PeopleAdminService {
       ]);
     const balance = (type: string) => Number(balances.find((b) => b.type === type)?.balance ?? 0);
     const isAgent = apps.some((a) => a.app === 'agent');
+    const tiers = isAgent ? await this.tierTerms(user.countryCode) : null;
     const avg = (role: 'customer' | 'agent') => {
       const given = ratings.filter((r) => r.raterRole === role);
       return given.length ? Math.round((given.reduce((s, r) => s + r.stars, 0) / given.length) * 10) / 10 : null;
@@ -226,6 +239,7 @@ export class PeopleAdminService {
       agent: isAgent
         ? {
             tier: profile[0]?.tier ?? 'bronze',
+            tiers,
             tierSetAt: profile[0]?.tierSetAt ?? null,
             tierSetBy: profile[0]?.tierSetBy ?? null,
             categoryKeys: profile[0]?.categoryKeys ?? null,

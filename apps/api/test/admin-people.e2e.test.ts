@@ -96,6 +96,10 @@ describe('admin people', () => {
     expect((await request(t.http).get('/v1/agent/profile').set(agent.headers).expect(200)).body.tier).toBe('gold');
     const d = await detail(agent.userId);
     expect(d.agent).toMatchObject({ tier: 'gold', tierSetBy: ops.name });
+    // What each tier means, from the country's current settings.
+    expect(d.agent.tiers.map((x: { tier: string }) => x.tier)).toEqual(['bronze', 'silver', 'gold', 'platinum']);
+    expect(d.agent.tiers[0]).toMatchObject({ tier: 'bronze', holdHours: 24 });
+    expect(d.agent.tiers[1]).toMatchObject({ tier: 'silver', holdHours: 0 });
 
     const audit = await request(t.http)
       .get(`/v1/admin/audit?targetType=person&targetId=${agent.userId}`)
