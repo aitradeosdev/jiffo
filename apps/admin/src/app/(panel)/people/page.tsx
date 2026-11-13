@@ -1,12 +1,19 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { agentTierLabel } from '@jiffo/shared';
-import { Badge, buttonClass, Card, Empty, inputClass, PageHeader, tableClass, tdClass, thClass } from '@/components/ui';
+import { ListControls, Pager } from '@/components/list-controls';
+import { Badge, Card, Empty, PageHeader, tableClass, tdClass, thClass } from '@/components/ui';
 import { api, getCountry } from '@/lib/api';
 import { nameOf } from '@/lib/errands';
 import { dateTime, money } from '@/lib/format';
+import { listLink } from '@/lib/links';
 
 export const metadata: Metadata = { title: 'People' };
+
+const ROLES = [
+  { value: 'customer', label: 'Customers' },
+  { value: 'agent', label: 'Agents' },
+] as const;
 
 interface Row {
   id: string;
@@ -34,53 +41,24 @@ export default async function PeoplePage({
   const query = new URLSearchParams({ country: country.code, role, ...(q ? { q } : {}) });
   if (params.before) query.set('before', params.before);
   const page = await api<{ people: Row[]; next: string | null }>(`/admin/people?${query}`);
-  const link = (changes: Record<string, string | null>) => {
-    const next = new URLSearchParams({ role, ...(q ? { q } : {}) });
-    for (const [k, v] of Object.entries(changes)) {
-      if (v === null) next.delete(k);
-      else next.set(k, v);
-    }
-    if (next.get('role') === 'customer') next.delete('role');
-    const s = next.toString();
-    return s ? `/people?${s}` : '/people';
-  };
+  const link = (changes: Record<string, string | null>) =>
+    listLink('/people', { role, q }, changes, { role: 'customer' });
   const agents = role === 'agent';
 
   return (
     <>
       <PageHeader title="People" subtitle={`Customers and agents in ${country.name}, newest first.`} />
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <nav aria-label="Customers or agents" className="flex gap-1.5">
-          {(['customer', 'agent'] as const).map((r) => (
-            <Link
-              key={r}
-              href={link({ role: r, before: null, q: null })}
-              aria-current={r === role ? 'page' : undefined}
-              className={`h-9 rounded-full px-3.5 text-sm leading-9 font-semibold ${
-                r === role ? 'bg-ink text-on-ink' : 'bg-surface text-ink-2 hover:bg-surface-2'
-              }`}
-            >
-              {r === 'customer' ? 'Customers' : 'Agents'}
-            </Link>
-          ))}
-        </nav>
-        <form action="/people" className="flex w-full gap-2 sm:w-auto" role="search">
-          {agents ? <input type="hidden" name="role" value="agent" /> : null}
-          <label htmlFor="q" className="sr-only">
-            Search people
-          </label>
-          <input
-            id="q"
-            name="q"
-            defaultValue={q}
-            placeholder="Name, phone or email"
-            className={`${inputClass} h-9 sm:w-72`}
-          />
-          <button type="submit" className={buttonClass('primary', true)}>
-            Search
-          </button>
-        </form>
-      </div>
+      <ListControls
+        base="/people"
+        label="Customers or agents"
+        filters={ROLES}
+        current={role}
+        link={(r) => link({ role: r, before: null, q: null })}
+        q={q}
+        searchLabel="Search people"
+        placeholder="Name, phone or email"
+        hidden={agents ? { role: 'agent' } : undefined}
+      />
       <Card padded={false}>
         {page.people.length === 0 ? (
           <Empty title={q ? `Nobody matches “${q}”` : agents ? 'No agents yet' : 'No customers yet'} />
@@ -134,18 +112,10 @@ export default async function PeoplePage({
           </div>
         )}
       </Card>
-      <div className="mt-4 flex gap-2">
-        {params.before ? (
-          <Link href={link({ before: null })} className={buttonClass('secondary', true)}>
-            Newest
-          </Link>
-        ) : null}
-        {page.next ? (
-          <Link href={link({ before: page.next })} className={buttonClass('secondary', true)}>
-            Older
-          </Link>
-        ) : null}
-      </div>
+      <Pager
+        newest={params.before ? link({ before: null }) : null}
+        older={page.next ? link({ before: page.next }) : null}
+      />
     </>
   );
 }

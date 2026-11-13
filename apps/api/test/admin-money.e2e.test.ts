@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { eq } from 'drizzle-orm';
+import { deposits as depositsTable } from '../src/db/schema';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WalletService } from '../src/money/wallet.service';
@@ -166,6 +168,24 @@ describe('admin money', () => {
     const byRef = await get(`deposits?country=NG&q=${mine.reference}`).expect(200);
     expect(byRef.body.deposits.map((d: { id: string }) => d.id)).toEqual([mine.id]);
     expect((await get('deposits?country=NG&filter=failed').expect(200)).body.deposits).toEqual([]);
+
+    // A top-up nobody paid into reads as expired once its account number has lapsed, not as waiting.
+    const open = await request(t.http)
+      .post('/v1/wallet/deposits')
+      .set(customer.headers)
+      .send({ amountKobo: 100_000 })
+      .expect(201);
+    const ids = async (filter: string) =>
+      (await get(`deposits?country=NG&filter=${filter}`).expect(200)).body.deposits.map((d: { id: string }) => d.id);
+    expect(await ids('pending')).toContain(open.body.id);
+    await t.db
+      .update(depositsTable)
+      .set({ expiresAt: new Date(Date.now() - 60_000) })
+      .where(eq(depositsTable.id, open.body.id));
+    expect(await ids('pending')).not.toContain(open.body.id);
+    expect(await ids('expired')).toContain(open.body.id);
+    const all = (await get('deposits?country=NG').expect(200)).body.deposits;
+    expect(all.find((d: { id: string }) => d.id === open.body.id).status).toBe('expired');
 
     // The agent withdraws to their own account.
     await adjust({

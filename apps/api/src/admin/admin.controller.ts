@@ -36,7 +36,7 @@ const MoneyListQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });
 const DepositsQuery = MoneyListQuery.extend({
-  filter: z.enum(['all', 'pending', 'failed', 'mismatch']).default('all'),
+  filter: z.enum(['all', 'pending', 'expired', 'failed', 'mismatch']).default('all'),
 });
 const PayoutsQuery = MoneyListQuery.extend({ filter: z.enum(['all', 'pending', 'failed']).default('all') });
 const AdjustBody = z.object({

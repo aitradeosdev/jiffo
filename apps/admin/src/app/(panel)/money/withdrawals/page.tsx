@@ -66,6 +66,7 @@ export default async function WithdrawalsPage({
         current={filter}
         link={(f) => link({ filter: f, before: null })}
         q={q}
+        searchLabel="Search withdrawals"
         placeholder="Name, phone or reference"
         hidden={filter !== 'all' ? { filter } : undefined}
       />

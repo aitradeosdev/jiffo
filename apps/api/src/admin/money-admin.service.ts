@@ -56,15 +56,18 @@ export class MoneyAdminService {
   async summary(country: string, days: number) {
     const [c] = await this.db.select().from(countries).where(eq(countries.code, country));
     if (!c) throw notFound('country_not_found', 'Country not found');
-    const since = sql`now() - make_interval(days => ${days})`;
+    const tz = c.timezone;
+    // The same window for the totals and the chart: whole local days, today included.
+    const since = sql`(date_trunc('day', now() at time zone ${tz}) - make_interval(days => ${days - 1})) at time zone ${tz}`;
     const rows = async (query: SQL) => (await this.db.execute(query)).rows;
     const [held, platform, revenue, charges, topUps, withdrawals, daily] = await Promise.all([
       rows(sql`select type, coalesce(sum(balance), 0)::bigint as kobo from ledger_accounts
         where country_code = ${country} and owner_id is not null group by type`),
-      // Platform accounts aren't kept as a running balance; they are the sum of their postings.
-      rows(sql`select a.type, coalesce(sum(p.amount), 0)::bigint as kobo from postings p
-        join ledger_accounts a on a.id = p.account_id
-        where a.country_code = ${country} and a.owner_id is null group by a.type`),
+      // Platform accounts aren't kept as a running balance; they are the sum of their postings, read
+      // account by account through the postings index.
+      rows(sql`select a.type,
+          (select coalesce(sum(p.amount), 0) from postings p where p.account_id = a.id)::bigint as kobo
+        from ledger_accounts a where a.country_code = ${country} and a.owner_id is null`),
       rows(sql`select j.kind, coalesce(-sum(p.amount), 0)::bigint as kobo from postings p
         join ledger_accounts a on a.id = p.account_id join journal_entries j on j.id = p.journal_id
         where a.country_code = ${country} and a.type = 'platform_revenue' and p.created_at >= ${since}
@@ -82,19 +85,19 @@ export class MoneyAdminService {
           count(*) filter (where status = 'failed')::int as failed,
           count(*) filter (where status in ('requested', 'processing'))::int as pending
         from payouts where country_code = ${country} and created_at >= ${since}`),
+      // One pass over the window's postings, grouped by local day, then laid over every day so quiet days show.
       rows(sql`with days as (
-          select generate_series(date_trunc('day', now() at time zone ${c.timezone}) - make_interval(days => ${days - 1}),
-            date_trunc('day', now() at time zone ${c.timezone}), interval '1 day') as day)
-        select to_char(d.day, 'YYYY-MM-DD') as day,
-          (select coalesce(-sum(p.amount), 0) from postings p join ledger_accounts a on a.id = p.account_id
-            where a.country_code = ${country} and a.type = 'platform_revenue'
-            and p.created_at >= (d.day at time zone ${c.timezone})
-            and p.created_at < ((d.day + interval '1 day') at time zone ${c.timezone}))::bigint as revenue,
-          (select coalesce(sum(p.amount), 0) from postings p join ledger_accounts a on a.id = p.account_id
-            where a.country_code = ${country} and a.type = 'provider_fees'
-            and p.created_at >= (d.day at time zone ${c.timezone})
-            and p.created_at < ((d.day + interval '1 day') at time zone ${c.timezone}))::bigint as charges
-        from days d order by d.day`),
+          select to_char(generate_series(date_trunc('day', now() at time zone ${tz}) - make_interval(days => ${days - 1}),
+            date_trunc('day', now() at time zone ${tz}), interval '1 day'), 'YYYY-MM-DD') as day),
+        sums as (
+          select to_char(p.created_at at time zone ${tz}, 'YYYY-MM-DD') as day,
+            coalesce(-sum(p.amount) filter (where a.type = 'platform_revenue'), 0) as revenue,
+            coalesce(sum(p.amount) filter (where a.type = 'provider_fees'), 0) as charges
+          from postings p join ledger_accounts a on a.id = p.account_id
+          where a.country_code = ${country} and a.type in ('platform_revenue', 'provider_fees') and p.created_at >= ${since}
+          group by 1)
+        select d.day, coalesce(s.revenue, 0)::bigint as revenue, coalesce(s.charges, 0)::bigint as charges
+        from days d left join sums s on s.day = d.day order by d.day`),
     ]);
     const n = (v: unknown) => Number(v ?? 0);
     const byType = (list: Record<string, unknown>[], type: string) => n(list.find((r) => r.type === type)?.kobo);
@@ -134,7 +137,7 @@ export class MoneyAdminService {
   /** Top-ups, newest first. */
   async deposits(query: {
     country: string;
-    filter: 'all' | 'pending' | 'failed' | 'mismatch';
+    filter: 'all' | 'pending' | 'expired' | 'failed' | 'mismatch';
     q?: string;
     before?: string;
     limit: number;
@@ -147,6 +150,7 @@ export class MoneyAdminService {
         createdAt: deposits.createdAt,
         completedAt: deposits.completedAt,
         status: deposits.status,
+        expiresAt: deposits.expiresAt,
         reference: deposits.reference,
         amountKobo: deposits.amountKobo,
         paidKobo: deposits.paidKobo,
@@ -161,7 +165,13 @@ export class MoneyAdminService {
       .where(
         and(
           eq(deposits.countryCode, query.country),
-          query.filter === 'pending' ? eq(deposits.status, 'pending') : undefined,
+          // Waiting means still open: a top-up nobody paid into stays 'pending' after its account number expires.
+          query.filter === 'pending'
+            ? and(eq(deposits.status, 'pending'), sql`${deposits.expiresAt} > now()`)
+            : undefined,
+          query.filter === 'expired'
+            ? and(eq(deposits.status, 'pending'), sql`${deposits.expiresAt} <= now()`)
+            : undefined,
           query.filter === 'failed' ? eq(deposits.status, 'failed') : undefined,
           query.filter === 'mismatch' ? eq(deposits.senderMismatch, true) : undefined,
           query.q ? this.personOrReference(query.q, deposits.reference) : undefined,
@@ -172,7 +182,15 @@ export class MoneyAdminService {
       )
       .orderBy(desc(deposits.createdAt), desc(deposits.id))
       .limit(query.limit + 1);
-    return this.page(rows, query.limit, 'deposits');
+    const now = Date.now();
+    const page = this.page(rows, query.limit, 'deposits');
+    return {
+      ...page,
+      deposits: page.deposits.map(({ expiresAt, ...d }) => ({
+        ...d,
+        status: d.status === 'pending' && expiresAt.getTime() <= now ? ('expired' as const) : d.status,
+      })),
+    };
   }
 
   /** Withdrawals, newest first, with the bank they went to (last four digits only). */
@@ -257,11 +275,6 @@ export class MoneyAdminService {
    * request id posts nothing the second time.
    */
   async adjust(admin: AdminContext, input: AdjustmentInput) {
-    if (input.amountKobo <= 0 || input.amountKobo > MAX_ADJUSTMENT_KOBO) {
-      throw unprocessable('amount_out_of_range', 'Adjustments are between ₦0.01 and ₦1,000,000', {
-        maxKobo: MAX_ADJUSTMENT_KOBO,
-      });
-    }
     return this.db.transaction(async (tx) => {
       const [person] = await tx.select().from(users).where(eq(users.id, input.personId)).for('update');
       if (!person) throw notFound('person_not_found', 'Person not found');

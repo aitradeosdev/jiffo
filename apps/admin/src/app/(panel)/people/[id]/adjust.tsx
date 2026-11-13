@@ -34,7 +34,18 @@ export function AdjustForm({
   const valid = kobo > 0 && note.trim().length >= 5;
 
   return (
-    <form action={action} className="space-y-3" onChange={() => setConfirming(false)}>
+    <form
+      action={action}
+      className="space-y-3"
+      onChange={() => setConfirming(false)}
+      // Enter in a field would submit at once; it only ever opens the confirmation instead.
+      onSubmit={(e) => {
+        if (!confirming) {
+          e.preventDefault();
+          if (valid) setConfirming(true);
+        }
+      }}
+    >
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="requestId" value={requestId} />
       {accounts.length > 1 ? (
@@ -111,7 +122,7 @@ export function AdjustForm({
         </label>
       ) : null}
       <label className="block">
-        <span className="mb-1.5 block text-sm font-semibold">Why</span>
+        <span className="mb-1.5 block text-sm font-semibold">Reason for the adjustment</span>
         <textarea
           name="note"
           required

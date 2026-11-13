@@ -70,7 +70,18 @@ export function ActionsForm({
       : `Everything held goes back to the customer: ${naira(facts.heldFeeKobo + facts.heldItemsKobo)}.`;
 
   return (
-    <form action={action} className="space-y-4" onChange={() => setConfirming(false)}>
+    <form
+      action={action}
+      className="space-y-4"
+      onChange={() => setConfirming(false)}
+      // Enter in an amount would submit at once; it only ever opens the confirmation instead.
+      onSubmit={(e) => {
+        if (!confirming) {
+          e.preventDefault();
+          if (event) setConfirming(true);
+        }
+      }}
+    >
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="version" value={version} />
       <fieldset className="space-y-2">

@@ -10,6 +10,7 @@ export function ListControls({
   link,
   q,
   placeholder,
+  searchLabel,
   hidden,
 }: {
   base: string;
@@ -19,6 +20,8 @@ export function ListControls({
   link: (filter: string) => string;
   q: string;
   placeholder: string;
+  /** What the search box is for, for screen readers, e.g. "Search errands". */
+  searchLabel: string;
   hidden?: Record<string, string>;
 }) {
   return (
@@ -42,7 +45,7 @@ export function ListControls({
           <input key={k} type="hidden" name={k} value={v} />
         ))}
         <label htmlFor="q" className="sr-only">
-          Search
+          {searchLabel}
         </label>
         <input id="q" name="q" defaultValue={q} placeholder={placeholder} className={`${inputClass} h-9 sm:w-72`} />
         <button type="submit" className={buttonClass('primary', true)}>

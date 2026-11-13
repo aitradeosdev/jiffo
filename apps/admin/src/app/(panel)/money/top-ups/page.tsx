@@ -12,6 +12,7 @@ export const metadata: Metadata = { title: 'Top-ups' };
 const FILTERS = [
   { value: 'all', label: 'All' },
   { value: 'pending', label: 'Waiting' },
+  { value: 'expired', label: 'Expired' },
   { value: 'failed', label: 'Failed' },
   { value: 'mismatch', label: 'Sender name differs' },
 ] as const;
@@ -19,6 +20,7 @@ const STATUS = {
   pending: { label: 'Waiting for transfer', tone: 'neutral' },
   succeeded: { label: 'Received', tone: 'brand' },
   failed: { label: 'Failed', tone: 'danger' },
+  expired: { label: 'Expired, never paid', tone: 'neutral' },
 } as const;
 
 interface Deposit {
@@ -65,6 +67,7 @@ export default async function TopUpsPage({
         current={filter}
         link={(f) => link({ filter: f, before: null })}
         q={q}
+        searchLabel="Search top-ups"
         placeholder="Name, phone or reference"
         hidden={filter !== 'all' ? { filter } : undefined}
       />

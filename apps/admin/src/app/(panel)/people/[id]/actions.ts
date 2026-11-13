@@ -32,7 +32,7 @@ export async function adjustBalance(_: PersonState, form: FormData): Promise<Per
   if (!(amountKobo > 0)) return { error: 'Enter an amount' };
   const errandId = String(form.get('errandId') ?? '');
   try {
-    await api('/admin/money/adjustments', {
+    const res = await api<{ posted: boolean }>('/admin/money/adjustments', {
       method: 'POST',
       body: {
         personId: id,
@@ -44,6 +44,8 @@ export async function adjustBalance(_: PersonState, form: FormData): Promise<Per
         ...(errandId ? { errandId } : {}),
       },
     });
+    // The same form was already saved (a retry after a lost answer): say so rather than claim a new change.
+    if (!res.posted) return { error: 'This adjustment was already saved. Refresh the page to see it.' };
   } catch (error) {
     return { error: messageOf(error) };
   }

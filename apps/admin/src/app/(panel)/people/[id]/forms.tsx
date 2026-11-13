@@ -18,11 +18,11 @@ const about = (t: TierTerms) =>
   `${t.commissionBps / 100}% commission · ${t.holdHours ? `earnings held ${t.holdHours} h` : 'earnings at once'}`;
 
 /** A reason box that keeps its text when the action is refused. */
-function Reason({ placeholder }: { placeholder: string }) {
+function Reason({ label = 'Why', placeholder }: { label?: string; placeholder: string }) {
   const [note, setNote] = useState('');
   return (
     <label className="block">
-      <span className="mb-1.5 block text-sm font-semibold">Why</span>
+      <span className="mb-1.5 block text-sm font-semibold">{label}</span>
       <textarea
         name="note"
         required
@@ -68,7 +68,7 @@ export function TierForm({ id, tier, tiers }: { id: string; tier: string; tiers:
       </fieldset>
       {chosen !== tier ? (
         <>
-          <Reason placeholder="For example: 50 errands with 4.9 stars and no disputes" />
+          <Reason label="Why change their tier" placeholder="For example: 50 errands with 4.9 stars and no disputes" />
           <Notice>{state.error}</Notice>
           <SubmitButton small pendingLabel="Saving…">
             Change tier

@@ -71,6 +71,7 @@ export const JOURNAL: Record<string, string> = {
   items_refund: 'Item money returned',
   settle: 'Paid out at the hand-off',
   tip: 'Tip',
+  adjustment: 'Adjustment by Jiffo support',
 };
 
 export interface PersonRef {

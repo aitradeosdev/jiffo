@@ -57,6 +57,13 @@
       "when": 1794572709590,
       "tag": "0007_admin",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794588744920,
+      "tag": "0008_admin_list_indexes",
+      "breakpoints": true
     }
   ]
 }
