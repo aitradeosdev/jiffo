@@ -15,6 +15,11 @@ export interface Application {
   steps: { basics: boolean; identity: boolean; address: boolean; bank: boolean; prefs: boolean; learn: boolean };
   /** Started with the provider, and its result not back yet. */
   identityChecking: boolean;
+  /**
+   * How the identity check runs: "numbers" asks for the NIN and BVN here and then runs the provider's SDK;
+   * "hosted" opens the provider's own page, which asks for everything itself.
+   */
+  identityFlow: 'numbers' | 'hosted';
   stateCode: string | null;
   stateName: string | null;
   waitlisted: boolean;
@@ -158,9 +163,12 @@ export function CheckList({ app }: { app: Application }) {
   const c = useColors();
   const byKey = new Map(app.checks.map((ch) => [ch.key, ch]));
   const running = app.status === 'checking';
-  const firstMissing = CHECK_ORDER.findIndex(([key]) => !byKey.has(key));
+  // A provider with its own page checks the NIN and the selfie only, so there is no BVN result to wait for.
+  const noBvn = !byKey.has('bvn') && (app.steps.identity || app.identityFlow === 'hosted');
+  const order = CHECK_ORDER.filter(([key]) => key !== 'bvn' || !noBvn);
+  const firstMissing = order.findIndex(([key]) => !byKey.has(key));
   const rows: Array<{ key: string; label: string; state: CheckState; note?: string }> = [
-    ...CHECK_ORDER.map(([key, label], i) => {
+    ...order.map(([key, label], i) => {
       const check = byKey.get(key);
       const state: CheckState = check
         ? check.outcome === 'passed'
