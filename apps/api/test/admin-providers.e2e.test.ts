@@ -100,6 +100,32 @@ describe('admin: providers', () => {
     expect(t.messaging.lastCodeFor(other)).toMatch(/^\d{6}$/);
   });
 
+  it("doesn't count a test of settings saved over while it ran, and takes keys again after a key change", async () => {
+    await api('put', '/sms/termii').send(termii).expect(200);
+    vi.spyOn(TermiiMessagingAdapter.prototype, 'check').mockImplementation(async () => {
+      // Saved again while the test was talking to Termii.
+      await t.db.update(providerSettings).set({ updatedAt: new Date() }).where(eq(providerSettings.provider, 'termii'));
+      return 'Connected';
+    });
+    expect((await api('post', '/sms/termii/test')).body).toEqual({
+      ok: false,
+      message: 'The settings changed during the test. Test again.',
+    });
+
+    // As if SECRETS_KEY had changed: the stored keys can't be read, and saving new ones works.
+    const other = new SecretBox('cd'.repeat(32)).seal(JSON.stringify({ apiKey: 'old' }), 'provider:sms:termii');
+    await t.db.update(providerSettings).set({ secrets: other }).where(eq(providerSettings.provider, 'termii'));
+    await api('put', '/sms/termii')
+      .send({ secrets: { apiKey: 'TL-after-rotation-5555' } })
+      .expect(200);
+    const list = await api('get', '').expect(200);
+    const sms = list.body.categories.find((c: { category: string }) => c.category === 'sms');
+    expect(sms.providers.find((p: { key: string }) => p.key === 'termii')).toMatchObject({
+      complete: true,
+      secretHints: { apiKey: '••••5555' },
+    });
+  });
+
   it('keeps a key bound to its provider', () => {
     const box = new SecretBox('ab'.repeat(32));
     const sealed = box.seal('secret', 'provider:sms:termii');
@@ -174,6 +200,15 @@ describe('admin: providers', () => {
     await api('post', '/payments/active').send({ provider: null }).expect(200);
     expect((await api('delete', '/payments/paystack')).body.error.code).toBe('provider_in_use');
     await t.db.update(payouts).set({ status: 'failed' }).where(eq(payouts.id, payout!.id));
+    // A top-up never paid, long past being checked, doesn't keep Paystack's keys.
+    await t.db.insert(deposits).values({
+      ...deposit!,
+      id: undefined,
+      reference: `stale-${crypto.randomUUID()}`,
+      provider: 'paystack',
+      status: 'pending',
+      expiresAt: new Date(Date.now() - 30 * 86_400_000),
+    });
     await api('delete', '/payments/paystack').expect(200);
   });
 });

@@ -25,6 +25,12 @@ const RETRY_AFTER_MS = 60_000;
 const CHECK_AFTER_MS = 5 * 60_000;
 
 const mask = (accountNumber: string) => `******${accountNumber.slice(-4)}`;
+/** A bank's name reduced for comparing lists from different providers: "GTBank Plc" and "gtbank" match. */
+const bankKey = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/\b(plc|limited|ltd|bank|nigeria)\b/g, '')
+    .replace(/[^a-z0-9]/g, '');
 
 export const payoutView = (p: PayoutRow) => ({
   id: p.id,
@@ -60,11 +66,14 @@ export class PayoutsService {
   ) {}
 
   async listBanks() {
-    const name = this.payments.name;
-    const cached = this.banks.get(name);
+    return this.banksOf(this.providers.current('payments'));
+  }
+
+  private async banksOf(payments: PaymentsAdapter) {
+    const cached = this.banks.get(payments.name);
     if (cached && Date.now() - cached.at < BANKS_TTL_MS) return cached.list;
-    const list = await this.payments.listBanks();
-    this.banks.set(name, { at: Date.now(), list });
+    const list = await payments.listBanks();
+    this.banks.set(payments.name, { at: Date.now(), list });
     return list;
   }
 
@@ -98,13 +107,15 @@ export class PayoutsService {
   async setAccount(auth: AuthContext, bankCode: string, accountNumber: string) {
     const [me] = await this.db.select().from(users).where(eq(users.id, auth.userId));
     if (!me?.firstName || !me.lastName) throw conflict('profile_incomplete', 'Add your first and last name first');
-    const bank = (await this.listBanks()).find((b) => b.code === bankCode);
+    // One provider for the whole step, so the account is recorded with the provider that registered it.
+    const payments = this.providers.current('payments');
+    const bank = (await this.banksOf(payments)).find((b) => b.code === bankCode);
     if (!bank) throw unprocessable('bank_not_supported', 'Choose a bank from the list');
 
     const legalName = await this.applications.legalName(auth.userId);
     let accountName: string;
     try {
-      ({ accountName } = await this.payments.resolveAccount(
+      ({ accountName } = await payments.resolveAccount(
         bankCode,
         accountNumber,
         legalName ?? `${me.firstName} ${me.lastName}`,
@@ -122,7 +133,7 @@ export class PayoutsService {
       throw unprocessable('account_name_mismatch', 'The account must be in your own name', { accountName });
     }
 
-    const { recipientCode } = await this.payments.createRecipient({ name: accountName, bankCode, accountNumber });
+    const { recipientCode } = await payments.createRecipient({ name: accountName, bankCode, accountNumber });
     await this.db.transaction(async (tx) => {
       await tx
         .update(payoutAccounts)
@@ -130,7 +141,7 @@ export class PayoutsService {
         .where(and(eq(payoutAccounts.userId, auth.userId), isNull(payoutAccounts.replacedAt)));
       await tx.insert(payoutAccounts).values({
         userId: auth.userId,
-        provider: this.payments.name,
+        provider: payments.name,
         bankCode,
         bankName: bank.name,
         accountNumber,
@@ -242,7 +253,12 @@ export class PayoutsService {
     const via = payout.provider
       ? this.providers.named('payments', payout.provider)
       : this.providers.current('payments');
-    if (!via) return this.fail(payout.id, `${payout.provider} is no longer set up`);
+    // Its provider can't be reached from here now (keys removed or unreadable). It may already have taken
+    // the transfer, so nothing is refunded: the payout waits, and is tried again once it is set up.
+    if (!via) {
+      this.logger.warn(`Payout ${payout.id} waits: ${payout.provider} is not set up`);
+      return payout;
+    }
     let account: typeof payoutAccounts.$inferSelect;
     try {
       account = await this.recipientWith(via, payout.payoutAccountId);
@@ -298,14 +314,25 @@ export class PayoutsService {
     const [account] = await this.db.select().from(payoutAccounts).where(eq(payoutAccounts.id, accountId));
     if (!account) throw new Error(`Payout account ${accountId} not found`);
     if (account.provider === via.name) return account;
+    // Each provider has its own bank codes: the bank is found on this one's list by name, then by code.
+    const banks = await this.banksOf(via);
+    const bank =
+      banks.find((b) => bankKey(b.name) === bankKey(account.bankName)) ??
+      banks.find((b) => b.code === account.bankCode);
+    if (!bank) {
+      throw new PaymentsProviderError(
+        422,
+        `${account.bankName} isn't on the list of the payments provider now in use. Add your bank account again.`,
+      );
+    }
     const { recipientCode } = await via.createRecipient({
       name: account.accountName,
-      bankCode: account.bankCode,
+      bankCode: bank.code,
       accountNumber: account.accountNumber,
     });
     const [moved] = await this.db
       .update(payoutAccounts)
-      .set({ provider: via.name, recipientCode })
+      .set({ provider: via.name, recipientCode, bankCode: bank.code })
       .where(eq(payoutAccounts.id, account.id))
       .returning();
     return moved!;

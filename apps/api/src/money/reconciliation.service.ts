@@ -38,9 +38,10 @@ export class ReconciliationService {
     let providerBalanceKobo = 0;
     for (const name of [...new Set([this.payments.name, ...used.rows.map((r) => r.provider)])].sort()) {
       const adapter = this.providers.named('payments', name);
-      // Its keys were removed: its balance can't be read, and any money left there shows as a difference.
-      if (!adapter) {
-        this.logger.warn(`Reconciliation leaves out ${name}, which is no longer set up`);
+      // No provider set up at all, or its keys were removed: its balance can't be read, and any money left
+      // there shows as a difference.
+      if (!adapter || adapter.name === 'none') {
+        if (name !== 'none') this.logger.warn(`Reconciliation leaves out ${name}, which is no longer set up`);
         continue;
       }
       providerBalanceKobo += await adapter.balance(currency);

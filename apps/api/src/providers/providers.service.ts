@@ -27,7 +27,7 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
   private rows = new Map<string, Row>();
   private active = new Map<ProviderCategory, string>();
   /** Built adapters, kept while their settings are unchanged. */
-  private readonly built = new Map<string, { stamp: number; adapter: unknown }>();
+  private readonly built = new Map<string, { stamp: number; adapter: unknown | null }>();
   private timer?: ReturnType<typeof setInterval>;
 
   constructor(
@@ -78,6 +78,11 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
    * even after admin switched to another. Null when that provider isn't set up any more.
    */
   named<C extends ProviderCategory>(category: C, name: string): Adapters[C] | null {
+    // The same keys current() uses for this provider: the panel's once it is switched on there, else the
+    // environment's when it names this provider, else the panel's saved ones.
+    if (this.active.get(category) === name) {
+      return this.fromSettings(category, name) ?? (this.env[category].name === name ? this.env[category] : null);
+    }
     if (this.env[category].name === name) return this.env[category];
     return this.fromSettings(category, name);
   }
@@ -89,14 +94,16 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
     if (!row || !build) return null;
     const key = `${category}:${name}`;
     const stamp = row.updatedAt.getTime();
+    // A failure is kept too, so settings that can't be read are tried and logged once, not on every call.
     const cached = this.built.get(key);
-    if (cached?.stamp === stamp) return cached.adapter as Adapters[C];
+    if (cached?.stamp === stamp) return cached.adapter as Adapters[C] | null;
     try {
       const adapter = build(this.values(row));
       this.built.set(key, { stamp, adapter });
       return adapter;
     } catch (error) {
       this.logger.error(`Provider ${key} could not be set up: ${String(error)}`);
+      this.built.set(key, { stamp, adapter: null });
       return null;
     }
   }

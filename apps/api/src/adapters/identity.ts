@@ -114,7 +114,7 @@ export class FakeIdentityAdapter implements IdentityAdapter {
  * by the fake, and the rest of the API still runs.
  */
 export class UnconfiguredIdentityAdapter implements IdentityAdapter {
-  readonly name = 'unconfigured';
+  readonly name = 'none';
   private refuse(): never {
     throw new IdentityUnavailable();
   }

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, eq, inArray, sql } from 'drizzle-orm';
+import { and, count, eq, gt, inArray, sql } from 'drizzle-orm';
 import {
   PROVIDER_CATEGORIES,
   PROVIDER_CATEGORY_INFO,
@@ -14,6 +14,7 @@ import { admins, agentApplications, deposits, payouts, providerSettings } from '
 import { badRequest, conflict, notFound } from '../common/errors';
 import { BUILDERS, checkAdapter } from '../providers/builders';
 import { ProvidersService, secretBinding } from '../providers/providers.service';
+import { DEPOSIT_RECHECK_DAYS } from '../money/deposits.service';
 import { AuditService } from './audit.service';
 import type { AdminContext } from './admin.types';
 
@@ -124,9 +125,15 @@ export class ProvidersAdminService {
           .from(providerSettings)
           .where(and(eq(providerSettings.category, category), eq(providerSettings.provider, provider)));
         const binding = secretBinding(category, provider);
-        const oldSecrets: Record<string, string> = before?.secrets
-          ? (JSON.parse(this.providers.box.open(before.secrets, binding)) as Record<string, string>)
-          : {};
+        // Keys saved under an earlier SECRETS_KEY can't be read: they are dropped, and must be typed again.
+        let oldSecrets: Record<string, string> = {};
+        if (before?.secrets) {
+          try {
+            oldSecrets = JSON.parse(this.providers.box.open(before.secrets, binding)) as Record<string, string>;
+          } catch {
+            oldSecrets = {};
+          }
+        }
         const config: Record<string, string> = {};
         for (const f of info.fields.filter((f) => !f.secret)) {
           const value = (input.config[f.key] ?? before?.config[f.key] ?? '').trim();
@@ -144,6 +151,8 @@ export class ProvidersAdminService {
         for (const f of info.fields.filter((f) => !f.secret)) {
           if ((before?.config[f.key] ?? '') !== (config[f.key] ?? '')) changed.push(f.key);
         }
+        const lost = Object.keys(before?.secretHints ?? {}).filter((k) => !(k in secrets));
+        changed.push(...lost);
         if (before && changed.length === 0) return { changed };
         try {
           BUILDERS[category][provider]!({ ...config, ...secrets });
@@ -197,10 +206,13 @@ export class ProvidersAdminService {
       message = (error as Error).message || 'The provider refused';
     }
     message = message.slice(0, 300);
-    await this.db
+    // Kept only if the settings are still the ones tested: a save during the test needs a test of its own.
+    const [kept] = await this.db
       .update(providerSettings)
       .set({ lastTestAt: new Date(), lastTestOk: ok, lastTestMessage: message })
-      .where(eq(providerSettings.id, row.id));
+      .where(and(eq(providerSettings.id, row.id), eq(providerSettings.updatedAt, row.updatedAt)))
+      .returning({ id: providerSettings.id });
+    if (!kept) return { ok: false, message: 'The settings changed during the test. Test again.' };
     return { ok, message };
   }
 
@@ -280,7 +292,14 @@ export class ProvidersAdminService {
         this.db
           .select({ n: count() })
           .from(deposits)
-          .where(and(eq(deposits.provider, provider), eq(deposits.status, 'pending'))),
+          // Top-ups still being checked: one never paid stops being asked about a week after it expired.
+          .where(
+            and(
+              eq(deposits.provider, provider),
+              eq(deposits.status, 'pending'),
+              gt(deposits.expiresAt, new Date(Date.now() - DEPOSIT_RECHECK_DAYS * 86_400_000)),
+            ),
+          ),
         this.db
           .select({ n: count() })
           .from(payouts)

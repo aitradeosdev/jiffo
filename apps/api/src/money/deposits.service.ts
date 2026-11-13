@@ -20,7 +20,8 @@ const MINUTE_MS = 60_000;
 /** Open one-time account numbers a customer can have at once. */
 const MAX_OPEN_DEPOSITS = 3;
 /** Expired top-ups are checked again for this long, in case a transfer lands late. */
-const RECHECK_DAYS = 7;
+/** How long an unpaid top-up keeps being asked about after its account number expires. */
+export const DEPOSIT_RECHECK_DAYS = 7;
 type DepositRow = typeof deposits.$inferSelect;
 
 export const depositView = (d: DepositRow) => ({
@@ -89,7 +90,9 @@ export class DepositsService {
     }
     const reference = `jd-${randomUUID()}`;
     const expiresAt = new Date(Date.now() + settings.timers.depositAccountMinutes * MINUTE_MS);
-    const account = await this.payments.createTransferDeposit({
+    // One provider for the whole step: a switch in between must not record another than the one used.
+    const payments = this.providers.current('payments');
+    const account = await payments.createTransferDeposit({
       reference,
       amountKobo,
       email: `${auth.userId}@${this.config.PAYMENT_EMAIL_DOMAIN}`,
@@ -100,7 +103,7 @@ export class DepositsService {
       .values({
         userId: auth.userId,
         countryCode: auth.countryCode,
-        provider: this.payments.name,
+        provider: payments.name,
         reference,
         amountKobo,
         accountNumber: account.accountNumber,
@@ -219,7 +222,7 @@ export class DepositsService {
         and(
           eq(deposits.status, 'pending'),
           lt(deposits.expiresAt, new Date()),
-          gt(deposits.expiresAt, new Date(Date.now() - RECHECK_DAYS * 86_400_000)),
+          gt(deposits.expiresAt, new Date(Date.now() - DEPOSIT_RECHECK_DAYS * 86_400_000)),
         ),
       )
       .limit(500);
