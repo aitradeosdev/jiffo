@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
 import { router } from 'expo-router';
 import { goBack } from '@/nav';
 import { useSession } from '@/auth/session';
@@ -20,7 +20,8 @@ export default function Withdraw() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const kobo = parseNaira(text);
-  const available = wallet.data?.availableKobo ?? 0;
+  const available = wallet.data?.availableKobo ?? null;
+  const tooMuch = !!kobo && available !== null && kobo > available;
 
   const submit = async () => {
     if (!kobo) return;
@@ -41,7 +42,15 @@ export default function Withdraw() {
     }
   };
 
-  if (account.data === null) {
+  if (account.loading && !account.data) {
+    return (
+      <Screen>
+        <ActivityIndicator />
+      </Screen>
+    );
+  }
+
+  if (!account.error && account.data === null) {
     return (
       <Screen footer={<Button label="Add bank account" onPress={() => router.replace('/payout-account')} />}>
         <Text variant="title">Add your bank account first</Text>
@@ -56,22 +65,24 @@ export default function Withdraw() {
         <Button
           label={kobo ? `Withdraw ${naira(kobo)}` : 'Withdraw'}
           onPress={submit}
-          disabled={!kobo || kobo > available}
+          disabled={!kobo || available === null || tooMuch}
           loading={busy}
         />
       }
     >
       <Text variant="title">Withdraw</Text>
-      <Text tone="ink2">Available: {naira(available)}</Text>
+      <Text tone="ink2">
+        {available === null ? (wallet.error ?? 'Checking your balance…') : `Available: ${naira(available)}`}
+      </Text>
       <Field
         label="Amount"
         prefix="₦"
         value={text}
         onChangeText={(t) => setText(t.replace(/[^\d.,]/g, ''))}
         keyboardType="decimal-pad"
-        error={error ?? (kobo && kobo > available ? 'More than you have available' : null)}
+        error={error ?? (tooMuch ? 'More than you have available' : null)}
       />
-      <Chip label="Everything" onPress={() => setText(String(available / 100))} />
+      {available ? <Chip label="Everything" onPress={() => setText(String(available / 100))} /> : null}
       <View style={{ gap: space.sm }}>
         <Row
           icon="calendar"

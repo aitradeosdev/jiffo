@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSession } from '../auth/session';
 import { errorMessage } from '../api/client';
@@ -25,7 +25,7 @@ export function AgentBoard() {
   const c = useColors();
   const { api, user } = useSession();
   const { config } = useCountryConfig();
-  const { coords, error: locationError, refresh: relocate } = useCurrentLocation();
+  const { error: locationError, blocked, locate, openSettings } = useCurrentLocation();
   const mine = useResource<ErrandView[]>('/v1/errands?limit=10');
   const [jobs, setJobs] = useState<BoardErrand[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,21 +33,26 @@ export function AgentBoard() {
   const [sort, setSort] = useState<Sort>('near');
   useRealtimeEvent('errand.updated', mine.reloadSoon);
 
+  // Each refresh reads the location again, so "near you" follows the agent as they move.
   const load = useCallback(async () => {
-    if (!coords) return;
+    const here = await locate();
+    if (!here) return;
     try {
-      setJobs(await api.get<BoardErrand[]>(`/v1/errands/board?lat=${coords.lat}&lng=${coords.lng}&radiusKm=10`));
+      setJobs(await api.get<BoardErrand[]>(`/v1/errands/board?lat=${here.lat}&lng=${here.lng}&radiusKm=10`));
       setError(null);
     } catch (e) {
       setError(errorMessage(e));
     }
-  }, [api, coords]);
-  // New errands don't arrive as live events yet, so the board checks every 20 seconds while open.
-  useEffect(() => {
-    load();
-    const timer = setInterval(load, REFRESH_MS);
-    return () => clearInterval(timer);
-  }, [load]);
+  }, [api, locate]);
+  // New errands don't arrive as live events yet, so the board checks every 20 seconds, only while it is
+  // the screen in front.
+  useFocusEffect(
+    useCallback(() => {
+      load();
+      const timer = setInterval(load, REFRESH_MS);
+      return () => clearInterval(timer);
+    }, [load]),
+  );
 
   const shown = useMemo(() => {
     const list = [...(jobs ?? [])];
@@ -101,7 +106,11 @@ export function AgentBoard() {
         {locationError ? (
           <Card tone="urgent">
             <Text>{locationError}</Text>
-            <Button kind="secondary" label="Try again" onPress={relocate} />
+            {blocked ? (
+              <Button kind="secondary" label="Open Settings" onPress={openSettings} />
+            ) : (
+              <Button kind="secondary" label="Try again" onPress={load} />
+            )}
           </Card>
         ) : null}
         {error ? <Text tone="danger">{error}</Text> : null}

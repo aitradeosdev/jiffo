@@ -98,12 +98,30 @@ export function AgentEarnings() {
         ) : null}
 
         <Section title="Payout account">
-          <Row
-            icon="briefcase"
-            title={account.data ? `${account.data.bankName} · ${account.data.accountNumber}` : 'Add your bank account'}
-            subtitle={account.data ? account.data.accountName : 'It must be in your own name'}
-            onPress={() => router.push('/payout-account')}
-          />
+          {account.data ? (
+            <Row
+              icon="briefcase"
+              title={`${account.data.bankName} · ${account.data.accountNumber}`}
+              subtitle={account.data.accountName}
+              onPress={() => router.push('/payout-account')}
+            />
+          ) : account.error ? (
+            <Row
+              icon="alert-circle"
+              title="Couldn't load your bank account"
+              subtitle={account.error}
+              onPress={() => account.reload()}
+            />
+          ) : account.loading ? (
+            <Row icon="briefcase" title="Loading…" />
+          ) : (
+            <Row
+              icon="briefcase"
+              title="Add your bank account"
+              subtitle="It must be in your own name"
+              onPress={() => router.push('/payout-account')}
+            />
+          )}
         </Section>
 
         <Section title="Withdrawals">

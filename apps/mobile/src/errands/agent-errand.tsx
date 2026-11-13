@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Image, Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 import { goBack } from '../nav';
@@ -15,23 +15,7 @@ import { Button, Field, Screen, Text } from '../ui/kit';
 import { Card, Chip, Icon, Row } from '../ui/parts';
 import { Photos } from '../ui/photos';
 import { AfterCompletion } from './after-completion';
-import type { ErrandView } from './types';
-
-/** How each status reads to the agent. */
-const AGENT_STATUS: Record<ErrandView['status'], string> = {
-  requested: 'Open errand',
-  accepted: 'Accepted',
-  started: 'In progress',
-  item_pending: 'Waiting for the customer to lock the item amount',
-  items_locked: 'Item amount locked',
-  delivered: 'At the drop-off',
-  photo_pending: 'Waiting for the customer to approve',
-  unreachable: 'Customer unreachable',
-  disputed: 'Support is reviewing',
-  completed: 'Completed',
-  cancelled: 'Cancelled',
-  expired: 'Expired',
-};
+import { AGENT_STATUS, type ErrandView } from './types';
 
 interface Shot {
   uri: string;
@@ -43,7 +27,7 @@ interface Shot {
 export function AgentErrand({ id }: { id: string }) {
   const { api } = useSession();
   const { config } = useCountryConfig();
-  const { data: errand, error, reload, setData } = useResource<ErrandView>(`/v1/errands/${id}`);
+  const { data: errand, error, reload, setData } = useResource<ErrandView>(id ? `/v1/errands/${id}` : null);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [offer, setOffer] = useState('');
@@ -54,6 +38,14 @@ export function AgentErrand({ id }: { id: string }) {
   useRealtimeEvent<{ errandId: string; version: number }>('errand.updated', (u) => {
     if (u.errandId === id && (!errand || u.version > errand.version)) reload();
   });
+
+  // Photo links expire after 15 minutes: refresh every 10 while there are photos to show.
+  const hasPhotos = !!errand?.photos && (errand.photos.items.length > 0 || !!errand.photos.dropoff);
+  useEffect(() => {
+    if (!hasPhotos) return;
+    const timer = setInterval(reload, 10 * 60_000);
+    return () => clearInterval(timer);
+  }, [hasPhotos, reload]);
 
   if (!errand) return <Screen>{error ? <Text tone="danger">{error}</Text> : <ActivityIndicator />}</Screen>;
 
@@ -83,7 +75,8 @@ export function AgentErrand({ id }: { id: string }) {
     const file = await pickPhoto('camera');
     if (file)
       setShots((s) => [
-        ...s.filter((x) => purpose !== 'dropoff_photo' || x.purpose !== 'dropoff_photo'),
+        // One photo of each kind: taking it again replaces it.
+        ...s.filter((x) => x.purpose !== purpose),
         { ...file, purpose },
       ]);
   };
