@@ -64,6 +64,7 @@ All routes are under `/v1` except `GET /health`. Errors always look like `{ "err
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Sign-in        | `POST /auth/otp/request`, `POST /auth/otp/verify`, `POST /auth/refresh`, `POST /auth/logout`, `POST /auth/logout-others`                                                                        |
 | Profile        | `GET /me`, `PATCH /me`, `PUT /devices/current/push-token`                                                                                                                                       |
+| Agent profile  | `GET /agent/profile`, `PATCH /agent/profile`: categories and purchase errands the agent takes; the tier is set by admin                                                                         |
 | Country config | `GET /config/:country`: currency, states, categories and the public settings                                                                                                                    |
 | Errands        | `POST /errands`, `GET /errands`, `GET /errands/board` (agent app), `GET /errands/:id`, `GET /errands/:id/events`, `GET /errands/:id/pin` (customer, once delivered), `POST /errands/:id/events` |
 | Chat           | `GET /errands/:id/messages`, `POST /errands/:id/messages`                                                                                                                                       |
@@ -94,6 +95,6 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
 
 - **Top-ups:** the customer asks for an amount and gets a one-time account number from Paystack. The wallet is credited with what actually arrived, only after Paystack confirms it, from the webhook or when the app checks the top-up.
 - **Escrow:** the fee and service fee are held when an agent accepts, adjusted when a new price is accepted, and returned if the agent leaves or the errand is cancelled. Item money is held separately when the customer locks the item amount.
-- **Hand-off:** item money goes to the agent untouched and withdrawable at once. The fee, less commission, goes to the agent; Bronze earnings are held for 24 hours. The service fee and commission go to platform revenue.
+- **Hand-off:** item money goes to the agent untouched and withdrawable at once. The fee, less the commission for the agent's tier (set by admin), goes to the agent; Bronze earnings are held for 24 hours. The service fee and commission go to platform revenue.
 - **Withdrawals:** agents only, to an account in their own name. One free scheduled withdrawal a day, or instant for a fee. A bounced transfer puts the full amount back.
 - **Reconciliation:** every night the ledger's cash is compared with the Paystack balance and the result is saved for finance.

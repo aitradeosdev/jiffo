@@ -11,6 +11,7 @@ import {
 import { DB, type Db, type Tx } from '../db/database.module';
 import { earningHolds, errands, journalEntries, ledgerAccounts, postings, type LedgerAccountType } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
+import { AgentsService } from '../agents/agents.service';
 import { ApiError, conflict, notFound } from '../common/errors';
 import type { AuthContext } from '../auth/auth.types';
 import { InsufficientFunds, LedgerService, accountKey, transfer, type AccountRef } from './ledger.service';
@@ -53,15 +54,12 @@ export class WalletService {
     @Inject(DB) private readonly db: Db,
     private readonly ledger: LedgerService,
     private readonly countries: CountriesService,
+    private readonly agents: AgentsService,
   ) {}
 
-  /**
-   * The agent's tier sets their commission and when earnings can be withdrawn. Tiers are worked out
-   * from the last 30 days once agent profiles exist; until then every agent is Bronze, which also
-   * covers new agents.
-   */
-  async agentTier(_userId: string): Promise<CommissionTier> {
-    return 'bronze';
+  /** The agent's tier, set by admin. It decides their commission and when earnings can be withdrawn. */
+  agentTier(userId: string): Promise<CommissionTier> {
+    return this.agents.tier(userId);
   }
 
   async customerBalance(userId: string, countryCode: string) {

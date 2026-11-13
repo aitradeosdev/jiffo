@@ -19,6 +19,7 @@ import { decrypt, encrypt, numericCode, safeEqual } from '../common/crypto';
 import { ApiError, badRequest, conflict, locked, notFound, unprocessable } from '../common/errors';
 import { ERRAND_TIMERS, type ErrandTimerJob, type ErrandTimers } from '../timers/errand-timers';
 import { CustomerFundsLow, WalletService } from '../money/wallet.service';
+import { AgentsService } from '../agents/agents.service';
 import { ErrandNotifier, type TransitionResult } from './errand-notifier';
 import { EVENT_DATA, type CreateErrandInput, type ErrandEventInput } from './errand-input';
 import {
@@ -50,6 +51,7 @@ export class ErrandsService implements OnModuleInit {
     private readonly countries: CountriesService,
     private readonly notifier: ErrandNotifier,
     private readonly wallet: WalletService,
+    private readonly agents: AgentsService,
   ) {}
 
   onModuleInit() {
@@ -119,6 +121,8 @@ export class ErrandsService implements OnModuleInit {
 
   /** Open errands whose pickup is within the radius, nearest first. */
   async board(auth: AuthContext, q: { lat: number; lng: number; radiusKm: number; limit: number }) {
+    // Only errands in the agent's chosen categories, and purchase errands only if they take them.
+    const prefs = await this.agents.preferences(auth.userId);
     const here = sql`ST_SetSRID(ST_MakePoint(${q.lng}, ${q.lat}), 4326)::geography`;
     const distance = sql<number>`ST_Distance(${errandStops.location}, ${here})`;
     const rows = await this.db
@@ -130,6 +134,8 @@ export class ErrandsService implements OnModuleInit {
           eq(errands.status, 'requested'),
           eq(errands.countryCode, auth.countryCode),
           ne(errands.customerId, auth.userId),
+          prefs.categoryKeys ? inArray(errands.categoryKey, prefs.categoryKeys) : undefined,
+          prefs.takesPurchases ? undefined : eq(errands.buy, false),
           sql`ST_DWithin(${errandStops.location}, ${here}, ${q.radiusKm * 1000})`,
         ),
       )

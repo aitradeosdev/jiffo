@@ -17,7 +17,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import type { CountrySettings, ErrandState } from '@jiffo/shared';
+import { AGENT_TIERS, type CountrySettings, type ErrandState } from '@jiffo/shared';
 
 /** PostGIS point (longitude, latitude). Written with ST_MakePoint, read back through the lat/lng columns. */
 const geographyPoint = customType<{ data: string; driverData: string }>({
@@ -189,6 +189,23 @@ export const otpChallenges = pgTable(
     index('otp_ip_created_idx').on(t.requestedIp, t.createdAt),
   ],
 );
+
+/** Agent-only details. A row is created the first time an agent's profile is read or changed. */
+export const agentProfiles = pgTable('agent_profiles', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id),
+  /** Set by admin. It decides the agent's commission and when their earnings can be withdrawn. */
+  tier: text('tier', { enum: AGENT_TIERS }).notNull().default('bronze'),
+  tierSetBy: uuid('tier_set_by'),
+  tierSetAt: timestamp('tier_set_at', { withTimezone: true }),
+  /** The categories the agent receives; null means every category. */
+  categoryKeys: text('category_keys').array(),
+  /** Whether the agent takes errands where they buy the items. */
+  takesPurchases: boolean('takes_purchases').notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
 
 /* ---------- Errands ---------- */
 
