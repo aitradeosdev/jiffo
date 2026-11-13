@@ -5,6 +5,7 @@ import { admins, agentApplications, states, users } from '../db/schema';
 import { AgentApplicationService } from '../agents/application.service';
 import { PushService } from '../push/push.service';
 import { AuditService } from './audit.service';
+import { SUPPORT_CHECK_LABELS, type Check } from './check-labels';
 import { requireCountry } from './countries';
 import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
@@ -19,17 +20,9 @@ export type ApplicationStatus = (typeof APPLICATION_STATUSES)[number];
  */
 const since = sql`coalesce("agent_applications"."submitted_at", "agent_applications"."created_at")`;
 
-type Check = { key: string; outcome: string; note?: string };
 /** Each check as support reads it. The agent app has its own words, addressed to the agent. */
 const CHECK_LABELS: Record<string, string> = {
-  nin: 'NIN matches their details',
-  bvn: 'BVN matches their details',
-  drivers_licence: "Driver's licence matches their details",
-  voters_card: "Voter's card matches their details",
-  passport: 'Passport matches their details',
-  id_type: 'An ID we accept',
-  selfie: 'Selfie matches the ID photo',
-  age: '18 or older',
+  ...SUPPORT_CHECK_LABELS,
   name: 'Name in the app matches the ID',
   address: 'Address confirmed',
   bank: 'Bank account is in the name on the ID',

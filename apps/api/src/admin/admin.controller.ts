@@ -21,6 +21,7 @@ import { MAX_ADJUSTMENT_KOBO, MoneyAdminService } from './money-admin.service';
 import { SettingsAdminService } from './settings-admin.service';
 import { ProvidersAdminService } from './providers-admin.service';
 import { APPLICATION_STATUSES, ApplicationsAdminService } from './applications-admin.service';
+import { ID_CHECK_STATUSES, IdChecksAdminService } from './id-checks-admin.service';
 import { AGENT_TIERS, PROVIDER_CATEGORIES } from '@jiffo/shared';
 import { notFound } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
@@ -117,6 +118,13 @@ const ProviderBody = z.object({
   secrets: z.record(z.string(), z.string().max(20_000)).default({}),
 });
 const ActivateBody = z.object({ provider: z.string().min(1).max(40).nullable() });
+const IdChecksQuery = z.object({
+  country: z.string().length(2).toUpperCase(),
+  status: z.enum(ID_CHECK_STATUSES).default('review'),
+  q: z.string().trim().max(80).optional(),
+  before: z.string().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
 const ApplicationsQuery = z.object({
   country: z.string().length(2).toUpperCase(),
   status: z.enum(APPLICATION_STATUSES).default('review'),
@@ -126,6 +134,7 @@ const ApplicationsQuery = z.object({
 });
 /** The note is shown to the agent when their application is declined. */
 const DecisionBody = z.object({ decision: z.enum(['approve', 'reject', 'reopen']), note: Note });
+const IdDecisionBody = z.object({ decision: z.enum(['verify', 'decline', 'reopen']), note: Note });
 const InviteBody = z.object({
   email: z.string().email().max(200),
   name: z.string().trim().min(1).max(80),
@@ -154,6 +163,7 @@ export class AdminController {
     private readonly money: MoneyAdminService,
     private readonly settingsAdmin: SettingsAdminService,
     private readonly applications: ApplicationsAdminService,
+    private readonly idChecks: IdChecksAdminService,
     private readonly providerSettings: ProvidersAdminService,
   ) {}
 
@@ -332,6 +342,30 @@ export class AdminController {
     @Body(new ZodBody(DecisionBody)) body: z.infer<typeof DecisionBody>,
   ) {
     return this.applications.decide(admin, id, body);
+  }
+
+  @Get('id-checks')
+  @Needs('read')
+  listIdChecks(@Query(new ZodBody(IdChecksQuery)) query: z.infer<typeof IdChecksQuery>) {
+    return this.idChecks.list(query);
+  }
+
+  @Get('id-checks/counts')
+  @Needs('read')
+  idCheckCounts(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
+    return this.idChecks.counts(query.country);
+  }
+
+  /** Verify or decline a customer's ID check the provider sent to review, or reopen a declined one. */
+  @Post('people/:id/identity')
+  @HttpCode(200)
+  @Needs('operate')
+  decideIdentity(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', PersonId) id: string,
+    @Body(new ZodBody(IdDecisionBody)) body: z.infer<typeof IdDecisionBody>,
+  ) {
+    return this.idChecks.decide(admin, id, body);
   }
 
   @Get('people')

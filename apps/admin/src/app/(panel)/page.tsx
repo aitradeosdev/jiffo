@@ -30,7 +30,13 @@ interface Overview {
     payoutsKobo: number;
   };
   balances: { customerWalletsKobo: number; agentBalancesKobo: number; escrowKobo: number };
-  attention: { disputes: number; failedPayouts7d: number; senderMismatch7d: number; applications: number };
+  attention: {
+    disputes: number;
+    failedPayouts7d: number;
+    senderMismatch7d: number;
+    applications: number;
+    idChecks: number;
+  };
   week: Array<{ day: string; completed: number; revenueKobo: number }>;
   reconciliation: { at: string; differenceKobo: number; pendingDeposits: number; stuckPayouts: number } | null;
 }
@@ -59,6 +65,12 @@ export default async function OverviewPage() {
     attention.push(
       <Link href="/applications" className="underline">
         {plural(o.attention.applications, 'agent application')} waiting for review
+      </Link>,
+    );
+  if (o.attention.idChecks)
+    attention.push(
+      <Link href="/id-checks" className="underline">
+        {plural(o.attention.idChecks, "customer's ID check", "customers' ID checks")} waiting for review
       </Link>,
     );
   if (o.attention.failedPayouts7d)

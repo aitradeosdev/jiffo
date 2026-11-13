@@ -105,3 +105,13 @@ export const ApplicationsIcon = () => (
     <path d="m9 12 2.2 2.2L15.5 10" />
   </Icon>
 );
+
+/** An ID card: customers' identity checks. */
+export const IdChecksIcon = () => (
+  <Icon>
+    <rect x="3" y="5.5" width="18" height="13" rx="2.5" />
+    <circle cx="9" cy="11" r="2" />
+    <path d="M6.2 15.5c.5-1.3 1.6-2 2.8-2s2.3.7 2.8 2" />
+    <path d="M14.5 10h4M14.5 13.5h3" />
+  </Icon>
+);

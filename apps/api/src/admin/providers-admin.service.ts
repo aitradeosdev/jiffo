@@ -8,6 +8,7 @@ import {
   providerInfo,
   secretHint,
   type ProviderCategory,
+  ID_TYPES,
 } from '@jiffo/shared';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
@@ -74,6 +75,10 @@ export class ProvidersAdminService {
             name: p.name,
             about: p.about,
             fields: p.fields,
+            /** Identity providers: the IDs it checks with a selfie match, and how it takes a BVN. */
+            idTypes: p.idTypes ? p.idTypes.map((t) => ID_TYPES[t].name) : null,
+            bvnAlongside: p.bvnAlongside ?? null,
+            idChosenOnPage: p.idChosenOnPage ?? null,
             // A callback address with a token exists once the settings are saved.
             webhookUrl:
               p.webhookPath && (!p.webhookPath.includes('{token}') || row?.callbackToken)

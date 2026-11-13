@@ -110,7 +110,7 @@ export default async function ApplicationsPage({
                         </Link>
                         <span className="num block text-[13px] text-ink-3">{a.phone}</span>
                         {a.legalName ? (
-                          <span className="block text-[13px] text-ink-3">On the NIN: {a.legalName}</span>
+                          <span className="block text-[13px] text-ink-3">On the ID: {a.legalName}</span>
                         ) : null}
                       </td>
                       <td className={tdClass}>
