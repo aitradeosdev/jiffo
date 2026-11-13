@@ -1,6 +1,7 @@
 /* global console */
-// Copies the prototype's icons, category illustrations and wordmark into the app, so both share one
-// set of drawings. CSS colour variables become {token} placeholders the app fills from its theme.
+// Copies the prototype's line icons and wordmark into the app, so both share one set of drawings.
+// The prototype's flat category art (its ART block) is not copied: the app uses the 3D images in
+// assets/categories instead.
 // Run after changing docs/prototypes/src/c3-art.js:  node scripts/sync-prototype-art.mjs
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

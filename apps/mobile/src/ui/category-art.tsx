@@ -13,15 +13,15 @@ const ART = {
   other: require('../../assets/categories/other.webp'),
 } as const;
 
-export const hasCategoryArt = (key: string) => key in ART;
+/** Own keys only, so a category key such as "toString" never matches something inherited. */
+export const hasCategoryArt = (key: string): key is keyof typeof ART => Object.hasOwn(ART, key);
 
 /** A category's 3D illustration, or its line icon for a category added later without one. */
 export function CategoryArt({ categoryKey, icon, size }: { categoryKey: string; icon?: string; size: number }) {
-  const source = ART[categoryKey as keyof typeof ART];
-  if (!source) return <SvgIcon name={icon ?? 'bag'} size={Math.round(size * 0.6)} />;
+  if (!hasCategoryArt(categoryKey)) return <SvgIcon name={icon ?? 'bag'} size={Math.round(size * 0.6)} />;
   return (
     <Image
-      source={source}
+      source={ART[categoryKey]}
       style={{ width: size, height: size }}
       resizeMode="contain"
       accessibilityIgnoresInvertColors

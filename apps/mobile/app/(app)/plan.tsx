@@ -12,7 +12,7 @@ import { Button, noWebOutline, Text } from '@/ui/kit';
 import { Chip, Icon, IconCircle, Toggle } from '@/ui/parts';
 import { PageFooter, PageHeader } from '@/ui/floating';
 import { StopMark } from '@/ui/map/pins';
-import { CategoryArt } from '@/ui/category-art';
+import { CategoryArt, hasCategoryArt } from '@/ui/category-art';
 
 export default function Plan() {
   const c = useColors();
@@ -60,10 +60,10 @@ export default function Plan() {
             category ? { backgroundColor: c.surface2 } : { backgroundColor: c.surface, borderColor: c.ink },
           ]}
         >
-          {category ? (
-            <CategoryArt categoryKey={category.key} icon={category.icon} size={36} />
+          {category && hasCategoryArt(category.key) ? (
+            <CategoryArt categoryKey={category.key} size={36} />
           ) : (
-            <IconCircle icon="menu" size={32} />
+            <IconCircle icon={category ? category.icon : 'menu'} tone={category ? 'ink' : undefined} size={32} />
           )}
           {category ? (
             <Text style={styles.val} numberOfLines={1}>

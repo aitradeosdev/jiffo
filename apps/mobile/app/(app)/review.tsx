@@ -164,7 +164,7 @@ export default function Review() {
           <>
             <View style={[styles.option, { borderColor: c.ink, backgroundColor: c.surface }]}>
               <View style={[styles.tile, { backgroundColor: c.surface2 }]}>
-                <CategoryArt categoryKey={category?.key ?? ''} icon={category?.icon} size={44} />
+                <CategoryArt categoryKey={draft.categoryKey ?? ''} icon={category?.icon} size={44} />
               </View>
               <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
