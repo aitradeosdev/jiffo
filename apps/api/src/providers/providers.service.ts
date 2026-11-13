@@ -116,6 +116,11 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
     return { ...row.config, ...secrets };
   }
 
+  /** The secret part of a provider's callback address, or null before its settings are saved. */
+  callbackToken(category: string, provider: string) {
+    return this.rows.get(`${category}:${provider}`)?.callbackToken ?? null;
+  }
+
   /** What the environment uses for each category, for the panel to show when nothing is switched on. */
   envNames() {
     return Object.fromEntries(PROVIDER_CATEGORIES.map((c) => [c, this.env[c].name])) as Record<

@@ -394,7 +394,11 @@ export const errandCalls = pgTable(
     providerRef: text('provider_ref'),
     createdAt: createdAt(),
   },
-  (t) => [index('errand_calls_errand_idx').on(t.errandId, t.createdAt)],
+  (t) => [
+    index('errand_calls_errand_idx').on(t.errandId, t.createdAt),
+    // A provider asking about a call it placed names it by its own reference.
+    index('errand_calls_provider_ref_idx').on(t.provider, t.providerRef),
+  ],
 );
 
 /* ---------- Money ---------- */
@@ -868,6 +872,11 @@ export const providerSettings = pgTable(
     config: jsonb('config').$type<Record<string, string>>().notNull().default({}),
     /** The secret fields as one encrypted JSON object, bound to category and provider. */
     secrets: text('secrets'),
+    /**
+     * The secret part of the callback address, for providers that call us without signing (Africa's Talking
+     * Voice). Random, and replaced from the panel if the address leaks.
+     */
+    callbackToken: text('callback_token'),
     /** The last characters of each secret, to show which key is saved. */
     secretHints: jsonb('secret_hints').$type<Record<string, string>>().notNull().default({}),
     lastTestAt: timestamp('last_test_at', { withTimezone: true }),

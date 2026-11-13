@@ -182,6 +182,16 @@ export class AdminController {
     return this.providerSettings.test(params.category, params.provider);
   }
 
+  @Post('providers/:category/:provider/callback')
+  @HttpCode(200)
+  @Needs('settings')
+  newCallback(
+    @CurrentAdmin() admin: AdminContext,
+    @Param(new ZodBody(ProviderParams)) params: z.infer<typeof ProviderParams>,
+  ) {
+    return this.providerSettings.newCallbackToken(admin, params.category, params.provider);
+  }
+
   @Delete('providers/:category/:provider')
   @Needs('settings')
   removeProvider(

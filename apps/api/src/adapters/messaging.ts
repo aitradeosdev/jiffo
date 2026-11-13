@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { unavailable } from '../common/errors';
+import { africasTalkingApi, africasTalkingCheck, PROVIDER_TIMEOUT_MS } from './africastalking';
 
 /** SMS and one-time codes. Each provider (Termii, Africa's Talking, ...) is one implementation. */
 export interface MessagingAdapter {
@@ -69,5 +70,65 @@ export class TermiiMessagingAdapter implements MessagingAdapter {
     } | null;
     if (!res.ok) throw new Error(`Termii answered ${res.status}: ${body?.message ?? 'no details'}`);
     return `Connected. Balance: ${body?.balance ?? '?'} ${body?.currency ?? ''}`.trim();
+  }
+}
+
+/** Statuses Africa's Talking gives a recipient whose message it accepted: processed, sent, queued. */
+const AT_ACCEPTED = new Set([100, 101, 102]);
+
+/**
+ * Africa's Talking SMS (https://api.africastalking.com/version1/messaging). The username "sandbox" uses
+ * their sandbox. The sender ID is optional: without one, their shared short code sends.
+ */
+export class AfricasTalkingMessagingAdapter implements MessagingAdapter {
+  readonly name = 'africastalking';
+  private readonly logger = new Logger('AfricasTalkingSms');
+
+  constructor(
+    private readonly username: string,
+    private readonly apiKey: string,
+    private readonly senderId?: string,
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {}
+
+  async sendOtp(phone: string, code: string, ttlSeconds: number) {
+    const body = new URLSearchParams({
+      username: this.username,
+      to: phone,
+      message: otpText(code, ttlSeconds),
+      bulkSMSMode: '1',
+      ...(this.senderId ? { from: this.senderId } : {}),
+    });
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${africasTalkingApi(this.username)}/version1/messaging`, {
+        method: 'POST',
+        headers: {
+          apikey: this.apiKey,
+          accept: 'application/json',
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body,
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      });
+    } catch (error) {
+      this.logger.warn(`Sign-in code not sent: ${(error as Error).message}`);
+      throw unavailable('sms_failed', 'We could not send the code. Try again in a moment.');
+    }
+    const json = (await res.json().catch(() => null)) as {
+      SMSMessageData?: { Message?: string; Recipients?: Array<{ statusCode?: number; status?: string }> };
+    } | null;
+    const recipient = json?.SMSMessageData?.Recipients?.[0];
+    if (res.status !== 201 || !recipient || !AT_ACCEPTED.has(Number(recipient.statusCode))) {
+      // Why, without the number: an empty balance, an unapproved sender ID and an outage look alike to the person.
+      this.logger.warn(
+        `Sign-in code not sent: HTTP ${res.status}, ${recipient ? `${recipient.statusCode} ${recipient.status}` : (json?.SMSMessageData?.Message ?? 'no recipient')}`,
+      );
+      throw unavailable('sms_failed', 'We could not send the code. Try again in a moment.');
+    }
+  }
+
+  check() {
+    return africasTalkingCheck(this.username, this.apiKey, this.fetchImpl);
   }
 }

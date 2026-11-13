@@ -44,8 +44,10 @@ export interface ProviderInfo {
   name: string;
   about: string;
   fields: ProviderField[];
-  /** Where the provider should send its webhooks, under the API's address. */
+  /** Where the provider should send its webhooks, under the API's address. {token} is filled in by the API. */
   webhookPath?: string;
+  /** Where in the provider's dashboard that address goes. */
+  webhookHint?: string;
 }
 
 export const PROVIDERS: ProviderInfo[] = [
@@ -88,6 +90,68 @@ export const PROVIDERS: ProviderInfo[] = [
         required: false,
         placeholder: 'https://api.ng.termii.com',
         hint: 'The one shown in your Termii dashboard, if it differs.',
+      },
+    ],
+  },
+  {
+    key: 'africastalking',
+    category: 'sms',
+    name: "Africa's Talking",
+    about: 'SMS to Nigerian numbers, from your sender ID or their shared short code.',
+    fields: [
+      {
+        key: 'username',
+        label: 'Username',
+        secret: false,
+        required: true,
+        hint: 'Your app\'s username in the Africa\'s Talking dashboard. "sandbox" uses their sandbox.',
+      },
+      { key: 'apiKey', label: 'API key', secret: true, required: true },
+      {
+        key: 'senderId',
+        label: 'Sender ID',
+        secret: false,
+        required: false,
+        placeholder: 'Jiffo',
+        hint: "Approved with Africa's Talking. Leave empty to send from their shared short code.",
+      },
+    ],
+  },
+  {
+    key: 'africastalking',
+    category: 'calls',
+    name: "Africa's Talking Voice",
+    about: "Rings the caller from your Africa's Talking number, then connects them to the other person.",
+    webhookPath: '/v1/webhooks/calls/africastalking/{token}',
+    webhookHint: "Set it as the callback URL of the voice number in the Africa's Talking dashboard.",
+    fields: [
+      { key: 'username', label: 'Username', secret: false, required: true },
+      { key: 'apiKey', label: 'API key', secret: true, required: true },
+      {
+        key: 'phoneNumber',
+        label: 'Voice number',
+        secret: false,
+        required: true,
+        placeholder: '+234…',
+        hint: "Your voice number with Africa's Talking. Both people see this number, never each other's.",
+      },
+    ],
+  },
+  {
+    key: 'twilio',
+    category: 'calls',
+    name: 'Twilio',
+    about: 'Rings the caller from your Twilio number, then connects them to the other person.',
+    fields: [
+      { key: 'accountSid', label: 'Account SID', secret: false, required: true, placeholder: 'AC…' },
+      { key: 'authToken', label: 'Auth token', secret: true, required: true },
+      {
+        key: 'fromNumber',
+        label: 'Twilio number',
+        secret: false,
+        required: true,
+        placeholder: '+…',
+        hint: "A voice number you own with Twilio. Both people see this number, never each other's.",
       },
     ],
   },

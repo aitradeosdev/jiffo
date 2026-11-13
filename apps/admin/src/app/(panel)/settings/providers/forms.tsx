@@ -4,7 +4,14 @@ import { useActionState, useState } from 'react';
 import type { ProviderField } from '@jiffo/shared';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, buttonClass, inputClass, Notice } from '@/components/ui';
-import { activateProvider, removeProvider, saveProvider, testProvider, type ProviderState } from './actions';
+import {
+  activateProvider,
+  removeProvider,
+  renewCallback,
+  saveProvider,
+  testProvider,
+  type ProviderState,
+} from './actions';
 
 export interface ProviderView {
   key: string;
@@ -12,6 +19,9 @@ export interface ProviderView {
   about: string;
   fields: ProviderField[];
   webhookUrl: string | null;
+  webhookHint: string | null;
+  /** Its callback address carries a secret token, which can be replaced. */
+  hasCallbackToken: boolean;
   saved: boolean;
   complete: boolean;
   active: boolean;
@@ -50,6 +60,7 @@ export function ProviderCard({
   const [testState, test] = useActionState<ProviderState, FormData>(testProvider, {});
   const [onState, switchOn] = useActionState<ProviderState, FormData>(activateProvider, {});
   const [removeState, remove] = useActionState<ProviderState, FormData>(removeProvider, {});
+  const [renewState, renew] = useActionState<ProviderState, FormData>(renewCallback, {});
   const [config, setConfig] = useState(p.config);
   const [removing, setRemoving] = useState(false);
   const tested = p.lastTest?.current ? p.lastTest : null;
@@ -123,8 +134,11 @@ export function ProviderCard({
         </fieldset>
         {p.webhookUrl ? (
           <p className="text-[13px] text-ink-3">
-            Webhook address to give {p.name}: <span className="num font-semibold text-ink-2">{p.webhookUrl}</span>
+            Address to give {p.name}: <span className="num font-semibold break-all text-ink-2">{p.webhookUrl}</span>
+            {p.webhookHint ? <span className="block">{p.webhookHint}</span> : null}
           </p>
+        ) : p.hasCallbackToken && !p.saved ? (
+          <p className="text-[13px] text-ink-3">Save to get the callback address to give {p.name}.</p>
         ) : null}
         <Notice>{saveState.error}</Notice>
         {canEdit ? (
@@ -148,6 +162,14 @@ export function ProviderCard({
               <button type="submit" className={buttonClass('primary', true)} disabled={!canSwitchOn}>
                 Switch on
               </button>
+            </form>
+          ) : null}
+          {p.hasCallbackToken ? (
+            <form action={renew}>
+              <Hidden category={category} provider={p.key} />
+              <SubmitButton small kind="secondary" pendingLabel="Renewing…">
+                New callback address
+              </SubmitButton>
             </form>
           ) : null}
           {!p.active ? (
@@ -178,7 +200,7 @@ export function ProviderCard({
         {!p.active && p.saved && p.complete && !tested?.ok ? (
           <p className="text-[13px] text-ink-3">Switch on becomes available once a test passes.</p>
         ) : null}
-        <Notice>{testState.error ?? onState.error ?? removeState.error}</Notice>
+        <Notice>{testState.error ?? onState.error ?? removeState.error ?? renewState.error}</Notice>
       </div>
     </div>
   );

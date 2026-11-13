@@ -3,8 +3,10 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CallsUnavailable } from '../src/adapters/calls';
 import { ChatService } from '../src/chat/chat.service';
-import { errandCalls, errands } from '../src/db/schema';
-import { act, createErrand, createTestApp, fund, signIn, type Person, type TestApp } from './helpers';
+import { errandCalls, errands, providerSettings } from '../src/db/schema';
+import { AfricasTalkingCallsAdapter } from '../src/adapters/calls';
+import { ProvidersService } from '../src/providers/providers.service';
+import { act, adminAs, createErrand, createTestApp, fund, signIn, type Person, type TestApp } from './helpers';
 
 describe('masked calls', () => {
   let t: TestApp;
@@ -94,5 +96,61 @@ describe('masked calls', () => {
     expect(await t.db.select().from(errandCalls).where(eq(errandCalls.errandId, errand.id))).toEqual([]);
     // Not counted as a call: trying again rings at once.
     await call(customer, errand.id).expect(200);
+  });
+
+  describe("with Africa's Talking switched on", () => {
+    const owner = () => adminAs(t, 'owner');
+    afterAll(async () => {
+      await t.db.delete(providerSettings);
+      await t.app.get(ProvidersService).reload();
+    });
+
+    it('connects the answered call to the other person, and only through the secret address', async () => {
+      const admin = await owner();
+      const panel = (method: 'put' | 'post', path: string) =>
+        request(t.http)[method](`/v1/admin/providers${path}`).set(admin.headers);
+      await panel('put', '/calls/africastalking')
+        .send({ config: { username: 'jiffo', phoneNumber: '+2342017001000' }, secrets: { apiKey: 'at-key' } })
+        .expect(200);
+      vi.spyOn(AfricasTalkingCallsAdapter.prototype, 'check').mockResolvedValue('Connected');
+      await panel('post', '/calls/africastalking/test').expect(200);
+      await panel('post', '/calls/active').send({ provider: 'africastalking' }).expect(200);
+      const listed = await request(t.http).get('/v1/admin/providers').set(admin.headers).expect(200);
+      const url: string = listed.body.categories
+        .find((c: { category: string }) => c.category === 'calls')
+        .providers.find((p: { key: string }) => p.key === 'africastalking').webhookUrl;
+      const path = new URL(url).pathname;
+      expect(path).toMatch(/^\/v1\/webhooks\/calls\/africastalking\/[0-9a-f]{32}$/);
+
+      const { agent, errand } = await accepted();
+      const bridge = vi
+        .spyOn(AfricasTalkingCallsAdapter.prototype, 'bridge')
+        .mockResolvedValue({ providerRef: 'ATVId_42' });
+      await call(customer, errand.id).expect(200);
+      expect(bridge).toHaveBeenCalledWith(expect.objectContaining({ from: customer.phone, to: agent.phone }));
+
+      const answer = (body: Record<string, string>, at = path) => request(t.http).post(at).type('form').send(body);
+      const res = await answer({ isActive: '1', sessionId: 'ATVId_42', direction: 'Outbound' }).expect(200);
+      expect(res.headers['content-type']).toMatch(/xml/);
+      expect(res.text).toContain(`<Dial phoneNumbers="${agent.phone}" callerId="+2342017001000" record="false"/>`);
+      expect((await answer({ isActive: '1', sessionId: 'someone-else' })).text).toContain('<Say>');
+      expect((await answer({ isActive: '0', sessionId: 'ATVId_42' })).text).toBe('');
+      await answer({ isActive: '1', sessionId: 'ATVId_42' }, path.replace(/[0-9a-f]{32}$/, '0'.repeat(32))).expect(404);
+
+      // The agent changed before the caller answered: the one who left isn't rung.
+      const other = await signIn(t, 'agent');
+      await t.db.update(errands).set({ agentId: other.userId }).where(eq(errands.id, errand.id));
+      expect((await answer({ isActive: '1', sessionId: 'ATVId_42' })).text).toContain('<Say>');
+      await t.db.update(errands).set({ agentId: agent.userId }).where(eq(errands.id, errand.id));
+
+      // A new address, should the old one leak: the old one stops working.
+      await panel('post', '/calls/africastalking/callback').expect(200);
+      await answer({ isActive: '1', sessionId: 'ATVId_42' }).expect(404);
+      const renewed = await request(t.http).get('/v1/admin/providers').set(admin.headers).expect(200);
+      const next: string = renewed.body.categories
+        .find((c: { category: string }) => c.category === 'calls')
+        .providers.find((p: { key: string }) => p.key === 'africastalking').webhookUrl;
+      expect((await answer({ isActive: '1', sessionId: 'ATVId_42' }, new URL(next).pathname)).text).toContain('<Dial');
+    });
   });
 });
