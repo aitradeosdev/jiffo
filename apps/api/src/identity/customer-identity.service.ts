@@ -6,20 +6,19 @@ import { conflict, forbidden } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
 import { DB, type Db } from '../db/database.module';
 import { customerVerifications, users } from '../db/schema';
-import { IdentityChecksService, type Check, type IdentityOwner, type PendingCheck } from './identity-checks.service';
+import {
+  ID_CHECK_LABELS,
+  IdentityChecksService,
+  type Check,
+  type IdentityOwner,
+  type PendingCheck,
+} from './identity-checks.service';
 
 type Verification = typeof customerVerifications.$inferSelect;
 
 /** What the app says about each check, in the customer's words. */
 const LABELS: Record<string, string> = {
-  nin: 'NIN matches your details',
-  bvn: 'BVN matches your details',
-  drivers_licence: "Driver's licence matches your details",
-  voters_card: "Voter's card matches your details",
-  passport: 'Passport matches your details',
-  id_type: 'An ID we accept',
-  selfie: 'Selfie matches your ID photo',
-  age: 'Age 18 or older',
+  ...ID_CHECK_LABELS,
   duplicate: 'No other customer account on this ID',
 };
 /** While checking, the provider is asked again at most this often, however often the app looks. */
@@ -180,7 +179,7 @@ export class CustomerIdentityService implements IdentityOwner {
     const judged = this.checks.judge(
       { idType: row.idType as IdType, withBvn: false },
       result,
-      settings.identity.customerIdTypes,
+      this.checks.accepted('customer', settings.identity, row.provider),
     );
     const fingerprint = judged.fingerprint ?? row.pendingIdFingerprint;
     return this.db.transaction(async (tx) => {

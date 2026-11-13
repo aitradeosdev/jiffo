@@ -229,7 +229,8 @@ describe("identity checks on the provider's own page", () => {
     const nin = uniqueNin();
     const submit = (body: object) => request(t.http).post('/v1/identity/hosted/youverify/submit').send(body);
     await submit({ ref, sig: '0'.repeat(32), idNumber: nin }).expect(404);
-    await submit({ ref, sig, idNumber: '123' })
+    // A page served before ID types sends the NIN under its old name.
+    await submit({ ref, sig, nin: '123' })
       .expect(400)
       .expect(/invalid_id/);
     const run = vi.spyOn(YouverifyIdentityAdapter.prototype, 'submitPage').mockResolvedValue({

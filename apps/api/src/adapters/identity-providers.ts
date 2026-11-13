@@ -10,8 +10,9 @@ import {
   type IdentityRequest,
   type IdentityResult,
   type PageInput,
+  referenceRole,
 } from './identity';
-import { providerInfo, type IdType } from '@jiffo/shared';
+import { ID_TYPES, providerInfo, type IdType } from '@jiffo/shared';
 import { matchesLegalName } from '../common/names';
 
 /** What a provider checks, from the shared catalogue the admin panel shows too. */
@@ -43,7 +44,7 @@ export class IdentityPageError extends Error {}
 
 /** Where the provider's page sends the person when they finish: back into their app (by the reference). */
 export const identityDoneUrl = (ctx: ProviderContext, reference: string) =>
-  `${ctx.publicApiUrl}/v1/identity/done?for=${reference.startsWith('cid-') ? 'customer' : 'agent'}`;
+  `${ctx.publicApiUrl}/v1/identity/done?for=${referenceRole(reference)}`;
 
 /** A legal name in one form, whatever parts the provider gives. */
 const legalNameOf = (parts: Array<string | null | undefined>) =>
@@ -556,8 +557,9 @@ interface YouverifyNin {
   status?: string;
   reason?: string | null;
   selfieValidation?: boolean;
-  /** Where some of Youverify's answers put the face match instead. */
+  /** Where some of Youverify's answers put the face match instead (the licence's schema says validation). */
   validations?: { selfie?: { selfieVerification?: { match?: boolean } } };
+  validation?: { selfie?: { selfieVerification?: { match?: boolean } } };
   firstName?: string;
   middleName?: string;
   lastName?: string;
@@ -576,40 +578,35 @@ const escapeHtml = (text: string) =>
  * address in parts (building number, street, landmark) the app doesn't ask for, so the team checks them.
  */
 /** How each ID is asked for on a page Jiffo serves. */
-const ID_FIELDS: Record<IdType, { label: string; note: string; digits: boolean; pattern: string; issuer: string }> = {
+const ID_FIELDS: Record<IdType, { label: string; note: string; digits: boolean; issuer: string }> = {
   nin: {
     label: 'National Identification Number',
     note: 'On your NIN slip or card, or dial *346# to see it.',
     digits: true,
-    pattern: '^\\d{11}$',
     issuer: 'NIMC',
   },
   bvn: {
     label: 'Bank Verification Number',
     note: 'Dial *565*0# on the phone number linked to your bank to see it.',
     digits: true,
-    pattern: '^\\d{11}$',
     issuer: 'NIBSS',
   },
   drivers_licence: {
     label: "Driver's licence number",
     note: 'On the front of your licence.',
     digits: false,
-    pattern: '^[A-Z0-9]{9,14}$',
     issuer: 'FRSC',
   },
   voters_card: {
     label: 'Voter identification number (VIN)',
     note: 'On your voter’s card.',
     digits: false,
-    pattern: '^[A-Z0-9]{19}$',
     issuer: 'INEC',
   },
   passport: {
     label: 'Passport number',
     note: 'On the photo page of your passport.',
     digits: false,
-    pattern: '^[A-Z0-9]{8,9}$',
     issuer: 'the Immigration Service',
   },
 };
@@ -687,7 +684,8 @@ export class YouverifyIdentityAdapter implements IdentityAdapter {
     const { sessionId, sessionToken } = await this.newSession(reference);
     const id = ID_FIELDS[request.idType];
     const withBvn = request.withBvn && request.idType !== 'bvn';
-    const fields = { id: { digits: id.digits, pattern: id.pattern }, bvn: withBvn };
+    // The same formats the API checks the numbers against.
+    const fields = { id: { digits: id.digits, pattern: ID_TYPES[request.idType].pattern.source }, bvn: withBvn };
     const options = {
       sessionId,
       sessionToken,
@@ -857,7 +855,9 @@ go.addEventListener('click', function () {
             note: `${issuer} answered: ${record?.reason ?? record?.status ?? 'nothing'}`,
           };
     const matched =
-      record?.selfieValidation === true || record?.validations?.selfie?.selfieVerification?.match === true;
+      record?.selfieValidation === true ||
+      record?.validations?.selfie?.selfieVerification?.match === true ||
+      record?.validation?.selfie?.selfieVerification?.match === true;
     const selfieCheck: IdentityResult['checks'][number] = !found
       ? {
           key: 'selfie',
@@ -872,7 +872,14 @@ go.addEventListener('click', function () {
         : { key: 'selfie', outcome: 'review', note: "Youverify didn't match the selfie to the ID photo" };
     const legalName = found ? legalNameOf([record.firstName, record.middleName, record.lastName]) : undefined;
     const checks = [idCheck, selfieCheck];
-    if (withBvn) checks.push(await this.bvnCheck(input.bvn!, legalName));
+    // The BVN is compared with the ID's name, so it is looked up (and paid for) only once the ID was found.
+    if (withBvn) {
+      checks.push(
+        found
+          ? await this.bvnCheck(input.bvn!, legalName)
+          : { key: 'bvn', outcome: 'review', note: 'Not compared, as the ID record was not found' },
+      );
+    }
     return {
       status: 'done',
       outcome: overall(checks),

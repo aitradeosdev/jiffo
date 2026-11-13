@@ -1,10 +1,11 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, hkdfSync } from 'node:crypto';
 import { and, eq, gt } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SmileIdIdentityAdapter } from '../src/adapters/identity-providers';
 import { agentApplications, customerVerifications, providerSettings, settingsVersions } from '../src/db/schema';
 import { ProvidersService } from '../src/providers/providers.service';
+import { APP_CONFIG, type AppConfig } from '../src/config/app-config';
 import { adminAs, createTestApp, errandBody, signIn, type Person, type TestApp } from './helpers';
 
 /** An ID number that is new on every run, ending in the fake provider's code for the path wanted. */
@@ -139,7 +140,42 @@ describe('identity checks: ID types, and customers', () => {
     expect(done.body.checks.map((c: { key: string }) => c.key)).toEqual(['drivers_licence', 'bvn', 'selfie']);
     const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
     expect(row).toMatchObject({ identityIdType: 'drivers_licence', identityWithBvn: true, identityOutcome: 'passed' });
+
+    // The BVN as the ID itself: checked once, not twice.
+    const second = await signIn(t, 'agent', { unapproved: true });
+    await request(t.http).patch('/v1/me').set(second.headers).send({ lastName: 'Bakare' }).expect(200);
+    await identitySettings({ agentIdTypes: ['bvn'], requireBvnForAgents: true });
+    await request(t.http)
+      .post('/v1/agent/application/identity')
+      .set(second.headers)
+      .send({ consent: true, idType: 'bvn', idNumber: unique('2', 11) })
+      .expect(200);
+    const bvnOnly = await request(t.http).post('/v1/agent/application/identity/finish').set(second.headers).expect(200);
+    expect(bvnOnly.body.checks.map((c: { key: string }) => c.key)).toEqual(['bvn', 'selfie']);
     await identitySettings({ agentIdTypes: ['nin', 'bvn'], requireBvnForAgents: true });
+  });
+
+  it('still knows NINs fingerprinted before other IDs, so a second account on one is caught', async () => {
+    const config = t.app.get<AppConfig>(APP_CONFIG);
+    const key = Buffer.from(
+      hkdfSync('sha256', Buffer.from(config.PIN_KEY, 'hex'), Buffer.alloc(0), 'jiffo nin fingerprint', 32),
+    );
+    const nin = unique('7', 11);
+    const earlier = await signIn(t, 'agent');
+    await t.db
+      .update(agentApplications)
+      .set({ idFingerprint: createHmac('sha256', key).update(nin).digest('hex') })
+      .where(eq(agentApplications.userId, earlier.userId));
+    const agent = await signIn(t, 'agent', { unapproved: true });
+    await request(t.http).patch('/v1/me').set(agent.headers).send({ lastName: 'Bakare' }).expect(200);
+    // An earlier version of the app: the NIN alone, no ID type.
+    await request(t.http)
+      .post('/v1/agent/application/identity')
+      .set(agent.headers)
+      .send({ consent: true, nin, bvn: '22212345678' })
+      .expect(200);
+    const done = await request(t.http).post('/v1/agent/application/identity/finish').set(agent.headers).expect(200);
+    expect(done.body.checks).toContainEqual(expect.objectContaining({ key: 'duplicate', outcome: 'review' }));
   });
 
   it("with Smile ID, which can't check a BVN alongside, agents verify with their BVN; customers' results come home", async () => {
@@ -155,7 +191,10 @@ describe('identity checks: ID types, and customers', () => {
     await panel('post', '/identity/smileid/test').expect(200);
     await panel('post', '/identity/active').send({ provider: 'smileid' }).expect(200);
 
+    // Admin accepts only the NIN from agents, but requires their BVN: with Smile ID the BVN is the ID.
+    await identitySettings({ agentIdTypes: ['nin'], requireBvnForAgents: true });
     const agent = await signIn(t, 'agent', { unapproved: true });
+    await request(t.http).patch('/v1/me').set(agent.headers).send({ lastName: 'Bakare' }).expect(200);
     const view = (await request(t.http).get('/v1/agent/application').set(agent.headers).expect(200)).body;
     expect(view).toMatchObject({ provider: 'Smile ID', identityFlow: 'hosted', idTypes: [{ key: 'bvn' }] });
 
@@ -200,6 +239,37 @@ describe('identity checks: ID types, and customers', () => {
       )
       .expect(200);
     expect((await me(who)).body).toMatchObject({ status: 'verified', idType: 'voters_card', legalName: 'ADA OKAFOR' });
+
+    // The agent's app of before sends no ID type: the only one on offer, the BVN, is meant.
+    const agentStart = await request(t.http)
+      .post('/v1/agent/application/identity')
+      .set(agent.headers)
+      .send({ consent: true })
+      .expect(200);
+    const agentRef = String(agentStart.body.url).split('/').pop()!;
+    vi.spyOn(
+      SmileIdIdentityAdapter.prototype as unknown as { jobStatus: () => Promise<object> },
+      'jobStatus',
+    ).mockResolvedValue({ status: 'clear', user_id: agentRef });
+    const at = new Date().toISOString();
+    await request(t.http)
+      .post('/v1/webhooks/identity/smileid')
+      .set('content-type', 'application/json')
+      .set('response-timestamp', at)
+      .set('response-signature', createHmac('sha256', 'smile-key').update(`${at}1234sid_request`).digest('base64'))
+      .set('smileid-job-id', 'job_10')
+      .send(
+        JSON.stringify({
+          partner_params: { user_id: agentRef },
+          id_fields: { full_name: 'Tunde Bakare', date_of_birth: '1990-01-02', id_number: unique('2', 11) },
+        }),
+      )
+      .expect(200);
+    const [app] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
+    // A BVN the rule made the ID isn't flagged as an ID admin doesn't accept.
+    expect(app).toMatchObject({ identityIdType: 'bvn', identityOutcome: 'passed' });
+    expect(app!.checks.map((c) => c.key)).toEqual(['bvn', 'selfie']);
+    await identitySettings({ agentIdTypes: ['nin', 'bvn'], requireBvnForAgents: true });
     // The page at the end sends a customer back to the customer app.
     await request(t.http)
       .get('/v1/identity/done?for=customer')

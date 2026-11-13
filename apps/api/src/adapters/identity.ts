@@ -103,6 +103,11 @@ export interface IdentityAdapter {
   submitPage?(reference: string, request: IdentityRequest, input: PageInput): Promise<IdentityResult>;
 }
 
+/** References say whose check it is: customers' start with cid-, agents' with jid-. */
+export const REFERENCE_PREFIX = { customer: 'cid', agent: 'jid' } as const;
+export const referenceRole = (reference: string | undefined): 'customer' | 'agent' =>
+  reference?.startsWith(`${REFERENCE_PREFIX.customer}-`) ? 'customer' : 'agent';
+
 export type Headers = Record<string, string | string[] | undefined>;
 export const headerOf = (headers: Headers, name: string) => {
   const value = headers[name];
@@ -140,7 +145,9 @@ export class FakeIdentityAdapter implements IdentityAdapter {
         outcome: ending === '0000' ? 'failed' : 'passed',
         note: ending === '0000' ? 'No record for this ID' : undefined,
       },
-      ...(input.request.withBvn ? [{ key: 'bvn' as const, outcome: 'passed' as const }] : []),
+      ...(input.request.withBvn && input.request.idType !== 'bvn'
+        ? [{ key: 'bvn' as const, outcome: 'passed' as const }]
+        : []),
       {
         key: 'selfie',
         outcome: ending === '1111' ? 'review' : 'passed',

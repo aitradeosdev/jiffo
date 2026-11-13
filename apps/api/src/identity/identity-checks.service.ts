@@ -10,6 +10,7 @@ import {
   type IdentityRequest,
   type IdentityResult,
   type PageInput,
+  REFERENCE_PREFIX,
 } from '../adapters/identity';
 import { IdentityPageError, IdentityProviderError } from '../adapters/identity-providers';
 import { safeEqual } from '../common/crypto';
@@ -49,8 +50,18 @@ export interface IdentityOwner {
   settle(check: PendingCheck, result: IdentityResult): Promise<{ outcome: CheckOutcome } | null>;
 }
 
-/** References say whose check it is: customers' start with cid-, agents' with jid-. */
-const PREFIX: Record<IdentityRole, string> = { customer: 'cid', agent: 'jid' };
+const PREFIX: Record<IdentityRole, string> = REFERENCE_PREFIX;
+/** What each ID check says, in words for the person checked; each side adds its own for the rest. */
+export const ID_CHECK_LABELS: Record<string, string> = {
+  nin: 'NIN matches your details',
+  bvn: 'BVN matches your details',
+  drivers_licence: "Driver's licence matches your details",
+  voters_card: "Voter's card matches your details",
+  passport: 'Passport matches your details',
+  id_type: 'An ID we accept',
+  selfie: 'Selfie matches your ID photo',
+  age: 'Age 18 or older',
+};
 /** How many times an hour one check's page may be opened: each may start a paid session. */
 const PAGE_OPENS_PER_HOUR = 20;
 const HOUR_MS = 3_600_000;
@@ -68,7 +79,7 @@ export class IdentityChecksService {
   private readonly pageOpens = new Map<string, number[]>();
   /** Checks whose page is being sent now, in this process. */
   private readonly submitting = new Set<string>();
-  /** Its own key, derived from PIN_KEY, used only to fingerprint IDs. */
+  /** Its own key, derived from PIN_KEY, used only to fingerprint IDs (named for the NIN, its first ID). */
   private readonly idKey: Buffer;
 
   constructor(
@@ -76,7 +87,7 @@ export class IdentityChecksService {
     @Inject(APP_CONFIG) config: AppConfig,
   ) {
     this.idKey = Buffer.from(
-      hkdfSync('sha256', Buffer.from(config.PIN_KEY, 'hex'), Buffer.alloc(0), 'jiffo id fingerprint', 32),
+      hkdfSync('sha256', Buffer.from(config.PIN_KEY, 'hex'), Buffer.alloc(0), 'jiffo nin fingerprint', 32),
     );
   }
 
@@ -88,9 +99,15 @@ export class IdentityChecksService {
     return this.owners.get(reference.split('-')[0] ?? '') ?? null;
   }
 
-  /** HMAC of an ID's type and number: the same ID gives the same fingerprint, and can't be read back. */
+  /**
+   * HMAC of an ID's type and number: the same ID gives the same fingerprint, and can't be read back. A NIN's
+   * is of the number alone, as before other IDs, so fingerprints kept then still match; the others name
+   * their type, which a NIN (digits only) never can.
+   */
   fingerprint(idType: IdType, number: string) {
-    return createHmac('sha256', this.idKey).update(`${idType}:${number}`).digest('hex');
+    return createHmac('sha256', this.idKey)
+      .update(idType === 'nin' ? number : `${idType}:${number}`)
+      .digest('hex');
   }
 
   /** The provider switched on now, for a new check. */
@@ -139,15 +156,28 @@ export class IdentityChecksService {
     const withBvn = role === 'agent' && settings.requireBvnForAgents;
     let idTypes = accepted.filter((t) => adapter.idTypes.includes(t));
     if (withBvn && !adapter.bvnAlongside) idTypes = adapter.idTypes.includes('bvn') ? ['bvn'] : [];
+    // The IDs a result may be for: those admin accepts, and the BVN when the BVN rule made it the ID.
+    const acceptedIds = this.accepted(role, settings, adapter.name);
     return {
       adapter,
       idTypes,
+      acceptedIds,
       withBvn,
       flow: adapter.flow,
       idChosenOnPage: adapter.idChosenOnPage,
       /** The provider's name as people read it; none for the development stand-in. */
       providerName: providerInfo('identity', adapter.name)?.name ?? null,
     };
+  }
+
+  /**
+   * The IDs a finished check may be for, with the provider it was started with: those admin accepts, and the
+   * BVN when the BVN rule made it an agent's ID because that provider can't check it alongside another.
+   */
+  accepted(role: IdentityRole, settings: CountrySettings['identity'], provider: string): IdType[] {
+    const accepted = role === 'customer' ? settings.customerIdTypes : settings.agentIdTypes;
+    const forced = role === 'agent' && settings.requireBvnForAgents && !this.startedWith(provider).bvnAlongside;
+    return forced && !accepted.includes('bvn') ? [...accepted, 'bvn'] : [...accepted];
   }
 
   /**
@@ -169,9 +199,13 @@ export class IdentityChecksService {
       );
     }
     // On a provider whose page offers the IDs, the person picks there; the first accepted one stands in.
+    // Earlier versions of the apps send no ID type: they meant the NIN, or the only ID on offer.
+    const wanted =
+      input.idType ??
+      (options.idTypes.includes('nin') ? 'nin' : options.idTypes.length === 1 ? options.idTypes[0] : undefined);
     const idType = options.idChosenOnPage
       ? options.idTypes[0]!
-      : (options.idTypes.find((t) => t === input.idType) ??
+      : (options.idTypes.find((t) => t === wanted) ??
         (() => {
           throw badRequest('invalid_id_type', 'Choose one of the IDs we accept');
         })());

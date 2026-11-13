@@ -6,7 +6,12 @@ import { agentApplications, agentPresence, agentProfiles, payoutAccounts, states
 import { type IdentityAdapter, type IdentityRequest, type IdentityResult } from '../adapters/identity';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../common/errors';
 import { matchesLegalName } from '../common/names';
-import { IdentityChecksService, type IdentityOwner, type PendingCheck } from '../identity/identity-checks.service';
+import {
+  ID_CHECK_LABELS,
+  IdentityChecksService,
+  type IdentityOwner,
+  type PendingCheck,
+} from '../identity/identity-checks.service';
 import { PushService } from '../push/push.service';
 import { CountriesService } from '../countries/countries.service';
 
@@ -15,14 +20,7 @@ type Check = { key: string; outcome: string; note?: string };
 
 /** What the checklist says about each check, in the agent's words. */
 export const CHECK_LABELS: Record<string, string> = {
-  nin: 'NIN matches your details',
-  bvn: 'BVN matches your details',
-  drivers_licence: "Driver's licence matches your details",
-  voters_card: "Voter's card matches your details",
-  passport: 'Passport matches your details',
-  id_type: 'An ID we accept',
-  selfie: 'Selfie matches your ID photo',
-  age: 'Age 18 or older',
+  ...ID_CHECK_LABELS,
   name: 'Your name matches your ID',
   address: 'Address confirmed',
   bank: 'Bank account name matches your ID',
@@ -279,7 +277,11 @@ export class AgentApplicationService implements IdentityOwner {
   private async applyIdentity(app: Application, result: IdentityResult) {
     const userId = app.userId;
     const { settings } = await this.countries.currentSettings(app.countryCode);
-    const judged = this.checks.judge(requestOf(app), result, settings.identity.agentIdTypes);
+    const judged = this.checks.judge(
+      requestOf(app),
+      result,
+      this.checks.accepted('agent', settings.identity, app.identityProvider ?? 'none'),
+    );
     // The ID's fingerprint: of the ID the provider read, when its own page asked; else of what the app sent.
     const fingerprint = judged.fingerprint ?? app.pendingIdFingerprint;
     return this.db.transaction(async (tx) => {

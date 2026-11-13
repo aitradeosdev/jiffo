@@ -4,23 +4,28 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { badRequest, notFound, unauthorized } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
+import { referenceRole } from '../adapters/identity';
 import { IdentityChecksService } from './identity-checks.service';
 
 /** Where each app picks up after a provider's page (their schemes, see the mobile app.config.ts). */
 const DONE_URL = { customer: 'jiffo://identity-done', agent: 'jiffo-agent://identity-done' } as const;
 const APP_NAME = { customer: 'Jiffo', agent: 'Jiffo Agent' } as const;
 const appOf = (value: unknown): keyof typeof DONE_URL => (value === 'customer' ? 'customer' : 'agent');
-const forReference = (reference: string | undefined) => appOf(reference?.startsWith('cid-') ? 'customer' : 'agent');
+const forReference = (reference: string | undefined) => referenceRole(reference);
 
 /** From a provider's page that Jiffo serves: the signed link it was opened with, the numbers and the session. */
-const PageBody = z.object({
-  ref: z.string().min(1).max(100),
-  sig: z.string().min(1).max(100),
-  idNumber: z.string().max(40),
-  bvn: z.string().max(20).optional(),
-  session: z.string().max(200).optional(),
-  sessionSig: z.string().max(100).optional(),
-});
+const PageBody = z
+  .object({
+    ref: z.string().min(1).max(100),
+    sig: z.string().min(1).max(100),
+    idNumber: z.string().max(40).optional(),
+    /** Pages served before ID types send the NIN under this name. */
+    nin: z.string().max(40).optional(),
+    bvn: z.string().max(20).optional(),
+    session: z.string().max(200).optional(),
+    sessionSig: z.string().max(100).optional(),
+  })
+  .transform(({ nin, idNumber, ...rest }) => ({ ...rest, idNumber: idNumber ?? nin ?? '' }));
 
 /** What identity providers reach: their signed results, and the pages their widgets run in. */
 @Controller()

@@ -421,6 +421,39 @@ describe('Youverify', () => {
         id: 'LAG12345AA12',
         validation: { selfie: { image: 'https://cdn.youverify.co/f.jpg' } },
       });
+      // A licence that isn't found: the BVN isn't looked up (or paid for), and the match is read where the
+      // licence's answer puts it.
+      const missing: Call[] = [];
+      const notFound = (async (url: string | URL, init: RequestInit = {}) => {
+        missing.push({ url: String(url), init });
+        return String(url).includes('/identity/liveness')
+          ? envelope({ docs: [{ sessionId: 'sess-1', passed: true, faceImage: 'https://cdn.youverify.co/f.jpg' }] })
+          : envelope({ status: 'not_found' });
+      }) as typeof fetch;
+      const lost = await make(notFound).submitPage('jid-4', licence, {
+        ...input,
+        idNumber: 'LAG12345AA12',
+        bvn: '22212345678',
+      });
+      expect(lost.checks).toContainEqual({
+        key: 'bvn',
+        outcome: 'review',
+        note: 'Not compared, as the ID record was not found',
+      });
+      expect(missing.some((c) => c.url.endsWith('/ng/bvn'))).toBe(false);
+      const nested = (async (url: string | URL) =>
+        String(url).includes('/identity/liveness')
+          ? envelope({ docs: [{ sessionId: 'sess-1', passed: true, faceImage: 'https://cdn.youverify.co/f.jpg' }] })
+          : envelope({
+              status: 'found',
+              firstName: 'Tunde',
+              lastName: 'Bakare',
+              validation: { selfie: { selfieVerification: { match: true } } },
+            })) as typeof fetch;
+      const plain = { idType: 'drivers_licence', withBvn: false } as const;
+      expect((await make(nested).submitPage('jid-4', plain, { ...input, idNumber: 'LAG12345AA12' })).outcome).toBe(
+        'passed',
+      );
       // The page asks for both.
       const page = await make(
         fakeFetch(({ url }) =>
