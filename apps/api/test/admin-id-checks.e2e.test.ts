@@ -4,8 +4,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminAudit, adminSessions, customerVerifications } from '../src/db/schema';
 import { adminAs, createTestApp, signIn, type Person, type TestApp } from './helpers';
 
-/** An ID number new on every run, ending in the fake provider's code for the path wanted. */
-const passport = (ending = '4567') => `A${String(Date.now()).slice(-4)}${ending}`;
+/** A NIN new on every run, ending in the fake provider's code for the path wanted. */
+const nin = (ending = '4567') => `5${String(Date.now()).slice(-6)}${ending}`;
 
 describe("admin: customers' ID checks", () => {
   let t: TestApp;
@@ -27,7 +27,7 @@ describe("admin: customers' ID checks", () => {
     await request(t.http)
       .post('/v1/me/identity')
       .set(who.headers)
-      .send({ consent: true, idType: 'passport', idNumber })
+      .send({ consent: true, idType: 'nin', idNumber })
       .expect(200);
     await request(t.http).post('/v1/me/identity/finish').set(who.headers).expect(200);
     return who;
@@ -37,10 +37,10 @@ describe("admin: customers' ID checks", () => {
 
   it('lists checks in review with what was flagged, and support verifies one', async () => {
     // 1111: the selfie didn't clearly match, so the team looks.
-    const who = await customerChecked(passport('1111'));
+    const who = await customerChecked(nin('1111'));
     const list = await request(t.http).get('/v1/admin/id-checks?country=NG').set(ops.headers).expect(200);
     const row = list.body.checks.find((c: { id: string }) => c.id === who.userId);
-    expect(row).toMatchObject({ status: 'review', idType: 'passport', idName: 'International passport' });
+    expect(row).toMatchObject({ status: 'review', idType: 'nin', idName: 'NIN slip or card' });
     expect(row.flagged).toEqual([
       expect.objectContaining({ key: 'selfie', outcome: 'review', label: 'Selfie matches the ID photo' }),
     ]);
@@ -66,24 +66,24 @@ describe("admin: customers' ID checks", () => {
   });
 
   it("won't verify a second account on an ID another customer holds; declines, and reopens", async () => {
-    const id = passport();
+    const id = nin();
     await customerChecked(id);
     const second = await customerChecked(id);
     expect((await request(t.http).get('/v1/me/identity').set(second.headers)).body.status).toBe('review');
     await decide(second, { decision: 'verify', note: 'Looks like the same person' })
       .expect(409)
       .expect(/id_held/);
-    await decide(second, { decision: 'decline', note: 'This passport is on another account' }).expect(200);
+    await decide(second, { decision: 'decline', note: 'This NIN is on another account' }).expect(200);
     const declined = (await request(t.http).get('/v1/me/identity').set(second.headers)).body;
-    expect(declined).toMatchObject({ status: 'declined', decisionNote: 'This passport is on another account' });
+    expect(declined).toMatchObject({ status: 'declined', decisionNote: 'This NIN is on another account' });
     await request(t.http)
       .post('/v1/me/identity')
       .set(second.headers)
-      .send({ consent: true, idType: 'passport', idNumber: passport() })
+      .send({ consent: true, idType: 'nin', idNumber: nin() })
       .expect(403)
       .expect(/identity_declined/);
     // Reopened, they can check again with another ID.
-    await decide(second, { decision: 'reopen', note: 'They called; their own passport is new' }).expect(200);
+    await decide(second, { decision: 'reopen', note: 'They called; they will use their BVN' }).expect(200);
     const [row] = await t.db
       .select()
       .from(customerVerifications)
@@ -93,7 +93,7 @@ describe("admin: customers' ID checks", () => {
     await request(t.http)
       .post('/v1/me/identity')
       .set(second.headers)
-      .send({ consent: true, idType: 'nin', idNumber: `5${String(Date.now()).slice(-6)}4567` })
+      .send({ consent: true, idType: 'bvn', idNumber: `2${String(Date.now()).slice(-6)}4567` })
       .expect(200);
     const [fresh] = await t.db
       .select()
@@ -104,7 +104,7 @@ describe("admin: customers' ID checks", () => {
   });
 
   it("won't verify a check with a failed result, or one without the ID's number; the overview counts the queue", async () => {
-    const who = await customerChecked(passport('1111'));
+    const who = await customerChecked(nin('1111'));
     const overview = await request(t.http).get('/v1/admin/overview?country=NG').set(ops.headers).expect(200);
     expect(overview.body.attention.idChecks).toBeGreaterThanOrEqual(1);
     // The provider gave no number (as a provider's own page may not): another account couldn't be caught.

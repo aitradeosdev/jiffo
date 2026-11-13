@@ -30,9 +30,13 @@ export interface Section {
   fields: Field[];
 }
 
-const ID_TYPES = [
+/** A customer gives their NIN or BVN and takes a selfie; ID documents are for agents. */
+const CUSTOMER_ID_TYPES = [
   { value: 'nin', label: 'NIN' },
   { value: 'bvn', label: 'BVN' },
+];
+const ID_TYPES = [
+  ...CUSTOMER_ID_TYPES,
   { value: 'drivers_licence', label: "Driver's licence" },
   { value: 'voters_card', label: "Voter's card" },
   { value: 'passport', label: 'Passport' },
@@ -117,15 +121,15 @@ export const SECTIONS: Section[] = [
         path: 'identity.customerIdTypes',
         label: 'IDs customers can verify with',
         kind: 'multi',
-        options: ID_TYPES,
-        help: 'The customer picks one. Only those the identity provider in use checks are offered.',
+        options: CUSTOMER_ID_TYPES,
+        help: 'The customer gives one of these numbers and takes a selfie, once. ID documents are for agents.',
       },
       {
         path: 'identity.agentIdTypes',
         label: 'IDs agents can verify with',
         kind: 'multi',
         options: ID_TYPES,
-        help: 'The agent picks one. Only those the identity provider in use checks are offered.',
+        help: 'The agent picks one, and takes a selfie. Only those the identity provider in use checks are offered.',
       },
       {
         path: 'identity.requireBvnForAgents',

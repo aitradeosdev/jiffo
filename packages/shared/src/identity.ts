@@ -10,6 +10,13 @@ export const ID_TYPES = {
 export type IdType = keyof typeof ID_TYPES;
 export const ID_TYPE_KEYS = Object.keys(ID_TYPES) as [IdType, ...IdType[]];
 
+/**
+ * The IDs a customer verifies with: a number the issuer looks up, and a one-time selfie matched to the photo
+ * the issuer holds. No document is photographed; ID documents (licence, voter's card, passport) are for agents.
+ */
+export const CUSTOMER_ID_TYPES = ['nin', 'bvn'] as const satisfies readonly IdType[];
+export type CustomerIdType = (typeof CUSTOMER_ID_TYPES)[number];
+
 /** Strips spaces and checks an ID number against its type's format. */
 export function normaliseIdNumber(type: IdType, value: string): string | null {
   const clean = value.replace(/\s+/g, '').toUpperCase();

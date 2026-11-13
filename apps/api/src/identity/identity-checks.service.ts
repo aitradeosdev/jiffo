@@ -152,7 +152,7 @@ export class IdentityChecksService {
    */
   options(role: IdentityRole, settings: CountrySettings['identity']) {
     const adapter = this.providers.current('identity');
-    const accepted = role === 'customer' ? settings.customerIdTypes : settings.agentIdTypes;
+    const accepted: readonly IdType[] = role === 'customer' ? settings.customerIdTypes : settings.agentIdTypes;
     const withBvn = role === 'agent' && settings.requireBvnForAgents;
     let idTypes = accepted.filter((t) => adapter.idTypes.includes(t));
     if (withBvn && !adapter.bvnAlongside) idTypes = adapter.idTypes.includes('bvn') ? ['bvn'] : [];
@@ -175,7 +175,7 @@ export class IdentityChecksService {
    * BVN when the BVN rule made it an agent's ID because that provider can't check it alongside another.
    */
   accepted(role: IdentityRole, settings: CountrySettings['identity'], provider: string): IdType[] {
-    const accepted = role === 'customer' ? settings.customerIdTypes : settings.agentIdTypes;
+    const accepted: readonly IdType[] = role === 'customer' ? settings.customerIdTypes : settings.agentIdTypes;
     const forced = role === 'agent' && settings.requireBvnForAgents && !this.startedWith(provider).bvnAlongside;
     return forced && !accepted.includes('bvn') ? [...accepted, 'bvn'] : [...accepted];
   }

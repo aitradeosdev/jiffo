@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ID_TYPE_KEYS } from './identity';
+import { ID_TYPE_KEYS, CUSTOMER_ID_TYPES } from './identity';
 
 const kobo = z.number().int().nonnegative();
 const bps = z.number().int().min(0).max(10_000);
@@ -72,8 +72,15 @@ export const CountrySettingsSchema = z.object({
     minWithdrawalKobo: kobo.default(10_000),
   }),
   identity: z.object({
-    /** IDs a customer may verify with, one of them; the identity provider in use must check it. */
-    customerIdTypes: z.array(z.enum(ID_TYPE_KEYS)).min(1),
+    /**
+     * IDs a customer may verify with, one of them: the NIN or BVN, with a selfie. Settings saved when other
+     * IDs could be chosen keep only these.
+     */
+    customerIdTypes: z.preprocess(
+      (value) =>
+        Array.isArray(value) ? value.filter((t) => (CUSTOMER_ID_TYPES as readonly unknown[]).includes(t)) : value,
+      z.array(z.enum(CUSTOMER_ID_TYPES)).min(1),
+    ),
     /** IDs an agent may verify with, one of them. */
     agentIdTypes: z.array(z.enum(ID_TYPE_KEYS)).min(1),
     requireBvnForAgents: z.boolean(),
@@ -131,7 +138,7 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
     minWithdrawalKobo: 10_000,
   },
   identity: {
-    customerIdTypes: ['nin', 'drivers_licence', 'voters_card', 'passport'],
+    customerIdTypes: ['nin', 'bvn'],
     agentIdTypes: ['nin', 'bvn'],
     requireBvnForAgents: true,
     addressCheck: 'physical',

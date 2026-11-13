@@ -242,7 +242,7 @@ export const PROVIDERS: ProviderInfo[] = [
     bvnAlongside: true,
     idChosenOnPage: true,
     about:
-      "Dojah's EasyOnboard widget, with the government data, ID and selfie steps you set up in the Dojah dashboard (the IDs offered are chosen there; add BVN to the government data step for agents), and Dojah's agent visits for addresses.",
+      "Dojah's EasyOnboard widget, with the steps you set up in the Dojah dashboard: for customers the NIN or BVN and a selfie; for agents the IDs you accept from them (add BVN to the government data step) and a selfie. Dojah's agent visits addresses.",
     webhookPath: '/v1/webhooks/identity/dojah',
     webhookHint: 'Subscribe it for the kyc_widget service under Developers, Webhooks in the Dojah dashboard.',
     fields: [
@@ -257,10 +257,17 @@ export const PROVIDERS: ProviderInfo[] = [
       },
       {
         key: 'widgetId',
-        label: 'Widget ID',
+        label: 'Widget ID for agents',
         secret: false,
         required: true,
-        hint: 'The EasyOnboard flow with the NIN and selfie steps.',
+        hint: 'The EasyOnboard flow agents use: the IDs you accept from them, and the selfie.',
+      },
+      {
+        key: 'customerWidgetId',
+        label: 'Widget ID for customers',
+        secret: false,
+        required: false,
+        hint: "A flow with only the government data step (NIN or BVN) and the selfie: customers don't photograph a document. Without it, customers use the agents' flow.",
       },
       {
         key: 'webhookSecret',

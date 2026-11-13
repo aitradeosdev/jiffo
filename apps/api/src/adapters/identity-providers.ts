@@ -340,8 +340,10 @@ export class DojahIdentityAdapter implements IdentityAdapter {
     private readonly secretKey: string,
     /** The public key, for the widget in the browser. */
     private readonly publicKey: string,
+    /** The flow agents use; customers use their own when one is set (NIN or BVN and a selfie). */
     private readonly widgetId: string,
     private readonly webhookSecret: string,
+    private readonly customerWidgetId: string | undefined,
     sandbox: boolean,
     private readonly ctx: ProviderContext,
     private readonly fetchImpl: typeof fetch = fetch,
@@ -384,7 +386,9 @@ export class DojahIdentityAdapter implements IdentityAdapter {
       app_id: this.appId,
       p_key: this.publicKey,
       type: 'custom',
-      config: { widget_id: this.widgetId },
+      config: {
+        widget_id: referenceRole(reference) === 'customer' ? (this.customerWidgetId ?? this.widgetId) : this.widgetId,
+      },
       reference_id: reference,
     };
     const done = identityDoneUrl(this.ctx, reference);

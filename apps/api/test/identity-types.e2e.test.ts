@@ -63,12 +63,10 @@ describe('identity checks: ID types, and customers', () => {
     expect((await me(who).expect(200)).body).toMatchObject({
       status: 'none',
       flow: 'numbers',
-      // The IDs admin accepts for customers that the provider checks.
+      // A customer gives their NIN or BVN and takes a selfie; documents are for agents.
       idTypes: [
         { key: 'nin', name: 'NIN slip or card' },
-        { key: 'drivers_licence', name: "Driver's licence" },
-        { key: 'voters_card', name: "Voter's card (PVC)" },
-        { key: 'passport', name: 'International passport' },
+        { key: 'bvn', name: 'BVN' },
       ],
     });
     await request(t.http)
@@ -84,35 +82,35 @@ describe('identity checks: ID types, and customers', () => {
       .expect(403)
       .expect(/identity_required/);
 
-    // Not an ID admin accepts for customers, and a number that isn't a passport's.
-    await start(who, { idType: 'bvn', idNumber: '22212345678' })
+    // A document isn't how customers verify, and a number that isn't a BVN's.
+    await start(who, { idType: 'passport', idNumber: 'A12345678' })
       .expect(400)
       .expect(/invalid_id_type/);
-    await start(who, { idType: 'passport', idNumber: '12' })
+    await start(who, { idType: 'bvn', idNumber: '12' })
       .expect(400)
       .expect(/invalid_id/);
-    const passport = unique('A', 9);
-    await start(who, { idType: 'passport', idNumber: passport }).expect(200);
+    const bvn = unique('2', 11);
+    await start(who, { idType: 'bvn', idNumber: bvn }).expect(200);
     expect((await finish(who).expect(200)).body).toEqual({ status: 'verified', outcome: 'passed' });
     const view = (await me(who).expect(200)).body;
     expect(view).toMatchObject({
       status: 'verified',
-      idType: 'passport',
+      idType: 'bvn',
       legalName: 'ADA OKAFOR',
       startedFlow: 'numbers',
     });
-    expect(view.checks.map((c: { key: string }) => c.key)).toEqual(['passport', 'selfie', 'age']);
+    expect(view.checks.map((c: { key: string }) => c.key)).toEqual(['bvn', 'selfie', 'age']);
     const [row] = await t.db.select().from(customerVerifications).where(eq(customerVerifications.userId, who.userId));
     expect(row!.idFingerprint).toMatch(/^[0-9a-f]{64}$/);
-    expect(JSON.stringify(row)).not.toContain(passport);
+    expect(JSON.stringify(row)).not.toContain(bvn);
     await request(t.http).post('/v1/wallet/deposits').set(who.headers).send({ amountKobo: 500_000 }).expect(201);
     await start(who, { idType: 'nin', idNumber: '12345674567' })
       .expect(409)
       .expect(/already_verified/);
 
-    // A second account on the same passport goes to support; someone under 18 doesn't pass.
+    // A second account on the same BVN goes to support; someone under 18 doesn't pass.
     const second = await customer();
-    await start(second, { idType: 'passport', idNumber: passport }).expect(200);
+    await start(second, { idType: 'bvn', idNumber: bvn }).expect(200);
     expect((await finish(second).expect(200)).body.status).toBe('review');
     expect((await me(second)).body.checks).toContainEqual(
       expect.objectContaining({ key: 'duplicate', outcome: 'review' }),
@@ -212,17 +210,12 @@ describe('identity checks: ID types, and customers', () => {
 
     // A customer's check started on Smile ID's page, and its result sent to the webhook.
     const who = await customer();
-    expect((await me(who)).body.idTypes.map((i: { key: string }) => i.key)).toEqual([
-      'nin',
-      'drivers_licence',
-      'voters_card',
-      'passport',
-    ]);
+    expect((await me(who)).body.idTypes.map((i: { key: string }) => i.key)).toEqual(['nin', 'bvn']);
     const link = vi
       .spyOn(SmileIdIdentityAdapter.prototype, 'startIdentity')
       .mockImplementation(async ({ reference }) => ({ reference, url: `https://links.smile.test/${reference}` }));
-    const started = await start(who, { idType: 'voters_card' }).expect(200);
-    expect(link.mock.calls.at(-1)![0].request).toEqual({ idType: 'voters_card', withBvn: false });
+    const started = await start(who, { idType: 'nin' }).expect(200);
+    expect(link.mock.calls.at(-1)![0].request).toEqual({ idType: 'nin', withBvn: false });
     const reference = String(started.body.url).split('/').pop()!;
     expect(reference).toMatch(/^cid-/);
     vi.spyOn(
@@ -245,12 +238,12 @@ describe('identity checks: ID types, and customers', () => {
           id_fields: {
             full_name: 'Ada Okafor',
             date_of_birth: '1990-01-02',
-            id_number: `90F5B0A1B2C3D${String(Date.now()).slice(-6)}`,
+            id_number: unique('6', 11),
           },
         }),
       )
       .expect(200);
-    expect((await me(who)).body).toMatchObject({ status: 'verified', idType: 'voters_card', legalName: 'ADA OKAFOR' });
+    expect((await me(who)).body).toMatchObject({ status: 'verified', idType: 'nin', legalName: 'ADA OKAFOR' });
 
     // The agent's app of before sends no ID type: the only one on offer, the BVN, is meant.
     const agentStart = await request(t.http)

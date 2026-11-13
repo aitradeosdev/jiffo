@@ -131,7 +131,7 @@ describe('Smile ID', () => {
 
 describe('Dojah', () => {
   const make = (impl: typeof fetch) =>
-    new DojahIdentityAdapter('app-1', 'sk-dojah', 'pk-dojah', 'widget-1', 'hook-secret', false, ctx, impl);
+    new DojahIdentityAdapter('app-1', 'sk-dojah', 'pk-dojah', 'widget-1', 'hook-secret', 'widget-c', false, ctx, impl);
   const completed = {
     reference_id: 'jid-3',
     verification_status: 'Completed',
@@ -161,6 +161,10 @@ describe('Dojah', () => {
     );
     const page = dojah.page('jid-3');
     expect(page).toContain('https://api.jiffo.test/v1/identity/done?for=agent');
+    // Customers get their own flow: the NIN or BVN and a selfie, no document.
+    const forCustomer = dojah.page('cid-3');
+    expect(forCustomer).toContain('"widget_id":"widget-c"');
+    expect(forCustomer).toContain('https://api.jiffo.test/v1/identity/done?for=customer');
     expect(page).toContain('https://widget.dojah.io/widget.js');
     expect(page).toContain('"widget_id":"widget-1"');
     expect(page).toContain('"reference_id":"jid-3"');

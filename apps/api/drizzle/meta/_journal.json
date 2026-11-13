@@ -99,6 +99,13 @@
       "when": 1794607197881,
       "tag": "0013_identity_id_types",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794611227399,
+      "tag": "0014_customer_ids_nin_bvn",
+      "breakpoints": true
     }
   ]
 }
