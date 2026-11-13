@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { VARIANT } from '@/config';
-import { useSession } from '@/auth/session';
+import { AgentBoard } from '@/agent/board';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { useResource } from '@/api/useResource';
 import { useRealtimeEvent } from '@/realtime/realtime';
@@ -14,7 +14,7 @@ import { Screen, Text, Wordmark } from '@/ui/kit';
 import { Card, CategoryIcon, Icon, Row, Section } from '@/ui/parts';
 
 export default function Home() {
-  return VARIANT === 'customer' ? <CustomerHome /> : <AgentHome />;
+  return VARIANT === 'customer' ? <CustomerHome /> : <AgentBoard />;
 }
 
 function CustomerHome() {
@@ -102,18 +102,6 @@ function CustomerHome() {
           ))}
         </View>
       </Section>
-    </Screen>
-  );
-}
-
-/** Placeholder until the agent screens land. */
-function AgentHome() {
-  const { user } = useSession();
-  return (
-    <Screen>
-      <Wordmark height={30} />
-      <Text variant="title">{user?.firstName ? `Hi ${user.firstName}` : 'Hi there'}</Text>
-      <Text tone="ink2">Your errand board arrives in the next update.</Text>
     </Screen>
   );
 }

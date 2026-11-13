@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { goBack } from '@/nav';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { useDraft } from '@/errands/draft';
 import { Screen, Text } from '@/ui/kit';
@@ -20,7 +20,7 @@ export default function Category() {
           onPress={() => {
             // A new category resets the "agent buys items" switch to that category's default.
             update({ categoryKey: cat.key, buy: null });
-            router.back();
+            goBack();
           }}
         />
       ))}

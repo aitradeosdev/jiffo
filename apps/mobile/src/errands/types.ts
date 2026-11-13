@@ -71,4 +71,20 @@ export const STATUS_TEXT: Record<ErrandState, string> = {
   expired: 'No agent found',
 };
 
+/** How each status reads to the agent. */
+export const AGENT_STATUS: Record<ErrandState, string> = {
+  requested: 'Open errand',
+  accepted: 'Accepted',
+  started: 'In progress',
+  item_pending: 'Waiting for the customer to lock the item amount',
+  items_locked: 'Item amount locked',
+  delivered: 'At the drop-off',
+  photo_pending: 'Waiting for the customer to approve',
+  unreachable: 'Customer unreachable',
+  disputed: 'Support is reviewing',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+  expired: 'Expired',
+};
+
 export const isActive = (e: Pick<ErrandView, 'status'>) => !['completed', 'cancelled', 'expired'].includes(e.status);

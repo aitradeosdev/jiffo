@@ -11,7 +11,10 @@ import type { ErrandView } from './types';
 
 const TIPS = [20_000, 50_000, 100_000];
 
-/** After hand-off: an optional tip (all of it goes to the agent) and a rating, each once. */
+/**
+ * After hand-off. The customer can tip (all of it goes to the agent) and rate the agent; the agent
+ * rates the customer. Each once.
+ */
 export function AfterCompletion({ errand, onDone }: { errand: ErrandView; onDone: () => void }) {
   const c = useColors();
   const { api } = useSession();
@@ -21,7 +24,8 @@ export function AfterCompletion({ errand, onDone }: { errand: ErrandView; onDone
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState<'tip' | 'rate' | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const name = errand.agent?.firstName ?? 'your agent';
+  const isAgent = errand.role === 'agent';
+  const name = isAgent ? (errand.customer?.firstName ?? 'the customer') : (errand.agent?.firstName ?? 'your agent');
 
   const sendTip = async () => {
     if (!tip) return;
@@ -54,19 +58,21 @@ export function AfterCompletion({ errand, onDone }: { errand: ErrandView; onDone
 
   return (
     <View style={{ gap: space.md }}>
-      <Card>
-        <Text variant="label">{tipped ? `Thanks! ${name} gets all of it.` : `Tip ${name}?`}</Text>
-        {tipped ? null : (
-          <>
-            <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
-              {TIPS.map((t) => (
-                <Chip key={t} label={naira(t)} selected={tip === t} onPress={() => setTip(tip === t ? null : t)} />
-              ))}
-            </View>
-            {tip ? <Button label={`Tip ${naira(tip)}`} onPress={sendTip} loading={busy === 'tip'} /> : null}
-          </>
-        )}
-      </Card>
+      {isAgent ? null : (
+        <Card>
+          <Text variant="label">{tipped ? `Thanks! ${name} gets all of it.` : `Tip ${name}?`}</Text>
+          {tipped ? null : (
+            <>
+              <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
+                {TIPS.map((t) => (
+                  <Chip key={t} label={naira(t)} selected={tip === t} onPress={() => setTip(tip === t ? null : t)} />
+                ))}
+              </View>
+              {tip ? <Button label={`Tip ${naira(tip)}`} onPress={sendTip} loading={busy === 'tip'} /> : null}
+            </>
+          )}
+        </Card>
+      )}
       {errand.ratedByMe ? (
         <Text tone="ink3">Thanks for rating {name}.</Text>
       ) : (

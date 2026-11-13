@@ -3,6 +3,8 @@ import { RefreshControl, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useResource } from '@/api/useResource';
+import { VARIANT } from '@/config';
+import { AgentEarnings } from '@/agent/earnings';
 import { useRealtimeEvent } from '@/realtime/realtime';
 import { naira } from '@/money';
 import { useColors } from '@/theme/theme';
@@ -19,7 +21,11 @@ interface Movement {
   createdAt: string;
 }
 
-export default function Wallet() {
+export default function WalletTab() {
+  return VARIANT === 'agent' ? <AgentEarnings /> : <Wallet />;
+}
+
+function Wallet() {
   const c = useColors();
   const wallet = useResource<{ balanceKobo: number }>('/v1/wallet');
   const history = useResource<Movement[]>('/v1/wallet/transactions?limit=50');

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { goBack } from '@/nav';
 import * as Crypto from 'expo-crypto';
 import { useSession } from '@/auth/session';
 import { errorMessage } from '@/api/client';
@@ -69,7 +70,7 @@ export default function PlaceSearch() {
     try {
       const place = await api.get<PlacePick>(`/v1/places/${encodeURIComponent(s.placeId)}?session=${session}`);
       update({ [field]: place });
-      router.back();
+      goBack();
     } catch (e) {
       setError(errorMessage(e));
       setChoosing(false);

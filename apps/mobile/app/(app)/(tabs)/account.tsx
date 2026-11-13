@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { View } from 'react-native';
+import { router } from 'expo-router';
 import { useSession } from '@/auth/session';
 import { errorMessage } from '@/api/client';
 import { formatE164 } from '@/auth/phone';
@@ -32,6 +33,22 @@ export default function Account() {
           title={user ? formatE164(user.phone, config?.country.phonePrefix ?? '') : '…'}
           subtitle="Phone number"
         />
+        {VARIANT === 'agent' ? (
+          <>
+            <Row
+              icon="sliders"
+              title="Errand preferences"
+              subtitle="Categories and buying items"
+              onPress={() => router.push('/preferences')}
+            />
+            <Row
+              icon="briefcase"
+              title="Payout account"
+              subtitle="Your own-name bank account"
+              onPress={() => router.push('/payout-account')}
+            />
+          </>
+        ) : null}
         <Row icon="info" title={VARIANT === 'agent' ? 'Jiffo Agent' : 'Jiffo'} subtitle="Version 0.1.0" />
       </View>
       {error ? (

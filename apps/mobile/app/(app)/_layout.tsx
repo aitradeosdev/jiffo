@@ -18,6 +18,8 @@ export default function AppLayout() {
         <Stack.Screen name="place" options={{ presentation: 'modal' }} />
         <Stack.Screen name="category" options={{ presentation: 'modal' }} />
         <Stack.Screen name="topup" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="withdraw" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="payout-account" options={{ presentation: 'modal' }} />
       </Stack>
     </DraftProvider>
   );

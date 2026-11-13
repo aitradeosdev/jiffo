@@ -11,9 +11,10 @@ const tab = (title: string, icon: IconName) => ({
   ),
 });
 
-/** Customer: Home, Errands, Wallet, Account. The agent app's tabs arrive with its screens. */
+/** Customer: Home, Errands, Wallet, Account. Agent: Board, Jobs, Earnings, Account. */
 export default function TabsLayout() {
   const c = useColors();
+  const agent = VARIANT === 'agent';
   return (
     <Tabs
       screenOptions={{
@@ -24,9 +25,9 @@ export default function TabsLayout() {
         tabBarLabelStyle: { fontFamily: fonts.semibold, fontSize: 11 },
       }}
     >
-      <Tabs.Screen name="home" options={tab('Home', 'home')} />
-      <Tabs.Screen name="errands" options={{ ...tab('Errands', 'list'), hidden: VARIANT !== 'customer' }} />
-      <Tabs.Screen name="wallet" options={{ ...tab('Wallet', 'credit-card'), hidden: VARIANT !== 'customer' }} />
+      <Tabs.Screen name="home" options={tab(agent ? 'Board' : 'Home', agent ? 'inbox' : 'home')} />
+      <Tabs.Screen name="errands" options={tab(agent ? 'Jobs' : 'Errands', 'list')} />
+      <Tabs.Screen name="wallet" options={tab(agent ? 'Earnings' : 'Wallet', 'credit-card')} />
       <Tabs.Screen name="account" options={tab('Account', 'user')} />
     </Tabs>
   );

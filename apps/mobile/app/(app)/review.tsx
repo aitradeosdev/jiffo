@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
+import { goBack } from '@/nav';
 import { FEE_STEP_KOBO, serviceFee } from '@jiffo/shared';
 import { useSession } from '@/auth/session';
 import { errorMessage } from '@/api/client';
@@ -41,7 +42,7 @@ export default function Review() {
 
   const back = (
     <View style={styles.head}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={12}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => goBack()} hitSlop={12}>
         <Icon name="arrow-left" size={24} />
       </Pressable>
       <Text variant="heading">Confirm your errand</Text>
