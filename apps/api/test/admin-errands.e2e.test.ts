@@ -274,6 +274,18 @@ describe('admin errands and disputes', () => {
     expect(await trialBalance()).toBe(0);
   });
 
+  it('cancels an errand still waiting for an agent', async () => {
+    const errand = await createErrand(t, customer);
+    const d = await detail(errand.id);
+    expect(d.actions).toEqual(['admin_cancel']);
+    await settle(errand.id, {
+      event: 'admin_cancel',
+      version: d.errand.version,
+      note: 'Duplicate of another request',
+    }).expect(200);
+    expect((await detail(errand.id)).errand.status).toBe('cancelled');
+  });
+
   it('steps into an errand and arranges a redelivery', async () => {
     const errand = await createErrand(t, customer);
     await act(t, agent, errand.id, 'accept');

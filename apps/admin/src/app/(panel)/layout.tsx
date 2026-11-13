@@ -1,6 +1,14 @@
 import type { ReactNode } from 'react';
 import { adminRoleLabel } from '@jiffo/shared';
-import { AuditIcon, DisputesIcon, ErrandsIcon, OverviewIcon, SignOutIcon, TeamIcon } from '@/components/icons';
+import {
+  AuditIcon,
+  DisputesIcon,
+  ErrandsIcon,
+  OverviewIcon,
+  PeopleIcon,
+  SignOutIcon,
+  TeamIcon,
+} from '@/components/icons';
 import { Wordmark } from '@/components/wordmark';
 import { getCountry, getMe, type Permission } from '@/lib/api';
 import { chooseCountry, signOut } from './actions';
@@ -10,6 +18,7 @@ const SECTIONS: Array<NavItem & { needs: Permission }> = [
   { href: '/', label: 'Overview', icon: <OverviewIcon />, needs: 'read' },
   { href: '/errands', label: 'Errands', icon: <ErrandsIcon />, needs: 'read' },
   { href: '/disputes', label: 'Disputes', icon: <DisputesIcon />, needs: 'read' },
+  { href: '/people', label: 'People', icon: <PeopleIcon />, needs: 'read' },
   { href: '/team', label: 'Team', icon: <TeamIcon />, needs: 'team' },
   { href: '/audit', label: 'Audit log', icon: <AuditIcon />, needs: 'team' },
 ];

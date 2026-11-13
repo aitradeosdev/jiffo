@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { buttonClass, Card, Empty, PageHeader, tableClass, tdClass, thClass } from '@/components/ui';
-import { adminRoleLabel } from '@jiffo/shared';
+import { adminRoleLabel, agentTierLabel } from '@jiffo/shared';
 import { api, getCountry, getMe } from '@/lib/api';
 import { dateTime } from '@/lib/format';
 
@@ -12,6 +12,7 @@ interface Entry {
   action: string;
   targetType: string | null;
   targetId: string | null;
+  targetLabel: string | null;
   data: Record<string, unknown>;
   ip: string | null;
   createdAt: string;
@@ -39,6 +40,25 @@ function describe(entry: Entry, names: Map<string, string>): string {
       const line = changes.join(' and ') || `updated ${who}`;
       return line[0]!.toUpperCase() + line.slice(1);
     }
+    case 'agent.tier':
+      return `Changed ${entry.targetLabel ?? 'an agent'}'s tier from ${agentTierLabel(String(entry.data.from))} to ${agentTierLabel(
+        String(entry.data.to),
+      )}`;
+    case 'person.suspend':
+      return `Suspended ${entry.targetLabel ?? 'an account'}`;
+    case 'person.reactivate':
+      return `Reactivated ${entry.targetLabel ?? 'an account'}`;
+    case 'errand.admin_cancel':
+      return `Cancelled “${entry.targetLabel ?? 'an errand'}” before an agent took it`;
+    case 'errand.admin_intervene':
+      return `Stepped into “${entry.targetLabel ?? 'an errand'}”`;
+    case 'errand.redeliver':
+      return `Arranged a redelivery of “${entry.targetLabel ?? 'an errand'}”`;
+    case 'errand.resolve_complete':
+    case 'errand.resolve_cancel':
+      return `Settled “${entry.targetLabel ?? 'an errand'}” as ${entry.action.endsWith('complete') ? 'complete' : 'cancelled'}${
+        entry.data.split ? ', splitting the money' : ''
+      }`;
     default:
       return entry.action;
   }
@@ -93,7 +113,21 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
                       <div className="font-semibold">{e.admin.name}</div>
                       <div className="text-[13px] text-ink-3">{e.admin.email}</div>
                     </td>
-                    <td className={tdClass}>{describe(e, names)}</td>
+                    <td className={tdClass}>
+                      {e.targetId && (e.targetType === 'person' || e.targetType === 'errand') ? (
+                        <Link
+                          href={`/${e.targetType === 'person' ? 'people' : 'errands'}/${e.targetId}`}
+                          className="hover:underline"
+                        >
+                          {describe(e, names)}
+                        </Link>
+                      ) : (
+                        describe(e, names)
+                      )}
+                      {typeof e.data.note === 'string' ? (
+                        <span className="block text-[13px] text-ink-3">“{e.data.note}”</span>
+                      ) : null}
+                    </td>
                     <td className={`${tdClass} num text-ink-3`}>{e.ip ?? '—'}</td>
                   </tr>
                 ))}

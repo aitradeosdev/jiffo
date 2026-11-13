@@ -18,12 +18,13 @@ import {
   uploads,
   users,
 } from '../db/schema';
-import { badRequest, notFound } from '../common/errors';
+import { notFound } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
 import { ADMIN_ERRAND_EVENTS, ErrandsService, type AdminErrandEvent } from '../errands/errands.service';
 import { UploadsService } from '../files/uploads.service';
 import { chargeableItemsKobo, WalletService, type DisputeSplit } from '../money/wallet.service';
 import { AuditService } from './audit.service';
+import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
 
 /** The errand lists' filters, in the panel's words. */
@@ -53,19 +54,6 @@ const customerFields = {
 };
 const agentFields = { id: agent.id, firstName: agent.firstName, lastName: agent.lastName, phone: agent.phone };
 
-/**
- * A list cursor: the last row's creation time to the microsecond, as Postgres keeps it, and its id, so no
- * row is skipped or repeated between pages, even several created in the same millisecond.
- */
-const createdAtExact = sql<string>`to_char(${errands.createdAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
-const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z)_([0-9a-f-]{36})$/i;
-function parseCursor(cursor: string | undefined) {
-  if (!cursor) return null;
-  const m = CURSOR.exec(cursor);
-  if (!m) throw badRequest('invalid_cursor', 'That page link is not valid');
-  return { at: m[1]!, id: m[2]! };
-}
-
 /** Errands as support sees them: every errand, its whole history, and support's own actions. */
 @Injectable()
 export class ErrandsAdminService {
@@ -85,7 +73,7 @@ export class ErrandsAdminService {
       .select({
         id: errands.id,
         createdAt: errands.createdAt,
-        cursorAt: createdAtExact,
+        cursorAt: exactTime(errands.createdAt),
         status: errands.status,
         description: errands.description,
         categoryKey: errands.categoryKey,
@@ -117,28 +105,22 @@ export class ErrandsAdminService {
     const last = page.at(-1);
     return {
       errands: page.map(({ cursorAt: _, ...r }) => ({ ...r, agent: r.agent?.id ? r.agent : null })),
-      next: rows.length > query.limit && last ? `${last.cursorAt}_${last.id}` : null,
+      next: rows.length > query.limit && last ? cursorOf(last) : null,
     };
   }
 
   private search(text: string): SQL | undefined {
-    const q = text.trim();
-    const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-    const digits = q.replace(/[^\d]/g, '');
-    const clauses: Array<SQL | undefined> = [
+    const like = containing(text);
+    const phone = phoneDigits(text);
+    const id = idPrefix(text);
+    return or(
       ilike(errands.description, like),
       ilike(sql`coalesce(${customer.firstName}, '') || ' ' || coalesce(${customer.lastName}, '')`, like),
       ilike(sql`coalesce(${agent.firstName}, '') || ' ' || coalesce(${agent.lastName}, '')`, like),
-    ];
-    // Part of an errand id, as support reads it out from a screenshot.
-    if (/^[0-9a-f-]{6,36}$/i.test(q)) clauses.push(ilike(sql`${errands.id}::text`, `${q.toLowerCase()}%`));
-    // Part of a phone number, written any way: 0803..., +234 803..., 803 123 4567.
-    // Without the country code or leading 0, and only when enough digits are left to mean something.
-    const local = digits.replace(/^(234|0)/, '');
-    if (local.length >= 4) {
-      clauses.push(ilike(customer.phone, `%${local}%`), ilike(agent.phone, `%${local}%`));
-    }
-    return or(...clauses);
+      id ? ilike(sql`${errands.id}::text`, id) : undefined,
+      phone ? ilike(customer.phone, `%${phone}%`) : undefined,
+      phone ? ilike(agent.phone, `%${phone}%`) : undefined,
+    );
   }
 
   /** Disputed errands, the one waiting longest first, with who opened it and why. */

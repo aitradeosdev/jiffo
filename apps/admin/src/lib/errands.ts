@@ -44,6 +44,7 @@ export const EVENT: Record<string, string> = {
   redeliver: 'Redelivery',
   unreachable_timeout: 'Customer stayed unreachable',
   open_dispute: 'Dispute opened',
+  admin_cancel: 'Support cancelled it',
   admin_intervene: 'Support stepped in',
   resolve_complete: 'Support settled it as complete',
   resolve_cancel: 'Support settled it as cancelled',

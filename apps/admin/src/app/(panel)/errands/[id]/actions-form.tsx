@@ -7,6 +7,10 @@ import { money, nairaToKobo } from '@/lib/format';
 import { actOnErrand, type ActState } from './actions';
 
 const ACTIONS: Record<string, { label: string; about: string }> = {
+  admin_cancel: {
+    label: 'Cancel errand',
+    about: 'Closes it before any agent takes it. Nothing is held yet, so no money moves.',
+  },
   admin_intervene: {
     label: 'Step in',
     about: 'Moves it into dispute and keeps the money held while you look into it.',
@@ -180,7 +184,10 @@ export function ActionsForm({
       <Notice>{state.error}</Notice>
       {confirming ? (
         <div className="flex gap-2">
-          <SubmitButton kind={event === 'resolve_cancel' ? 'danger' : 'primary'} pendingLabel="Saving…">
+          <SubmitButton
+            kind={event === 'resolve_cancel' || event === 'admin_cancel' ? 'danger' : 'primary'}
+            pendingLabel="Saving…"
+          >
             Yes, {ACTIONS[event]?.label.toLowerCase()}
           </SubmitButton>
           <button type="button" className={buttonClass('ghost')} onClick={() => setConfirming(false)}>

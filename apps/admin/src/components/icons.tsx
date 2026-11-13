@@ -75,3 +75,10 @@ export const DisputesIcon = () => (
     <path d="M5 5h11.5l-2 4 2 4H5" />
   </Icon>
 );
+
+export const PeopleIcon = () => (
+  <Icon>
+    <circle cx="12" cy="8" r="3.5" />
+    <path d="M5 20a7 7 0 0 1 14 0" />
+  </Icon>
+);

@@ -8,6 +8,16 @@ const minutes = z.number().int().positive();
 export const AGENT_TIERS = ['bronze', 'silver', 'gold', 'platinum'] as const;
 export type AgentTier = (typeof AGENT_TIERS)[number];
 
+export const AGENT_TIER_LABELS: Record<AgentTier, string> = {
+  bronze: 'Bronze',
+  silver: 'Silver',
+  gold: 'Gold',
+  platinum: 'Platinum',
+};
+
+/** A tier's name for people, or the raw value for one this version doesn't know. */
+export const agentTierLabel = (tier: string) => AGENT_TIER_LABELS[tier as AgentTier] ?? tier;
+
 /**
  * Everything admin can change for a country. Each saved change becomes a new version,
  * so an errand can always be explained by the settings that applied when it ran.

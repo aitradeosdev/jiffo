@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { ADMIN_ROLES } from '../db/schema';
 import { ADMIN_ERRAND_EVENTS } from '../errands/errands.service';
 import { ERRAND_FILTERS, ErrandsAdminService } from './errands-admin.service';
+import { PEOPLE_ROLES, PeopleAdminService } from './people-admin.service';
+import { AGENT_TIERS } from '@jiffo/shared';
 import { notFound } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
 import { AdminGuard, CurrentAdmin, Needs } from './admin.guard';
@@ -12,6 +14,18 @@ import { TeamService } from './team.service';
 import type { AdminContext } from './admin.types';
 
 const AdminId = new ParseUUIDPipe({ exceptionFactory: () => notFound('admin_not_found', 'Teammate not found') });
+const PersonId = new ParseUUIDPipe({ exceptionFactory: () => notFound('person_not_found', 'Person not found') });
+const PeopleQuery = z.object({
+  country: z.string().length(2).toUpperCase(),
+  role: z.enum(PEOPLE_ROLES).default('customer'),
+  q: z.string().trim().max(80).optional(),
+  before: z.string().max(80).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+/** Why: kept in the audit log. */
+const Note = z.string().trim().min(5, 'Say why, in a few words').max(1000);
+const TierBody = z.object({ tier: z.enum(AGENT_TIERS), note: Note });
+const NoteBody = z.object({ note: Note });
 const ErrandId = new ParseUUIDPipe({ exceptionFactory: () => notFound('errand_not_found', 'Errand not found') });
 const kobo = z.number().int().min(0).max(100_000_000_00);
 const ErrandsQuery = z.object({
@@ -53,7 +67,53 @@ export class AdminController {
     private readonly team: TeamService,
     private readonly audit: AuditService,
     private readonly errands: ErrandsAdminService,
+    private readonly people: PeopleAdminService,
   ) {}
+
+  @Get('people')
+  @Needs('read')
+  listPeople(@Query(new ZodBody(PeopleQuery)) query: z.infer<typeof PeopleQuery>) {
+    return this.people.list(query);
+  }
+
+  @Get('people/:id')
+  @Needs('read')
+  person(@Param('id', PersonId) id: string) {
+    return this.people.detail(id);
+  }
+
+  @Post('people/:id/tier')
+  @HttpCode(200)
+  @Needs('operate')
+  setTier(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', PersonId) id: string,
+    @Body(new ZodBody(TierBody)) body: z.infer<typeof TierBody>,
+  ) {
+    return this.people.setTier(admin, id, body.tier, body.note);
+  }
+
+  @Post('people/:id/suspend')
+  @HttpCode(200)
+  @Needs('operate')
+  suspend(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', PersonId) id: string,
+    @Body(new ZodBody(NoteBody)) body: z.infer<typeof NoteBody>,
+  ) {
+    return this.people.suspend(admin, id, body.note);
+  }
+
+  @Post('people/:id/reactivate')
+  @HttpCode(200)
+  @Needs('operate')
+  reactivate(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', PersonId) id: string,
+    @Body(new ZodBody(NoteBody)) body: z.infer<typeof NoteBody>,
+  ) {
+    return this.people.reactivate(admin, id, body.note);
+  }
 
   @Get('errands')
   @Needs('read')
