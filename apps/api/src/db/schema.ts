@@ -656,3 +656,102 @@ export const errandRatings = pgTable(
     check('errand_ratings_stars_ck', sql`${t.stars} between 1 and 5`),
   ],
 );
+
+/* ---------- Admin ---------- */
+
+/**
+ * What each admin may do is decided by their role (see admin/permissions.ts). Owners can do everything,
+ * including managing the team; operations runs errands, disputes and people; finance runs money; support
+ * can look but not change anything.
+ */
+export const ADMIN_ROLES = ['owner', 'operations', 'finance', 'support'] as const;
+export type AdminRole = (typeof ADMIN_ROLES)[number];
+
+/** A Jiffo staff member. They join by invite, set a password, then must set up an authenticator app. */
+export const admins = pgTable(
+  'admins',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Always stored in lower case. */
+    email: text('email').notNull(),
+    name: text('name').notNull(),
+    role: text('role', { enum: ADMIN_ROLES }).notNull(),
+    status: text('status', { enum: ['invited', 'active', 'disabled'] })
+      .notNull()
+      .default('invited'),
+    passwordHash: text('password_hash'),
+    /** The authenticator secret, encrypted. Set when setup starts; only used once totpEnabledAt is set. */
+    totpCipher: text('totp_cipher'),
+    totpEnabledAt: timestamp('totp_enabled_at', { withTimezone: true }),
+    /** The last 30-second step a code was accepted for, so the same code can't be used twice. */
+    totpLastStep: integer('totp_last_step'),
+    /** Only the hash of the invite link's token is kept. */
+    inviteTokenHash: text('invite_token_hash'),
+    inviteExpiresAt: timestamp('invite_expires_at', { withTimezone: true }),
+    invitedBy: uuid('invited_by'),
+    lastSignInAt: timestamp('last_sign_in_at', { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('admins_email_uq').on(t.email), uniqueIndex('admins_invite_uq').on(t.inviteTokenHash)],
+);
+
+/** A signed-in admin. The token is opaque and only its hash is kept; sessions end when idle or at a hard limit. */
+export const adminSessions = pgTable(
+  'admin_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    adminId: uuid('admin_id')
+      .notNull()
+      .references(() => admins.id),
+    tokenHash: text('token_hash').notNull(),
+    ip: text('ip'),
+    userAgent: text('user_agent'),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    revokedReason: text('revoked_reason'),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('admin_sessions_token_uq').on(t.tokenHash), index('admin_sessions_admin_idx').on(t.adminId)],
+);
+
+/** Every admin sign-in attempt, kept for the lockouts and as a record. Unknown emails are recorded too. */
+export const adminSignInAttempts = pgTable(
+  'admin_sign_in_attempts',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    email: text('email').notNull(),
+    ip: text('ip'),
+    stage: text('stage', { enum: ['password', 'code'] }).notNull(),
+    succeeded: boolean('succeeded').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('admin_attempts_email_idx').on(t.email, t.createdAt),
+    index('admin_attempts_ip_idx').on(t.ip, t.createdAt),
+  ],
+);
+
+/** What admins changed, written in the same transaction as the change itself. */
+export const adminAudit = pgTable(
+  'admin_audit',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    adminId: uuid('admin_id')
+      .notNull()
+      .references(() => admins.id),
+    /** For example team.invite, errand.resolve or wallet.adjust. */
+    action: text('action').notNull(),
+    targetType: text('target_type'),
+    targetId: text('target_id'),
+    countryCode: char('country_code', { length: 2 }),
+    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+    ip: text('ip'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('admin_audit_created_idx').on(t.createdAt),
+    index('admin_audit_target_idx').on(t.targetType, t.targetId),
+  ],
+);

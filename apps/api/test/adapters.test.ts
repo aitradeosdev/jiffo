@@ -338,7 +338,10 @@ describe('config', () => {
       S3_BUCKET: 'jiffo-files',
     };
     expect(() => loadConfig(live)).toThrow(/TRUST_PROXY_HOPS/);
-    expect(loadConfig({ ...live, TRUST_PROXY_HOPS: '1' }).TRUST_PROXY_HOPS).toBe(1);
+    expect(() => loadConfig({ ...live, TRUST_PROXY_HOPS: '1' })).toThrow(/ADMIN_PANEL_SECRET/);
+    const ready = { ...live, TRUST_PROXY_HOPS: '1', ADMIN_PANEL_SECRET: 'z'.repeat(32) };
+    expect(loadConfig(ready).TRUST_PROXY_HOPS).toBe(1);
+    expect(() => loadConfig({ ...ready, ADMIN_PANEL_SECRET: 'too short' })).toThrow(/ADMIN_PANEL_SECRET/);
   });
 });
 
