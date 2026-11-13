@@ -5,3 +5,4 @@ brand
 pnpm-lock.yaml
 apps/api/drizzle/meta
 apps/mobile/src/ui/art.generated.ts
+.next

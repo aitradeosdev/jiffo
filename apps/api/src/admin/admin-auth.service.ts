@@ -119,14 +119,20 @@ export class AdminAuthService {
     return { next: stage, challenge: await this.signChallenge(admin.id, stage) };
   }
 
-  /** Step two for a first sign-in: a new authenticator secret to scan. Calling again replaces it. */
+  /**
+   * Step two for a first sign-in: the authenticator secret to scan. Asking again gives the same secret until
+   * the app is switched on, so reloading the page doesn't undo a scan already made.
+   */
   async startSetup(challenge: string) {
     const { admin } = await this.readChallenge(challenge, 'setup');
-    const secret = newTotpSecret();
-    await this.db
-      .update(admins)
-      .set({ totpCipher: encrypt(this.totpKey, secret), updatedAt: new Date() })
-      .where(eq(admins.id, admin.id));
+    let secret = admin.totpCipher ? decrypt(this.totpKey, admin.totpCipher) : null;
+    if (!secret) {
+      secret = newTotpSecret();
+      await this.db
+        .update(admins)
+        .set({ totpCipher: encrypt(this.totpKey, secret), updatedAt: new Date() })
+        .where(eq(admins.id, admin.id));
+    }
     return { secret, otpauthUrl: otpauthUrl(secret, admin.email) };
   }
 

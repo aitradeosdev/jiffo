@@ -155,6 +155,9 @@ describe('admin', () => {
 
     const setup = await request(t.http).post('/v1/admin/auth/setup').send({ challenge: ok.body.challenge }).expect(200);
     expect(setup.body.otpauthUrl).toContain(`secret=${setup.body.secret}`);
+    // Reloading the setup page shows the same secret, so a scan already made still works.
+    const again = await request(t.http).post('/v1/admin/auth/setup').send({ challenge: ok.body.challenge }).expect(200);
+    expect(again.body.secret).toBe(setup.body.secret);
     const bad = await request(t.http)
       .post('/v1/admin/auth/code')
       .set(fromIp())

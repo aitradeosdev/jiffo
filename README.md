@@ -9,6 +9,7 @@ The product is built from day one with adapters, so new countries, states and ou
 | Path                     | Contents                                                                                                                                                                                                                          |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `apps/mobile/`           | The Customer and Agent apps (Expo, React Native). One codebase builds both store apps; see below.                                                                                                                                 |
+| `apps/admin/`            | The admin panel (Next.js) for Jiffo staff. See below.                                                                                                                                                                             |
 | `apps/api/`              | The backend (NestJS). Accounts and phone sign-in, country settings, the errand lifecycle, chat, push and the realtime socket. See below.                                                                                          |
 | `packages/shared/`       | Code the backend and the apps share: the errand state machine, money in kobo, the country settings schema and ID types.                                                                                                           |
 | `docs/prototypes/`       | Clickable HTML prototypes of the customer app (`customer.html`) and the agent app (`agent.html`). Open either file in a browser. The panel beside the phone jumps to every screen and lets you play the other side of the errand. |
@@ -91,6 +92,7 @@ All routes are under `/v1` except `GET /health`. Errors always look like `{ "err
 | Payouts        | `GET /banks`, `GET /payout-account`, `PUT /payout-account` (agent app)                                                                                                                                                                              |
 | Webhooks       | `POST /webhooks/paystack`: signature-checked, stored, applied once                                                                                                                                                                                  |
 | Realtime       | Socket.IO namespace `/realtime`, with the access token in `auth.token`. Emit `errand.subscribe`; receive `errand.updated` and `message.created`.                                                                                                    |
+| Admin          | Under `/admin`, for the admin panel only: sign-in (`auth/sign-in`, `auth/setup`, `auth/code`, `auth/sign-out`, invites), `me`, `overview`, `team` and `audit`. Admin sessions are separate from app sessions.                                       |
 
 Every errand change goes through one endpoint, `POST /errands/:id/events`, with an event name such as `accept`, `send_offer`, `start`, `send_item_amount`, `mark_delivered` or `confirm_pin`. Who is acting comes from the session (customer app or agent app), never from the request. Each errand view lists the `allowedEvents` for the caller, so the apps show only the actions that are possible.
 
@@ -121,3 +123,32 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
 - **Hand-off:** item money goes to the agent untouched and withdrawable at once. The fee, less the commission for the agent's tier (set by admin), goes to the agent; Bronze earnings are held for 24 hours. The service fee and commission go to platform revenue.
 - **Withdrawals:** agents only, to an account in their own name. One free scheduled withdrawal a day, or instant for a fee. A bounced transfer puts the full amount back.
 - **Reconciliation:** every night the ledger's cash is compared with the Paystack balance and the result is saved for finance.
+
+## Running the admin panel
+
+`apps/admin` is the panel Jiffo staff use. Its server calls the API on each admin's behalf, so the session token stays in an httpOnly cookie and never reaches the browser's scripts.
+
+```bash
+cd apps/admin
+cp .env.example .env.local
+pnpm dev
+```
+
+It opens on port 3001. Set `ADMIN_PANEL_SECRET` to the same value in both `apps/api/.env` and `apps/admin/.env.local`, so the API sees each admin's own IP address for sign-in limits and the audit log.
+
+Admins join by invite only. Make the first owner from the API's folder, with the API's environment loaded:
+
+```bash
+pnpm admin invite --email you@jiffoapp.com --name "Your Name" --role owner
+```
+
+Open the printed link to choose a password. The first sign-in sets up an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password), and every sign-in after that needs its code. Owners invite everyone else from the Team page. If the only owner loses their phone, `pnpm admin reset --email ...` prints a new link.
+
+| Role       | Can                                                    |
+| ---------- | ------------------------------------------------------ |
+| Owner      | Everything, including the team, settings and audit log |
+| Operations | Errands, disputes and people                           |
+| Finance    | Money: refunds, wallet adjustments and payouts         |
+| Support    | Look at everything, change nothing                     |
+
+Sessions end after 30 minutes without activity, or 12 hours after sign-in. Five wrong attempts for one email pause sign-in for 15 minutes. Every change an admin makes is written to the audit log.
