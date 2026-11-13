@@ -71,3 +71,65 @@ export class TermiiMessagingAdapter implements MessagingAdapter {
     return `Connected. Balance: ${body?.balance ?? '?'} ${body?.currency ?? ''}`.trim();
   }
 }
+
+/** Statuses Africa's Talking gives a recipient whose message it accepted: processed, sent, queued. */
+const AT_ACCEPTED = new Set([100, 101, 102]);
+
+/**
+ * Africa's Talking SMS (https://api.africastalking.com/version1/messaging). The username "sandbox" uses
+ * their sandbox. The sender ID is optional: without one, their shared short code sends.
+ */
+export class AfricasTalkingMessagingAdapter implements MessagingAdapter {
+  readonly name = 'africastalking';
+  private readonly base: string;
+
+  constructor(
+    private readonly username: string,
+    private readonly apiKey: string,
+    private readonly senderId?: string,
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {
+    this.base =
+      username.toLowerCase() === 'sandbox'
+        ? 'https://api.sandbox.africastalking.com'
+        : 'https://api.africastalking.com';
+  }
+
+  private headers() {
+    return { apikey: this.apiKey, accept: 'application/json' };
+  }
+
+  async sendOtp(phone: string, code: string, ttlSeconds: number) {
+    const body = new URLSearchParams({
+      username: this.username,
+      to: phone,
+      message: otpText(code, ttlSeconds),
+      bulkSMSMode: '1',
+      ...(this.senderId ? { from: this.senderId } : {}),
+    });
+    const res = await this.fetchImpl(`${this.base}/version1/messaging`, {
+      method: 'POST',
+      headers: { ...this.headers(), 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+    }).catch(() => null);
+    const json = res
+      ? ((await res.json().catch(() => null)) as {
+          SMSMessageData?: { Recipients?: Array<{ statusCode?: number; status?: string }> };
+        } | null)
+      : null;
+    const recipient = json?.SMSMessageData?.Recipients?.[0];
+    if (!res || res.status !== 201 || !recipient || !AT_ACCEPTED.has(Number(recipient.statusCode))) {
+      throw unavailable('sms_failed', 'We could not send the code. Try again in a moment.');
+    }
+  }
+
+  /** For the panel's Test button: the account and its balance. Sends nothing. */
+  async check() {
+    const res = await this.fetchImpl(`${this.base}/version1/user?username=${encodeURIComponent(this.username)}`, {
+      headers: this.headers(),
+    });
+    const body = (await res.json().catch(() => null)) as { UserData?: { balance?: string } } | null;
+    if (!res.ok) throw new Error(`Africa's Talking answered ${res.status}`);
+    return `Connected. Balance: ${body?.UserData?.balance ?? 'not shown'}`;
+  }
+}

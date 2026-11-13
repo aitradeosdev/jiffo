@@ -12,6 +12,7 @@ export interface ProviderView {
   about: string;
   fields: ProviderField[];
   webhookUrl: string | null;
+  webhookHint: string | null;
   saved: boolean;
   complete: boolean;
   active: boolean;
@@ -123,7 +124,8 @@ export function ProviderCard({
         </fieldset>
         {p.webhookUrl ? (
           <p className="text-[13px] text-ink-3">
-            Webhook address to give {p.name}: <span className="num font-semibold text-ink-2">{p.webhookUrl}</span>
+            Address to give {p.name}: <span className="num font-semibold break-all text-ink-2">{p.webhookUrl}</span>
+            {p.webhookHint ? <span className="block">{p.webhookHint}</span> : null}
           </p>
         ) : null}
         <Notice>{saveState.error}</Notice>

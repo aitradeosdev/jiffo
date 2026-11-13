@@ -1,6 +1,7 @@
 import type { ProviderCategory } from '@jiffo/shared';
 import { GoogleMapsAdapter } from '../adapters/maps';
-import { TermiiMessagingAdapter } from '../adapters/messaging';
+import { AfricasTalkingMessagingAdapter, TermiiMessagingAdapter } from '../adapters/messaging';
+import { AfricasTalkingCallsAdapter, TwilioCallsAdapter } from '../adapters/calls';
 import { PaystackPaymentsAdapter } from '../adapters/payments';
 import { FcmPushAdapter } from '../adapters/push';
 import { S3StorageAdapter } from '../adapters/storage';
@@ -18,11 +19,15 @@ export const BUILDERS: { [C in ProviderCategory]: Record<string, (v: Values) => 
     paystack: (v) => new PaystackPaymentsAdapter(v.secretKey!, optional(v.baseUrl)),
   },
   sms: {
+    africastalking: (v) => new AfricasTalkingMessagingAdapter(v.username!, v.apiKey!, optional(v.senderId)),
     termii: (v) =>
       new TermiiMessagingAdapter(v.apiKey!, v.senderId!, optional(v.baseUrl) ?? 'https://api.ng.termii.com'),
   },
   identity: {},
-  calls: {},
+  calls: {
+    africastalking: (v) => new AfricasTalkingCallsAdapter(v.username!, v.apiKey!, v.phoneNumber!),
+    twilio: (v) => new TwilioCallsAdapter(v.accountSid!, v.authToken!, v.fromNumber!),
+  },
   push: {
     fcm: (v) => new FcmPushAdapter(v.serviceAccountJson!),
   },

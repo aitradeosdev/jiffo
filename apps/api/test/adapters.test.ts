@@ -1,6 +1,7 @@
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { TermiiMessagingAdapter } from '../src/adapters/messaging';
+import { AfricasTalkingMessagingAdapter, TermiiMessagingAdapter } from '../src/adapters/messaging';
+import { AfricasTalkingCallsAdapter, TwilioCallsAdapter } from '../src/adapters/calls';
 import { FcmPushAdapter } from '../src/adapters/push';
 import { PaystackPaymentsAdapter } from '../src/adapters/payments';
 import { GoogleMapsAdapter } from '../src/adapters/maps';
@@ -365,5 +366,90 @@ describe('BullMQ errand timers', () => {
     expect(Date.now() - start).toBeGreaterThanOrEqual(190);
     await new Promise((r) => setTimeout(r, 300));
     expect(fired).toEqual([job]);
+  });
+});
+
+describe("Africa's Talking SMS", () => {
+  const sent = (statusCode: number, status = 201) =>
+    new Response(JSON.stringify({ SMSMessageData: { Recipients: [{ statusCode, status: 'Success' }] } }), { status });
+
+  it('sends the code from the sender ID, and refuses a recipient it did not accept', async () => {
+    const { impl, calls } = fakeFetch(() => sent(101));
+    await new AfricasTalkingMessagingAdapter('jiffo', 'at-key', 'Jiffo', impl).sendOtp('+2348031234567', '123456', 300);
+    expect(calls[0]!.url).toBe('https://api.africastalking.com/version1/messaging');
+    expect(calls[0]!.init.headers).toMatchObject({ apikey: 'at-key', accept: 'application/json' });
+    const form = new URLSearchParams(String(calls[0]!.init.body));
+    expect(Object.fromEntries(form)).toMatchObject({ username: 'jiffo', to: '+2348031234567', from: 'Jiffo' });
+    expect(form.get('message')).toContain('123456');
+
+    const refused = fakeFetch(() => sent(403));
+    await expect(
+      new AfricasTalkingMessagingAdapter('jiffo', 'k', undefined, refused.impl).sendOtp('+2348031234567', '1', 60),
+    ).rejects.toMatchObject({ response: { error: { code: 'sms_failed' } } });
+    const sandbox = fakeFetch(() => sent(100));
+    await new AfricasTalkingMessagingAdapter('sandbox', 'k', undefined, sandbox.impl).sendOtp(
+      '+2348031234567',
+      '1',
+      60,
+    );
+    expect(sandbox.calls[0]!.url).toBe('https://api.sandbox.africastalking.com/version1/messaging');
+    expect(new URLSearchParams(String(sandbox.calls[0]!.init.body)).has('from')).toBe(false);
+  });
+});
+
+describe('calls providers', () => {
+  it("rings the caller through Africa's Talking, and dials the other person on answer", async () => {
+    const { impl, calls } = fakeFetch(
+      () =>
+        new Response(JSON.stringify({ entries: [{ status: 'Queued', sessionId: 'ATVId_1' }], errorMessage: 'None' })),
+    );
+    const at = new AfricasTalkingCallsAdapter('jiffo', 'at-key', '+2342017001000', impl);
+    expect(await at.bridge({ reference: 'call-1', from: '+2348031111111', to: '+2348032222222' })).toEqual({
+      providerRef: 'ATVId_1',
+    });
+    expect(calls[0]!.url).toBe('https://voice.africastalking.com/call');
+    expect(Object.fromEntries(new URLSearchParams(String(calls[0]!.init.body)))).toEqual({
+      username: 'jiffo',
+      from: '+2342017001000',
+      to: '+2348031111111',
+      clientRequestId: 'call-1',
+    });
+    expect(at.connect('+2348032222222').body).toContain(
+      '<Dial phoneNumbers="+2348032222222" callerId="+2342017001000" record="false"/>',
+    );
+    expect(at.connect(null).body).toContain('<Say>');
+
+    const failed = fakeFetch(
+      () => new Response(JSON.stringify({ entries: [{ status: 'InvalidPhoneNumber', errorMessage: 'bad number' }] })),
+    );
+    await expect(
+      new AfricasTalkingCallsAdapter('jiffo', 'k', '+2342017001000', failed.impl).bridge({
+        reference: 'r',
+        from: '+1',
+        to: '+2',
+      }),
+    ).rejects.toThrow(/bad number/);
+  });
+
+  it('rings the caller through Twilio with the dial instructions in the same request', async () => {
+    const { impl, calls } = fakeFetch(
+      () => new Response(JSON.stringify({ sid: 'CA123', status: 'queued' }), { status: 201 }),
+    );
+    const twilio = new TwilioCallsAdapter('AC1', 'token', '+15550001111', impl);
+    expect(await twilio.bridge({ reference: 'r', from: '+2348031111111', to: '+2348032222222' })).toEqual({
+      providerRef: 'CA123',
+    });
+    expect(calls[0]!.url).toBe('https://api.twilio.com/2010-04-01/Accounts/AC1/Calls.json');
+    expect(calls[0]!.init.headers).toMatchObject({
+      authorization: `Basic ${Buffer.from('AC1:token').toString('base64')}`,
+    });
+    const form = new URLSearchParams(String(calls[0]!.init.body));
+    expect(form.get('To')).toBe('+2348031111111');
+    expect(form.get('From')).toBe('+15550001111');
+    expect(form.get('Twiml')).toBe(
+      '<Response><Dial callerId="+15550001111" record="do-not-record"><Number>+2348032222222</Number></Dial></Response>',
+    );
+    const suspended = fakeFetch(() => new Response(JSON.stringify({ status: 'suspended' })));
+    await expect(new TwilioCallsAdapter('AC1', 't', '+1', suspended.impl).check()).rejects.toThrow(/suspended/);
   });
 });

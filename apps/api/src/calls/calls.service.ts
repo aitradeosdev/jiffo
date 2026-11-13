@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, count, desc, eq, inArray, sql } from 'drizzle-orm';
 import { CALLABLE_STATES } from '@jiffo/shared';
-import { CALLS, CallsUnavailable, type CallsAdapter } from '../adapters/calls';
+import { CALLS, CallsProviderError, CallsUnavailable, type CallsAdapter } from '../adapters/calls';
+import { ProvidersService } from '../providers/providers.service';
 import type { AuthContext } from '../auth/auth.types';
 import { ChatService } from '../chat/chat.service';
 import { conflict, notFound, tooMany, unavailable } from '../common/errors';
@@ -27,7 +28,31 @@ export class CallsService {
     @Inject(CALLS) private readonly calls: CallsAdapter,
     private readonly chat: ChatService,
     private readonly push: PushService,
+    private readonly providers: ProvidersService,
   ) {}
+
+  /**
+   * A provider asking what to do now the caller answered (Africa's Talking calls this). The address carries
+   * a token only Jiffo knows, and the call must be one it placed, on an errand still running.
+   */
+  async answered(provider: string, token: string, body: Record<string, string | undefined>) {
+    const adapter = this.providers.named('calls', provider);
+    if (!adapter?.connect || token !== this.providers.callbackToken('calls', provider)) {
+      throw notFound('not_found', 'Not found');
+    }
+    // Sent again when the call ends, with isActive 0: nothing to do then.
+    if (body.isActive !== '1') return { contentType: 'text/plain', body: '' };
+    const [row] = body.sessionId
+      ? await this.db
+          .select({ calleeId: errandCalls.calleeId, status: errands.status })
+          .from(errandCalls)
+          .innerJoin(errands, eq(errands.id, errandCalls.errandId))
+          .where(and(eq(errandCalls.provider, provider), eq(errandCalls.providerRef, body.sessionId)))
+      : [];
+    if (!row || !CALLABLE_STATES.has(row.status)) return adapter.connect(null);
+    const [callee] = await this.db.select({ phone: users.phone }).from(users).where(eq(users.id, row.calleeId));
+    return adapter.connect(callee?.phone ?? null);
+  }
 
   /** Whether calls can be made at all, for the apps to show the call button. */
   get available() {
@@ -96,6 +121,10 @@ export class CallsService {
         }));
       } catch (error) {
         if (error instanceof CallsUnavailable) throw notAvailable();
+        if (error instanceof CallsProviderError) {
+          this.logger.warn(`Call on ${errandId} not placed: ${error.message}`);
+          throw unavailable('call_failed', "We couldn't place the call. Try again, or send a message.");
+        }
         throw error;
       }
       const [row] = await tx

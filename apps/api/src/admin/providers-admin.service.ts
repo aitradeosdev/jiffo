@@ -73,7 +73,10 @@ export class ProvidersAdminService {
             name: p.name,
             about: p.about,
             fields: p.fields,
-            webhookUrl: p.webhookPath ? `${this.config.PUBLIC_API_URL}${p.webhookPath}` : null,
+            webhookUrl: p.webhookPath
+              ? `${this.config.PUBLIC_API_URL}${p.webhookPath.replace('{token}', this.providers.callbackToken(category, p.key))}`
+              : null,
+            webhookHint: p.webhookHint ?? null,
             saved: !!row,
             complete: this.complete(row, category, p.key),
             active: !!row?.active,
