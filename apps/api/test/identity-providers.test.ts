@@ -32,7 +32,7 @@ describe('Smile ID', () => {
         ? json({ token: 'jwt-1' })
         : json({ link: 'https://links.smile.test/abc', ref_id: 'r' }, 201),
     );
-    const nin = { idType: 'nin', withBvn: false } as const;
+    const nin = { role: 'agent', idType: 'nin', withBvn: false } as const;
     expect(await make(impl).startIdentity({ person, reference: 'jid-1', request: nin })).toEqual({
       reference: 'jid-1',
       url: 'https://links.smile.test/abc',
@@ -131,7 +131,7 @@ describe('Smile ID', () => {
 
 describe('Dojah', () => {
   const make = (impl: typeof fetch) =>
-    new DojahIdentityAdapter('app-1', 'sk-dojah', 'pk-dojah', 'widget-1', 'hook-secret', false, ctx, impl);
+    new DojahIdentityAdapter('app-1', 'sk-dojah', 'pk-dojah', 'widget-1', 'hook-secret', 'widget-c', false, ctx, impl);
   const completed = {
     reference_id: 'jid-3',
     verification_status: 'Completed',
@@ -159,8 +159,17 @@ describe('Dojah', () => {
     expect((await dojah.startIdentity({ reference: 'jid-3' })).url).toBe(
       'https://api.jiffo.test/v1/identity/hosted/dojah?ref=jid-3&sig=sig(dojah:jid-3)',
     );
-    const page = dojah.page('jid-3');
+    const page = dojah.page('jid-3', { role: 'agent', idType: 'nin', withBvn: false });
     expect(page).toContain('https://api.jiffo.test/v1/identity/done?for=agent');
+    // Customers get their own flow: the NIN or BVN and a selfie, no document.
+    const forCustomer = dojah.page('cid-3', { role: 'customer', idType: 'nin', withBvn: false });
+    expect(forCustomer).toContain('"widget_id":"widget-c"');
+    expect(forCustomer).toContain('https://api.jiffo.test/v1/identity/done?for=customer');
+    // Without a customers' flow set up, customers use the agents'.
+    const shared = new DojahIdentityAdapter('app-1', 'sk', 'pk', 'widget-1', 'hook', undefined, false, ctx, fetch);
+    expect(shared.page('cid-4', { role: 'customer', idType: 'nin', withBvn: false })).toContain(
+      '"widget_id":"widget-1"',
+    );
     expect(page).toContain('https://widget.dojah.io/widget.js');
     expect(page).toContain('"widget_id":"widget-1"');
     expect(page).toContain('"reference_id":"jid-3"');
@@ -285,7 +294,7 @@ describe('Youverify', () => {
     expect((await youverify.startIdentity({ reference: 'jid-4' })).url).toBe(
       'https://api.jiffo.test/v1/identity/hosted/youverify?ref=jid-4&sig=sig(youverify:jid-4)',
     );
-    const page = await youverify.page('jid-4', { idType: 'nin', withBvn: false });
+    const page = await youverify.page('jid-4', { role: 'agent', idType: 'nin', withBvn: false });
     expect(calls[0]!.url).toBe('https://api.sandbox.youverify.co/v2/api/identity/sdk/session/generate');
     expect(calls[0]!.init.headers).toMatchObject({ token: 'yv-secret' });
     expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({
@@ -310,7 +319,7 @@ describe('Youverify', () => {
 
   describe('a submitted page', () => {
     const input = { idNumber: '12345678901', session: 'sess-1', sessionSig: 'sig(youverify-session:jid-4:sess-1)' };
-    const nin = { idType: 'nin', withBvn: false } as const;
+    const nin = { role: 'agent', idType: 'nin', withBvn: false } as const;
     const respond = (live: object | null, nin: object) =>
       fakeFetch(({ url }) =>
         url.includes('/identity/liveness')
@@ -404,7 +413,7 @@ describe('Youverify', () => {
         }
         return envelope({ status: 'found', firstName: 'TUNDE', lastName: 'BAKARE' });
       }) as typeof fetch;
-      const licence = { idType: 'drivers_licence', withBvn: true } as const;
+      const licence = { role: 'agent', idType: 'drivers_licence', withBvn: true } as const;
       const result = await make(impl).submitPage('jid-4', licence, {
         ...input,
         idNumber: 'LAG12345AA12',
@@ -450,7 +459,7 @@ describe('Youverify', () => {
               lastName: 'Bakare',
               validation: { selfie: { selfieVerification: { match: true } } },
             })) as typeof fetch;
-      const plain = { idType: 'drivers_licence', withBvn: false } as const;
+      const plain = { role: 'agent', idType: 'drivers_licence', withBvn: false } as const;
       expect((await make(nested).submitPage('jid-4', plain, { ...input, idNumber: 'LAG12345AA12' })).outcome).toBe(
         'passed',
       );

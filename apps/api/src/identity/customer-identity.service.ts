@@ -166,7 +166,12 @@ export class CustomerIdentityService implements IdentityOwner {
         ),
       );
     return row
-      ? { userId: row.userId, provider, reference, request: { idType: row.idType as IdType, withBvn: false } }
+      ? {
+          userId: row.userId,
+          provider,
+          reference,
+          request: { role: 'customer', idType: row.idType as IdType, withBvn: false },
+        }
       : null;
   }
 
@@ -184,7 +189,7 @@ export class CustomerIdentityService implements IdentityOwner {
   private async apply(row: Verification, result: IdentityResult) {
     const settings = await this.settingsFor(row.userId);
     const judged = this.checks.judge(
-      { idType: row.idType as IdType, withBvn: false },
+      { role: 'customer', idType: row.idType as IdType, withBvn: false },
       result,
       this.checks.accepted('customer', settings.identity, row.provider),
     );

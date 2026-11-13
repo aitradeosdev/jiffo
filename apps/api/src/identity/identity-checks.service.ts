@@ -152,7 +152,7 @@ export class IdentityChecksService {
    */
   options(role: IdentityRole, settings: CountrySettings['identity']) {
     const adapter = this.providers.current('identity');
-    const accepted = role === 'customer' ? settings.customerIdTypes : settings.agentIdTypes;
+    const accepted: readonly IdType[] = role === 'customer' ? settings.customerIdTypes : settings.agentIdTypes;
     const withBvn = role === 'agent' && settings.requireBvnForAgents;
     let idTypes = accepted.filter((t) => adapter.idTypes.includes(t));
     if (withBvn && !adapter.bvnAlongside) idTypes = adapter.idTypes.includes('bvn') ? ['bvn'] : [];
@@ -175,7 +175,7 @@ export class IdentityChecksService {
    * BVN when the BVN rule made it an agent's ID because that provider can't check it alongside another.
    */
   accepted(role: IdentityRole, settings: CountrySettings['identity'], provider: string): IdType[] {
-    const accepted = role === 'customer' ? settings.customerIdTypes : settings.agentIdTypes;
+    const accepted: readonly IdType[] = role === 'customer' ? settings.customerIdTypes : settings.agentIdTypes;
     const forced = role === 'agent' && settings.requireBvnForAgents && !this.startedWith(provider).bvnAlongside;
     return forced && !accepted.includes('bvn') ? [...accepted, 'bvn'] : [...accepted];
   }
@@ -209,7 +209,7 @@ export class IdentityChecksService {
         (() => {
           throw badRequest('invalid_id_type', 'Choose one of the IDs we accept');
         })());
-    const request: IdentityRequest = { idType, withBvn: options.withBvn };
+    const request: IdentityRequest = { role, idType, withBvn: options.withBvn };
     let idNumber: string | undefined;
     let bvn: string | undefined;
     if (adapter.flow === 'numbers') {
@@ -253,7 +253,9 @@ export class IdentityChecksService {
       if (!checks.some((c) => c.key === key))
         checks.push({ key, outcome: 'review', note: 'No result from the provider' });
     }
-    if (!accepted.includes(idType)) {
+    // The ID a check started with was on offer then; only one the person chose on the provider's page is
+    // held against what admin accepts now.
+    if (result.idType && !accepted.includes(idType)) {
       checks.push({
         key: 'id_type',
         outcome: 'review',

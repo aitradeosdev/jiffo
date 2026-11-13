@@ -31,7 +31,7 @@ describe('country config', () => {
       'other',
     ]);
     expect(res.body.settings.identity).toEqual({
-      customerIdTypes: ['nin', 'drivers_licence', 'voters_card', 'passport'],
+      customerIdTypes: ['nin', 'bvn'],
       agentIdTypes: ['nin', 'bvn'],
     });
   });

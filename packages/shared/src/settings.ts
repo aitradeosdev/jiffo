@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ID_TYPE_KEYS } from './identity';
+import { ID_TYPE_KEYS, CUSTOMER_ID_TYPES } from './identity';
 
 const kobo = z.number().int().nonnegative();
 const bps = z.number().int().min(0).max(10_000);
@@ -22,6 +22,16 @@ export const agentTierLabel = (tier: string) => AGENT_TIER_LABELS[tier as AgentT
  * Everything admin can change for a country. Each saved change becomes a new version,
  * so an errand can always be explained by the settings that applied when it ran.
  */
+/**
+ * Customers' IDs as saved before they were limited to the NIN and BVN: a list with an ID document in it
+ * meant customers had a choice, which is now the NIN or the BVN; any other list is kept as it is.
+ */
+export function customerIdTypesOf(value: unknown) {
+  if (!Array.isArray(value)) return value;
+  const numbers = (CUSTOMER_ID_TYPES as readonly unknown[]).includes.bind(CUSTOMER_ID_TYPES);
+  return value.every(numbers) ? value : [...CUSTOMER_ID_TYPES];
+}
+
 export const CountrySettingsSchema = z.object({
   pricing: z.object({
     baseFeeKobo: kobo,
@@ -72,8 +82,12 @@ export const CountrySettingsSchema = z.object({
     minWithdrawalKobo: kobo.default(10_000),
   }),
   identity: z.object({
-    /** IDs a customer may verify with, one of them; the identity provider in use must check it. */
-    customerIdTypes: z.array(z.enum(ID_TYPE_KEYS)).min(1),
+    /**
+     * IDs a customer may verify with, one of them: the NIN or BVN, with a selfie. Settings saved when ID
+     * documents could be chosen for customers read as both numbers (see customerIdTypesOf); saving such a
+     * list is refused.
+     */
+    customerIdTypes: z.preprocess(customerIdTypesOf, z.array(z.enum(CUSTOMER_ID_TYPES)).min(1)),
     /** IDs an agent may verify with, one of them. */
     agentIdTypes: z.array(z.enum(ID_TYPE_KEYS)).min(1),
     requireBvnForAgents: z.boolean(),
@@ -131,7 +145,7 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
     minWithdrawalKobo: 10_000,
   },
   identity: {
-    customerIdTypes: ['nin', 'drivers_licence', 'voters_card', 'passport'],
+    customerIdTypes: ['nin', 'bvn'],
     agentIdTypes: ['nin', 'bvn'],
     requireBvnForAgents: true,
     addressCheck: 'physical',

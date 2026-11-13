@@ -1,3 +1,4 @@
+import { CUSTOMER_ID_TYPES } from '@jiffo/shared';
 /**
  * The country settings as the panel shows them: each setting's label, the unit it is typed in, and a line of
  * help. Paths follow CountrySettingsSchema in @jiffo/shared; the API checks every save against it.
@@ -117,15 +118,16 @@ export const SECTIONS: Section[] = [
         path: 'identity.customerIdTypes',
         label: 'IDs customers can verify with',
         kind: 'multi',
-        options: ID_TYPES,
-        help: 'The customer picks one. Only those the identity provider in use checks are offered.',
+        // A customer gives their NIN or BVN and takes a selfie; ID documents are for agents.
+        options: ID_TYPES.filter((t) => (CUSTOMER_ID_TYPES as readonly string[]).includes(t.value)),
+        help: 'The customer gives one of these numbers and takes a selfie, once. ID documents are for agents.',
       },
       {
         path: 'identity.agentIdTypes',
         label: 'IDs agents can verify with',
         kind: 'multi',
         options: ID_TYPES,
-        help: 'The agent picks one. Only those the identity provider in use checks are offered.',
+        help: 'The agent picks one, and takes a selfie. Only those the identity provider in use checks are offered.',
       },
       {
         path: 'identity.requireBvnForAgents',

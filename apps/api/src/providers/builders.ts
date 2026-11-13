@@ -43,6 +43,7 @@ export const BUILDERS: {
         v.publicKey!,
         v.widgetId!,
         v.webhookSecret!,
+        optional(v.customerWidgetId),
         sandboxMode(v.mode),
         ctx,
       ),
