@@ -11,11 +11,14 @@ import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { AuthContext } from '../auth/auth.types';
 import { notFound, tooMany, unprocessable } from '../common/errors';
+import { nameWords, plainName } from '../common/names';
 import { LedgerService } from './ledger.service';
 
 const MINUTE_MS = 60_000;
 /** Open one-time account numbers a customer can have at once. */
 const MAX_OPEN_DEPOSITS = 3;
+/** Expired top-ups are checked again for this long, in case a transfer lands late. */
+const RECHECK_DAYS = 7;
 type DepositRow = typeof deposits.$inferSelect;
 
 export const depositView = (d: DepositRow) => ({
@@ -35,17 +38,8 @@ export const depositView = (d: DepositRow) => ({
 
 /** Loose match of the sender's bank name against the customer's profile name. */
 function senderMatches(sender: string, firstName: string | null, lastName: string | null) {
-  const plain = (text: string) =>
-    text
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase();
-  const words = new Set(
-    plain(sender)
-      .split(/[^a-z]+/)
-      .filter(Boolean),
-  );
-  const names = [firstName, lastName].filter((n): n is string => !!n).map(plain);
+  const words = nameWords(sender);
+  const names = [firstName, lastName].filter((n): n is string => !!n).map(plainName);
   return names.length > 0 && names.some((n) => words.has(n));
 }
 
@@ -123,7 +117,13 @@ export class DepositsService {
       .where(and(eq(deposits.id, id), eq(deposits.userId, auth.userId)));
     if (!row) throw notFound('deposit_not_found', 'Top-up not found');
     if (row.status !== 'pending') return depositView(row);
-    return depositView((await this.sync(row.reference)) ?? row);
+    try {
+      return depositView((await this.sync(row.reference)) ?? row);
+    } catch (error) {
+      // The provider can't be reached: show what we have, so the customer still sees where to pay.
+      this.logger.warn(`Could not check deposit ${row.reference}: ${(error as Error).message}`);
+      return depositView(row);
+    }
   }
 
   /** Checks a deposit with the provider and credits the wallet once if the money arrived. */
@@ -133,20 +133,13 @@ export class DepositsService {
       this.logger.warn(`Payment for unknown deposit reference ${reference}`);
       return null;
     }
-    if (deposit.status === 'succeeded') return deposit;
+    if (deposit.status !== 'pending') return deposit;
 
     const status = await this.payments.verifyDeposit(reference);
     const { currency } = await this.countries.basics(deposit.countryCode);
-    if (status.status === 'pending') return deposit;
-    if (status.status === 'failed') {
-      if (deposit.status === 'failed') return deposit;
-      const [failed] = await this.db
-        .update(deposits)
-        .set({ status: 'failed', completedAt: new Date() })
-        .where(and(eq(deposits.id, deposit.id), eq(deposits.status, 'pending')))
-        .returning();
-      return failed ?? deposit;
-    }
+    // Not paid yet, or the provider calls the charge abandoned or failed. It stays pending, never failed:
+    // a transfer that lands later must still be credited.
+    if (status.status !== 'success') return deposit;
     if (status.currency !== currency)
       throw new Error(`Deposit ${reference} arrived in ${status.currency}, expected ${currency}`);
 
@@ -159,7 +152,7 @@ export class DepositsService {
 
     const credited = await this.db.transaction(async (tx) => {
       const [locked] = await tx.select().from(deposits).where(eq(deposits.id, deposit.id)).for('update');
-      if (!locked || locked.status === 'succeeded') return null;
+      if (!locked || locked.status !== 'pending') return null;
       await this.ledger.post(tx, {
         key: `deposit:${deposit.id}`,
         kind: 'deposit',
@@ -206,7 +199,13 @@ export class DepositsService {
     const stale = await this.db
       .select({ reference: deposits.reference })
       .from(deposits)
-      .where(and(eq(deposits.status, 'pending'), lt(deposits.expiresAt, new Date())))
+      .where(
+        and(
+          eq(deposits.status, 'pending'),
+          lt(deposits.expiresAt, new Date()),
+          gt(deposits.expiresAt, new Date(Date.now() - RECHECK_DAYS * 86_400_000)),
+        ),
+      )
       .limit(500);
     let stillPending = 0;
     for (const d of stale) {

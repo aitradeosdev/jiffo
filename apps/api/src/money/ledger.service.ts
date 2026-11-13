@@ -22,6 +22,8 @@ const PLATFORM: ReadonlySet<LedgerAccountType> = new Set([
   'provider_fees',
 ]);
 
+type LedgerAccountRow = typeof ledgerAccounts.$inferSelect;
+
 export interface AccountRef {
   type: LedgerAccountType;
   /** The user or errand. Leave out for platform accounts. */
@@ -77,9 +79,15 @@ export class InsufficientFunds extends ApiError {
  */
 @Injectable()
 export class LedgerService {
-  /** Gets or creates the account and locks it for the rest of the transaction. */
-  private async lockAccounts(tx: Tx, refs: AccountRef[], countryCode: string, currency: string) {
+  /**
+   * Gets or creates the accounts. People's and errands' accounts are locked for the rest of the
+   * transaction, because their balance is checked and kept on the row. Platform accounts (revenue,
+   * cash, fees, in transit) are shared by every movement in a country, so they are never locked:
+   * their postings are only appended, and their balance is summed from the postings when needed.
+   */
+  private async accountsFor(tx: Tx, refs: AccountRef[], countryCode: string, currency: string) {
     const wanted = new Map(refs.map((r) => [accountKey(r, countryCode), r]));
+    // ON CONFLICT DO NOTHING never locks an existing row, so this costs shared accounts nothing.
     await tx
       .insert(ledgerAccounts)
       .values(
@@ -94,14 +102,25 @@ export class LedgerService {
         })),
       )
       .onConflictDoNothing({ target: ledgerAccounts.key });
-    // Locking in key order means two transactions touching the same accounts never deadlock.
-    const rows = await tx
-      .select()
-      .from(ledgerAccounts)
-      .where(inArray(ledgerAccounts.key, [...wanted.keys()]))
-      .orderBy(asc(ledgerAccounts.key))
-      .for('update');
-    return new Map(rows.map((r) => [r.key, r]));
+
+    const result = new Map<string, LedgerAccountRow>();
+    const owned = [...wanted].filter(([, r]) => !PLATFORM.has(r.type)).map(([key]) => key);
+    if (owned.length > 0) {
+      // Locking in key order means two transactions touching the same accounts never deadlock.
+      const rows = await tx
+        .select()
+        .from(ledgerAccounts)
+        .where(inArray(ledgerAccounts.key, owned))
+        .orderBy(asc(ledgerAccounts.key))
+        .for('update');
+      for (const row of rows) result.set(row.key, row);
+    }
+    const platform = [...wanted].filter(([, r]) => PLATFORM.has(r.type)).map(([key]) => key);
+    if (platform.length > 0) {
+      const rows = await tx.select().from(ledgerAccounts).where(inArray(ledgerAccounts.key, platform));
+      for (const row of rows) result.set(row.key, row);
+    }
+    return result;
   }
 
   /** Posts the movements once. Returns false if a journal with this key already exists. */
@@ -128,7 +147,7 @@ export class LedgerService {
     if (!journal) return false;
     if (movements.length === 0) return true;
 
-    const accounts = await this.lockAccounts(
+    const accounts = await this.accountsFor(
       tx,
       movements.flatMap((m) => [m.debit, m.credit]),
       input.countryCode,
@@ -146,6 +165,8 @@ export class LedgerService {
     for (const [key, amount] of delta) {
       if (amount === 0) continue;
       const account = accounts.get(key)!;
+      lines.push({ journalId: journal.id, accountId: account.id, amount });
+      if (PLATFORM.has(account.type)) continue;
       const balance = account.balance + (account.normal === 'debit' ? amount : -amount);
       if (balance < 0 && !account.allowNegative) {
         throw new InsufficientFunds(account.type, {
@@ -154,7 +175,6 @@ export class LedgerService {
         });
       }
       await tx.update(ledgerAccounts).set({ balance }).where(eq(ledgerAccounts.id, account.id));
-      lines.push({ journalId: journal.id, accountId: account.id, amount });
     }
     if (lines.reduce((sum, l) => sum + l.amount, 0) !== 0) throw new Error(`Journal ${input.key} does not balance`);
     if (lines.length > 0) await tx.insert(postings).values(lines);
@@ -162,11 +182,23 @@ export class LedgerService {
   }
 
   async balance(tx: Tx, ref: AccountRef, countryCode: string): Promise<number> {
+    const key = accountKey(ref, countryCode);
+    if (!PLATFORM.has(ref.type)) {
+      const [row] = await tx
+        .select({ balance: ledgerAccounts.balance })
+        .from(ledgerAccounts)
+        .where(eq(ledgerAccounts.key, key));
+      return row?.balance ?? 0;
+    }
     const [row] = await tx
-      .select({ balance: ledgerAccounts.balance })
+      .select({ total: sql<string>`coalesce(sum(${postings.amount}), 0)`, normal: ledgerAccounts.normal })
       .from(ledgerAccounts)
-      .where(eq(ledgerAccounts.key, accountKey(ref, countryCode)));
-    return row?.balance ?? 0;
+      .leftJoin(postings, eq(postings.accountId, ledgerAccounts.id))
+      .where(eq(ledgerAccounts.key, key))
+      .groupBy(ledgerAccounts.normal);
+    if (!row) return 0;
+    const total = Number(row.total);
+    return row.normal === 'debit' ? total : -total;
   }
 
   /** Total of every posting ever made. A balanced ledger always answers 0. */

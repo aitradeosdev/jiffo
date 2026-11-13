@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, desc, eq, gte, inArray, isNull, lt, or, sql, sum } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, sql, sum } from 'drizzle-orm';
 import { formatNaira } from '@jiffo/shared';
 import { DB, type Db } from '../db/database.module';
 import { payoutAccounts, payouts, users } from '../db/schema';
@@ -10,12 +10,16 @@ import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { AuthContext } from '../auth/auth.types';
 import { conflict, unprocessable } from '../common/errors';
+import { nameWords, plainName } from '../common/names';
 import { LedgerService, transfer } from './ledger.service';
 import { WalletService } from './wallet.service';
 
 type PayoutRow = typeof payouts.$inferSelect;
 const BANKS_TTL_MS = 24 * 3_600_000;
-const RETRY_AFTER_MS = 5 * 60_000;
+/** An instant withdrawal that didn't reach the provider is retried after a minute. */
+const RETRY_AFTER_MS = 60_000;
+/** A transfer with no news for this long is checked with the provider. */
+const CHECK_AFTER_MS = 5 * 60_000;
 
 const mask = (accountNumber: string) => `******${accountNumber.slice(-4)}`;
 
@@ -31,19 +35,6 @@ export const payoutView = (p: PayoutRow) => ({
   sentAt: p.sentAt,
   completedAt: p.completedAt,
 });
-
-/** Lower-case words with accents removed, so "Adé" on a profile matches "ADE" at the bank. */
-const plain = (text: string) =>
-  text
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-const words = (name: string) =>
-  new Set(
-    plain(name)
-      .split(/[^a-z]+/)
-      .filter(Boolean),
-  );
 
 /** Agents' payout accounts and withdrawals. Customers never withdraw in the app. */
 @Injectable()
@@ -107,8 +98,8 @@ export class PayoutsService {
       if (error instanceof PaystackError) throw unprocessable('account_not_found', 'Check the account number and bank');
       throw error;
     }
-    const held = words(accountName);
-    if (!held.has(plain(me.firstName)) || !held.has(plain(me.lastName))) {
+    const held = nameWords(accountName);
+    if (!held.has(plainName(me.firstName)) || !held.has(plainName(me.lastName))) {
       throw unprocessable('account_name_mismatch', 'The account must be in your own name', { accountName });
     }
 
@@ -242,19 +233,23 @@ export class PayoutsService {
       // The provider may have taken the transfer and only the answer was lost. A retry would then be
       // refused as a duplicate reference, so ask about this reference before giving up.
       const known = await this.payments.verifyTransfer(payout.reference).catch(() => null);
+      // The provider never took it and said why (bad recipient, no balance, transfers off): give the money back.
+      if (!known && error instanceof PaystackError && error.status >= 400 && error.status < 500) {
+        return this.fail(payout.id, error.message);
+      }
       if (!known) {
         // Left as requested: the daily run tries again with the same reference, so the bank pays once.
         this.logger.warn(`Payout ${payout.id} not sent yet: ${(error as Error).message}`);
         return payout;
       }
-      result = { status: known.status, transferCode: null, reason: known.reason };
+      result = { status: known.status, transferCode: null, reason: known.reason, feeKobo: known.feeKobo };
     }
     const [sent] = await this.db
       .update(payouts)
       .set({ status: 'processing', sentAt: new Date(), providerTransferCode: result.transferCode })
       .where(and(eq(payouts.id, payout.id), eq(payouts.status, 'requested')))
       .returning();
-    if (result.status === 'success') return this.succeed(payout.id);
+    if (result.status === 'success') return this.succeed(payout.id, result.feeKobo ?? 0);
     if (result.status === 'failed') return this.fail(payout.id, result.reason ?? 'failed');
     return sent ?? payout;
   }
@@ -266,13 +261,14 @@ export class PayoutsService {
       this.logger.warn(`Transfer for unknown payout reference ${reference}`);
       return null;
     }
-    const { status, reason } = await this.payments.verifyTransfer(reference);
-    if (status === 'success') return this.succeed(payout.id);
+    const { status, reason, feeKobo } = await this.payments.verifyTransfer(reference);
+    if (status === 'success') return this.succeed(payout.id, feeKobo ?? 0);
     if (status === 'failed') return this.fail(payout.id, reason ?? 'failed');
     return payout;
   }
 
-  private async succeed(payoutId: string) {
+  /** The bank paid. The provider's own transfer fee, when it reports one, is booked so reconciliation stays exact. */
+  private async succeed(payoutId: string, providerFeeKobo: number) {
     const done = await this.db.transaction(async (tx) => {
       const [payout] = await tx.select().from(payouts).where(eq(payouts.id, payoutId)).for('update');
       if (!payout || payout.status === 'succeeded' || payout.status === 'failed') return null;
@@ -284,6 +280,7 @@ export class PayoutsService {
         currency,
         movements: [
           { debit: { type: 'payouts_in_transit' }, credit: { type: 'provider_cash' }, amountKobo: payout.sendKobo },
+          { debit: { type: 'provider_fees' }, credit: { type: 'provider_cash' }, amountKobo: providerFeeKobo },
         ],
       });
       const [row] = await tx
@@ -342,25 +339,39 @@ export class PayoutsService {
     return done ?? (await this.db.select().from(payouts).where(eq(payouts.id, payoutId)))[0] ?? null;
   }
 
-  /** The daily run: sends the free scheduled withdrawals and retries instant ones that never reached the provider. */
+  /** The daily run: sends the free scheduled withdrawals, then catches up on anything else. */
   async runDaily() {
-    await this.wallet.releaseDue();
-    const due = await this.db
+    const scheduled = await this.db
+      .select({ id: payouts.id })
+      .from(payouts)
+      .where(and(eq(payouts.status, 'requested'), eq(payouts.speed, 'scheduled')))
+      .limit(5_000);
+    for (const p of scheduled) await this.send(p.id);
+    return { scheduled: scheduled.length, ...(await this.retryPending()) };
+  }
+
+  /**
+   * Every few minutes: releases held earnings that are due, retries instant withdrawals that never
+   * reached the provider, and asks again about transfers that went quiet.
+   */
+  async retryPending() {
+    const released = await this.wallet.releaseDue();
+    const instant = await this.db
       .select({ id: payouts.id })
       .from(payouts)
       .where(
         and(
           eq(payouts.status, 'requested'),
-          or(eq(payouts.speed, 'scheduled'), lt(payouts.createdAt, new Date(Date.now() - RETRY_AFTER_MS))),
+          eq(payouts.speed, 'instant'),
+          lt(payouts.createdAt, new Date(Date.now() - RETRY_AFTER_MS)),
         ),
       )
       .limit(1_000);
-    for (const p of due) await this.send(p.id);
-    // Transfers that went quiet: ask the provider again.
+    for (const p of instant) await this.send(p.id);
     const stuck = await this.db
       .select({ reference: payouts.reference })
       .from(payouts)
-      .where(and(eq(payouts.status, 'processing'), lt(payouts.sentAt, new Date(Date.now() - RETRY_AFTER_MS))))
+      .where(and(eq(payouts.status, 'processing'), lt(payouts.sentAt, new Date(Date.now() - CHECK_AFTER_MS))))
       .limit(1_000);
     for (const p of stuck) {
       try {
@@ -369,6 +380,6 @@ export class PayoutsService {
         this.logger.warn(`Could not check payout ${p.reference}: ${(error as Error).message}`);
       }
     }
-    return { sent: due.length, checked: stuck.length };
+    return { released, retried: instant.length, checked: stuck.length };
   }
 }

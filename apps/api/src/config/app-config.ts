@@ -32,6 +32,8 @@ const EnvSchema = z
     /** When the free daily withdrawals go out, and when the ledger is checked against the provider (UTC). */
     PAYOUT_CRON: z.string().default('0 15 * * *'),
     RECONCILE_CRON: z.string().default('30 23 * * *'),
+    /** Releases due earnings, retries instant withdrawals and checks quiet transfers. */
+    PAYOUT_RETRY_CRON: z.string().default('*/5 * * * *'),
     /** Errand timers (item lock, auto-release, unreachable, urgent expiry). memory is for tests only. */
     TIMER_PROVIDER: z.enum(['bullmq', 'memory']).default('bullmq'),
     REDIS_URL: z.string().url().default('redis://localhost:6379'),

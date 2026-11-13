@@ -11,13 +11,20 @@ import {
 import { DB, type Db, type Tx } from '../db/database.module';
 import { earningHolds, errands, journalEntries, ledgerAccounts, postings, type LedgerAccountType } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
-import { conflict, notFound } from '../common/errors';
+import { ApiError, conflict, notFound } from '../common/errors';
 import type { AuthContext } from '../auth/auth.types';
 import { InsufficientFunds, LedgerService, accountKey, transfer, type AccountRef } from './ledger.service';
 
 type ErrandRow = typeof errands.$inferSelect;
 
 const HOUR_MS = 3_600_000;
+
+/** An agent tried to accept, but the customer's wallet no longer covers the fee and service fee. */
+export class CustomerFundsLow extends ApiError {
+  constructor() {
+    super(409, 'customer_funds_low', "The customer's wallet can't cover this errand yet. Try another errand.");
+  }
+}
 const wallet = (userId: string): AccountRef => ({ type: 'customer_wallet', ownerId: userId });
 const available = (userId: string): AccountRef => ({ type: 'agent_available', ownerId: userId });
 const held = (userId: string): AccountRef => ({ type: 'agent_held', ownerId: userId });
@@ -93,12 +100,7 @@ export class WalletService {
           movements: [transfer(customer, feeEscrow(after.id), after.feeKobo + after.serviceFeeKobo)],
         });
       } catch (error) {
-        if (error instanceof InsufficientFunds) {
-          throw conflict(
-            'customer_funds_low',
-            "The customer's wallet can't cover this errand yet. Try another errand.",
-          );
-        }
+        if (error instanceof InsufficientFunds) throw new CustomerFundsLow();
         throw error;
       }
       return;
@@ -275,18 +277,26 @@ export class WalletService {
     if (auth.app === 'customer') {
       return { currency, balanceKobo: await this.ledger.balance(this.db, wallet(auth.userId), auth.countryCode) };
     }
-    await this.releaseDue(auth.userId);
-    const [availableKobo, heldKobo, upcoming] = await Promise.all([
+    // Read only: earnings whose hold has ended count as available here, and are moved in the ledger by
+    // the recurring job or when the agent withdraws.
+    const [availableKobo, heldKobo, holds] = await Promise.all([
       this.ledger.balance(this.db, available(auth.userId), auth.countryCode),
       this.ledger.balance(this.db, held(auth.userId), auth.countryCode),
       this.db
         .select({ amountKobo: earningHolds.amountKobo, availableAt: earningHolds.availableAt })
         .from(earningHolds)
         .where(and(eq(earningHolds.userId, auth.userId), isNull(earningHolds.releasedAt)))
-        .orderBy(asc(earningHolds.availableAt))
-        .limit(20),
+        .orderBy(asc(earningHolds.availableAt)),
     ]);
-    return { currency, availableKobo, heldKobo, tier: await this.agentTier(auth.userId), upcoming };
+    const now = Date.now();
+    const dueKobo = holds.filter((h) => h.availableAt.getTime() <= now).reduce((sum, h) => sum + h.amountKobo, 0);
+    return {
+      currency,
+      availableKobo: availableKobo + dueKobo,
+      heldKobo: heldKobo - dueKobo,
+      tier: await this.agentTier(auth.userId),
+      upcoming: holds.filter((h) => h.availableAt.getTime() > now).slice(0, 20),
+    };
   }
 
   /** The person's money movements, newest first. Amounts are positive for money in, negative for money out. */

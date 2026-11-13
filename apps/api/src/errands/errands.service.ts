@@ -18,7 +18,7 @@ import type { AuthContext } from '../auth/auth.types';
 import { decrypt, encrypt, numericCode, safeEqual } from '../common/crypto';
 import { ApiError, badRequest, conflict, locked, notFound, unprocessable } from '../common/errors';
 import { ERRAND_TIMERS, type ErrandTimerJob, type ErrandTimers } from '../timers/errand-timers';
-import { WalletService } from '../money/wallet.service';
+import { CustomerFundsLow, WalletService } from '../money/wallet.service';
 import { ErrandNotifier, type TransitionResult } from './errand-notifier';
 import { EVENT_DATA, type CreateErrandInput, type ErrandEventInput } from './errand-input';
 import {
@@ -277,9 +277,7 @@ export class ErrandsService implements OnModuleInit {
       return await this.runTransition(errandId, auth, input);
     } catch (error) {
       // An agent tried to accept but the customer's wallet no longer covers it: tell the customer.
-      const code =
-        error instanceof ApiError ? (error.getResponse() as { error?: { code?: string } }).error?.code : undefined;
-      if (code === 'customer_funds_low') await this.notifier.customerFundsLow(errandId);
+      if (error instanceof CustomerFundsLow) await this.notifier.customerFundsLow(errandId);
       throw error;
     }
   }

@@ -17,6 +17,7 @@ export interface TransitionResult {
 }
 
 type Party = 'customer' | 'agent';
+const FUNDS_LOW_EVERY_MS = 10 * 60_000;
 interface Note {
   /** Who gets the push notification. */
   to: Party;
@@ -164,6 +165,7 @@ function noteFor(event: ErrandEvent, r: TransitionResult): Note | null {
 @Injectable()
 export class ErrandNotifier {
   private readonly logger = new Logger(ErrandNotifier.name);
+  private readonly fundsLowSentAt = new Map<string, number>();
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -172,18 +174,29 @@ export class ErrandNotifier {
     private readonly push: PushService,
   ) {}
 
-  /** An agent is ready, but the wallet no longer covers the errand. */
+  /**
+   * An agent is ready, but the wallet no longer covers the errand. Sent at most once per errand every
+   * 10 minutes, however many agents try, and it never turns the agent's answer into a different error.
+   */
   async customerFundsLow(errandId: string) {
-    const [errand] = await this.db
-      .select({ customerId: errands.customerId })
-      .from(errands)
-      .where(eq(errands.id, errandId));
-    if (!errand) return;
-    await this.push.notifyUser(errand.customerId, 'customer', {
-      title: 'Top up to get your agent',
-      body: 'An agent wants to take your errand, but your wallet is short. Top up and they can accept.',
-      data: { type: 'wallet.low', errandId },
-    });
+    const last = this.fundsLowSentAt.get(errandId) ?? 0;
+    if (Date.now() - last < FUNDS_LOW_EVERY_MS) return;
+    if (this.fundsLowSentAt.size > 10_000) this.fundsLowSentAt.clear();
+    this.fundsLowSentAt.set(errandId, Date.now());
+    try {
+      const [errand] = await this.db
+        .select({ customerId: errands.customerId })
+        .from(errands)
+        .where(eq(errands.id, errandId));
+      if (!errand) return;
+      await this.push.notifyUser(errand.customerId, 'customer', {
+        title: 'Top up to get your agent',
+        body: 'An agent wants to take your errand, but your wallet is short. Top up and they can accept.',
+        data: { type: 'wallet.low', errandId },
+      });
+    } catch (error) {
+      this.logger.warn(`Low-funds push for ${errandId} failed: ${(error as Error).message}`);
+    }
   }
 
   async transitioned(r: TransitionResult) {

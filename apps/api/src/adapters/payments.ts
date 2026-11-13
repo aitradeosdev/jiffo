@@ -20,6 +20,14 @@ export interface DepositStatus {
 
 export type TransferStatus = 'pending' | 'success' | 'failed';
 
+export interface TransferResult {
+  status: TransferStatus;
+  transferCode: string | null;
+  reason?: string;
+  /** The provider's own fee for the transfer, taken from its balance on top of the amount. */
+  feeKobo?: number;
+}
+
 /** A verified webhook, reduced to what the core needs. The core always re-checks with the provider. */
 export type PaymentWebhook =
   | { kind: 'deposit'; eventKey: string; reference: string; raw: Record<string, unknown> }
@@ -54,8 +62,8 @@ export interface PaymentsAdapter {
     amountKobo: number;
     recipientCode: string;
     reason: string;
-  }): Promise<{ status: TransferStatus; transferCode: string | null; reason?: string }>;
-  verifyTransfer(reference: string): Promise<{ status: TransferStatus; reason?: string }>;
+  }): Promise<TransferResult>;
+  verifyTransfer(reference: string): Promise<{ status: TransferStatus; reason?: string; feeKobo?: number }>;
   /** Cash the provider holds for us, for the daily reconciliation. */
   balance(currency: string): Promise<number>;
   /** Checks the signature and returns the event, or null when the signature is wrong. */
@@ -109,6 +117,10 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
   ) {}
 
   private async call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+    return (await this.callWithMeta<T>(method, path, body)).data;
+  }
+
+  private async callWithMeta<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<PaystackEnvelope<T>> {
     let res: Response;
     try {
       res = await this.fetchImpl(`${this.baseUrl}${path}`, {
@@ -120,11 +132,9 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
       throw unavailable('payments_unavailable', 'Payments are not reachable right now. Try again shortly.');
     }
     const json = (await res.json().catch(() => null)) as PaystackEnvelope<T> | null;
-    if (!res.ok || !json?.status) {
-      const error = new PaystackError(res.status, json?.message ?? `Paystack answered ${res.status}`);
-      throw error;
-    }
-    return json.data;
+    if (!res.ok || !json?.status)
+      throw new PaystackError(res.status, json?.message ?? `Paystack answered ${res.status}`);
+    return json;
   }
 
   async createTransferDeposit(input: { reference: string; amountKobo: number; email: string; expiresAt: Date }) {
@@ -175,14 +185,12 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
     const banks: Bank[] = [];
     let next: string | null | undefined;
     do {
-      const query = `/bank?country=nigeria&currency=NGN&perPage=100&use_cursor=true${next ? `&next=${encodeURIComponent(next)}` : ''}`;
-      const res = await this.fetchImpl(`${this.baseUrl}${query}`, {
-        headers: { authorization: `Bearer ${this.secretKey}` },
-      });
-      const json = (await res.json()) as PaystackEnvelope<Array<{ code: string; name: string; active: boolean }>>;
-      if (!res.ok || !json.status) throw new PaystackError(res.status, json.message);
-      banks.push(...json.data.filter((b) => b.active).map((b) => ({ code: b.code, name: b.name })));
-      next = json.meta?.next;
+      const page = await this.callWithMeta<Array<{ code: string; name: string; active: boolean }>>(
+        'GET',
+        `/bank?country=nigeria&currency=NGN&perPage=100&use_cursor=true${next ? `&next=${encodeURIComponent(next)}` : ''}`,
+      );
+      banks.push(...page.data.filter((b) => b.active).map((b) => ({ code: b.code, name: b.name })));
+      next = page.meta?.next;
     } while (next);
     return banks;
   }
@@ -207,19 +215,31 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
   }
 
   async transfer(input: { reference: string; amountKobo: number; recipientCode: string; reason: string }) {
-    const data = await this.call<{ status: string; transfer_code?: string }>('POST', '/transfer', {
-      source: 'balance',
-      amount: input.amountKobo,
-      recipient: input.recipientCode,
-      reference: input.reference,
-      reason: input.reason,
-    });
-    return { status: mapTransfer(data.status), transferCode: data.transfer_code ?? null, reason: data.status };
+    const data = await this.call<{ status: string; transfer_code?: string; fee_charged?: number }>(
+      'POST',
+      '/transfer',
+      {
+        source: 'balance',
+        amount: input.amountKobo,
+        recipient: input.recipientCode,
+        reference: input.reference,
+        reason: input.reason,
+      },
+    );
+    return {
+      status: mapTransfer(data.status),
+      transferCode: data.transfer_code ?? null,
+      reason: data.status,
+      feeKobo: data.fee_charged,
+    };
   }
 
   async verifyTransfer(reference: string) {
-    const data = await this.call<{ status: string }>('GET', `/transfer/verify/${encodeURIComponent(reference)}`);
-    return { status: mapTransfer(data.status), reason: data.status };
+    const data = await this.call<{ status: string; fee_charged?: number }>(
+      'GET',
+      `/transfer/verify/${encodeURIComponent(reference)}`,
+    );
+    return { status: mapTransfer(data.status), reason: data.status, feeKobo: data.fee_charged };
   }
 
   async balance(currency: string) {
@@ -258,6 +278,9 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
   readonly accounts = new Map<string, string>();
   /** The status the next transfer call answers with. */
   nextTransferStatus: TransferStatus = 'pending';
+  /** When set, the next transfer call is refused outright, as Paystack does for a bad recipient. */
+  rejectNextTransfer: string | null = null;
+  transferFeeKobo = 1_000;
   providerBalanceKobo = 0;
   feeBps = 150;
 
@@ -325,18 +348,28 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
 
   async transfer(input: { reference: string; amountKobo: number; recipientCode: string }) {
     const existing = this.transfers.get(input.reference);
-    if (existing) return { status: existing.status, transferCode: `TRF_${input.reference}` };
+    if (existing) throw new PaystackError(400, 'Duplicate Transaction Reference');
+    if (this.rejectNextTransfer) {
+      const message = this.rejectNextTransfer;
+      this.rejectNextTransfer = null;
+      throw new PaystackError(400, message);
+    }
     const status = this.nextTransferStatus;
     this.transfers.set(input.reference, { amountKobo: input.amountKobo, recipientCode: input.recipientCode, status });
-    if (status !== 'failed') this.providerBalanceKobo -= input.amountKobo;
-    return { status, transferCode: `TRF_${input.reference}` };
+    if (status !== 'failed') this.providerBalanceKobo -= input.amountKobo + this.transferFeeKobo;
+    return {
+      status,
+      transferCode: `TRF_${input.reference}`,
+      feeKobo: status === 'success' ? this.transferFeeKobo : undefined,
+    };
   }
 
   /** The bank settles (or bounces) a transfer. Returns the signed webhook. */
   settleTransfer(reference: string, status: 'success' | 'failed') {
     const transfer = this.transfers.get(reference);
     if (!transfer) throw new Error(`No fake transfer ${reference}`);
-    if (status === 'failed' && transfer.status !== 'failed') this.providerBalanceKobo += transfer.amountKobo;
+    if (status === 'failed' && transfer.status !== 'failed')
+      this.providerBalanceKobo += transfer.amountKobo + this.transferFeeKobo;
     transfer.status = status;
     return this.webhook(status === 'success' ? 'transfer.success' : 'transfer.failed', {
       id: Math.floor(Math.random() * 1e9),
@@ -347,7 +380,7 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
   async verifyTransfer(reference: string) {
     const t = this.transfers.get(reference);
     if (!t) throw new PaystackError(404, 'Transfer not found');
-    return { status: t.status };
+    return { status: t.status, feeKobo: t.status === 'success' ? this.transferFeeKobo : undefined };
   }
 
   async balance() {

@@ -352,7 +352,10 @@ export const ledgerAccounts = pgTable(
     ownerId: uuid('owner_id'),
     normal: text('normal', { enum: ['debit', 'credit'] }).notNull(),
     allowNegative: boolean('allow_negative').notNull().default(false),
-    /** Kept in step with the postings in the same transaction, in the account's normal direction. */
+    /**
+     * For people's and errands' accounts: kept in step with the postings in the same transaction, in the
+     * account's normal direction. Platform accounts stay at 0 here; their balance is summed from postings.
+     */
     balance: kobo('balance').notNull().default(0),
     createdAt: createdAt(),
   },

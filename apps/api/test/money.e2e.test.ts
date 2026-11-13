@@ -3,6 +3,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { deposits, earningHolds, ledgerAccounts, payouts } from '../src/db/schema';
 import { WalletService } from '../src/money/wallet.service';
+import { LedgerService } from '../src/money/ledger.service';
 import {
   act,
   balanceOf,
@@ -32,8 +33,7 @@ describe('money', () => {
   afterAll(() => t.close());
 
   const trialBalance = () => t.app.get(WalletService).trialBalance();
-  const revenue = async () =>
-    (await t.db.select().from(ledgerAccounts).where(eq(ledgerAccounts.key, 'platform_revenue:NG')))[0]?.balance ?? 0;
+  const revenue = () => t.app.get(LedgerService).balance(t.db, { type: 'platform_revenue' }, 'NG');
   const referenceOf = async (depositId: string) =>
     (await t.db.select().from(deposits).where(eq(deposits.id, depositId)))[0]!.reference;
   const runToDelivered = async (id: string) => {
@@ -101,6 +101,48 @@ describe('money', () => {
       expect((await balanceOf(t, person)).balanceKobo).toBe(750_000);
       const [row] = await t.db.select().from(deposits).where(eq(deposits.id, res.body.id));
       expect(row!.senderMismatch).toBe(true);
+    });
+
+    it('keeps an abandoned top-up open, so a late transfer is still credited', async () => {
+      const person = await signIn(t, 'customer');
+      const res = await request(t.http)
+        .post('/v1/wallet/deposits')
+        .set(person.headers)
+        .send({ amountKobo: 300_000 })
+        .expect(201);
+      const reference = await referenceOf(res.body.id);
+      t.payments.deposits.get(reference)!.status = 'failed'; // Paystack calls the unpaid charge abandoned
+      expect(
+        (await request(t.http).get(`/v1/wallet/deposits/${res.body.id}`).set(person.headers).expect(200)).body.status,
+      ).toBe('pending');
+
+      // The account number expires, the transfer lands late and its webhook is lost.
+      await t.db
+        .update(deposits)
+        .set({ expiresAt: new Date(Date.now() - 60_000) })
+        .where(eq(deposits.id, res.body.id));
+      t.payments.pay(reference);
+      await t.jobs.run('reconcile.daily');
+      expect((await balanceOf(t, person)).balanceKobo).toBe(300_000);
+    });
+
+    it('still shows a pending top-up when the provider is unreachable', async () => {
+      const person = await signIn(t, 'customer');
+      const res = await request(t.http)
+        .post('/v1/wallet/deposits')
+        .set(person.headers)
+        .send({ amountKobo: 200_000 })
+        .expect(201);
+      const verify = t.payments.verifyDeposit.bind(t.payments);
+      t.payments.verifyDeposit = async () => {
+        throw new Error('ECONNRESET');
+      };
+      try {
+        const polled = await request(t.http).get(`/v1/wallet/deposits/${res.body.id}`).set(person.headers).expect(200);
+        expect(polled.body).toMatchObject({ status: 'pending', accountNumber: res.body.accountNumber });
+      } finally {
+        t.payments.verifyDeposit = verify;
+      }
     });
 
     it('checks the amount and keeps deposits to the customer app', async () => {
@@ -224,6 +266,13 @@ describe('money', () => {
       expect(t.push.sent.filter((p) => p.token === 'short-wallet-1').at(-1)).toMatchObject({
         title: 'Top up to get your agent',
       });
+      // More agents trying does not flood the customer.
+      const other = await signIn(t, 'agent');
+      await act(t, other, second.id, 'accept', {}, 409);
+      await act(t, agent, second.id, 'accept', {}, 409);
+      expect(
+        t.push.sent.filter((p) => p.token === 'short-wallet-1' && p.title === 'Top up to get your agent'),
+      ).toHaveLength(1);
       expect((await request(t.http).get(`/v1/errands/${second.id}`).set(buyer.headers).expect(200)).body.status).toBe(
         'requested',
       );
@@ -322,6 +371,12 @@ describe('money', () => {
       await t.db.update(earningHolds).set({ availableAt: due }).where(eq(earningHolds.userId, earner.userId));
       wallet = await balanceOf(t, earner);
       expect(wallet).toMatchObject({ availableKobo: 2 * (FEE - COMMISSION), heldKobo: 0, upcoming: [] });
+      // Reading the wallet changes nothing; the recurring job moves the money in the ledger.
+      const holds = () => t.db.select().from(earningHolds).where(eq(earningHolds.userId, earner.userId));
+      expect((await holds()).every((h) => h.releasedAt === null)).toBe(true);
+      await t.jobs.run('payouts.retry');
+      expect((await holds()).every((h) => h.releasedAt !== null)).toBe(true);
+      expect(await balanceOf(t, earner)).toMatchObject({ availableKobo: 2 * (FEE - COMMISSION), heldKobo: 0 });
       expect(await trialBalance()).toBe(0);
     });
 
@@ -382,9 +437,13 @@ describe('money', () => {
         amountKobo: 90_000,
         recipientCode: 'RCP_058_0123456789',
       });
+      const fees = () => t.app.get(LedgerService).balance(t.db, { type: 'provider_fees' }, 'NG');
+      const feesBefore = await fees();
       await deliverWebhook(t, t.payments.settleTransfer(row!.reference, 'success')).expect(200);
       const [done] = await t.db.select().from(payouts).where(eq(payouts.id, res.body.id));
       expect(done!.status).toBe('succeeded');
+      // Paystack's own transfer fee is booked, so reconciliation stays exact.
+      expect((await fees()) - feesBefore).toBe(t.payments.transferFeeKobo);
       expect(await trialBalance()).toBe(0);
     });
 
@@ -407,6 +466,44 @@ describe('money', () => {
       }
       expect((await balanceOf(t, earner)).availableKobo).toBe(start - 30_000);
       expect([...t.payments.transfers.values()].filter((x) => x.amountKobo === 20_000)).toHaveLength(1);
+    });
+
+    it('gives the money back when the provider refuses a transfer outright', async () => {
+      const start = (await balanceOf(t, earner)).availableKobo;
+      t.payments.rejectNextTransfer = 'Transfer recipient is no longer valid';
+      const res = await request(t.http)
+        .post('/v1/wallet/withdrawals')
+        .set(earner.headers)
+        .send({ amountKobo: 25_000, speed: 'instant' })
+        .expect(201);
+      expect(res.body).toMatchObject({ status: 'failed', failureReason: 'Transfer recipient is no longer valid' });
+      expect((await balanceOf(t, earner)).availableKobo).toBe(start);
+    });
+
+    it('retries an instant withdrawal within minutes when the provider was unreachable', async () => {
+      const transfer = t.payments.transfer.bind(t.payments);
+      t.payments.transfer = async () => {
+        throw new Error('ETIMEDOUT');
+      };
+      let id = '';
+      try {
+        const res = await request(t.http)
+          .post('/v1/wallet/withdrawals')
+          .set(earner.headers)
+          .send({ amountKobo: 20_000, speed: 'instant' })
+          .expect(201);
+        expect(res.body.status).toBe('requested');
+        id = res.body.id;
+      } finally {
+        t.payments.transfer = transfer;
+      }
+      await t.db
+        .update(payouts)
+        .set({ createdAt: new Date(Date.now() - 2 * 60_000) })
+        .where(eq(payouts.id, id));
+      await t.jobs.run('payouts.retry');
+      const [row] = await t.db.select().from(payouts).where(eq(payouts.id, id));
+      expect(row!.status).toBe('processing');
     });
 
     it('gives the full amount back, fee included, when the bank bounces it', async () => {
@@ -466,12 +563,40 @@ describe('money', () => {
   });
 
   describe('reconciliation', () => {
-    it('finds no new gap when the ledger and the provider agree', async () => {
-      const [first] = (await t.jobs.run('reconcile.daily')) as Array<{ differenceKobo: number }>;
+    it('finds no new gap when the ledger and the provider agree, payouts included', async () => {
+      const run = async () =>
+        ((await t.jobs.run('reconcile.daily')) as Array<{ differenceKobo: number }>)[0]!.differenceKobo;
+      const first = await run();
       const buyer = await signIn(t, 'customer');
       await fund(t, buyer, 750_000);
-      const [second] = (await t.jobs.run('reconcile.daily')) as Array<{ differenceKobo: number }>;
-      expect(second!.differenceKobo).toBe(first!.differenceKobo);
+      expect(await run()).toBe(first);
+
+      // A whole payout: requested, sent, confirmed. The provider's transfer fee is accounted for.
+      const payee = await signIn(t, 'agent', { firstName: 'Ngozi' });
+      await request(t.http).patch('/v1/me').set(payee.headers).send({ lastName: 'Eze' }).expect(200);
+      t.payments.accounts.set('044:2222222222', 'EZE NGOZI');
+      await request(t.http)
+        .put('/v1/payout-account')
+        .set(payee.headers)
+        .send({ bankCode: '044', accountNumber: '2222222222' })
+        .expect(200);
+      const errand = await createErrand(t, buyer);
+      await act(t, payee, errand.id, 'accept');
+      await act(t, payee, errand.id, 'start');
+      await act(t, payee, errand.id, 'mark_delivered');
+      await act(t, payee, errand.id, 'confirm_pin', { pin: await pin(buyer, errand.id) });
+      await t.db
+        .update(earningHolds)
+        .set({ availableAt: new Date(Date.now() - 1000) })
+        .where(eq(earningHolds.userId, payee.userId));
+      const out = await request(t.http)
+        .post('/v1/wallet/withdrawals')
+        .set(payee.headers)
+        .send({ amountKobo: 100_000, speed: 'instant' })
+        .expect(201);
+      const [row] = await t.db.select().from(payouts).where(eq(payouts.id, out.body.id));
+      await deliverWebhook(t, t.payments.settleTransfer(row!.reference, 'success')).expect(200);
+      expect(await run()).toBe(first);
       expect(await trialBalance()).toBe(0);
     });
   });
