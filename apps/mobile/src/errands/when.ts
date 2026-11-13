@@ -22,3 +22,20 @@ export const staleSchedule = (scheduledFor: string | null) => !!scheduledFor && 
 /** A sent errand's schedule, while it is still ahead. */
 export const upcoming = (scheduledFor: string | null) =>
   scheduledFor && new Date(scheduledFor).getTime() > Date.now() ? scheduledFor : null;
+
+/** "Today, 6:12 PM", "Yesterday, 6:12 PM" or "4 Nov, 11:40 AM", for lists. */
+export function shortWhen(iso: string) {
+  const at = new Date(iso);
+  const time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return `${dayLabel(at)}, ${time}`;
+}
+
+/** "Today", "Yesterday" or "4 Nov", for grouping by day. */
+export function dayLabel(at: Date) {
+  const days = Math.round((startOfDay(new Date()) - startOfDay(at)) / 86_400_000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();

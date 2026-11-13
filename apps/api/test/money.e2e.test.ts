@@ -215,6 +215,18 @@ describe('money', () => {
       expect((await balanceOf(t, buyer)).balanceKobo).toBe(1_000_000 - FEE - SERVICE);
       const view = await request(t.http).get(`/v1/errands/${errand.id}`).set(buyer.headers).expect(200);
       expect(view.body.held).toEqual({ feeKobo: FEE + SERVICE, itemsKobo: 0 });
+      // The wallet shows the same money as held for this errand, and its movement names the errand.
+      const summary = await balanceOf(t, buyer);
+      expect(summary).toMatchObject({
+        heldKobo: FEE + SERVICE,
+        holding: [{ errandId: errand.id, heldKobo: FEE + SERVICE }],
+      });
+      const moves = (await request(t.http).get('/v1/wallet/transactions').set(buyer.headers).expect(200)).body;
+      expect(moves[0]).toMatchObject({
+        kind: 'fee_lock',
+        errandId: errand.id,
+        detail: 'Pick up a parcel from the front desk',
+      });
       await act(t, agent, errand.id, 'mark_delivered');
       await act(t, agent, errand.id, 'confirm_pin', { pin: await pin(buyer, errand.id) });
 

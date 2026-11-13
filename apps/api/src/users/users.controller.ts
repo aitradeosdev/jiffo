@@ -1,8 +1,8 @@
 import { Body, Controller, Get, Inject, Patch, UseGuards } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { DB, type Db } from '../db/database.module';
-import { users } from '../db/schema';
+import { errandEvents, errandRatings, errands, users } from '../db/schema';
 import { AuthGuard, CurrentAuth } from '../auth/auth.guard';
 import { publicUser } from '../auth/auth.service';
 import type { AuthContext } from '../auth/auth.types';
@@ -29,6 +29,39 @@ export class UsersController {
     const [user] = await this.db.select().from(users).where(eq(users.id, auth.userId));
     if (!user) throw notFound('user_not_found', 'Account not found');
     return publicUser(user);
+  }
+
+  /** Rating from the other side, finished errands and disputes, for the account screen. */
+  @Get('stats')
+  async stats(@CurrentAuth() auth: AuthContext) {
+    const mine = auth.app === 'customer' ? eq(errands.customerId, auth.userId) : eq(errands.agentId, auth.userId);
+    const [[rating], [done], [disputes]] = await Promise.all([
+      this.db
+        .select({ avg: sql<string | null>`avg(${errandRatings.stars})`, n: sql<number>`count(*)::int` })
+        .from(errandRatings)
+        .where(
+          and(
+            eq(errandRatings.rateeId, auth.userId),
+            // Rated in this app's role: agents rate customers, customers rate agents.
+            eq(errandRatings.raterRole, auth.app === 'customer' ? 'agent' : 'customer'),
+          ),
+        ),
+      this.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(errands)
+        .where(and(mine, eq(errands.status, 'completed'))),
+      this.db
+        .select({ n: sql<number>`count(distinct ${errandEvents.errandId})::int` })
+        .from(errandEvents)
+        .innerJoin(errands, eq(errands.id, errandEvents.errandId))
+        .where(and(mine, eq(errandEvents.event, 'open_dispute'))),
+    ]);
+    return {
+      ratingAvg: rating?.avg ? Math.round(Number(rating.avg) * 10) / 10 : null,
+      ratingCount: rating?.n ?? 0,
+      errandsCompleted: done?.n ?? 0,
+      disputes: disputes?.n ?? 0,
+    };
   }
 
   @Patch()
