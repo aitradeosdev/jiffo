@@ -162,7 +162,7 @@ export class ProvidersAdminService {
         changed.push(...lost);
         if (before && changed.length === 0) return { changed };
         try {
-          BUILDERS[category][provider]!({ ...config, ...secrets });
+          BUILDERS[category][provider]!({ ...config, ...secrets }, this.providers.context);
         } catch (error) {
           throw buildError(error);
         }

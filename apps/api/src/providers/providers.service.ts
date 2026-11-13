@@ -1,4 +1,6 @@
+import { createHmac, hkdfSync } from 'node:crypto';
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import type { ProviderContext } from '../adapters/identity-providers';
 import { PROVIDER_CATEGORIES, type ProviderCategory } from '@jiffo/shared';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
@@ -35,8 +37,17 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
     @Inject(APP_CONFIG) config: AppConfig,
     @Inject(ENV_ADAPTERS) private readonly env: Adapters,
   ) {
-    this.box = new SecretBox(secretsKeyFrom(config));
+    const master = secretsKeyFrom(config);
+    this.box = new SecretBox(master);
+    const linkKey = Buffer.from(hkdfSync('sha256', Buffer.from(master, 'hex'), Buffer.alloc(0), 'jiffo links', 32));
+    this.context = {
+      publicApiUrl: config.PUBLIC_API_URL.replace(/\/$/, ''),
+      sign: (text) => createHmac('sha256', linkKey).update(text).digest('hex').slice(0, 32),
+    };
   }
+
+  /** What adapters get from the API: its public address, and signing for the links they hand out. */
+  readonly context: ProviderContext;
 
   async onModuleInit() {
     await this.reload();
@@ -98,7 +109,7 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
     const cached = this.built.get(key);
     if (cached?.stamp === stamp) return cached.adapter as Adapters[C] | null;
     try {
-      const adapter = build(this.values(row));
+      const adapter = build(this.values(row), this.context);
       this.built.set(key, { stamp, adapter });
       return adapter;
     } catch (error) {

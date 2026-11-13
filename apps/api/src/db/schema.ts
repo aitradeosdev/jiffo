@@ -893,3 +893,23 @@ export const providerSettings = pgTable(
       .where(sql`${t.active}`),
   ],
 );
+
+/**
+ * Identity results a provider sent by webhook, until the application picks them up: only the outcome, the
+ * legal name, date of birth and the NIN's fingerprint. The provider's payload, which carries more, is never kept.
+ */
+export const identityResults = pgTable(
+  'identity_results',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    provider: text('provider').notNull(),
+    reference: text('reference').notNull(),
+    outcome: text('outcome', { enum: ['passed', 'failed', 'review'] }).notNull(),
+    legalName: text('legal_name'),
+    dateOfBirth: text('date_of_birth'),
+    checks: jsonb('checks').$type<Array<{ key: string; outcome: string; note?: string }>>().notNull().default([]),
+    ninFingerprint: text('nin_fingerprint'),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('identity_results_uq').on(t.provider, t.reference)],
+);

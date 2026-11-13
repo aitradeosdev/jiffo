@@ -50,6 +50,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       'expo-font',
       ['expo-splash-screen', { image: `./assets/${variant}/icon.png`, imageWidth: 120, backgroundColor: v.background }],
       'expo-notifications',
+      'expo-web-browser',
       [
         'expo-image-picker',
         {

@@ -23,6 +23,11 @@ export interface IdentityResult {
   /** YYYY-MM-DD, as on the NIN record. */
   dateOfBirth?: string;
   checks: Array<{ key: 'nin' | 'bvn' | 'selfie'; outcome: CheckOutcome; note?: string }>;
+  /**
+   * The NIN as the provider read it, for providers whose own page asks for it. Only ever turned into the
+   * fingerprint that stops a second account on the same NIN; never stored.
+   */
+  idNumber?: string;
 }
 
 export interface AddressResult {
@@ -33,17 +38,39 @@ export interface AddressResult {
 
 export interface IdentityAdapter {
   readonly name: string;
-  /** Starts the NIN, BVN and selfie checks. The token is for the provider's SDK in the app. */
+  /**
+   * How the agent takes part. "numbers": the app asks for the NIN and BVN and runs the provider's screens
+   * (the development stand-in). "hosted": the provider's own web page asks for everything, and the app
+   * opens it at `url`.
+   */
+  readonly flow: 'numbers' | 'hosted';
+  /** Starts the identity checks under our reference. */
   startIdentity(input: {
     person: IdentityPerson;
-    nin: string;
-    bvn: string;
-  }): Promise<{ reference: string; sdkToken: string }>;
+    reference: string;
+    nin?: string;
+    bvn?: string;
+  }): Promise<{ reference: string; sdkToken?: string; url?: string }>;
   identityResult(reference: string): Promise<IdentityResult>;
   /** Starts the address check; a provider may send someone to visit. */
-  startAddress(input: { person: IdentityPerson; address: string; state: string }): Promise<{ reference: string }>;
+  startAddress(input: {
+    person: IdentityPerson;
+    address: string;
+    state: string;
+    area?: string;
+  }): Promise<{ reference: string }>;
   addressResult(reference: string): Promise<AddressResult>;
+  /** A result the provider sent us, once its signature shows it came from them; null when it doesn't. */
+  parseWebhook?(rawBody: Buffer, headers: Headers): { reference: string; result: IdentityResult } | null;
+  /** For providers whose widget runs in a page Jiffo serves: that page. */
+  page?(reference: string): string;
 }
+
+export type Headers = Record<string, string | string[] | undefined>;
+export const headerOf = (headers: Headers, name: string) => {
+  const value = headers[name];
+  return Array.isArray(value) ? value[0] : value;
+};
 
 export const IDENTITY = Symbol('IDENTITY');
 
@@ -54,12 +81,13 @@ export const IDENTITY = Symbol('IDENTITY');
  */
 export class FakeIdentityAdapter implements IdentityAdapter {
   readonly name = 'fake';
+  readonly flow = 'numbers' as const;
   private readonly identities = new Map<string, IdentityResult>();
   private readonly addresses = new Map<string, AddressResult>();
 
-  async startIdentity(input: { person: IdentityPerson; nin: string; bvn: string }) {
-    const reference = `fake_id_${randomUUID()}`;
-    const ending = input.nin.slice(-4);
+  async startIdentity(input: { person: IdentityPerson; reference: string; nin?: string; bvn?: string }) {
+    const reference = input.reference;
+    const ending = (input.nin ?? '').slice(-4);
     const checks: IdentityResult['checks'] = [
       {
         key: 'nin',
@@ -115,6 +143,7 @@ export class FakeIdentityAdapter implements IdentityAdapter {
  */
 export class UnconfiguredIdentityAdapter implements IdentityAdapter {
   readonly name = 'none';
+  readonly flow = 'numbers' as const;
   private refuse(): never {
     throw new IdentityUnavailable();
   }

@@ -1,0 +1,191 @@
+import { createHmac } from 'node:crypto';
+import { describe, expect, it } from 'vitest';
+import { DojahIdentityAdapter, isoDate, SmileIdIdentityAdapter } from '../src/adapters/identity-providers';
+
+type Call = { url: string; init: RequestInit };
+function fakeFetch(respond: (call: Call) => Response) {
+  const calls: Call[] = [];
+  const impl = (async (url: string | URL, init: RequestInit = {}) => {
+    const call = { url: String(url), init };
+    calls.push(call);
+    return respond(call);
+  }) as typeof fetch;
+  return { impl, calls };
+}
+const ctx = { publicApiUrl: 'https://api.jiffo.test', sign: (text: string) => `sig(${text})` };
+const person = { firstName: 'Tunde', lastName: 'Bakare', phone: '+2348031234567' };
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+
+describe('Smile ID', () => {
+  const make = (impl: typeof fetch) =>
+    new SmileIdIdentityAdapter('1234', 'smile-key', true, 'https://jiffo.test/privacy', ctx, impl);
+
+  it('makes a single-use Smile Link for Biometric KYC with the NIN, coming back to the app', async () => {
+    const { impl, calls } = fakeFetch(({ url }) =>
+      url.endsWith('/v3/token')
+        ? json({ token: 'jwt-1' })
+        : json({ link: 'https://links.smile.test/abc', ref_id: 'r' }, 201),
+    );
+    expect(await make(impl).startIdentity({ person, reference: 'jid-1' })).toEqual({
+      reference: 'jid-1',
+      url: 'https://links.smile.test/abc',
+    });
+    expect(calls[0]!.url).toBe('https://testapi.smileidentity.com/v3/token');
+    expect(calls[0]!.init.headers).toMatchObject({ 'smileid-partner-id': '1234', 'smileid-api-key': 'smile-key' });
+    expect(calls[1]!.url).toBe('https://testapi.smileidentity.com/v3/smile_links');
+    expect(calls[1]!.init.headers).toMatchObject({ 'SmileID-Partner-ID': '1234', 'SmileID-Token': 'jwt-1' });
+    const form = calls[1]!.init.body as FormData;
+    expect(JSON.parse(await (form.get('id_types') as Blob).text())).toEqual([
+      { country: 'NG', id_type: 'NIN_V2', verification_method: 'biometric_kyc' },
+    ]);
+    expect(form.get('is_single_use')).toBe('true');
+    expect(form.get('user_id')).toBe('jid-1');
+    expect(form.get('callback_url')).toBe('https://api.jiffo.test/v1/webhooks/identity/smileid');
+    expect(form.get('redirect_url')).toBe('https://api.jiffo.test/v1/identity/done');
+    expect(form.get('notice_privacy_policy_url')).toBe('https://jiffo.test/privacy');
+  });
+
+  it('takes a result only with a signature made with our API key', () => {
+    const smile = make(fakeFetch(() => json({})).impl);
+    const body = Buffer.from(
+      JSON.stringify({
+        status: 'clear',
+        reason: null,
+        partner_params: { user_id: 'jid-1', job_id: 'job_1' },
+        id_fields: {
+          first_name: 'Tunde',
+          other_names: 'Ade',
+          last_name: 'Bakare',
+          date_of_birth: '1995-04-12',
+          id_number: '12345678901',
+        },
+      }),
+    );
+    const timestamp = '2026-11-13T10:00:00.000Z';
+    const signature = createHmac('sha256', 'smile-key').update(`${timestamp}1234sid_request`).digest('base64');
+    const parsed = smile.parseWebhook(body, { 'response-timestamp': timestamp, 'response-signature': signature });
+    expect(parsed).toEqual({
+      reference: 'jid-1',
+      result: {
+        status: 'done',
+        outcome: 'passed',
+        legalName: 'TUNDE ADE BAKARE',
+        dateOfBirth: '1995-04-12',
+        checks: [
+          { key: 'nin', outcome: 'passed' },
+          { key: 'selfie', outcome: 'passed' },
+        ],
+        idNumber: '12345678901',
+      },
+    });
+    expect(smile.parseWebhook(body, { 'response-timestamp': timestamp, 'response-signature': 'forged' })).toBeNull();
+    // A blocked check failed; attention means a person should look.
+    const blocked = Buffer.from(
+      JSON.stringify({ status: 'block', reason: 'face_mismatch', partner_params: { user_id: 'jid-2' } }),
+    );
+    expect(
+      smile.parseWebhook(blocked, { 'response-timestamp': timestamp, 'response-signature': signature })?.result,
+    ).toMatchObject({
+      outcome: 'failed',
+      checks: [{ key: 'nin', outcome: 'failed', note: 'face_mismatch' }, expect.anything()],
+    });
+  });
+});
+
+describe('Dojah', () => {
+  const make = (impl: typeof fetch) =>
+    new DojahIdentityAdapter('app-1', 'sk-dojah', 'pk-dojah', 'widget-1', 'hook-secret', false, ctx, impl);
+  const completed = {
+    reference_id: 'jid-3',
+    verification_status: 'Completed',
+    data: {
+      government_data: {
+        status: true,
+        data: {
+          nin: {
+            entity: {
+              first_name: 'Tunde',
+              middle_name: 'Ade',
+              last_name: 'Bakare',
+              date_of_birth: '12-04-1995',
+              nin: '12345678901',
+            },
+          },
+        },
+      },
+      selfie: { status: true },
+    },
+  };
+
+  it('opens a signed page on our side that runs the widget for this reference', async () => {
+    const dojah = make(fakeFetch(() => json({})).impl);
+    expect((await dojah.startIdentity({ reference: 'jid-3' })).url).toBe(
+      'https://api.jiffo.test/v1/identity/hosted/dojah?ref=jid-3&sig=sig(dojah:jid-3)',
+    );
+    const page = dojah.page('jid-3');
+    expect(page).toContain('https://widget.dojah.io/widget.js');
+    expect(page).toContain('"widget_id":"widget-1"');
+    expect(page).toContain('"reference_id":"jid-3"');
+    expect(page).not.toContain('sk-dojah');
+  });
+
+  it('reads the result by our reference, looking at each step', async () => {
+    const { impl, calls } = fakeFetch(() => json({ entity: completed }));
+    expect(await make(impl).identityResult('jid-3')).toEqual({
+      status: 'done',
+      outcome: 'passed',
+      legalName: 'TUNDE ADE BAKARE',
+      dateOfBirth: '1995-04-12',
+      checks: [
+        { key: 'nin', outcome: 'passed' },
+        { key: 'selfie', outcome: 'passed' },
+      ],
+      idNumber: '12345678901',
+    });
+    expect(calls[0]!.url).toBe('https://api.dojah.io/api/v1/kyc/verification?reference_id=jid-3');
+    expect(calls[0]!.init.headers).toMatchObject({ Authorization: 'sk-dojah', AppId: 'app-1' });
+    // Completed means finished, not passed: a failed selfie step is looked at.
+    const noSelfie = { ...completed, data: { ...completed.data, selfie: { status: false } } };
+    expect((await make(fakeFetch(() => json({ entity: noSelfie })).impl).identityResult('x')).outcome).toBe('review');
+    expect(
+      (await make(fakeFetch(() => json({ entity: { verification_status: 'Ongoing' } })).impl).identityResult('x'))
+        .status,
+    ).toBe('pending');
+    expect((await make(fakeFetch(() => json({}, 404)).impl).identityResult('x')).status).toBe('pending');
+  });
+
+  it('takes a webhook only with the webhook secret, and starts and reads address visits', async () => {
+    const dojah = make(fakeFetch(() => json({})).impl);
+    const raw = Buffer.from(JSON.stringify(completed));
+    const signature = createHmac('sha256', 'hook-secret').update(raw).digest('hex');
+    expect(dojah.parseWebhook(raw, { 'x-dojah-signature': signature })?.reference).toBe('jid-3');
+    expect(dojah.parseWebhook(raw, { 'x-dojah-signature': 'nope' })).toBeNull();
+
+    const { impl, calls } = fakeFetch(({ init }) =>
+      init.method === 'POST'
+        ? json({ entity: { status: 'pending', reference_id: 'addr-1' } })
+        : json({ entity: { status: 'verified' } }),
+    );
+    const visits = make(impl);
+    expect(await visits.startAddress({ person, address: '14 Fola Osibo Road', state: 'Lagos', area: 'Lekki' })).toEqual(
+      {
+        reference: 'addr-1',
+      },
+    );
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({
+      first_name: 'Tunde',
+      last_name: 'Bakare',
+      mobile: '08031234567',
+      street: '14 Fola Osibo Road',
+      lga: 'Lekki',
+      state: 'Lagos',
+    });
+    expect(await visits.addressResult('addr-1')).toEqual({ status: 'done', outcome: 'passed' });
+  });
+
+  it('reads dates of birth in either order', () => {
+    expect(isoDate('1995-04-12')).toBe('1995-04-12');
+    expect(isoDate('12-04-1995')).toBe('1995-04-12');
+    expect(isoDate('April')).toBeUndefined();
+  });
+});

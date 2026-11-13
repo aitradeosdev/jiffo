@@ -21,7 +21,10 @@ const STEPS: Array<{ key: StepKey; title: string; sub: (app: Application) => str
   {
     key: 'identity',
     title: 'Identity',
-    sub: (app) => `NIN, BVN and a selfie, checked by ${providerName(app)}`,
+    sub: (app) =>
+      app.identityFlow === 'hosted'
+        ? `Your NIN and a selfie, checked by ${providerName(app)}`
+        : `NIN, BVN and a selfie, checked by ${providerName(app)}`,
     icon: 'shield',
     href: '/apply/identity',
   },
