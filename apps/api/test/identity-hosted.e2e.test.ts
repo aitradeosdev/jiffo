@@ -242,7 +242,21 @@ describe("identity checks on the provider's own page", () => {
       idNumber: nin,
     });
     const body = { ref, sig, nin, session: 'sess-1', sessionSig: 'whatever-youverify-checks' };
-    expect((await submit(body).expect(200)).body).toEqual({ status: 'done', outcome: 'passed' });
+    // Sent twice at once: the second waits its turn rather than starting a second paid check.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const runResult = run.getMockImplementation()!;
+    run.mockImplementationOnce(async (...args) => {
+      await held;
+      return runResult(...args);
+    });
+    const first = submit(body).then((res) => res);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await submit(body)
+      .expect(409)
+      .expect(/identity_busy/);
+    release();
+    expect((await first).body).toEqual({ status: 'done', outcome: 'passed' });
     expect(run).toHaveBeenCalledWith(ref, { nin, session: 'sess-1', sessionSig: 'whatever-youverify-checks' });
     const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
     expect(row).toMatchObject({ identityProvider: 'youverify', legalName: 'TUNDE BAKARE', identityOutcome: 'passed' });
@@ -250,9 +264,29 @@ describe("identity checks on the provider's own page", () => {
     expect(JSON.stringify(row)).not.toContain(nin);
     const done = await request(t.http).post('/v1/agent/application/identity/finish').set(agent.headers).expect(200);
     expect(done.body).toMatchObject({ status: 'done', outcome: 'passed' });
-    // Once settled, the page can't run the check again.
+    // Once settled, the page can't run the check again, nor open.
     await submit(body).expect(409);
     expect(run).toHaveBeenCalledTimes(1);
+    const finished = await request(t.http)
+      .get(url.pathname + url.search)
+      .expect(410);
+    expect(finished.text).toContain('This check is finished');
+
+    // Each check's page opens a limited number of times an hour: each open may start a paid session.
+    const again = await request(t.http)
+      .post('/v1/agent/application/identity')
+      .set(agent.headers)
+      .send({ consent: true })
+      .expect(200);
+    const link = new URL(again.body.url);
+    for (let i = 0; i < 20; i += 1)
+      await request(t.http)
+        .get(link.pathname + link.search)
+        .expect(200);
+    const limited = await request(t.http)
+      .get(link.pathname + link.search)
+      .expect(429);
+    expect(limited.text).toContain('opened too many times');
     await panel('post', '/identity/active').send({ provider: null }).expect(200);
   });
 });

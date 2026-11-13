@@ -102,6 +102,9 @@ export class AgentApplicationController {
   }
 }
 
+/** Where the agent app picks up after a provider's page (its scheme, see app.config.ts). */
+const IDENTITY_DONE_APP_URL = 'jiffo-agent://identity-done';
+
 /** What identity providers reach: their signed results, and the pages their widgets run in. */
 @Controller()
 export class IdentityProviderController {
@@ -128,18 +131,29 @@ export class IdentityProviderController {
     try {
       page = reference && signature ? await this.applications.hostedPage(provider, reference, signature) : null;
     } catch (error) {
-      // The provider couldn't start the check: said in the browser, with a way to try again.
-      if (!(error instanceof HttpException) || error.getStatus() !== 503) throw error;
+      // The provider couldn't start the check, or the page was opened too often: said in the browser.
+      if (!(error instanceof HttpException) || ![429, 503].includes(error.getStatus())) throw error;
+      const later = error.getStatus() === 429;
       res
-        .status(503)
+        .status(error.getStatus())
         .type('html')
         .set('cache-control', 'no-store')
         .send(
-          `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Try again</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1 style="font-size:24px">The check couldn't start</h1><p>Try again in a moment.</p><p><a href="javascript:location.reload()">Try again</a></p></body></html>`,
+          `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Try again</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1 style="font-size:24px">The check couldn't start</h1><p>${later ? 'This page was opened too many times. Try again in an hour.' : 'Try again in a moment.'}</p>${later ? '' : '<p><a href="javascript:location.reload()">Try again</a></p>'}</body></html>`,
         );
       return;
     }
     if (!page) throw notFound('not_found', 'Not found');
+    if (page === 'finished') {
+      res
+        .status(410)
+        .type('html')
+        .set('cache-control', 'no-store')
+        .send(
+          `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Finished</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1 style="font-size:24px">This check is finished</h1><p>It is done, or was started again. Go back to the app.</p><p><a href="${IDENTITY_DONE_APP_URL}">Go back to Jiffo Agent</a></p></body></html>`,
+        );
+      return;
+    }
     res.type('html').set('cache-control', 'no-store').send(page);
   }
 
@@ -155,7 +169,7 @@ export class IdentityProviderController {
   /** Where a provider's page sends the agent when they finish: back into the agent app. */
   @Get('identity/done')
   done(@Res() res: Response) {
-    const app = 'jiffo-agent://identity-done';
+    const app = IDENTITY_DONE_APP_URL;
     res
       .type('html')
       .send(

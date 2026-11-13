@@ -249,7 +249,12 @@ describe('Youverify', () => {
     expect(page).toContain('"sessionToken":"tok-1"');
     expect(page).toContain('"sessionSig":"sig(youverify-session:jid-4:sess-1)"');
     expect(page).toContain('integrity="sha384-');
+    // The SDK starts only with a task, and tags the result with Jiffo's account via the public key.
+    expect(page).toContain('"tasks":[{"id":"complete-the-circle"}]');
+    expect(page).toContain('"publicKey":"pmk-1"');
     expect(page).toContain('National Identification Number');
+    // Pasted with spaces, the NIN keeps only its digits.
+    expect(page).toContain("nin.value.replace(/[^0-9]/g, '').slice(0, 11)");
     expect(page).not.toContain('yv-secret');
     // The page sends the NIN and the session, never the selfie.
     expect(page).not.toMatch(/faceImage/);
@@ -313,6 +318,19 @@ describe('Youverify', () => {
           { key: 'selfie', outcome: 'review' },
         ],
       });
+      // Some answers put the match under validations.
+      const nested = respond(live, {
+        status: 'found',
+        firstName: 'A',
+        lastName: 'B',
+        validations: { selfie: { selfieVerification: { match: true } } },
+      });
+      expect((await make(nested.impl).submitPage('jid-4', input)).outcome).toBe('passed');
+      const silent = respond(live, { status: 'failed', reason: 'NIMC timeout' });
+      expect((await make(silent.impl).submitPage('jid-4', input)).checks).toEqual([
+        { key: 'nin', outcome: 'review', note: 'NIMC answered: NIMC timeout' },
+        { key: 'selfie', outcome: 'review', note: "Not compared, as NIMC didn't answer" },
+      ]);
       const missing = respond(live, { status: 'not_found' });
       const result = await make(missing.impl).submitPage('jid-4', input);
       expect(result).toMatchObject({
@@ -338,6 +356,9 @@ describe('Youverify', () => {
     expect(calls[0]!.url).toBe('https://api.sandbox.youverify.co/v2/api/states');
     const refused = fakeFetch(() => json({ success: false, statusCode: 401, message: 'Permission denied' }, 401));
     await expect(make(refused.impl).check()).rejects.toThrow(/401/);
+    // A refusal that comes with a 200.
+    const broke = fakeFetch(() => json({ success: false, message: 'Insufficient balance', data: null }));
+    await expect(make(broke.impl).check()).rejects.toThrow(/Insufficient balance/);
     expect(await make(impl).addressResult()).toMatchObject({ outcome: 'review' });
   });
 });

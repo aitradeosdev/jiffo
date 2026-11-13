@@ -9,13 +9,14 @@ import { agentApplications, agentPresence, agentProfiles, payoutAccounts, states
 import {
   IdentityUnavailable,
   type IdentityResult,
+  type PageInput,
   UnconfiguredIdentityAdapter,
   type CheckOutcome,
   type IdentityAdapter,
 } from '../adapters/identity';
 import { ProvidersService } from '../providers/providers.service';
 import { IdentityPageError, IdentityProviderError } from '../adapters/identity-providers';
-import { badRequest, conflict, forbidden, notFound, unavailable, unprocessable } from '../common/errors';
+import { badRequest, conflict, forbidden, notFound, tooMany, unavailable, unprocessable } from '../common/errors';
 import { nameWords } from '../common/names';
 import { PushService } from '../push/push.service';
 import { CountriesService } from '../countries/countries.service';
@@ -41,6 +42,9 @@ const IDENTITY_CHECKS = ['nin', 'bvn', 'selfie'];
  * with its own page asks for the NIN only). Any BVN check that came back must pass too.
  */
 const requiredChecks = (flow: IdentityAdapter['flow']) => (flow === 'hosted' ? ['nin', 'selfie'] : IDENTITY_CHECKS);
+/** How many times an hour one check's page may be opened: each may start a paid session. */
+const PAGE_OPENS_PER_HOUR = 20;
+const HOUR_MS = 3_600_000;
 /** While checking, the provider is asked again at most this often, however often the app looks. */
 const POLL_EVERY_MS = 15_000;
 
@@ -62,6 +66,10 @@ export function matchesLegalName(name: string, legalName: string) {
 @Injectable()
 export class AgentApplicationService {
   private readonly logger = new Logger(AgentApplicationService.name);
+  /** When each check's page was opened in the last hour, in this process. */
+  private readonly pageOpens = new Map<string, number[]>();
+  /** Checks whose page is being sent now, in this process. */
+  private readonly submitting = new Set<string>();
   /** Its own key, derived from PIN_KEY, used only to fingerprint NINs. */
   private readonly ninKey: Buffer;
 
@@ -286,10 +294,40 @@ export class AgentApplicationService {
     return safeEqual(signature, this.providers.context.sign(`${provider}:${reference}`));
   }
 
-  /** The page a provider's widget runs in, for a link this API made. */
-  async hostedPage(provider: string, reference: string, signature: string) {
+  /** The application waiting on a check started with this provider and reference, if any. */
+  private async waitingOn(provider: string, reference: string) {
+    const [app] = await this.db
+      .select()
+      .from(agentApplications)
+      .where(
+        and(
+          eq(agentApplications.identityProvider, provider),
+          eq(agentApplications.identityReference, reference),
+          eq(agentApplications.status, 'draft'),
+          isNull(agentApplications.identityOutcome),
+        ),
+      );
+    return app ?? null;
+  }
+
+  /**
+   * The page a provider's widget runs in, for a link this API made and a check still waiting on it: null for
+   * any other link, "finished" for a check that is done or was started again. Opening one may start a paid
+   * session with the provider, so each check's page opens a limited number of times an hour.
+   */
+  async hostedPage(provider: string, reference: string, signature: string): Promise<string | 'finished' | null> {
     const adapter = this.providers.named('identity', provider);
     if (!adapter?.page || !this.signedLink(provider, reference, signature)) return null;
+    if (!(await this.waitingOn(provider, reference))) return 'finished';
+    const now = Date.now();
+    for (const [key, opens] of this.pageOpens) {
+      if (opens.every((at) => now - at > HOUR_MS)) this.pageOpens.delete(key);
+    }
+    const opens = (this.pageOpens.get(reference) ?? []).filter((at) => now - at <= HOUR_MS);
+    if (opens.length >= PAGE_OPENS_PER_HOUR) {
+      throw tooMany('identity_page_limit', 'This page was opened too many times. Try again in an hour.');
+    }
+    this.pageOpens.set(reference, [...opens, now]);
     const page = adapter.page.bind(adapter);
     return this.provider(async () => page(reference));
   }
@@ -297,41 +335,40 @@ export class AgentApplicationService {
   /**
    * What the agent sent from a provider's page that Jiffo serves: the check runs with it, and its result
    * settles the application at once. The NIN is passed to the provider and only its fingerprint is kept.
+   * One at a time per check, so a second send can't start a second paid check.
    */
-  async submitPage(
-    provider: string,
-    input: { ref: string; sig: string; nin: string; session?: string; sessionSig?: string },
-  ) {
+  async submitPage(provider: string, input: PageInput & { ref: string; sig: string }) {
     const adapter = this.providers.named('identity', provider);
     if (!adapter?.submitPage || !this.signedLink(provider, input.ref, input.sig)) return null;
     const nin = normaliseIdNumber('nin', input.nin);
     if (!nin) throw badRequest('invalid_nin', 'A NIN is 11 digits');
-    const [app] = await this.db
-      .select()
-      .from(agentApplications)
-      .where(
-        and(
-          eq(agentApplications.identityProvider, provider),
-          eq(agentApplications.identityReference, input.ref),
-          eq(agentApplications.status, 'draft'),
-          isNull(agentApplications.identityOutcome),
-        ),
-      );
-    if (!app) throw conflict('identity_changed', 'This check is finished or was started again. Go back to the app.');
-    const submit = adapter.submitPage.bind(adapter);
-    let result: IdentityResult;
+    const finished = () =>
+      conflict('identity_changed', 'This check is finished or was started again. Go back to the app.');
+    const app = await this.waitingOn(provider, input.ref);
+    if (!app) throw finished();
+    if (this.submitting.has(input.ref)) throw conflict('identity_busy', 'This check is already being sent.');
+    this.submitting.add(input.ref);
     try {
-      result = await this.provider(() =>
-        submit(input.ref, { nin, session: input.session, sessionSig: input.sessionSig }),
-      );
-    } catch (error) {
-      if (error instanceof IdentityPageError) throw badRequest('identity_page', error.message);
-      throw error;
+      let result: IdentityResult;
+      try {
+        result = await adapter.submitPage(input.ref, { nin, session: input.session, sessionSig: input.sessionSig });
+      } catch (error) {
+        if (error instanceof IdentityPageError) throw badRequest('identity_page', error.message);
+        if (error instanceof IdentityProviderError) {
+          this.logger.warn(`Identity provider: ${error.message}`);
+          throw unavailable('identity_failed', `The check didn't go through. Send it again in a moment.`);
+        }
+        if (error instanceof IdentityUnavailable) {
+          throw unavailable('identity_unavailable', "Identity checks aren't available yet.");
+        }
+        throw error;
+      }
+      const settled = await this.applyIdentity(app, result);
+      if (!settled) throw finished();
+      return { status: settled.status, outcome: settled.outcome };
+    } finally {
+      this.submitting.delete(input.ref);
     }
-    const settled = await this.applyIdentity(app, result);
-    if (!settled)
-      throw conflict('identity_changed', 'This check is finished or was started again. Go back to the app.');
-    return { status: settled.status, outcome: settled.outcome };
   }
 
   /**
@@ -367,8 +404,14 @@ export class AgentApplicationService {
       return { status: 'pending' as const };
     }
     const settled = await this.applyIdentity(app, result);
-    if (!settled) throw conflict('identity_changed', 'Your identity check was started again. Finish that one.');
-    return settled;
+    if (settled) return settled;
+    // Settled meanwhile, as by the provider's webhook: that result stands.
+    const now = await this.load(app.userId);
+    if (now.identityReference === app.identityReference && now.identityOutcome) {
+      const checks = now.checks.filter((c) => [...IDENTITY_CHECKS, 'duplicate'].includes(c.key));
+      return { status: 'done' as const, outcome: now.identityOutcome, checks };
+    }
+    throw conflict('identity_changed', 'Your identity check was started again. Finish that one.');
   }
 
   /**
@@ -420,6 +463,8 @@ export class AgentApplicationService {
             eq(agentApplications.userId, userId),
             eq(agentApplications.status, 'draft'),
             eq(agentApplications.identityReference, app.identityReference!),
+            // Settled once: a second result for the same check, arriving at the same time, is let go.
+            isNull(agentApplications.identityOutcome),
           ),
         )
         .returning({ userId: agentApplications.userId });

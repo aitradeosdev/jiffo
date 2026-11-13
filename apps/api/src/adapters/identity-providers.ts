@@ -445,6 +445,8 @@ interface YouverifyNin {
   status?: string;
   reason?: string | null;
   selfieValidation?: boolean;
+  /** Where some of Youverify's answers put the face match instead. */
+  validations?: { selfie?: { selfieVerification?: { match?: boolean } } };
   firstName?: string;
   middleName?: string;
   lastName?: string;
@@ -487,8 +489,11 @@ export class YouverifyIdentityAdapter implements IdentityAdapter {
     }).catch((error: Error) => {
       throw new IdentityProviderError(`Youverify didn't answer: ${error.message}`);
     });
-    const json = (await res.json().catch(() => null)) as { data?: T; message?: string } | null;
-    if (!res.ok || !json) throw new IdentityProviderError(`Youverify answered ${res.status}: ${json?.message ?? ''}`);
+    const json = (await res.json().catch(() => null)) as { success?: boolean; data?: T; message?: string } | null;
+    // A refusal can come with a 200 too, such as an empty wallet: success false.
+    if (!res.ok || !json || json.success === false) {
+      throw new IdentityProviderError(`Youverify answered ${res.status}: ${json?.message ?? ''}`);
+    }
     return json.data as T;
   }
 
@@ -522,7 +527,16 @@ export class YouverifyIdentityAdapter implements IdentityAdapter {
    */
   async page(reference: string) {
     const { sessionId, sessionToken } = await this.newSession(reference);
-    const options = { sessionId, sessionToken, sandboxEnvironment: this.sandbox, branding: { name: 'Jiffo' } };
+    const options = {
+      sessionId,
+      sessionToken,
+      // Tags the result with Jiffo's account, so the API finds it by session afterwards.
+      publicKey: this.publicMerchantKey,
+      sandboxEnvironment: this.sandbox,
+      // The SDK won't start without at least one task.
+      tasks: [{ id: 'complete-the-circle' }],
+      branding: { name: 'Jiffo' },
+    };
     const submit = {
       url: `${this.ctx.publicApiUrl}/v1/identity/hosted/youverify/submit`,
       ref: reference,
@@ -558,34 +572,50 @@ var options = ${json(options)};
 var submit = ${json(submit)};
 var nin = document.getElementById('nin'), go = document.getElementById('go'), error = document.getElementById('error');
 var say = function (text) { error.textContent = text; };
+// After a liveness check passed, the button sends the result again rather than starting another check.
+var passed = false;
 nin.addEventListener('input', function () {
-  nin.value = nin.value.replace(/\\D/g, '').slice(0, 11);
+  nin.value = nin.value.replace(/[^0-9]/g, '').slice(0, 11);
   go.disabled = nin.value.length !== 11;
 });
 if (window.YouverifyLiveness && YouverifyLiveness.preload) YouverifyLiveness.preload();
-options.onSuccess = function () {
-  // The selfie stays with Youverify: only the NIN and the session go to Jiffo.
-  go.disabled = true; say('Checking…');
-  fetch(submit.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+var send = function () {
+  go.disabled = true; nin.disabled = true; say('Checking…');
+  var timeout = window.AbortSignal && AbortSignal.timeout ? AbortSignal.timeout(90000) : undefined;
+  fetch(submit.url, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: timeout, body: JSON.stringify({
     ref: submit.ref, sig: submit.sig, nin: nin.value, session: submit.session, sessionSig: submit.sessionSig
   }) }).then(function (res) {
     if (res.ok) { location.href = submit.done; return; }
-    return res.json().then(function (body) {
-      say((body && body.error && body.error.message) || 'That didn\\'t work. Try again.'); go.disabled = false;
+    return res.json().catch(function () { return null; }).then(function (body) {
+      var problem = body && body.error;
+      if (problem && problem.code === 'identity_changed') { location.href = submit.done; return; }
+      // A NIN typed wrong: the selfie check still stands, so the agent corrects it and sends again.
+      if (problem && problem.code === 'invalid_nin') nin.disabled = false;
+      say((problem && problem.message) || "That didn't go through. Send it again.");
+      go.disabled = false;
     });
-  }).catch(function () { say('No connection. Try again.'); go.disabled = false; });
+  }).catch(function () { say("That didn't go through. Check your connection and send it again."); go.disabled = false; });
+};
+options.onSuccess = function () {
+  // The selfie stays with Youverify: only the NIN and the session go to Jiffo.
+  passed = true; go.textContent = 'Send again'; send();
 };
 options.onFailure = function (data) {
   var key = data && data.error && data.error.key;
   // A session that ran out: the page starts a new one.
   if (key === 'invalid_or_expired_session' || key === 'session_token_error') { location.reload(); return; }
-  say("The selfie check didn't pass. Try again in good light, facing the camera.");
-  setTimeout(function () { location.reload(); }, 2500);
+  say("The selfie check didn't pass. Tap Take selfie to try again, in good light, facing the camera.");
+  go.dataset.fresh = 'reload';
 };
 go.addEventListener('click', function () {
+  if (passed) { send(); return; }
+  // A new try after a failed check needs a new session, which a reload starts.
+  if (go.dataset.fresh === 'reload') { location.reload(); return; }
   if (!window.YouverifyLiveness) { say("The selfie check couldn't load. Check your connection and try again."); return; }
   say('');
-  new YouverifyLiveness(options).start();
+  Promise.resolve()
+    .then(function () { return new YouverifyLiveness(options).start(); })
+    .catch(function () { say("The selfie check couldn't start. Try again."); });
 });
 </script></body></html>`;
   }
@@ -604,7 +634,7 @@ go.addEventListener('click', function () {
       );
       const doc = found?.docs?.find((d) => d.sessionId === sessionId);
       if (doc) return doc;
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
     throw new IdentityProviderError('Youverify has no selfie check for this session yet');
   }
@@ -638,9 +668,17 @@ go.addEventListener('click', function () {
       : nin?.status === 'not_found'
         ? { key: 'nin', outcome: 'failed', note: 'No NIN record found' }
         : { key: 'nin', outcome: 'review', note: `NIMC answered: ${nin?.reason ?? nin?.status ?? 'nothing'}` };
+    const matched = nin?.selfieValidation === true || nin?.validations?.selfie?.selfieVerification?.match === true;
     const selfieCheck: IdentityResult['checks'][number] = !found
-      ? { key: 'selfie', outcome: 'review', note: 'Not compared, as the NIN record was not found' }
-      : nin.selfieValidation === true
+      ? {
+          key: 'selfie',
+          outcome: 'review',
+          note:
+            nin?.status === 'not_found'
+              ? 'Not compared, as the NIN record was not found'
+              : "Not compared, as NIMC didn't answer",
+        }
+      : matched
         ? { key: 'selfie', outcome: 'passed' }
         : { key: 'selfie', outcome: 'review', note: "Youverify didn't match the selfie to the NIN photo" };
     const checks = [ninCheck, selfieCheck];
