@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { and, desc, eq, inArray, lt, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import {
   canRevealPin,
   commissionBpsFor,
@@ -16,7 +16,7 @@ import {
 import type { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db, type Tx } from '../db/database.module';
-import { errandEvents, errandRatings, errandStops, errands, journalEntries, users } from '../db/schema';
+import { earningHolds, errandEvents, errandRatings, errandStops, errands, journalEntries, users } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
 import type { AuthContext } from '../auth/auth.types';
 import { decrypt, encrypt, numericCode, safeEqual } from '../common/crypto';
@@ -49,6 +49,16 @@ interface EventEffect {
 
 const HOUR_MS = 3_600_000;
 const MINUTE_MS = 60_000;
+
+export interface Settlement {
+  agentKobo: number;
+  commissionKobo: number;
+  itemsKobo: number;
+  tipKobo: number;
+  tier: string | null;
+  /** Bronze earnings wait before they can be withdrawn; null once available. */
+  heldUntil: Date | null;
+}
 
 /** How far from the pickup the matching screen counts online agents. */
 const NEARBY_RADIUS_KM = 3;
@@ -157,7 +167,14 @@ export class ErrandsService implements OnModuleInit {
       .where(and(mine, before ? lt(errands.createdAt, before) : undefined))
       .orderBy(desc(errands.createdAt))
       .limit(limit);
-    return this.views(rows, () => (auth.app === 'customer' ? 'customer' : 'agent'));
+    const views = await this.views(rows, () => (auth.app === 'customer' ? 'customer' : 'agent'));
+    if (auth.app === 'customer') return views;
+    // Agents see what each finished job earned them: their fee share plus any tip.
+    const paid = await this.wallet.settlements(rows.filter((r) => r.status === 'completed').map((r) => r.id));
+    return views.map((v) => {
+      const p = paid.get(v.id);
+      return { ...v, earnedKobo: p ? p.agentKobo + p.tipKobo : null };
+    });
   }
 
   /** Open errands whose pickup is within the radius, nearest first. */
@@ -368,6 +385,7 @@ export class ErrandsService implements OnModuleInit {
       pendingOfferServiceFeeKobo: null as number | null,
       completedBy: null as CompletedBy | null,
       agentEarnsKobo: null as number | null,
+      settlement: null as Settlement | null,
       agentLocation: null as { lat: number; lng: number; at: Date } | null,
       nearbyAgents: null as { count: number; radiusKm: number } | null,
     };
@@ -385,7 +403,7 @@ export class ErrandsService implements OnModuleInit {
     const offer = errand.pendingOfferKobo;
     const pickup = view!.stops[0]!;
     const travelling = (TRAVEL_STATES as readonly string[]).includes(errand.status);
-    const [photoEvents, [rating], [tip], held, offerSettings, [ending], agentLocation, nearby, earns] =
+    const [photoEvents, [rating], [tip], held, offerSettings, [ending], agentLocation, nearby, earns, settled] =
       await Promise.all([
         mayHavePhotos
           ? this.db
@@ -437,6 +455,7 @@ export class ErrandsService implements OnModuleInit {
             )
           : Promise.resolve(null),
         role === 'agent' ? this.agentEarns(errand, errand.agentTier ?? 'bronze') : Promise.resolve(null),
+        completed && role === 'agent' ? this.settlementOf(errand) : Promise.resolve(null),
       ]);
     const items = (photoEvents.find((e) => e.event === 'send_item_amount')?.data.photos as string[] | undefined) ?? [];
     const dropoff = photoEvents.find((e) => e.event === 'send_dropoff_photo')?.data.photo as string | undefined;
@@ -452,6 +471,7 @@ export class ErrandsService implements OnModuleInit {
       pendingOfferServiceFeeKobo: offer !== null && offerSettings ? serviceFee(offer, offerSettings.fees) : null,
       completedBy: ending ? (COMPLETED_BY[ending.event] ?? null) : null,
       agentEarnsKobo: earns,
+      settlement: settled,
       agentLocation,
       nearbyAgents: nearby === null ? null : { count: nearby, radiusKm: NEARBY_RADIUS_KM },
     };
@@ -470,6 +490,27 @@ export class ErrandsService implements OnModuleInit {
     } catch (error) {
       this.logger.warn(`Could not clear agent ${before.agentId}'s position: ${String(error)}`);
     }
+  }
+
+  /** How a finished errand paid its agent, and when held earnings become withdrawable. */
+  private async settlementOf(errand: ErrandRow): Promise<Settlement | null> {
+    const [paid, [hold]] = await Promise.all([
+      this.wallet.settlements([errand.id]),
+      this.db
+        .select({ availableAt: earningHolds.availableAt })
+        .from(earningHolds)
+        .where(
+          and(
+            eq(earningHolds.errandId, errand.id),
+            eq(earningHolds.userId, errand.agentId!),
+            isNull(earningHolds.releasedAt),
+          ),
+        )
+        .orderBy(desc(earningHolds.availableAt))
+        .limit(1),
+    ]);
+    const p = paid.get(errand.id);
+    return p ? { ...p, heldUntil: hold?.availableAt ?? null } : null;
   }
 
   /** What the agent keeps from the fee after commission at their tier, under the errand's own settings. */

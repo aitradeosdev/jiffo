@@ -76,13 +76,14 @@ export default function Account() {
           value={s ? (s.ratingAvg !== null ? `${s.ratingAvg.toFixed(1)} ★` : 'New') : '…'}
           label={s?.ratingCount ? `Rating · ${s.ratingCount}` : 'Your rating'}
         />
-        <Stat value={s ? String(s.errandsCompleted) : '…'} label={agent ? 'Jobs done' : 'Errands'} />
+        <Stat value={s ? String(s.errandsCompleted) : '…'} label={agent ? 'Completed' : 'Errands'} />
         <Stat value={s ? String(s.disputes) : '…'} label="Disputes" />
       </View>
 
       {agent ? (
         <View style={styles.menu}>
           <MenuRow icon="tune" label="Errand preferences" onPress={() => router.push('/preferences')} />
+          <MenuRow icon="chart" label="Earnings" onPress={() => router.push('/wallet')} />
           <MenuRow icon="bank" label="Payout account" onPress={() => router.push('/payout-account')} />
         </View>
       ) : null}

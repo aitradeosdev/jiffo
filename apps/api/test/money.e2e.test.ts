@@ -231,7 +231,21 @@ describe('money', () => {
       await act(t, agent, errand.id, 'confirm_pin', { pin: await pin(buyer, errand.id) });
 
       expect((await revenue()) - before).toBe(SERVICE + COMMISSION);
+      // The agent's job shows how it paid them, and their list and week show what they earned.
+      const job = (await request(t.http).get(`/v1/errands/${errand.id}`).set(agent.headers).expect(200)).body;
+      expect(job.settlement).toMatchObject({
+        agentKobo: FEE - COMMISSION,
+        commissionKobo: COMMISSION,
+        itemsKobo: 0,
+        tipKobo: 0,
+        tier: 'bronze',
+      });
+      expect(job.settlement.heldUntil).toBeTruthy();
+      const jobs = (await request(t.http).get('/v1/errands').set(agent.headers).expect(200)).body;
+      expect(jobs.find((e: { id: string }) => e.id === errand.id).earnedKobo).toBe(FEE - COMMISSION);
       const wallet = await balanceOf(t, agent);
+      expect(wallet.week).toHaveLength(7);
+      expect(wallet.week.at(-1).earnedKobo).toBeGreaterThanOrEqual(FEE - COMMISSION);
       expect(wallet.tier).toBe('bronze');
       expect(wallet.heldKobo).toBeGreaterThanOrEqual(FEE - COMMISSION);
       expect(wallet.upcoming.at(-1)).toMatchObject({ amountKobo: FEE - COMMISSION });

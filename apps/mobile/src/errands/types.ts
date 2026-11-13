@@ -45,6 +45,17 @@ export interface ErrandView {
   held?: { feeKobo: number; itemsKobo: number };
   /** Single errand view: the service fee a pending new price would bring, under the errand's own settings. */
   pendingOfferServiceFeeKobo?: number | null;
+  /** Agent app, once completed: how the errand paid them. */
+  settlement?: {
+    agentKobo: number;
+    commissionKobo: number;
+    itemsKobo: number;
+    tipKobo: number;
+    tier: string | null;
+    heldUntil: string | null;
+  } | null;
+  /** Agent app list: what a finished job earned them (fee share and tip). */
+  earnedKobo?: number | null;
   /** Agent app: what the agent keeps from the fee after commission at their tier. */
   agentEarnsKobo?: number | null;
   /** Customer, while the errand runs: where their agent was a moment ago. */
