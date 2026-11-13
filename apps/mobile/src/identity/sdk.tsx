@@ -5,7 +5,7 @@ import { fonts } from '../theme/tokens';
 import { Button, Text } from '../ui/kit';
 import { ObScreen, Question } from '../ui/onboarding';
 import { Icon } from '../ui/parts';
-import { Confirmed, Point, Waiting } from './apply-parts';
+import { Confirmed, Point, Waiting } from '../agent/apply-parts';
 
 export interface ProviderSdkProps {
   /** The adapter's name, as the API gives it when the check starts. */
@@ -13,8 +13,8 @@ export interface ProviderSdkProps {
   /** The provider's name for people, when admin has set one. */
   providerLabel: string;
   sdkToken: string;
-  /** The BVN, masked, for the approval screen. */
-  bvnMasked: string;
+  /** The BVN, masked, for the approval screen; none when no BVN is checked. */
+  bvnMasked?: string;
   onDone: () => void;
   onCancel: () => void;
 }
@@ -27,9 +27,9 @@ export interface ProviderSdkProps {
 export function ProviderSdk(props: ProviderSdkProps) {
   if (props.provider === 'fake') return <TestProviderSdk {...props} />;
   return (
-    <ObScreen onBack={props.onCancel} footer={<Button label="Back to your application" onPress={props.onCancel} />}>
+    <ObScreen onBack={props.onCancel} footer={<Button label="Go back" onPress={props.onCancel} />}>
       <Question
-        title="Update Jiffo Agent"
+        title="Update the app"
         sub={`This version of the app can't run ${props.providerLabel}'s checks. Update the app, then try again.`}
       />
     </ObScreen>
@@ -44,6 +44,8 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
  */
 function TestProviderSdk({ bvnMasked, onDone, onCancel }: ProviderSdkProps) {
   const [step, setStep] = useState<'consent' | 'selfie'>('consent');
+  // No BVN checked: straight to the selfie.
+  if (!bvnMasked) return <SelfieStep onBack={onCancel} onDone={onDone} />;
   return step === 'consent' ? (
     <ConsentStep bvnMasked={bvnMasked} onBack={onCancel} onApproved={() => setStep('selfie')} />
   ) : (

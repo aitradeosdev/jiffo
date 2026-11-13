@@ -95,7 +95,12 @@ describe('identity checks: ID types, and customers', () => {
     await start(who, { idType: 'passport', idNumber: passport }).expect(200);
     expect((await finish(who).expect(200)).body).toEqual({ status: 'verified', outcome: 'passed' });
     const view = (await me(who).expect(200)).body;
-    expect(view).toMatchObject({ status: 'verified', idType: 'passport', legalName: 'ADA OKAFOR' });
+    expect(view).toMatchObject({
+      status: 'verified',
+      idType: 'passport',
+      legalName: 'ADA OKAFOR',
+      startedFlow: 'numbers',
+    });
     expect(view.checks.map((c: { key: string }) => c.key)).toEqual(['passport', 'selfie', 'age']);
     const [row] = await t.db.select().from(customerVerifications).where(eq(customerVerifications.userId, who.userId));
     expect(row!.idFingerprint).toMatch(/^[0-9a-f]{64}$/);
@@ -140,6 +145,13 @@ describe('identity checks: ID types, and customers', () => {
     expect(done.body.checks.map((c: { key: string }) => c.key)).toEqual(['drivers_licence', 'bvn', 'selfie']);
     const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
     expect(row).toMatchObject({ identityIdType: 'drivers_licence', identityWithBvn: true, identityOutcome: 'passed' });
+    // The app reads how the check was started, which stays even if admin changes the settings after.
+    const after = (await request(t.http).get('/v1/agent/application').set(agent.headers).expect(200)).body;
+    expect(after).toMatchObject({
+      identityIdType: 'drivers_licence',
+      identityWithBvn: true,
+      identityStartedFlow: 'numbers',
+    });
 
     // The BVN as the ID itself: checked once, not twice.
     const second = await signIn(t, 'agent', { unapproved: true });

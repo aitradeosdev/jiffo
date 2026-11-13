@@ -27,7 +27,8 @@ export default function Name() {
         // Clearing a saved email removes it.
         ...(email.trim() ? { email: email.trim() } : user?.email ? { email: null } : {}),
       });
-      router.replace('/home');
+      // Customers check their ID next, as every customer is verified; agents' applications have it.
+      router.replace(VARIANT === 'agent' ? '/home' : '/verify');
     } catch (e) {
       setError(errorMessage(e));
     } finally {
