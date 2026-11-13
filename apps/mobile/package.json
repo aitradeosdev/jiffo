@@ -1,0 +1,43 @@
+{
+  "name": "@jiffo/mobile",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "dependencies": {
+    "@expo-google-fonts/figtree": "^0.4.1",
+    "@expo/metro-runtime": "~58.0.17",
+    "@jiffo/shared": "workspace:*",
+    "expo": "~58.0.25",
+    "expo-constants": "~58.0.16",
+    "expo-crypto": "~58.0.8",
+    "expo-device": "~58.0.5",
+    "expo-font": "~58.0.12",
+    "expo-linking": "~58.0.17",
+    "expo-notifications": "~58.1.9",
+    "expo-router": "~58.0.31",
+    "expo-secure-store": "~58.0.3",
+    "expo-splash-screen": "~58.0.14",
+    "expo-status-bar": "~58.0.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-safe-area-context": "~5.11.1",
+    "react-native-screens": "~4.30.1",
+    "react-native-web": "^0.21.4",
+    "socket.io-client": "^4.8.4"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "typescript": "~6.0.3",
+    "vitest": "^2.1.9"
+  },
+  "scripts": {
+    "start": "expo start --clear",
+    "start:agent": "APP_VARIANT=agent expo start --clear",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "export:web": "expo export --clear --platform web --output-dir dist/customer && APP_VARIANT=agent expo export --clear --platform web --output-dir dist/agent"
+  },
+  "private": true,
+  "description": "Jiffo customer and agent apps (one codebase, two store apps)"
+}

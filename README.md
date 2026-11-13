@@ -8,6 +8,7 @@ The product is built from day one with adapters, so new countries, states and ou
 
 | Path                     | Contents                                                                                                                                                                                                                          |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/mobile/`           | The Customer and Agent apps (Expo, React Native). One codebase builds both store apps; see below.                                                                                                                                 |
 | `apps/api/`              | The backend (NestJS). Accounts and phone sign-in, country settings, the errand lifecycle, chat, push and the realtime socket. See below.                                                                                          |
 | `packages/shared/`       | Code the backend and the apps share: the errand state machine, money in kobo, the country settings schema and ID types.                                                                                                           |
 | `docs/prototypes/`       | Clickable HTML prototypes of the customer app (`customer.html`) and the agent app (`agent.html`). Open either file in a browser. The panel beside the phone jumps to every screen and lets you play the other side of the errand. |
@@ -26,6 +27,21 @@ The product is built from day one with adapters, so new countries, states and ou
 - **Hosting:** AWS Cape Town (af-south-1), pending legal confirmation for data residency.
 
 Money is kept in a double-entry ledger in whole kobo, with idempotent webhooks and daily reconciliation against the payment provider.
+
+## Running the apps
+
+`apps/mobile` builds both store apps from one codebase. `APP_VARIANT` picks which one: `customer` (Jiffo, the default) or `agent` (Jiffo Agent). Each has its own name, icon, bundle identifier and screens.
+
+With the backend running locally:
+
+```bash
+cd apps/mobile
+EXPO_PUBLIC_API_URL=http://<your computer's LAN address>:3000 pnpm start
+```
+
+Open it in Expo Go, or press `w` for the web version. Use `pnpm start:agent` for the agent app. Switching between the two needs the bundler cache cleared, which both scripts do.
+
+`pnpm --filter @jiffo/mobile export:web` builds both apps for the web, the same way CI does.
 
 ## Running the backend
 
