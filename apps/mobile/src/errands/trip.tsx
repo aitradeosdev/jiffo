@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ErrandEvent } from '@jiffo/shared';
 import { goBack } from '@/nav';
 import { useCountryConfig } from '@/api/useCountryConfig';
+import { useRealtimeEvent } from '@/realtime/realtime';
 import { naira } from '@/money';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
@@ -59,12 +60,16 @@ export function CustomerTrip({
   const pickup = errand.stops.find((s) => s.kind === 'pickup');
   const dropoff = errand.stops.find((s) => s.kind === 'dropoff');
   const held = heldKobo(errand);
-  const pins: MapPin[] = errand.stops.map((s) => ({
-    key: String(s.seq),
-    kind: PIN_KIND[s.kind],
-    lat: s.lat,
-    lng: s.lng,
-  }));
+  // The agent's position: from the errand, then live as they move.
+  const [agentAt, setAgentAt] = useState(errand.agentLocation ?? null);
+  useEffect(() => setAgentAt(errand.agentLocation ?? null), [errand.agentLocation]);
+  useRealtimeEvent<{ errandId: string; lat: number; lng: number; at: string }>('agent.location', (e) => {
+    if (e.errandId === errand.id) setAgentAt({ lat: e.lat, lng: e.lng, at: e.at });
+  });
+  const pins: MapPin[] = [
+    ...errand.stops.map((s) => ({ key: String(s.seq), kind: PIN_KIND[s.kind], lat: s.lat, lng: s.lng })),
+    ...(agentAt ? [{ key: 'agent', kind: 'agent' as const, label: agent, lat: agentAt.lat, lng: agentAt.lng }] : []),
+  ];
   const openChat = () => router.push(`/errand/${errand.id}/chat`);
   const top = insets.top + 10;
 

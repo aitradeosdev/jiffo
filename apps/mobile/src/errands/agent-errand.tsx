@@ -16,6 +16,7 @@ import { Card, Chip, Icon, Row } from '../ui/parts';
 import { Photos } from '../ui/photos';
 import { AfterCompletion } from './after-completion';
 import { AGENT_STATUS, type ErrandView } from './types';
+import { AgentRequest } from '../agent/request';
 
 interface Shot {
   uri: string;
@@ -98,6 +99,12 @@ export function AgentErrand({ id }: { id: string }) {
       setBusy(null);
     }
   };
+
+  if (errand.role === 'prospect') {
+    return (
+      <AgentRequest errand={errand} onAccept={() => act('accept')} accepting={busy === 'accept'} error={actionError} />
+    );
+  }
 
   const offerKobo = parseNaira(offer);
   const itemKobo = parseNaira(itemAmount);

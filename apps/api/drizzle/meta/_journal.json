@@ -43,6 +43,13 @@
       "when": 1794534322573,
       "tag": "0005_files_and_ratings",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794557151578,
+      "tag": "0006_agent_presence",
+      "breakpoints": true
     }
   ]
 }

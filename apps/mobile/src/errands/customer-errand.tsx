@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { useColors } from '@/theme/theme';
 import { Text } from '@/ui/kit';
@@ -17,6 +18,13 @@ export function CustomerErrand({ id }: { id: string }) {
   const state = useErrand(id);
   const { errand, error, reload, can, act, busy, actionError, shortKobo } = state;
   const pin = useHandoffPin(errand);
+  // While matching, look again every half minute so the count of agents nearby stays current.
+  const matching = errand?.status === 'requested';
+  useEffect(() => {
+    if (!matching) return;
+    const timer = setInterval(reload, 30_000);
+    return () => clearInterval(timer);
+  }, [matching, reload]);
 
   if (!errand) {
     return (

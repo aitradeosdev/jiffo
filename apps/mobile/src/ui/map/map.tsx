@@ -4,7 +4,15 @@ import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Polyline } from 're
 import { useScheme } from '../../theme/theme';
 import { MAP_COLORS, googleStyle } from './palette';
 import { MapPinView } from './pins';
-import { DEFAULT_CENTER, routeOf, type MapHandle, type MapPin, type MapProps } from './types';
+import { DEFAULT_CENTER, pointsDown, routeOf, type MapHandle, type MapPin, type MapProps } from './types';
+
+const PIN_LABEL: Partial<Record<MapPin['kind'], string>> = {
+  agent: 'Your agent',
+  pick: 'Pickup',
+  drop: 'Drop-off',
+  stop: 'Stop',
+  me: 'You are here',
+};
 
 const EDGE = 56;
 const CITY_DELTA = 0.035;
@@ -30,7 +38,10 @@ export function JiffoMap({
   const ready = useRef(false);
   const customMapStyle = useMemo(() => googleStyle(colors), [colors]);
   const route = showRoute ? routeOf(pins) : [];
-  const key = pins.map((p) => `${p.kind}:${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join('|');
+  // Refit when pins come or go, not when one moves (the agent, a live position), so the camera stays put.
+  const key = pins.map((p) => `${p.kind}:${p.key}`).join('|');
+  // Once the person pans the map, leave it where they put it until they ask to recentre.
+  const userMoved = useRef(false);
   const focus = center ?? DEFAULT_CENTER;
 
   const fit = (animated: boolean) => {
@@ -50,10 +61,15 @@ export function JiffoMap({
     }
   };
 
-  useImperativeHandle(ref, () => ({ recenter: () => fit(true) }));
+  useImperativeHandle(ref, () => ({
+    recenter: () => {
+      userMoved.current = false;
+      fit(true);
+    },
+  }));
   // Refit when the pins move or the sheet changes size.
   useEffect(() => {
-    if (ready.current) fit(true);
+    if (ready.current && !userMoved.current) fit(true);
   }, [key, insets.top, insets.bottom, focus.lat, focus.lng]);
 
   return (
@@ -70,6 +86,9 @@ export function JiffoMap({
         longitudeDelta: CITY_DELTA,
       }}
       mapPadding={{ top: insets.top, bottom: insets.bottom, left: 0, right: 0 }}
+      onPanDrag={() => {
+        userMoved.current = true;
+      }}
       onMapReady={() => {
         ready.current = true;
         fit(false);
@@ -120,11 +139,10 @@ function PinMarker({ pin }: { pin: MapPin }) {
   return (
     <Marker
       coordinate={{ latitude: pin.lat, longitude: pin.lng }}
-      anchor={{ x: 0.5, y: 0.5 }}
+      anchor={pointsDown(pin.kind) ? { x: 0.5, y: 0.95 } : { x: 0.5, y: 0.5 }}
       tracksViewChanges={tracks}
-      accessibilityLabel={
-        pin.kind === 'agent' ? 'Your agent' : pin.kind === 'pick' ? 'Pickup' : pin.kind === 'drop' ? 'Drop-off' : 'Stop'
-      }
+      onPress={pin.onPress}
+      accessibilityLabel={PIN_LABEL[pin.kind] ?? pin.label}
     >
       <MapPinView kind={pin.kind} label={pin.label} radar={pin.radar} />
     </Marker>

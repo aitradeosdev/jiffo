@@ -247,7 +247,7 @@ describe('errands', () => {
         .get('/v1/errands/board?lat=6.4480&lng=3.4700')
         .set(abroad.headers)
         .expect(200);
-      expect(board.body).toEqual([]);
+      expect(board.body).toEqual({ errands: [], hiddenByPreferences: 0 });
     });
   });
 
@@ -292,10 +292,10 @@ describe('errands', () => {
         .get('/v1/errands/board?lat=6.4480&lng=3.4700&radiusKm=5')
         .set(agent.headers)
         .expect(200);
-      const ids = near.body.map((e: { id: string }) => e.id);
+      const ids = near.body.errands.map((e: { id: string }) => e.id);
       expect(ids).toContain(lekki.id);
       expect(ids).not.toContain(ikeja.id);
-      const mine = near.body.find((e: { id: string }) => e.id === lekki.id);
+      const mine = near.body.errands.find((e: { id: string }) => e.id === lekki.id);
       expect(mine).toMatchObject({ role: 'prospect', allowedEvents: ['accept'] });
       expect(mine.distanceMeters).toBeLessThan(500);
 
@@ -303,7 +303,7 @@ describe('errands', () => {
         .get('/v1/errands/board?lat=6.4480&lng=3.4700&radiusKm=30')
         .set(agent.headers)
         .expect(200);
-      const order = wide.body.map((e: { id: string }) => e.id);
+      const order = wide.body.errands.map((e: { id: string }) => e.id);
       expect(order.indexOf(lekki.id)).toBeLessThan(order.indexOf(ikeja.id));
 
       await request(t.http).get('/v1/errands/board?lat=6.4&lng=3.4').set(customer.headers).expect(403);

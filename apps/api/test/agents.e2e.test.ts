@@ -19,7 +19,7 @@ describe('agent profile', () => {
 
   const board = (agent: Person) =>
     request(t.http).get('/v1/errands/board?lat=6.4480&lng=3.4700&radiusKm=5').set(agent.headers).expect(200);
-  const ids = (res: { body: Array<{ id: string }> }) => res.body.map((e) => e.id);
+  const ids = (res: { body: { errands: Array<{ id: string }> } }) => res.body.errands.map((e) => e.id);
   const setTier = (agent: Person, tier: 'bronze' | 'silver' | 'gold' | 'platinum') =>
     t.db
       .insert(agentProfiles)
@@ -48,10 +48,15 @@ describe('agent profile', () => {
       .send({ categoryKeys: ['parcel', 'food', 'parcel'], takesPurchases: false })
       .expect(200);
     expect(updated.body).toEqual({ tier: 'bronze', categoryKeys: ['parcel', 'food'], takesPurchases: false });
-    const shown = ids(await board(agent));
+    const filtered = await board(agent);
+    const shown = ids(filtered);
     expect(shown).toContain(parcel.id);
     expect(shown).toContain(foodNoBuy.id);
     expect(shown).not.toContain(groceries.id);
+    // The board says how many nearby errands the preferences leave out.
+    expect(filtered.body.hiddenByPreferences).toBeGreaterThanOrEqual(1);
+    // Each errand shows what this agent keeps after commission: Bronze pays 15% of ₦2,500.
+    expect(filtered.body.errands.find((e: { id: string }) => e.id === parcel.id).agentEarnsKobo).toBe(212_500);
 
     await request(t.http).patch('/v1/agent/profile').set(agent.headers).send({ categoryKeys: null }).expect(200);
     expect(ids(await board(agent))).not.toContain(groceries.id); // still no purchase errands

@@ -45,6 +45,12 @@ export interface ErrandView {
   held?: { feeKobo: number; itemsKobo: number };
   /** Single errand view: the service fee a pending new price would bring, under the errand's own settings. */
   pendingOfferServiceFeeKobo?: number | null;
+  /** Agent app: what the agent keeps from the fee after commission at their tier. */
+  agentEarnsKobo?: number | null;
+  /** Customer, while the errand runs: where their agent was a moment ago. */
+  agentLocation?: { lat: number; lng: number; at: string } | null;
+  /** Customer, while matching: how many agents are online near the pickup. */
+  nearbyAgents?: { count: number; radiusKm: number } | null;
   /** Single errand view, once completed: how the hand-off happened. */
   completedBy?: 'pin' | 'photo' | 'auto' | 'support' | null;
 }
