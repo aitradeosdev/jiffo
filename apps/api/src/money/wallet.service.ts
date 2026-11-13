@@ -4,13 +4,14 @@ import {
   commissionBpsFor,
   holdsEarnings,
   splitFeeEscrow,
-  type CommissionTier,
+  type AgentTier,
   type CountrySettings,
   type ErrandEvent,
 } from '@jiffo/shared';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { earningHolds, errands, journalEntries, ledgerAccounts, postings, type LedgerAccountType } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
+import { AgentsService } from '../agents/agents.service';
 import { ApiError, conflict, notFound } from '../common/errors';
 import type { AuthContext } from '../auth/auth.types';
 import { InsufficientFunds, LedgerService, accountKey, transfer, type AccountRef } from './ledger.service';
@@ -53,16 +54,8 @@ export class WalletService {
     @Inject(DB) private readonly db: Db,
     private readonly ledger: LedgerService,
     private readonly countries: CountriesService,
+    private readonly agents: AgentsService,
   ) {}
-
-  /**
-   * The agent's tier sets their commission and when earnings can be withdrawn. Tiers are worked out
-   * from the last 30 days once agent profiles exist; until then every agent is Bronze, which also
-   * covers new agents.
-   */
-  async agentTier(_userId: string): Promise<CommissionTier> {
-    return 'bronze';
-  }
 
   async customerBalance(userId: string, countryCode: string) {
     return this.ledger.balance(this.db, wallet(userId), countryCode);
@@ -83,7 +76,7 @@ export class WalletService {
       event: ErrandEvent;
       settings: CountrySettings;
       currency: string;
-      tier: CommissionTier;
+      tier: AgentTier;
     },
   ) {
     const { before, after, event, settings, currency } = input;
@@ -132,7 +125,8 @@ export class WalletService {
       return;
     }
 
-    if (after.status === 'completed') return this.settle(tx, after, settings, currency, input.tier);
+    // The tier recorded when the agent accepted, so a later change by admin never alters this errand.
+    if (after.status === 'completed') return this.settle(tx, after, settings, currency, after.agentTier ?? input.tier);
 
     // The agent left before starting, or the errand ended unfinished: whatever is held goes back.
     const agentLeft = after.status === 'requested' && before.status === 'accepted';
@@ -152,7 +146,7 @@ export class WalletService {
   }
 
   /** Hand-off: the item money goes to the agent untouched; the fee escrow is shared out. */
-  private async settle(tx: Tx, errand: ErrandRow, settings: CountrySettings, currency: string, tier: CommissionTier) {
+  private async settle(tx: Tx, errand: ErrandRow, settings: CountrySettings, currency: string, tier: AgentTier) {
     const agentId = errand.agentId!;
     const [fee, items] = await Promise.all([
       this.ledger.balance(tx, feeEscrow(errand.id), errand.countryCode),
@@ -200,7 +194,7 @@ export class WalletService {
     const [settings, { currency }, tier] = await Promise.all([
       this.countries.settingsAt(errand.countryCode, errand.settingsVersion),
       this.countries.basics(errand.countryCode),
-      this.agentTier(errand.agentId),
+      errand.agentTier ?? this.agents.tier(errand.agentId),
     ]);
     const hold = holdsEarnings(tier);
     const agentId = errand.agentId;
@@ -294,7 +288,7 @@ export class WalletService {
       currency,
       availableKobo: availableKobo + dueKobo,
       heldKobo: heldKobo - dueKobo,
-      tier: await this.agentTier(auth.userId),
+      tier: await this.agents.tier(auth.userId),
       upcoming: holds.filter((h) => h.availableAt.getTime() > now).slice(0, 20),
     };
   }

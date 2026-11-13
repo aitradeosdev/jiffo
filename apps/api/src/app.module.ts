@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AdaptersModule } from './adapters/adapters.module';
+import { AgentsModule } from './agents/agents.module';
 import { AuthModule } from './auth/auth.module';
 import { ChatModule } from './chat/chat.module';
 import { ConfigModule } from './config/app-config';
@@ -22,6 +23,7 @@ import { UsersModule } from './users/users.module';
     CountriesModule,
     AuthModule,
     UsersModule,
+    AgentsModule,
     PushModule,
     RealtimeModule,
     ChatModule,

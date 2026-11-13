@@ -4,7 +4,7 @@ import {
   canRevealPin,
   nextState,
   serviceFee,
-  type CommissionTier,
+  type AgentTier,
   type CountrySettings,
   type ErrandEvent,
   type ErrandState,
@@ -19,6 +19,7 @@ import { decrypt, encrypt, numericCode, safeEqual } from '../common/crypto';
 import { ApiError, badRequest, conflict, locked, notFound, unprocessable } from '../common/errors';
 import { ERRAND_TIMERS, type ErrandTimerJob, type ErrandTimers } from '../timers/errand-timers';
 import { CustomerFundsLow, WalletService } from '../money/wallet.service';
+import { AgentsService } from '../agents/agents.service';
 import { ErrandNotifier, type TransitionResult } from './errand-notifier';
 import { EVENT_DATA, type CreateErrandInput, type ErrandEventInput } from './errand-input';
 import {
@@ -50,6 +51,7 @@ export class ErrandsService implements OnModuleInit {
     private readonly countries: CountriesService,
     private readonly notifier: ErrandNotifier,
     private readonly wallet: WalletService,
+    private readonly agents: AgentsService,
   ) {}
 
   onModuleInit() {
@@ -119,6 +121,8 @@ export class ErrandsService implements OnModuleInit {
 
   /** Open errands whose pickup is within the radius, nearest first. */
   async board(auth: AuthContext, q: { lat: number; lng: number; radiusKm: number; limit: number }) {
+    // Only errands in the agent's chosen categories, and purchase errands only if they take them.
+    const prefs = await this.agents.profile(auth.userId);
     const here = sql`ST_SetSRID(ST_MakePoint(${q.lng}, ${q.lat}), 4326)::geography`;
     const distance = sql<number>`ST_Distance(${errandStops.location}, ${here})`;
     const rows = await this.db
@@ -130,6 +134,8 @@ export class ErrandsService implements OnModuleInit {
           eq(errands.status, 'requested'),
           eq(errands.countryCode, auth.countryCode),
           ne(errands.customerId, auth.userId),
+          prefs.categoryKeys ? inArray(errands.categoryKey, prefs.categoryKeys) : undefined,
+          prefs.takesPurchases ? undefined : eq(errands.buy, false),
           sql`ST_DWithin(${errandStops.location}, ${here}, ${q.radiusKm * 1000})`,
         ),
       )
@@ -251,17 +257,24 @@ export class ErrandsService implements OnModuleInit {
    * The settings an errand runs under. Its country and settings version never change, so this is read
    * before the transaction: a query on the pool while holding a locked connection could starve the pool.
    */
-  private async settingsOf(errandId: string, agentId?: string) {
+  /**
+   * The errand's settings and currency, and the tier its money follows: the tier of the agent accepting
+   * now, or the tier recorded when the current agent accepted.
+   */
+  private async settingsOf(errandId: string, acceptingAgentId?: string) {
     const [row] = await this.db
-      .select({ countryCode: errands.countryCode, settingsVersion: errands.settingsVersion, agentId: errands.agentId })
+      .select({
+        countryCode: errands.countryCode,
+        settingsVersion: errands.settingsVersion,
+        agentTier: errands.agentTier,
+      })
       .from(errands)
       .where(eq(errands.id, errandId));
     if (!row) return null;
-    const agent = agentId ?? row.agentId;
     const [settings, { currency }, tier] = await Promise.all([
       this.countries.settingsAt(row.countryCode, row.settingsVersion),
       this.countries.basics(row.countryCode),
-      agent ? this.wallet.agentTier(agent) : Promise.resolve<CommissionTier>('bronze'),
+      acceptingAgentId ? this.agents.tier(acceptingAgentId) : Promise.resolve<AgentTier>(row.agentTier ?? 'bronze'),
     ]);
     return { settings, currency, tier };
   }
@@ -302,7 +315,7 @@ export class ErrandsService implements OnModuleInit {
       const actor = role === 'customer' ? 'customer' : 'agent';
       const to = nextState(errand.status, input.event, transitionContext(errand, actor));
       const event = input.event as ErrandEvent;
-      const effect = await this.effectOf(tx, event, errand, auth, input.data, settings);
+      const effect = await this.effectOf(tx, event, errand, auth, input.data, settings, money.tier);
       if (effect instanceof ApiError) return { error: effect };
 
       const after = await this.write(tx, errand, event, to, effect, actor, auth.userId);
@@ -399,10 +412,12 @@ export class ErrandsService implements OnModuleInit {
     auth: AuthContext,
     data: Record<string, unknown>,
     settings: CountrySettings,
+    tier: AgentTier,
   ): Promise<EventEffect | ApiError> {
     const now = new Date();
     const releaseAgent: Patch = {
       agentId: null,
+      agentTier: null,
       pinCipher: null,
       pinAttempts: 0,
       pendingOfferKobo: null,
@@ -417,6 +432,7 @@ export class ErrandsService implements OnModuleInit {
         return {
           patch: {
             agentId: auth.userId,
+            agentTier: tier,
             acceptedAt: now,
             pinCipher: encrypt(this.config.PIN_KEY, pin),
             pinAttempts: 0,

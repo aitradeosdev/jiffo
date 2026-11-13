@@ -17,7 +17,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import type { CountrySettings, ErrandState } from '@jiffo/shared';
+import { AGENT_TIERS, type CountrySettings, type ErrandState } from '@jiffo/shared';
 
 /** PostGIS point (longitude, latitude). Written with ST_MakePoint, read back through the lat/lng columns. */
 const geographyPoint = customType<{ data: string; driverData: string }>({
@@ -190,6 +190,30 @@ export const otpChallenges = pgTable(
   ],
 );
 
+/** Agent-only details. A row is created the first time an agent's profile is read or changed. */
+export const AGENT_PROFILE_DEFAULTS = { tier: 'bronze', categoryKeys: null, takesPurchases: true } as const;
+const tierCheck = (column: unknown) => sql`${column} in (${sql.raw(AGENT_TIERS.map((t) => `'${t}'`).join(', '))})`;
+
+export const agentProfiles = pgTable(
+  'agent_profiles',
+  {
+    userId: uuid('user_id')
+      .primaryKey()
+      .references(() => users.id),
+    /** Set by admin. It decides the agent's commission and when their earnings can be withdrawn. */
+    tier: text('tier', { enum: AGENT_TIERS }).notNull().default(AGENT_PROFILE_DEFAULTS.tier),
+    tierSetBy: uuid('tier_set_by'),
+    tierSetAt: timestamp('tier_set_at', { withTimezone: true }),
+    /** The categories the agent receives; null means every category. */
+    categoryKeys: text('category_keys').array(),
+    /** Whether the agent takes errands where they buy the items. */
+    takesPurchases: boolean('takes_purchases').notNull().default(AGENT_PROFILE_DEFAULTS.takesPurchases),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [check('agent_profiles_tier_ck', tierCheck(t.tier))],
+);
+
 /* ---------- Errands ---------- */
 
 export const errands = pgTable(
@@ -216,6 +240,8 @@ export const errands = pgTable(
     itemAmountKobo: kobo('item_amount_kobo'),
     scheduledFor: timestamp('scheduled_for', { withTimezone: true }),
     settingsVersion: integer('settings_version').notNull(),
+    /** The agent's tier when they accepted. Commission and the earnings hold follow it, whatever admin changes later. */
+    agentTier: text('agent_tier', { enum: AGENT_TIERS }),
     pinCipher: text('pin_cipher'),
     pinAttempts: smallint('pin_attempts').notNull().default(0),
     version: integer('version').notNull().default(0),
@@ -231,6 +257,7 @@ export const errands = pgTable(
     index('errands_customer_idx').on(t.customerId, t.createdAt),
     index('errands_agent_idx').on(t.agentId, t.createdAt),
     index('errands_status_idx').on(t.status),
+    check('errands_agent_tier_ck', sql`${t.agentTier} is null or ${tierCheck(t.agentTier)}`),
   ],
 );
 

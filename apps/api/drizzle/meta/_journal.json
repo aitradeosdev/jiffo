@@ -29,6 +29,13 @@
       "when": 1794526586760,
       "tag": "0003_money",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794531580200,
+      "tag": "0004_agent_profiles",
+      "breakpoints": true
     }
   ]
 }

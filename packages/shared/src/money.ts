@@ -1,3 +1,5 @@
+import type { AgentTier } from './settings';
+
 /**
  * Money is always held as whole kobo (1 naira = 100 kobo) in a JavaScript safe integer.
  * Rates are basis points (1 bp = 0.01%), so 10% is 1000 bp. Nothing here uses floating-point
@@ -44,18 +46,16 @@ export function commission(errandFee: Kobo, commissionBps: number): Kobo {
   return applyBps(errandFee, commissionBps);
 }
 
-export type CommissionTier = 'bronze' | 'silver' | 'gold' | 'platinum';
-
 /** The commission rate for a tier, or the launch rate while admin has one switched on. */
 export function commissionBpsFor(
-  fees: { commissionBps: Record<CommissionTier, number>; launchCommissionBps: number | null },
-  tier: CommissionTier,
+  fees: { commissionBps: Record<AgentTier, number>; launchCommissionBps: number | null },
+  tier: AgentTier,
 ): number {
   return fees.launchCommissionBps ?? fees.commissionBps[tier];
 }
 
 /** Bronze agents (and new agents) wait for errand earnings; Silver and up can withdraw them at once. */
-export const holdsEarnings = (tier: CommissionTier) => tier === 'bronze';
+export const holdsEarnings = (tier: AgentTier) => tier === 'bronze';
 
 /**
  * How the fee escrow is shared out at hand-off: the customer's service fee and the agent's commission
