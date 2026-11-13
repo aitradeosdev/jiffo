@@ -82,3 +82,11 @@ export const PeopleIcon = () => (
     <path d="M5 20a7 7 0 0 1 14 0" />
   </Icon>
 );
+
+export const MoneyIcon = () => (
+  <Icon>
+    <rect x="3" y="6" width="18" height="12" rx="2" />
+    <circle cx="12" cy="12" r="2.5" />
+    <path d="M6.5 9.5v.01M17.5 14.5v.01" />
+  </Icon>
+);

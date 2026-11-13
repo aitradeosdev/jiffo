@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { buttonClass, Card, Empty, PageHeader, tableClass, tdClass, thClass } from '@/components/ui';
 import { adminRoleLabel, agentTierLabel } from '@jiffo/shared';
 import { api, getCountry, getMe } from '@/lib/api';
-import { dateTime } from '@/lib/format';
+import { dateTime, money } from '@/lib/format';
 
 export const metadata: Metadata = { title: 'Audit log' };
 
@@ -44,6 +44,10 @@ function describe(entry: Entry, names: Map<string, string>): string {
       return `Changed ${entry.targetLabel ?? 'an agent'}'s tier from ${agentTierLabel(String(entry.data.from))} to ${agentTierLabel(
         String(entry.data.to),
       )}`;
+    case 'money.adjust':
+      return `${entry.data.direction === 'debit' ? 'Took back' : 'Added'} ${money(Number(entry.data.amountKobo ?? 0))} ${
+        entry.data.direction === 'debit' ? 'from' : 'to'
+      } ${entry.targetLabel ?? 'an account'}'s ${entry.data.account === 'agent_available' ? 'agent balance' : 'wallet'}`;
     case 'person.suspend':
       return `Suspended ${entry.targetLabel ?? 'an account'}`;
     case 'person.reactivate':

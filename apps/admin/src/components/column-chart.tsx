@@ -55,9 +55,10 @@ export function ColumnChart({ title, columns, empty }: { title: string; columns:
         {columns.map((c, i) => (
           <span
             key={c.label}
-            className={`flex-1 text-center text-xs ${i === last ? 'font-bold text-ink' : 'text-ink-3'}`}
+            className={`flex-1 text-center text-xs whitespace-nowrap ${i === last ? 'font-bold text-ink' : 'text-ink-3'}`}
           >
-            {c.label}
+            {/* With many columns, one label a week, counted back from the latest, so they never crowd. */}
+            {columns.length <= 14 || (last - i) % 7 === 0 ? c.label : ''}
           </span>
         ))}
       </div>
