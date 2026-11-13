@@ -3,6 +3,7 @@ import { ErrandsModule } from '../errands/errands.module';
 import { ErrandsAdminService } from './errands-admin.service';
 import { PeopleAdminService } from './people-admin.service';
 import { MoneyAdminService } from './money-admin.service';
+import { SettingsAdminService } from './settings-admin.service';
 import { PushModule } from '../push/push.module';
 import { AdminAuthController } from './admin-auth.controller';
 import { AdminAuthService } from './admin-auth.service';
@@ -24,6 +25,7 @@ import { TeamService } from './team.service';
     MoneyAdminService,
     OverviewService,
     PeopleAdminService,
+    SettingsAdminService,
     TeamService,
   ],
   exports: [AdminAuthService, AdminGuard, AuditService],
