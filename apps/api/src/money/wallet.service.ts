@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, isNull, lt, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql, type SQL } from 'drizzle-orm';
 import {
   ERRAND_STATES,
   TERMINAL_STATES,
@@ -291,7 +291,8 @@ export class WalletService {
     }
     // Read only: earnings whose hold has ended count as available here, and are moved in the ledger by
     // the recurring job or when the agent withdraws.
-    const [availableKobo, heldKobo, holds] = await Promise.all([
+    const { timezone } = await this.countries.basics(auth.countryCode);
+    const [availableKobo, heldKobo, holds, todayKobo] = await Promise.all([
       this.ledger.balance(this.db, available(auth.userId), auth.countryCode),
       this.ledger.balance(this.db, held(auth.userId), auth.countryCode),
       this.db
@@ -299,6 +300,7 @@ export class WalletService {
         .from(earningHolds)
         .where(and(eq(earningHolds.userId, auth.userId), isNull(earningHolds.releasedAt)))
         .orderBy(asc(earningHolds.availableAt)),
+      this.earnedSince(auth, sql`date_trunc('day', now() at time zone ${timezone}) at time zone ${timezone}`),
     ]);
     const now = Date.now();
     const dueKobo = holds.filter((h) => h.availableAt.getTime() <= now).reduce((sum, h) => sum + h.amountKobo, 0);
@@ -306,9 +308,38 @@ export class WalletService {
       currency,
       availableKobo: availableKobo + dueKobo,
       heldKobo: heldKobo - dueKobo,
+      todayKobo,
       tier: await this.agents.tier(auth.userId),
       upcoming: holds.filter((h) => h.availableAt.getTime() > now).slice(0, 20),
     };
+  }
+
+  /**
+   * An agent's earnings since a moment: their share of each fee (as recorded when the errand settled)
+   * and tips. Item money paid back at hand-off is the agent's own money, not earnings.
+   */
+  private async earnedSince(auth: AuthContext, since: SQL) {
+    const keys = (['agent_available', 'agent_held'] as const).map((type) =>
+      accountKey({ type, ownerId: auth.userId }, auth.countryCode),
+    );
+    const touchesAgent = (journalId: SQL | typeof journalEntries.id) =>
+      sql`exists (select 1 from ${postings} join ${ledgerAccounts} on ${ledgerAccounts.id} = ${postings.accountId}
+        where ${postings.journalId} = ${journalId} and ${inArray(ledgerAccounts.key, keys)})`;
+    const [[fees], [tips]] = await Promise.all([
+      this.db
+        .select({ total: sql<string>`coalesce(sum((${journalEntries.data}->>'agentKobo')::bigint), 0)` })
+        .from(journalEntries)
+        .where(
+          and(eq(journalEntries.kind, 'settle'), gte(journalEntries.createdAt, since), touchesAgent(journalEntries.id)),
+        ),
+      this.db
+        .select({ total: sql<string>`coalesce(sum(-${postings.amount}), 0)` })
+        .from(postings)
+        .innerJoin(ledgerAccounts, eq(ledgerAccounts.id, postings.accountId))
+        .innerJoin(journalEntries, eq(journalEntries.id, postings.journalId))
+        .where(and(inArray(ledgerAccounts.key, keys), eq(journalEntries.kind, 'tip'), gte(postings.createdAt, since))),
+    ]);
+    return Number(fees?.total ?? 0) + Number(tips?.total ?? 0);
   }
 
   /** The customer's errands that have money held in escrow now, with how much. */

@@ -16,6 +16,19 @@ import { Card, Chip, Icon, Row } from '../ui/parts';
 import { Photos } from '../ui/photos';
 import { AfterCompletion } from './after-completion';
 import { AGENT_STATUS, type ErrandView } from './types';
+import { AgentRequest } from '../agent/request';
+import { useShareLocationDuring } from '../agent/presence';
+
+/** Where the agent is out doing the errand, and the customer can follow them. */
+const OUT_ON_ERRAND: ErrandView['status'][] = [
+  'accepted',
+  'started',
+  'item_pending',
+  'items_locked',
+  'delivered',
+  'photo_pending',
+  'unreachable',
+];
 
 interface Shot {
   uri: string;
@@ -46,6 +59,9 @@ export function AgentErrand({ id }: { id: string }) {
     const timer = setInterval(reload, 10 * 60_000);
     return () => clearInterval(timer);
   }, [hasPhotos, reload]);
+
+  // While out on the errand, the customer follows the agent on their map.
+  useShareLocationDuring(!!errand && errand.role === 'agent' && OUT_ON_ERRAND.includes(errand.status));
 
   if (!errand) return <Screen>{error ? <Text tone="danger">{error}</Text> : <ActivityIndicator />}</Screen>;
 
@@ -98,6 +114,12 @@ export function AgentErrand({ id }: { id: string }) {
       setBusy(null);
     }
   };
+
+  if (errand.role === 'prospect') {
+    return (
+      <AgentRequest errand={errand} onAccept={() => act('accept')} accepting={busy === 'accept'} error={actionError} />
+    );
+  }
 
   const offerKobo = parseNaira(offer);
   const itemKobo = parseNaira(itemAmount);

@@ -4,7 +4,15 @@ import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Polyline } from 're
 import { useScheme } from '../../theme/theme';
 import { MAP_COLORS, googleStyle } from './palette';
 import { MapPinView } from './pins';
-import { DEFAULT_CENTER, routeOf, type MapHandle, type MapPin, type MapProps } from './types';
+import { DEFAULT_CENTER, pointsDown, routeOf, type MapHandle, type MapPin, type MapProps } from './types';
+
+const PIN_LABEL: Partial<Record<MapPin['kind'], string>> = {
+  agent: 'Your agent',
+  pick: 'Pickup',
+  drop: 'Drop-off',
+  stop: 'Stop',
+  me: 'You are here',
+};
 
 const EDGE = 56;
 const CITY_DELTA = 0.035;
@@ -120,11 +128,10 @@ function PinMarker({ pin }: { pin: MapPin }) {
   return (
     <Marker
       coordinate={{ latitude: pin.lat, longitude: pin.lng }}
-      anchor={{ x: 0.5, y: 0.5 }}
+      anchor={pointsDown(pin.kind) ? { x: 0.5, y: 0.95 } : { x: 0.5, y: 0.5 }}
       tracksViewChanges={tracks}
-      accessibilityLabel={
-        pin.kind === 'agent' ? 'Your agent' : pin.kind === 'pick' ? 'Pickup' : pin.kind === 'drop' ? 'Drop-off' : 'Stop'
-      }
+      onPress={pin.onPress}
+      accessibilityLabel={PIN_LABEL[pin.kind] ?? pin.label}
     >
       <MapPinView kind={pin.kind} label={pin.label} radar={pin.radar} />
     </Marker>

@@ -70,3 +70,12 @@ export function useCurrentLocation() {
 
   return { coords, error, blocked, locate, peek, openSettings: () => Linking.openSettings() };
 }
+
+/** Straight-line distance between two points, in metres (haversine). */
+export function distanceMeters(a: Coords, b: Coords) {
+  const rad = (d: number) => (d * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * 6_371_000 * Math.asin(Math.sqrt(h)));
+}

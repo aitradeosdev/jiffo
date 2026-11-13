@@ -214,6 +214,27 @@ export const agentProfiles = pgTable(
   (t) => [check('agent_profiles_tier_ck', tierCheck(t.tier))],
 );
 
+/**
+ * Where an agent is and whether they take errands now. The agent app reports it while online or on an
+ * errand; it is cleared when they go offline with nothing running, so a location is never kept longer.
+ */
+export const agentPresence = pgTable(
+  'agent_presence',
+  {
+    userId: uuid('user_id')
+      .primaryKey()
+      .references(() => users.id),
+    countryCode: text('country_code').notNull(),
+    online: boolean('online').notNull().default(false),
+    lat: doublePrecision('lat'),
+    lng: doublePrecision('lng'),
+    location: geographyPoint('location'),
+    locatedAt: timestamp('located_at', { withTimezone: true }),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('agent_presence_location_gix').using('gist', t.location)],
+);
+
 /* ---------- Errands ---------- */
 
 export const errands = pgTable(

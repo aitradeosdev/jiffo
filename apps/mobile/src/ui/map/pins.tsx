@@ -37,6 +37,24 @@ export function MapPinView({ kind, label, radar }: { kind: PinKind; label?: stri
       </View>
     );
   }
+  if (kind === 'fee') {
+    return (
+      <View style={{ alignItems: 'center' }}>
+        <View style={[styles.fee, { backgroundColor: c.ink }]}>
+          <Text style={{ color: c.onInk, fontFamily: fonts.bold, fontSize: 12.5 }}>{label}</Text>
+        </View>
+        <View style={[styles.stem, { backgroundColor: c.ink }]} />
+        <View style={[styles.feeDot, { backgroundColor: c.ink, borderColor: c.surface }]} />
+      </View>
+    );
+  }
+  if (kind === 'me') {
+    return (
+      <View style={[styles.meHalo, { backgroundColor: 'rgba(39,110,241,0.18)' }]}>
+        <View style={[styles.me, { backgroundColor: c.blue, borderColor: '#FFFFFF' }]} />
+      </View>
+    );
+  }
   if (kind === 'agent') {
     return (
       <View style={[styles.agent, { backgroundColor: c.ink, borderColor: c.surface }]}>
@@ -54,6 +72,17 @@ export function MapPinView({ kind, label, radar }: { kind: PinKind; label?: stri
 }
 
 const styles = StyleSheet.create({
+  fee: {
+    paddingHorizontal: 9,
+    height: 26,
+    borderRadius: 8,
+    justifyContent: 'center',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.25)',
+  },
+  stem: { width: 2, height: 8 },
+  feeDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 2 },
+  meHalo: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  me: { width: 16, height: 16, borderRadius: 8, borderWidth: 3, boxShadow: '0 1px 4px rgba(0,0,0,0.3)' },
   radar: { width: 170, height: 170, alignItems: 'center', justifyContent: 'center' },
   ring: { position: 'absolute', borderWidth: 1.5, opacity: 0.45 },
   halo: { padding: 3, borderRadius: 6, boxShadow: '0 1px 4px rgba(0,0,0,0.25)' },

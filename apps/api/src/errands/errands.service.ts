@@ -2,6 +2,8 @@ import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { and, desc, eq, inArray, lt, ne, sql } from 'drizzle-orm';
 import {
   canRevealPin,
+  commissionBpsFor,
+  splitFeeEscrow,
   nextState,
   serviceFee,
   suggestedFee,
@@ -22,6 +24,7 @@ import { ApiError, badRequest, conflict, locked, notFound, unprocessable } from 
 import { ERRAND_TIMERS, type ErrandTimerJob, type ErrandTimers } from '../timers/errand-timers';
 import { CustomerFundsLow, WalletService } from '../money/wallet.service';
 import { AgentsService } from '../agents/agents.service';
+import { PresenceService, TRAVEL_STATES } from '../agents/presence.service';
 import { MAPS, type MapsAdapter } from '../adapters/maps';
 import { UploadsService } from '../files/uploads.service';
 import { participantRole } from './access';
@@ -46,6 +49,9 @@ interface EventEffect {
 
 const HOUR_MS = 3_600_000;
 const MINUTE_MS = 60_000;
+
+/** How far from the pickup the matching screen counts online agents. */
+const NEARBY_RADIUS_KM = 3;
 
 /** How an errand reached completed, for the customer's receipt. */
 type CompletedBy = 'pin' | 'photo' | 'auto' | 'support';
@@ -75,6 +81,7 @@ export class ErrandsService implements OnModuleInit {
     private readonly agents: AgentsService,
     @Inject(MAPS) private readonly maps: MapsAdapter,
     private readonly uploads: UploadsService,
+    private readonly presence: PresenceService,
   ) {}
 
   onModuleInit() {
@@ -154,30 +161,55 @@ export class ErrandsService implements OnModuleInit {
   /** Open errands whose pickup is within the radius, nearest first. */
   async board(auth: AuthContext, q: { lat: number; lng: number; radiusKm: number; limit: number }) {
     // Only errands in the agent's chosen categories, and purchase errands only if they take them.
-    const prefs = await this.agents.profile(auth.userId);
+    const [prefs, tier] = await Promise.all([this.agents.profile(auth.userId), this.agents.tier(auth.userId)]);
     const here = sql`ST_SetSRID(ST_MakePoint(${q.lng}, ${q.lat}), 4326)::geography`;
     const distance = sql<number>`ST_Distance(${errandStops.location}, ${here})`;
-    const rows = await this.db
-      .select({ errand: errands, distanceMeters: distance })
-      .from(errands)
-      .innerJoin(errandStops, and(eq(errandStops.errandId, errands.id), eq(errandStops.seq, 0)))
-      .where(
-        and(
-          eq(errands.status, 'requested'),
-          eq(errands.countryCode, auth.countryCode),
-          ne(errands.customerId, auth.userId),
-          prefs.categoryKeys ? inArray(errands.categoryKey, prefs.categoryKeys) : undefined,
-          prefs.takesPurchases ? undefined : eq(errands.buy, false),
-          sql`ST_DWithin(${errandStops.location}, ${here}, ${q.radiusKm * 1000})`,
-        ),
-      )
-      .orderBy(distance)
-      .limit(q.limit);
+    const open = and(
+      eq(errands.status, 'requested'),
+      eq(errands.countryCode, auth.countryCode),
+      ne(errands.customerId, auth.userId),
+      sql`ST_DWithin(${errandStops.location}, ${here}, ${q.radiusKm * 1000})`,
+    );
+    const filtered = !!prefs.categoryKeys || !prefs.takesPurchases;
+    const wanted = and(
+      open,
+      prefs.categoryKeys ? inArray(errands.categoryKey, prefs.categoryKeys) : undefined,
+      prefs.takesPurchases ? undefined : eq(errands.buy, false),
+    );
+    const pickupOf = and(eq(errandStops.errandId, errands.id), eq(errandStops.seq, 0));
+    const [rows, counts] = await Promise.all([
+      this.db
+        .select({ errand: errands, distanceMeters: distance })
+        .from(errands)
+        .innerJoin(errandStops, pickupOf)
+        .where(wanted)
+        .orderBy(distance)
+        .limit(q.limit),
+      // How many nearby errands the agent's preferences leave out, so the board can say so.
+      filtered
+        ? this.db
+            .select({
+              all: sql<number>`count(*)::int`,
+              wanted: sql<number>`count(*) filter (where ${wanted})::int`,
+            })
+            .from(errands)
+            .innerJoin(errandStops, pickupOf)
+            .where(open)
+        : Promise.resolve([{ all: 0, wanted: 0 }]),
+    ]);
     const views = await this.views(
       rows.map((r) => r.errand),
       () => 'prospect',
     );
-    return views.map((v, i) => ({ ...v, distanceMeters: Math.round(Number(rows[i]!.distanceMeters)) }));
+    const earns = await Promise.all(rows.map((r) => this.agentEarns(r.errand, tier)));
+    return {
+      errands: views.map((v, i) => ({
+        ...v,
+        distanceMeters: Math.round(Number(rows[i]!.distanceMeters)),
+        agentEarnsKobo: earns[i]!,
+      })),
+      hiddenByPreferences: Math.max(0, (counts[0]?.all ?? 0) - (counts[0]?.wanted ?? 0)),
+    };
   }
 
   async events(errandId: string, auth: AuthContext) {
@@ -333,8 +365,15 @@ export class ErrandsService implements OnModuleInit {
       held: { feeKobo: 0, itemsKobo: 0 },
       pendingOfferServiceFeeKobo: null as number | null,
       completedBy: null as CompletedBy | null,
+      agentEarnsKobo: null as number | null,
+      agentLocation: null as { lat: number; lng: number; at: Date } | null,
+      nearbyAgents: null as { count: number; radiusKm: number } | null,
     };
-    if (role === 'prospect' || !viewerId) return { ...view!, ...empty };
+    if (!viewerId) return { ...view!, ...empty };
+    // An agent deciding whether to accept sees what they would earn at their tier.
+    if (role === 'prospect') {
+      return { ...view!, ...empty, agentEarnsKobo: await this.agentEarns(errand, await this.agents.tier(viewerId)) };
+    }
     // Only look for what can exist: photos once the agent has started, ratings and tips once completed.
     const mayHavePhotos =
       !['requested', 'accepted', 'started'].includes(errand.status) || errand.itemAmountKobo !== null;
@@ -342,43 +381,61 @@ export class ErrandsService implements OnModuleInit {
     // Money sits in escrow only between accept and the end of the errand.
     const mayHoldMoney = errand.status !== 'requested' && !TERMINAL_STATES.has(errand.status);
     const offer = errand.pendingOfferKobo;
-    const [photoEvents, [rating], [tip], held, offerSettings, [ending]] = await Promise.all([
-      mayHavePhotos
-        ? this.db
-            .select({ event: errandEvents.event, data: errandEvents.data })
-            .from(errandEvents)
-            .where(
-              and(
-                eq(errandEvents.errandId, errand.id),
-                inArray(errandEvents.event, ['send_item_amount', 'send_dropoff_photo']),
-              ),
+    const pickup = view!.stops[0]!;
+    const travelling = (TRAVEL_STATES as readonly string[]).includes(errand.status);
+    const [photoEvents, [rating], [tip], held, offerSettings, [ending], agentLocation, nearby, earns] =
+      await Promise.all([
+        mayHavePhotos
+          ? this.db
+              .select({ event: errandEvents.event, data: errandEvents.data })
+              .from(errandEvents)
+              .where(
+                and(
+                  eq(errandEvents.errandId, errand.id),
+                  inArray(errandEvents.event, ['send_item_amount', 'send_dropoff_photo']),
+                ),
+              )
+              .orderBy(desc(errandEvents.id))
+          : Promise.resolve([]),
+        completed
+          ? this.db
+              .select({ id: errandRatings.id })
+              .from(errandRatings)
+              .where(and(eq(errandRatings.errandId, errand.id), eq(errandRatings.raterId, viewerId)))
+          : Promise.resolve([]),
+        completed && role === 'customer'
+          ? this.db
+              .select({ id: journalEntries.id })
+              .from(journalEntries)
+              .where(eq(journalEntries.key, `errand:${errand.id}:tip`))
+          : Promise.resolve([]),
+        mayHoldMoney ? this.wallet.heldFor(errand.id, errand.countryCode) : Promise.resolve(empty.held),
+        // A new price's service fee follows the settings the errand was created under, as accepting it will.
+        offer !== null ? this.countries.settingsAt(errand.countryCode, errand.settingsVersion) : Promise.resolve(null),
+        completed
+          ? this.db
+              .select({ event: errandEvents.event })
+              .from(errandEvents)
+              .where(and(eq(errandEvents.errandId, errand.id), eq(errandEvents.toStatus, 'completed')))
+              .orderBy(desc(errandEvents.id))
+              .limit(1)
+          : Promise.resolve([]),
+        // The customer follows their agent on the map while the errand runs.
+        role === 'customer' && travelling && errand.agentId
+          ? this.presence.locationOf(errand.agentId)
+          : Promise.resolve(null),
+        // While matching, the customer sees how many agents are online near the pickup, never who or where.
+        role === 'customer' && errand.status === 'requested'
+          ? this.presence.onlineNear(
+              errand.countryCode,
+              pickup.lat,
+              pickup.lng,
+              NEARBY_RADIUS_KM * 1000,
+              errand.customerId,
             )
-            .orderBy(desc(errandEvents.id))
-        : Promise.resolve([]),
-      completed
-        ? this.db
-            .select({ id: errandRatings.id })
-            .from(errandRatings)
-            .where(and(eq(errandRatings.errandId, errand.id), eq(errandRatings.raterId, viewerId)))
-        : Promise.resolve([]),
-      completed && role === 'customer'
-        ? this.db
-            .select({ id: journalEntries.id })
-            .from(journalEntries)
-            .where(eq(journalEntries.key, `errand:${errand.id}:tip`))
-        : Promise.resolve([]),
-      mayHoldMoney ? this.wallet.heldFor(errand.id, errand.countryCode) : Promise.resolve(empty.held),
-      // A new price's service fee follows the settings the errand was created under, as accepting it will.
-      offer !== null ? this.countries.settingsAt(errand.countryCode, errand.settingsVersion) : Promise.resolve(null),
-      completed
-        ? this.db
-            .select({ event: errandEvents.event })
-            .from(errandEvents)
-            .where(and(eq(errandEvents.errandId, errand.id), eq(errandEvents.toStatus, 'completed')))
-            .orderBy(desc(errandEvents.id))
-            .limit(1)
-        : Promise.resolve([]),
-    ]);
+          : Promise.resolve(null),
+        role === 'agent' ? this.agentEarns(errand, errand.agentTier ?? 'bronze') : Promise.resolve(null),
+      ]);
     const items = (photoEvents.find((e) => e.event === 'send_item_amount')?.data.photos as string[] | undefined) ?? [];
     const dropoff = photoEvents.find((e) => e.event === 'send_dropoff_photo')?.data.photo as string | undefined;
     return {
@@ -392,7 +449,28 @@ export class ErrandsService implements OnModuleInit {
       held,
       pendingOfferServiceFeeKobo: offer !== null && offerSettings ? serviceFee(offer, offerSettings.fees) : null,
       completedBy: ending ? (COMPLETED_BY[ending.event] ?? null) : null,
+      agentEarnsKobo: earns,
+      agentLocation,
+      nearbyAgents: nearby === null ? null : { count: nearby, radiusKm: NEARBY_RADIUS_KM },
     };
+  }
+
+  /** Once an agent is off an errand, their location is kept only if they are still online or busy. */
+  private async afterAgentLeft(before: ErrandRow, after: ErrandRow) {
+    const travelling = (status: string) => (TRAVEL_STATES as readonly string[]).includes(status);
+    if (before.agentId && travelling(before.status) && !travelling(after.status)) {
+      await this.presence.forgetIfIdle(before.agentId);
+    }
+  }
+
+  /** What the agent keeps from the fee after commission at their tier, under the errand's own settings. */
+  private async agentEarns(errand: ErrandRow, tier: AgentTier) {
+    const settings = await this.countries.settingsAt(errand.countryCode, errand.settingsVersion);
+    return splitFeeEscrow({
+      feeKobo: errand.feeKobo,
+      serviceFeeKobo: errand.serviceFeeKobo,
+      commissionBps: commissionBpsFor(settings.fees, tier),
+    }).agentKobo;
   }
 
   /** Runs one event from the customer or agent app through the state machine. */
@@ -470,6 +548,7 @@ export class ErrandsService implements OnModuleInit {
 
     if ('error' in outcome) throw outcome.error;
     await this.notifier.transitioned(outcome.result);
+    await this.afterAgentLeft(outcome.result.before, outcome.result.after);
     return this.viewOne(outcome.result.after, outcome.role, auth.userId);
   }
 
@@ -509,7 +588,10 @@ export class ErrandsService implements OnModuleInit {
         settings,
       } satisfies TransitionResult;
     });
-    if (result) await this.notifier.transitioned(result);
+    if (result) {
+      await this.notifier.transitioned(result);
+      await this.afterAgentLeft(result.before, result.after);
+    }
   }
 
   private async write(

@@ -1,10 +1,10 @@
 import { useImperativeHandle, useMemo, useState, type Ref } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Path, Polyline, Rect } from 'react-native-svg';
 import { useScheme } from '../../theme/theme';
 import { MAP_COLORS, type MapColors } from './palette';
 import { MapPinView } from './pins';
-import { routeOf, type MapHandle, type MapPin, type MapProps } from './types';
+import { pointsDown, routeOf, type MapHandle, type MapPin, type MapProps } from './types';
 
 const EDGE = 56;
 
@@ -136,9 +136,16 @@ export function JiffoMap({ pins, showRoute, insets, style, ref }: MapProps & { r
         </Svg>
       ) : null}
       {placed.map(({ pin, x, y }) => (
-        <View key={pin.key} style={[styles.pin, { left: x, top: y }]}>
+        <Pressable
+          key={pin.key}
+          disabled={!pin.onPress}
+          onPress={pin.onPress}
+          accessibilityRole={pin.onPress ? 'button' : undefined}
+          accessibilityLabel={pin.label}
+          style={[styles.pin, { left: x, top: y }, pointsDown(pin.kind) && styles.down]}
+        >
           <MapPinView kind={pin.kind} label={pin.label} radar={pin.radar} />
-        </View>
+        </Pressable>
       ))}
     </View>
   );
@@ -146,4 +153,5 @@ export function JiffoMap({ pins, showRoute, insets, style, ref }: MapProps & { r
 
 const styles = StyleSheet.create({
   pin: { position: 'absolute', transform: [{ translateX: '-50%' }, { translateY: '-50%' }] },
+  down: { transform: [{ translateX: '-50%' }, { translateY: '-95%' }] },
 });

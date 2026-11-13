@@ -5,14 +5,22 @@ export interface MapPoint {
   lng: number;
 }
 
-/** pick: ring circle, drop: ring square, stop: grey dot, agent: the agent's marker. */
-export type PinKind = 'pick' | 'stop' | 'drop' | 'agent';
+/**
+ * pick: ring circle, drop: ring square, stop: grey dot, agent: the agent's marker, fee: an errand on the
+ * board with its fee above a dot, me: where the phone is.
+ */
+export type PinKind = 'pick' | 'stop' | 'drop' | 'agent' | 'fee' | 'me';
+
+/** Pins that point at their place from below (their dot is at the bottom), rather than centred on it. */
+export const pointsDown = (kind: PinKind) => kind === 'fee';
 
 export interface MapPin extends MapPoint {
   key: string;
   kind: PinKind;
-  /** Shown inside the agent marker (their initial). */
+  /** Shown inside the agent marker (their initial), or the fee on a board pin. */
   label?: string;
+  /** Tapping the pin, such as opening a board errand. */
+  onPress?: () => void;
   /** Rings around the pin while nearby agents are being asked. */
   radar?: boolean;
 }

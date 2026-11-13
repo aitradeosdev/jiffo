@@ -72,6 +72,16 @@ export function Matching({
             {sub}
           </Text>
         </View>
+        {errand.nearbyAgents && !scheduled ? (
+          <View style={styles.nearby}>
+            <IconCircle icon="users" size={36} />
+            <Text variant="sub" tone="ink3" style={{ flex: 1 }} accessibilityLiveRegion="polite">
+              {errand.nearbyAgents.count === 0
+                ? `No agents online within ${errand.nearbyAgents.radiusKm} km yet. It stays open for the next one.`
+                : `${errand.nearbyAgents.count} ${errand.nearbyAgents.count === 1 ? 'agent' : 'agents'} online within ${errand.nearbyAgents.radiusKm} km`}
+            </Text>
+          </View>
+        ) : null}
         <List>
           {errand.stops.map((stop) => (
             <Row
@@ -126,4 +136,5 @@ function MarkWell({ kind }: { kind: 'pick' | 'stop' | 'drop' }) {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  nearby: { flexDirection: 'row', alignItems: 'center', gap: 10 },
 });
