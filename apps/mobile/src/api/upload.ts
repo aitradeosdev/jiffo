@@ -37,9 +37,14 @@ export async function uploadPhoto(
   purpose: UploadPurpose,
   file: { uri: string; mimeType: string },
 ) {
-  const ticket = await api.post<UploadTicket>('/v1/uploads', { errandId, purpose, contentType: file.mimeType });
   const blob = await (await fetch(file.uri)).blob();
-  if (blob.size > ticket.maxBytes) throw new ApiError(413, 'photo_too_large', 'That photo is too large');
+  // The size is signed into the upload link, so the store refuses anything else.
+  const ticket = await api.post<UploadTicket>('/v1/uploads', {
+    errandId,
+    purpose,
+    contentType: file.mimeType,
+    size: blob.size,
+  });
   let res: Response;
   try {
     res = await fetch(ticket.upload.url, { method: ticket.upload.method, headers: ticket.upload.headers, body: blob });

@@ -8,7 +8,13 @@ import { ChatService } from './chat.service';
 
 const SendBody = z
   .object({
-    body: z.string().trim().min(1).max(2000).optional(),
+    // A blank caption is no caption, so a photo with only spaces still sends.
+    body: z
+      .string()
+      .trim()
+      .max(2000)
+      .optional()
+      .transform((v) => v || undefined),
     /** A chat photo uploaded through /v1/uploads for this errand. */
     photo: z.string().min(1).max(300).optional(),
     /** Set by the app per message, so a retried send never shows twice. */

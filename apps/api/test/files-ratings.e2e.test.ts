@@ -33,8 +33,10 @@ describe('photos and ratings', () => {
       request(t.http)
         .post('/v1/uploads')
         .set(person.headers)
-        .send({ errandId: errand.id, purpose, contentType: 'image/jpeg' });
+        .send({ errandId: errand.id, purpose, contentType: 'image/jpeg', size: 8 });
     expect((await upload(agent, 'receipt').expect(404)).body.error.code).toBe('errand_not_found'); // not their errand yet
+    // Nothing to photograph before an agent accepts.
+    expect((await upload(customer, 'chat_photo').expect(409)).body.error.code).toBe('uploads_closed');
     await act(t, agent, errand.id, 'accept');
     expect((await upload(customer, 'receipt').expect(403)).body.error.code).toBe('upload_not_allowed');
     await upload(customer, 'chat_photo').expect(201);
@@ -42,9 +44,39 @@ describe('photos and ratings', () => {
     const bad = await request(t.http)
       .post('/v1/uploads')
       .set(agent.headers)
-      .send({ errandId: errand.id, purpose: 'receipt', contentType: 'application/pdf' })
+      .send({ errandId: errand.id, purpose: 'receipt', contentType: 'application/pdf', size: 8 })
       .expect(422);
     expect(bad.body.error.code).toBe('unsupported_file');
+    const huge = await request(t.http)
+      .post('/v1/uploads')
+      .set(agent.headers)
+      .send({ errandId: errand.id, purpose: 'receipt', contentType: 'image/jpeg', size: 50 * 1024 * 1024 })
+      .expect(422);
+    expect(huge.body.error.code).toBe('photo_too_large');
+
+    // The size is signed into the link: a different size is refused, as S3 would.
+    const ticket = (await upload(agent, 'item_photo').expect(201)).body;
+    const url = new URL(ticket.upload.url);
+    await request(t.http)
+      .put(url.pathname + url.search)
+      .set('content-type', 'image/jpeg')
+      .send(Buffer.alloc(20))
+      .expect(403);
+
+    await act(t, customer, errand.id, 'cancel');
+    expect((await upload(customer, 'chat_photo').expect(409)).body.error.code).toBe('uploads_closed');
+  });
+
+  it('answers strangers and wrong states before looking at photos', async () => {
+    const errand = await createErrand(t, customer);
+    await act(t, agent, errand.id, 'accept');
+    const stranger = await signIn(t, 'agent');
+    expect((await act(t, stranger, errand.id, 'send_dropoff_photo', { photo: 'x' }, 404)).error.code).toBe(
+      'errand_not_found',
+    );
+    expect((await act(t, agent, errand.id, 'send_dropoff_photo', { photo: 'x' }, 409)).error.code).toBe(
+      'errand_invalid_state',
+    );
   });
 
   it('accepts only photos the agent really uploaded for this errand', async () => {
@@ -58,7 +90,7 @@ describe('photos and ratings', () => {
     const reserved = await request(t.http)
       .post('/v1/uploads')
       .set(agent.headers)
-      .send({ errandId: errand.id, purpose: 'receipt', contentType: 'image/jpeg' })
+      .send({ errandId: errand.id, purpose: 'receipt', contentType: 'image/jpeg', size: 8 })
       .expect(201);
     const send = (photos: string[], status: number) =>
       act(t, agent, errand.id, 'send_item_amount', { amountKobo: 500_000, photos }, status);
@@ -125,7 +157,13 @@ describe('photos and ratings', () => {
     expect((await rate(customer, { stars: 5 }).expect(409)).body.error.code).toBe('rating_not_available');
     await deliver(errand.id);
 
-    expect((await view(customer, errand.id)).ratedByMe).toBe(false);
+    expect(await view(customer, errand.id)).toMatchObject({ ratedByMe: false, tipped: false });
+    await request(t.http)
+      .post(`/v1/errands/${errand.id}/tip`)
+      .set(customer.headers)
+      .send({ amountKobo: 20_000 })
+      .expect(201);
+    expect((await view(customer, errand.id)).tipped).toBe(true);
     expect((await rate(customer, { stars: 5, comment: '  Fast and careful  ' }).expect(201)).body).toEqual({
       stars: 5,
       comment: 'Fast and careful',

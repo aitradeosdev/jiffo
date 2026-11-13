@@ -8,6 +8,7 @@ import type { AuthContext } from '../auth/auth.types';
 import { ZodBody } from '../common/zod-body';
 import { ErrandId } from '../common/params';
 import { conflict, notFound } from '../common/errors';
+import { participantRole } from '../errands/access';
 
 const RatingBody = z.object({
   stars: z.number().int().min(1).max(5),
@@ -28,12 +29,7 @@ export class RatingsController {
     @Body(new ZodBody(RatingBody)) body: z.infer<typeof RatingBody>,
   ) {
     const [errand] = await this.db.select().from(errands).where(eq(errands.id, id));
-    const role =
-      auth.app === 'customer' && errand?.customerId === auth.userId
-        ? 'customer'
-        : auth.app === 'agent' && errand?.agentId === auth.userId
-          ? 'agent'
-          : null;
+    const role = participantRole(errand, auth);
     if (!errand || !role) throw notFound('errand_not_found', 'Errand not found');
     if (errand.status !== 'completed' || !errand.agentId)
       throw conflict('rating_not_available', 'You can rate once the errand is complete');

@@ -13,6 +13,8 @@ const UploadBody = z.object({
   errandId: z.string().uuid(),
   purpose: z.enum(UPLOAD_PURPOSES),
   contentType: z.string().max(60),
+  /** Bytes. Signed into the link, so nothing bigger can be stored. */
+  size: z.number().int().positive(),
 });
 
 @Controller('uploads')
@@ -27,7 +29,12 @@ export class UploadsController {
   }
 }
 
-const SignedQuery = z.object({ m: z.enum(['GET', 'PUT']), exp: z.coerce.number(), sig: z.string().max(128) });
+const SignedQuery = z.object({
+  m: z.enum(['GET', 'PUT']),
+  exp: z.coerce.number(),
+  size: z.coerce.number().int().min(0),
+  sig: z.string().max(128),
+});
 
 /**
  * Development storage only: serves the signed links the memory store hands out, as S3 would.
@@ -39,8 +46,9 @@ export class DevFilesController {
 
   private memory(method: 'GET' | 'PUT', key: string, q: z.infer<typeof SignedQuery>) {
     if (!(this.storage instanceof MemoryStorageAdapter)) throw notFound('not_found', 'Not found');
-    if (q.m !== method || !this.storage.verify(method, key, q.exp, q.sig))
+    if (q.m !== method || !this.storage.verify(method, key, q.exp, q.size, q.sig)) {
       throw forbidden('bad_signature', 'Link expired or invalid');
+    }
     return this.storage;
   }
 
@@ -53,6 +61,7 @@ export class DevFilesController {
   ) {
     const store = this.memory('PUT', key, q);
     const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (bytes.length !== q.size) throw forbidden('bad_size', 'The file is not the size the link was signed for');
     store.files.set(key, { bytes, contentType: req.headers['content-type'] ?? 'application/octet-stream' });
     res.status(200).end();
   }

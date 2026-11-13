@@ -16,7 +16,7 @@ export function AfterCompletion({ errand, onDone }: { errand: ErrandView; onDone
   const c = useColors();
   const { api } = useSession();
   const [tip, setTip] = useState<number | null>(null);
-  const [tipped, setTipped] = useState(false);
+  const [tipped, setTipped] = useState(!!errand.tipped);
   const [stars, setStars] = useState(0);
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState<'tip' | 'rate' | null>(null);

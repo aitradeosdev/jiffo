@@ -40,6 +40,14 @@ export default function ErrandScreen() {
     if (u.errandId === id && (!errand || u.version > errand.version)) reload();
   });
 
+  // Photo links expire after 15 minutes: refresh every 10 while there are photos to show.
+  const hasPhotos = !!errand?.photos && (errand.photos.items.length > 0 || !!errand.photos.dropoff);
+  useEffect(() => {
+    if (!hasPhotos) return;
+    const timer = setInterval(reload, 10 * 60_000);
+    return () => clearInterval(timer);
+  }, [hasPhotos, reload]);
+
   // The hand-off PIN only exists once the agent marks the errand delivered.
   useEffect(() => {
     if (errand?.status !== 'delivered') return setPin(null);

@@ -58,8 +58,11 @@ export default function Chat() {
       setError(errorMessage(e));
     }
   }, [api, id]);
+  // Photo links expire after 15 minutes: reload the thread every 10 so open photos keep working.
   useEffect(() => {
     load();
+    const timer = setInterval(load, 10 * 60_000);
+    return () => clearInterval(timer);
   }, [load]);
 
   const add = (m: ChatMessage) =>

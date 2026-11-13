@@ -1,15 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, count, eq, inArray } from 'drizzle-orm';
+import { TERMINAL_STATES } from '@jiffo/shared';
 import { DB, type Db } from '../db/database.module';
 import { errands, uploads, type UploadPurpose } from '../db/schema';
 import { STORAGE, type StorageAdapter } from '../adapters/storage';
 import type { AuthContext } from '../auth/auth.types';
-import { forbidden, notFound, unprocessable } from '../common/errors';
+import { conflict, forbidden, notFound, tooMany, unprocessable } from '../common/errors';
+import { participantRole } from '../errands/access';
 
 const UPLOAD_TTL_SECONDS = 10 * 60;
 const DOWNLOAD_TTL_SECONDS = 15 * 60;
 const MAX_BYTES = 10 * 1024 * 1024;
+/** Enough for any real errand; stops one person filling storage through one errand. */
+const MAX_UPLOADS_PER_ERRAND = 50;
 const TYPES: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
@@ -30,19 +34,28 @@ export class UploadsService {
     @Inject(STORAGE) private readonly storage: StorageAdapter,
   ) {}
 
-  private async roleOn(errandId: string, auth: AuthContext) {
-    const [errand] = await this.db
-      .select({ customerId: errands.customerId, agentId: errands.agentId })
-      .from(errands)
-      .where(eq(errands.id, errandId));
-    if (auth.app === 'customer' && errand?.customerId === auth.userId) return 'customer' as const;
-    if (auth.app === 'agent' && errand?.agentId === auth.userId) return 'agent' as const;
-    throw notFound('errand_not_found', 'Errand not found');
-  }
-
   /** A signed link to upload one photo for an errand, straight to storage. */
-  async create(auth: AuthContext, input: { errandId: string; purpose: UploadPurpose; contentType: string }) {
-    const role = await this.roleOn(input.errandId, auth);
+  async create(
+    auth: AuthContext,
+    input: { errandId: string; purpose: UploadPurpose; contentType: string; size: number },
+  ) {
+    const [errand] = await this.db
+      .select({ customerId: errands.customerId, agentId: errands.agentId, status: errands.status })
+      .from(errands)
+      .where(eq(errands.id, input.errandId));
+    const role = participantRole(errand, auth);
+    if (!errand || !role) throw notFound('errand_not_found', 'Errand not found');
+    // Photos belong to an errand in progress: none before an agent accepts, none once it has ended.
+    if (errand.status === 'requested' || TERMINAL_STATES.has(errand.status)) {
+      throw conflict('uploads_closed', 'Photos can only be added while the errand is in progress');
+    }
+    if (input.size > MAX_BYTES)
+      throw unprocessable('photo_too_large', 'That photo is too large', { maxBytes: MAX_BYTES });
+    const [made] = await this.db
+      .select({ n: count() })
+      .from(uploads)
+      .where(and(eq(uploads.errandId, input.errandId), eq(uploads.ownerId, auth.userId)));
+    if ((made?.n ?? 0) >= MAX_UPLOADS_PER_ERRAND) throw tooMany('too_many_uploads', 'Too many photos for this errand');
     if (!PURPOSES_BY_ROLE[role].includes(input.purpose))
       throw forbidden('upload_not_allowed', 'You can’t add this kind of photo');
     const ext = TYPES[input.contentType];
@@ -58,6 +71,7 @@ export class UploadsService {
     const upload = await this.storage.presignUpload({
       key,
       contentType: input.contentType,
+      size: input.size,
       ttlSeconds: UPLOAD_TTL_SECONDS,
     });
     return { key, upload, maxBytes: MAX_BYTES };

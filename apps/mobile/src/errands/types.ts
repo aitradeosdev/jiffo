@@ -33,6 +33,8 @@ export interface ErrandView {
   /** Only on a single errand's view, for its customer and agent: short-lived photo links. */
   photos?: { items: string[]; dropoff: string | null };
   ratedByMe?: boolean;
+  /** Customer only: a tip was already given on this errand. */
+  tipped?: boolean;
 }
 
 export interface Quote {
