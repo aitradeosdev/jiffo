@@ -38,9 +38,10 @@ const EnvSchema = z
     FAKE_PAYMENTS_AUTOPAY_SECONDS: z.coerce.number().int().min(0).default(0),
     /**
      * Paystack needs an email on every charge. Customers sign in by phone, so each gets an address
-     * on this domain built from their account id. No personal details go in it.
+     * on this domain built from their account id. No personal details go in it. It must be a domain
+     * Jiffo owns, since Paystack may send receipts to it.
      */
-    PAYMENT_EMAIL_DOMAIN: z.string().default('customers.jiffo.app'),
+    PAYMENT_EMAIL_DOMAIN: z.string().default('customers.jiffoapp.com'),
     /** When the free daily withdrawals go out, and when the ledger is checked against the provider (UTC). */
     PAYOUT_CRON: z.string().default('0 15 * * *'),
     RECONCILE_CRON: z.string().default('30 23 * * *'),
