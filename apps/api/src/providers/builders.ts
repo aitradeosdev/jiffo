@@ -2,7 +2,7 @@ import type { ProviderCategory } from '@jiffo/shared';
 import { GoogleMapsAdapter } from '../adapters/maps';
 import { AfricasTalkingMessagingAdapter, TermiiMessagingAdapter } from '../adapters/messaging';
 import { AfricasTalkingCallsAdapter, TwilioCallsAdapter } from '../adapters/calls';
-import { PaystackPaymentsAdapter } from '../adapters/payments';
+import { FlutterwavePaymentsAdapter, PaystackPaymentsAdapter } from '../adapters/payments';
 import { FcmPushAdapter } from '../adapters/push';
 import { S3StorageAdapter } from '../adapters/storage';
 import type { Adapters } from './env-adapters';
@@ -16,6 +16,7 @@ const optional = (v: string | undefined) => (v && v.trim() ? v.trim() : undefine
  */
 export const BUILDERS: { [C in ProviderCategory]: Record<string, (v: Values) => Adapters[C]> } = {
   payments: {
+    flutterwave: (v) => new FlutterwavePaymentsAdapter(v.secretKey!, v.secretHash!, v.businessName!),
     paystack: (v) => new PaystackPaymentsAdapter(v.secretKey!, optional(v.baseUrl)),
   },
   sms: {

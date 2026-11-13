@@ -69,6 +69,40 @@ export const PROVIDERS: ProviderInfo[] = [
     ],
   },
   {
+    key: 'flutterwave',
+    category: 'payments',
+    name: 'Flutterwave',
+    about: 'One-time bank-transfer account numbers for top-ups, and transfers for payouts.',
+    webhookPath: '/v1/webhooks/flutterwave',
+    webhookHint:
+      'Set it as the webhook URL in Settings, Webhooks, in the Flutterwave dashboard, with the same secret hash as below.',
+    fields: [
+      {
+        key: 'secretKey',
+        label: 'Secret key',
+        secret: true,
+        required: true,
+        placeholder: 'FLWSECK-…',
+        hint: 'Settings, API keys, in the Flutterwave dashboard.',
+      },
+      {
+        key: 'secretHash',
+        label: 'Webhook secret hash',
+        secret: true,
+        required: true,
+        hint: 'A long random value you choose, set the same here and in Settings, Webhooks. Flutterwave sends it with every webhook.',
+      },
+      {
+        key: 'businessName',
+        label: 'Name on the account',
+        secret: false,
+        required: true,
+        placeholder: 'Jiffo',
+        hint: 'What customers see as the account name when they transfer.',
+      },
+    ],
+  },
+  {
     key: 'termii',
     category: 'sms',
     name: 'Termii',

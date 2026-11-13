@@ -50,7 +50,12 @@ export class WebhooksController {
     if (stored?.processedAt) return { received: true, duplicate: true };
 
     try {
-      if (event.kind === 'deposit') await this.deposits.sync(event.reference);
+      if (event.kind === 'deposit') {
+        const deposit = await this.deposits.sync(event.reference);
+        // Told it was paid, but the provider's API doesn't show it yet: answered as not done, so the
+        // provider delivers the webhook again later instead of it being kept as handled.
+        if (deposit?.status === 'pending') throw new Error(`Deposit ${event.reference} not visible as paid yet`);
+      }
       if (event.kind === 'transfer') await this.payouts.sync(event.reference);
     } catch (error) {
       const message = (error as Error).message;

@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TermiiMessagingAdapter } from '../src/adapters/messaging';
-import { PaystackPaymentsAdapter } from '../src/adapters/payments';
+import { FlutterwavePaymentsAdapter, PaystackPaymentsAdapter } from '../src/adapters/payments';
 import { adminAudit, deposits, payoutAccounts, payouts, providerSettings } from '../src/db/schema';
 import { ProvidersService } from '../src/providers/providers.service';
 import { SecretBox } from '../src/providers/secret-box';
@@ -210,5 +210,62 @@ describe('admin: providers', () => {
       expiresAt: new Date(Date.now() - 30 * 86_400_000),
     });
     await api('delete', '/payments/paystack').expect(200);
+  });
+
+  it('takes a Flutterwave top-up from its webhook, checked with the secret hash', async () => {
+    await api('put', '/payments/flutterwave')
+      .send({ config: { businessName: 'Jiffo' }, secrets: { secretKey: 'FLWSECK-x', secretHash: 'hash-abc-123' } })
+      .expect(200);
+    vi.spyOn(FlutterwavePaymentsAdapter.prototype, 'balance').mockResolvedValue(0);
+    await api('post', '/payments/flutterwave/test').expect(200);
+    await api('post', '/payments/active').send({ provider: 'flutterwave' }).expect(200);
+
+    vi.spyOn(FlutterwavePaymentsAdapter.prototype, 'createTransferDeposit').mockResolvedValue({
+      accountNumber: '7824822527',
+      accountName: 'Jiffo',
+      bankName: 'WEMA BANK',
+      expiresAt: new Date(Date.now() + 1_800_000),
+    });
+    const customer = await signIn(t, 'customer');
+    const started = await request(t.http)
+      .post('/v1/wallet/deposits')
+      .set(customer.headers)
+      .send({ amountKobo: 250_000 })
+      .expect(201);
+    expect(started.body).toMatchObject({ accountNumber: '7824822527', bankName: 'WEMA BANK' });
+    const [deposit] = await t.db.select().from(deposits).where(eq(deposits.id, started.body.id));
+    expect(deposit!.provider).toBe('flutterwave');
+
+    const verify = vi.spyOn(FlutterwavePaymentsAdapter.prototype, 'verifyDeposit');
+    // The webhook can arrive before the API shows the payment: answered as not done, so it comes again.
+    verify.mockResolvedValueOnce({
+      status: 'pending',
+      amountKobo: 0,
+      feesKobo: 0,
+      currency: 'NGN',
+      senderName: null,
+      senderBank: null,
+    });
+    verify.mockResolvedValue({
+      status: 'success',
+      amountKobo: 250_000,
+      feesKobo: 3_500,
+      currency: 'NGN',
+      senderName: null,
+      senderBank: null,
+    });
+    const hook = JSON.stringify({ event: 'charge.completed', data: { id: 99, tx_ref: deposit!.reference } });
+    const send = (hash: string) =>
+      request(t.http)
+        .post('/v1/webhooks/flutterwave')
+        .set('content-type', 'application/json')
+        .set('verif-hash', hash)
+        .send(hook);
+    await send('wrong').expect(401);
+    await send('hash-abc-123').expect(500);
+    expect((await balanceOf(t, customer)).balanceKobo).toBe(0);
+    await send('hash-abc-123').expect(200);
+    expect((await balanceOf(t, customer)).balanceKobo).toBe(250_000);
+    await api('post', '/payments/active').send({ provider: null }).expect(200);
   });
 });
