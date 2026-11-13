@@ -71,6 +71,8 @@ export class CustomerIdentityService implements IdentityOwner {
       /** none, checking, verified, review, failed or declined. */
       status: row?.status ?? 'none',
       idType: row?.idType ?? null,
+      /** How the current or last check ran, with the provider it was started with. */
+      startedFlow: row ? this.checks.startedWith(row.provider).flow : null,
       legalName: row?.legalName ?? null,
       checks: (row?.checks ?? []).map((c) => ({ ...c, label: LABELS[c.key] ?? c.key })),
       /** Said to the customer only when support declined. */

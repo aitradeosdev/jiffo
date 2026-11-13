@@ -68,3 +68,8 @@ export const idNumberOk = (type: IdType, text: string) => normaliseIdNumber(type
 export const maskIdNumber = (text: string) => `${'•'.repeat(Math.max(0, text.length - 4))}${text.slice(-4)}`;
 
 export const idName = (type: IdType) => ID_TYPES[type].name;
+
+/** The identity provider's name in a sentence, for when admin hasn't switched one on yet. */
+export const providerLabel = (name: string | null | undefined) => name ?? 'our identity provider';
+/** The same, or any text, to start a sentence with. */
+export const capitalised = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);

@@ -16,7 +16,7 @@ function savedOutcome(app: Application): CheckOutcome | 'pending' | null {
   const own = app.checks.filter((c) => keys.includes(c.key));
   if (own.some((c) => c.outcome === 'failed')) return 'failed';
   // As the API decides: the ID and the selfie must pass, and the BVN too when it is checked.
-  const needed = [id, 'selfie', ...(app.withBvn && id !== 'bvn' ? ['bvn'] : [])];
+  const needed = [id, 'selfie', ...(app.identityWithBvn && id !== 'bvn' ? ['bvn'] : [])];
   const all = needed.every((key) => own.some((c) => c.key === key));
   return all && own.every((c) => c.outcome === 'passed') ? 'passed' : 'review';
 }
@@ -35,7 +35,8 @@ export default function Identity() {
   );
   const [outcome, setOutcome] = useState<CheckOutcome | 'pending' | null>(() => app && savedOutcome(app));
   const provider = providerName(app);
-  const hosted = app?.identityFlow === 'hosted';
+  // How the check on this screen ran: the one started, even if admin has switched provider since.
+  const hosted = (app?.identityStartedFlow ?? app?.identityFlow) === 'hosted';
   const back = () => router.dismissTo('/apply');
 
   if (!app) return null;
@@ -100,7 +101,9 @@ export default function Identity() {
       {outcome === 'passed' ? (
         <Confirmed
           title={
-            app.withBvn && app.identityIdType !== 'bvn' ? 'Your ID, BVN and selfie match' : 'Your ID and selfie match'
+            app.identityWithBvn && app.identityIdType !== 'bvn'
+              ? 'Your ID, BVN and selfie match'
+              : 'Your ID and selfie match'
           }
           sub={
             app.legalName

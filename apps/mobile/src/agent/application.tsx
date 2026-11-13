@@ -7,6 +7,7 @@ import { fonts } from '../theme/tokens';
 import { Text } from '../ui/kit';
 import { Icon } from '../ui/parts';
 import type { IdType } from '@jiffo/shared';
+import { capitalised, providerLabel } from '../identity/ids';
 
 export type ApplicationStatus = 'draft' | 'checking' | 'approved' | 'review' | 'rejected';
 export type CheckOutcome = 'passed' | 'failed' | 'review';
@@ -27,8 +28,10 @@ export interface Application {
   withBvn: boolean;
   /** The agent picks the ID on the provider's page rather than in the app. */
   idChosenOnPage: boolean;
-  /** The ID the current or last check used. */
+  /** The ID the current or last check used, whether it checked the BVN too, and how it ran. */
   identityIdType: IdType | null;
+  identityWithBvn: boolean;
+  identityStartedFlow: 'numbers' | 'hosted' | null;
   stateCode: string | null;
   stateName: string | null;
   waitlisted: boolean;
@@ -59,20 +62,21 @@ const PENDING_LABELS: Record<string, string> = {
 };
 
 /** The checks in the order the checking screen lists them: the agent's ID first, then their BVN if asked. */
-export function checkOrder(app: Pick<Application, 'identityIdType' | 'withBvn' | 'checks'>): Array<[string, string]> {
+export function checkOrder(
+  app: Pick<Application, 'identityIdType' | 'identityWithBvn' | 'withBvn' | 'checks'>,
+): Array<[string, string]> {
   const id = app.identityIdType ?? 'nin';
-  const bvn = id !== 'bvn' && (app.withBvn || app.checks.some((c) => c.key === 'bvn'));
+  // The BVN as the check was started (before one, as it would be now), or one that came back anyway.
+  const asked = app.identityIdType ? app.identityWithBvn : app.withBvn;
+  const bvn = id !== 'bvn' && (asked || app.checks.some((c) => c.key === 'bvn'));
   const keys = [id, ...(bvn ? ['bvn'] : []), 'selfie', 'age', 'name', 'address', 'bank'];
   return keys.map((key) => [key, PENDING_LABELS[key] ?? key]);
 }
 
-/** The provider's name in a sentence, for when admin hasn't named one yet. */
-export const providerName = (app: Pick<Application, 'provider'> | null) => app?.provider ?? 'our identity provider';
+/** The provider's name in a sentence, for when admin hasn't switched one on yet. */
+export const providerName = (app: Pick<Application, 'provider'> | null) => providerLabel(app?.provider);
 /** The same, to start a sentence with. */
-export const ProviderName = (app: Pick<Application, 'provider'> | null) => {
-  const name = providerName(app);
-  return name.charAt(0).toUpperCase() + name.slice(1);
-};
+export const ProviderName = (app: Pick<Application, 'provider'> | null) => capitalised(providerName(app));
 
 interface ApplicationValue {
   app: Application | null;

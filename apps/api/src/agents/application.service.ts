@@ -137,8 +137,10 @@ export class AgentApplicationService implements IdentityOwner {
       withBvn: options.withBvn,
       /** The agent picks the ID on the provider's page rather than in the app. */
       idChosenOnPage: options.idChosenOnPage,
-      /** The ID the current or last check used. */
+      /** The ID the current or last check used, whether it checked the BVN too, and how it ran. */
       identityIdType: app.identityIdType,
+      identityWithBvn: app.identityWithBvn,
+      identityStartedFlow: app.identityProvider ? this.checks.startedWith(app.identityProvider).flow : null,
       /** Started with the provider, and its result not back yet. */
       identityChecking: app.identityReference !== null && app.identityOutcome === null,
       stateCode: app.stateCode,

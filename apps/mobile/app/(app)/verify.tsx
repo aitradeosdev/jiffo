@@ -5,7 +5,7 @@ import { useSession } from '@/auth/session';
 import { Confirmed, Waiting } from '@/agent/apply-parts';
 import { IdentityCheck } from '@/identity/check';
 import { useCustomerIdentity } from '@/identity/customer';
-import { idName } from '@/identity/ids';
+import { capitalised, idName, providerLabel } from '@/identity/ids';
 import { Button, Text } from '@/ui/kit';
 import { ObScreen, Question } from '@/ui/onboarding';
 import { List, Row } from '@/ui/parts';
@@ -22,17 +22,27 @@ export default function Verify() {
   const { identity, error, reload } = useCustomerIdentity();
   const [checking, setChecking] = useState<false | 'new' | 'resume'>(false);
   const [busy, setBusy] = useState(false);
+  // Each check is a fresh screen, so one that finished never stays on its last step.
+  const [attempt, setAttempt] = useState(0);
+  // The result couldn't be loaded after a check: said, with a way to load it again.
+  const [lost, setLost] = useState(false);
   const home = () => router.replace('/home');
   const leave = () => (router.canGoBack() ? router.back() : home());
 
-  if (!identity) {
+  if (!identity || lost) {
     return (
       <ObScreen onBack={leave}>
         <Question title="Verify your identity" />
-        {error ? (
+        {error || lost ? (
           <>
             <Waiting icon="alert" title="Couldn't load this" sub="Check your connection and try again." />
-            <Button kind="secondary" label="Try again" onPress={() => void reload()} />
+            <Button
+              kind="secondary"
+              label="Try again"
+              onPress={async () => {
+                if (await reload()) setLost(false);
+              }}
+            />
           </>
         ) : (
           <Waiting busy title="Loading" />
@@ -41,20 +51,23 @@ export default function Verify() {
     );
   }
 
-  const provider = identity.provider ?? 'our identity provider';
+  const provider = providerLabel(identity.provider);
   const start = checking || (identity.status === 'none' ? 'new' : false);
   if (start) {
     return (
       <IdentityCheck
+        key={attempt}
         options={identity}
         paths={{ start: '/v1/me/identity', finish: '/v1/me/identity/finish' }}
         returnUrl={RETURN_URL}
         why="Every customer and agent is verified, so you know who's running your errand and they know who they're running it for."
-        resume={start === 'resume' ? { hosted: identity.flow === 'hosted' } : undefined}
+        resume={start === 'resume' ? { hosted: (identity.startedFlow ?? identity.flow) === 'hosted' } : undefined}
         onBack={checking ? () => setChecking(false) : leave}
         onFinished={async () => {
-          await reload();
+          const next = await reload();
+          setAttempt((n) => n + 1);
           setChecking(false);
+          if (!next) setLost(true);
         }}
       />
     );
@@ -64,6 +77,7 @@ export default function Verify() {
     setBusy(true);
     await reload();
     setBusy(false);
+    setAttempt((n) => n + 1);
     setChecking('new');
   };
 
@@ -101,7 +115,7 @@ export default function Verify() {
           icon="clock"
           title={`${capitalised(provider)} is still checking`}
           sub={
-            identity.flow === 'hosted'
+            (identity.startedFlow ?? identity.flow) === 'hosted'
               ? `The result comes here when it's back. If you closed ${provider}'s page before the end, start a new check.`
               : "The result comes here when it's back."
           }
@@ -149,8 +163,6 @@ export default function Verify() {
     </ObScreen>
   );
 }
-
-const capitalised = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /** The checks that didn't pass, in words. */
 function Checks({

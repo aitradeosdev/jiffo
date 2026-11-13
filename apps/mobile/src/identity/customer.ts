@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import type { IdType } from '@jiffo/shared';
 import { useSession } from '../auth/session';
 import type { IdentityOptions } from './check';
@@ -7,13 +8,15 @@ import type { IdentityOptions } from './check';
 export interface CustomerIdentity extends IdentityOptions {
   status: 'none' | 'checking' | 'verified' | 'review' | 'failed' | 'declined';
   idType: IdType | null;
+  /** How the current or last check ran. */
+  startedFlow: 'numbers' | 'hosted' | null;
   legalName: string | null;
   checks: Array<{ key: string; outcome: 'passed' | 'failed' | 'review'; note?: string; label: string }>;
   decisionNote: string | null;
   reviewHours: number;
 }
 
-/** The customer's check, loaded on opening, with a way to load it again. */
+/** The customer's check, loaded whenever its screen comes into view, with a way to load it again. */
 export function useCustomerIdentity() {
   const { api } = useSession();
   const [identity, setIdentity] = useState<CustomerIdentity | null>(null);
@@ -29,8 +32,10 @@ export function useCustomerIdentity() {
       return null;
     }
   }, [api]);
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  useFocusEffect(
+    useCallback(() => {
+      void reload();
+    }, [reload]),
+  );
   return { identity, error, reload };
 }

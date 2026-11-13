@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { goBack } from '@/nav';
 import * as Clipboard from 'expo-clipboard';
@@ -44,7 +44,7 @@ export default function TopUp() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const { identity } = useCustomerIdentity();
+  const { identity, error: identityError } = useCustomerIdentity();
   const kobo = parseNaira(text);
   const valid = kobo !== null && kobo >= min && (max === null || kobo <= max);
 
@@ -79,7 +79,15 @@ export default function TopUp() {
     }
   };
 
-  // Money comes in only from verified customers: said before an amount is chosen.
+  // Money comes in only from verified customers: said before an amount is chosen. Until the check's status
+  // is known nothing is asked (if it can't be loaded, the form shows and the API still says).
+  if (!identity && !identityError && !deposit) {
+    return (
+      <Screen>
+        <ActivityIndicator style={{ marginTop: 48 }} />
+      </Screen>
+    );
+  }
   if (identity && identity.status !== 'verified' && !deposit) {
     const checking = identity.status === 'checking' || identity.status === 'review';
     return (

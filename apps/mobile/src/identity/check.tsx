@@ -8,7 +8,7 @@ import { FieldGroup, Point, Waiting } from '../agent/apply-parts';
 import { Button, Text } from '../ui/kit';
 import { ObScreen, Question, TextBox } from '../ui/onboarding';
 import { List, Row } from '../ui/parts';
-import { ID_COPY, cleanIdNumber, idNumberOk, maskIdNumber } from './ids';
+import { ID_COPY, capitalised, cleanIdNumber, idNumberOk, maskIdNumber, providerLabel } from './ids';
 import { ProviderSdk } from './sdk';
 
 /** What the API says a new check can be, for the person's app. */
@@ -30,7 +30,8 @@ export interface FinishResult {
 }
 const finished = (r: FinishResult) => r.status !== 'pending' && r.status !== 'checking';
 
-type Phase = 'choose' | 'number' | 'bvn' | 'intro' | 'sdk' | 'away' | 'finishing';
+/** failed: the result couldn't be asked for; the check is running, so the person asks again. */
+type Phase = 'choose' | 'number' | 'bvn' | 'intro' | 'sdk' | 'away' | 'finishing' | 'failed';
 interface Started {
   sdkToken: string | null;
   url: string | null;
@@ -76,6 +77,8 @@ export function IdentityCheck(props: IdentityCheckProps) {
   const [idNumber, setIdNumber] = useState('');
   const [bvn, setBvn] = useState('');
   const [started, setStarted] = useState<Started | null>(null);
+  // Also read by finish() when it runs from the closure that started the check, before a render.
+  const startedRef = useRef<Started | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
@@ -85,15 +88,18 @@ export function IdentityCheck(props: IdentityCheckProps) {
     },
     [],
   );
-  const provider = options.provider ?? 'our identity provider';
-  const hosted = started ? started.url !== null : (props.resume?.hosted ?? options.flow === 'hosted');
+  const provider = providerLabel(options.provider);
+  const isHosted = () => {
+    const now = startedRef.current;
+    return now ? now.url !== null : (props.resume?.hosted ?? options.flow === 'hosted');
+  };
   const needsBvn = options.withBvn && idType !== 'bvn';
 
   const finish = async () => {
     setPhase('finishing');
     setError(null);
     try {
-      const tries = hosted ? HOSTED_FINISH_TRIES : FINISH_TRIES;
+      const tries = isHosted() ? HOSTED_FINISH_TRIES : FINISH_TRIES;
       for (let i = 0; i < tries && mounted.current; i += 1) {
         const result = await api.post<FinishResult>(props.paths.finish);
         if (finished(result)) {
@@ -106,7 +112,9 @@ export function IdentityCheck(props: IdentityCheckProps) {
     } catch (e) {
       if (!mounted.current) return;
       setError(errorMessage(e));
-      setPhase(hosted && started?.url ? 'away' : first);
+      // The check is running: back to the provider's page screen, or a screen that asks again. Starting
+      // over would replace the check the person just did.
+      setPhase(startedRef.current?.url ? 'away' : 'failed');
     }
   };
 
@@ -140,6 +148,7 @@ export function IdentityCheck(props: IdentityCheckProps) {
           ? { idType, consent: true }
           : { idType, idNumber, ...(needsBvn ? { bvn } : {}), consent: true };
       const result = await api.post<Started>(props.paths.start, body);
+      startedRef.current = result;
       setStarted(result);
       if (result.url) await visit(result.url);
       else setPhase('sdk');
@@ -177,6 +186,24 @@ export function IdentityCheck(props: IdentityCheckProps) {
         onDone={finish}
         onCancel={() => setPhase(needsBvn ? 'bvn' : 'number')}
       />
+    );
+  }
+
+  if (phase === 'failed') {
+    return (
+      <ObScreen
+        onBack={props.onBack}
+        progress={props.progress}
+        footer={
+          <View style={{ gap: 8 }}>
+            <Button label="Ask for the result again" onPress={finish} />
+            <Button kind="plain" label="Later" onPress={props.onBack} />
+          </View>
+        }
+      >
+        <Question title="We couldn't get your result" sub="Your check went through. Ask for its result again." />
+        {problem}
+      </ObScreen>
     );
   }
 
@@ -250,10 +277,7 @@ export function IdentityCheck(props: IdentityCheckProps) {
           sub={`${capitalised(provider)} asks for your ${chosen}${needsBvn ? ' and BVN' : ''} and takes a selfie on its own page.`}
         />
         <Reassurance provider={provider} />
-        <Text variant="note" tone="ink3">
-          By continuing you agree to {provider} checking your {chosen} with the issuer
-          {needsBvn ? ' and your BVN with NIBSS' : ''}, and taking a selfie to match your ID photo.
-        </Text>
+        <Consent provider={provider} idShort={chosen} withBvn={needsBvn} />
         {problem}
       </ObScreen>
     );
@@ -321,8 +345,6 @@ export function IdentityCheck(props: IdentityCheckProps) {
     </ObScreen>
   );
 }
-
-const capitalised = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 function Consent({ provider, idShort, withBvn }: { provider: string; idShort: string; withBvn?: boolean }) {
   return (

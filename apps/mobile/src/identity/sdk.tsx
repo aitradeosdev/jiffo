@@ -27,7 +27,7 @@ export interface ProviderSdkProps {
 export function ProviderSdk(props: ProviderSdkProps) {
   if (props.provider === 'fake') return <TestProviderSdk {...props} />;
   return (
-    <ObScreen onBack={props.onCancel} footer={<Button label="Back to your application" onPress={props.onCancel} />}>
+    <ObScreen onBack={props.onCancel} footer={<Button label="Go back" onPress={props.onCancel} />}>
       <Question
         title="Update the app"
         sub={`This version of the app can't run ${props.providerLabel}'s checks. Update the app, then try again.`}
@@ -43,7 +43,8 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
  * opened and no photo is taken; the API's test provider decides the results from the NIN.
  */
 function TestProviderSdk({ bvnMasked, onDone, onCancel }: ProviderSdkProps) {
-  const [step, setStep] = useState<'consent' | 'selfie'>(bvnMasked ? 'consent' : 'selfie');
+  const [step, setStep] = useState<'consent' | 'selfie'>('consent');
+  // No BVN checked: straight to the selfie.
   if (!bvnMasked) return <SelfieStep onBack={onCancel} onDone={onDone} />;
   return step === 'consent' ? (
     <ConsentStep bvnMasked={bvnMasked} onBack={onCancel} onApproved={() => setStep('selfie')} />
