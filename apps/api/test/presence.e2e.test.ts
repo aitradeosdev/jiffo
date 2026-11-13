@@ -52,6 +52,20 @@ describe('agent presence and live location', () => {
     await put(near, { online: true, lat: 6.4 }, 400);
   });
 
+  it('keeps the agent online or offline as they were when only a position is sent from the background', async () => {
+    const agent = await signIn(t, 'agent');
+    await put(agent, { online: true, lat: 6.448, lng: 3.47 });
+    expect((await put(agent, { lat: 6.449, lng: 3.471 })).body).toEqual({ online: true, sharingLocation: true });
+    expect(await presenceOf(agent)).toMatchObject({ online: true, lat: 6.449 });
+    // Offline with nothing running: nothing to share, so the background reporting can stop.
+    await put(agent, { online: false });
+    expect((await put(agent, { lat: 6.45, lng: 3.472 })).body).toEqual({ online: false, sharingLocation: false });
+    expect(await presenceOf(agent)).toMatchObject({ online: false, lat: null });
+    // A first report with no presence yet counts as offline.
+    const fresh = await signIn(t, 'agent');
+    expect((await put(fresh, { lat: 6.45, lng: 3.472 })).body).toEqual({ online: false, sharingLocation: false });
+  });
+
   it('deletes positions nobody refreshed for half an hour', async () => {
     const agent = await signIn(t, 'agent');
     await put(agent, { online: true, lat: 6.448, lng: 3.47 });
