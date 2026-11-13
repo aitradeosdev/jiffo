@@ -176,6 +176,7 @@ What's in it:
 - **Errands and disputes:** search every errand, read its full history (timeline, chat, photos, money), and settle disputes, the standard way or by splitting the money held.
 - **People:** customers and agents, with their activity and money; set agent tiers, suspend and reactivate accounts, and adjust balances.
 - **Applications:** agent applications by state. The ones whose checks didn't all pass wait in review, longest first; operations approves or declines each from the agent's page, seeing the provider's results and what the agent typed, never their documents. A decline's reason is shown to the agent.
+- **ID checks:** customers' ID checks by state. Those the provider couldn't settle wait in review, longest first; operations verifies or declines each from the customer's page (never with an ID another customer holds), or reopens a declined one so they can check again. The decline's reason is shown to the customer. The providers page says which IDs each identity provider checks.
 - **Money:** what Jiffo holds and earns, top-ups, withdrawals and the nightly check against the payment provider.
 - **Settings:** prices, fees, commission, timers, limits and identity rules as versioned settings, plus categories and states.
 - **Team and audit log:** who can use the panel, and every change anyone made in it.

@@ -5,7 +5,7 @@ import { agentTierLabel } from '@jiffo/shared';
 import { useActionState, useState } from 'react';
 import { SubmitButton } from '@/components/submit-button';
 import { buttonClass, inputClass, Notice } from '@/components/ui';
-import { changeAccess, decideApplication, setTier, type PersonState } from './actions';
+import { changeAccess, decideApplication, decideIdentity, setTier, type PersonState } from './actions';
 
 export interface TierTerms {
   tier: string;
@@ -197,6 +197,83 @@ export function DecisionForm({ id, status, failed }: { id: string; status: strin
       <Notice>{state.error}</Notice>
       <div className="flex gap-2">
         <SubmitButton kind={decision === 'reject' ? 'danger' : 'primary'} small pendingLabel="Saving…">
+          {copy.confirm}
+        </SubmitButton>
+        <button type="button" className={buttonClass('ghost', true)} onClick={() => setDecision(null)}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+type IdDecision = 'verify' | 'decline' | 'reopen';
+const ID_DECISION_COPY: Record<IdDecision, { about: string; reason: string; example: string; confirm: string }> = {
+  verify: {
+    about: 'They can add money and request errands straight away, and are told so.',
+    reason: 'Why verify',
+    example: 'For example: the selfie result was unclear; the photo match is fine on a second look',
+    confirm: 'Yes, verify',
+  },
+  decline: {
+    about: 'They can’t add money or request errands. They see your reason in the app, so write it to them.',
+    reason: 'What to tell them',
+    example: 'For example: the selfie is of a different person from the ID photo',
+    confirm: 'Yes, decline',
+  },
+  reopen: {
+    about: 'They can check their ID again, for example with another ID or a clearer selfie.',
+    reason: 'Why reopen',
+    example: 'For example: they called to say the selfie was taken in the dark',
+    confirm: 'Yes, reopen',
+  },
+};
+
+/**
+ * What support can do with a customer's ID check: verify or decline one in review; verify one declined by
+ * mistake, or reopen it for the customer. Each asks for a reason. One with a failed check can't be verified.
+ */
+export function IdDecisionForm({ id, status, failed }: { id: string; status: string; failed: string[] }) {
+  const [state, action] = useActionState<PersonState, FormData>(decideIdentity, {});
+  const [decision, setDecision] = useState<IdDecision | null>(null);
+  if (!decision) {
+    return (
+      <div className="space-y-2">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className={buttonClass('primary', true)}
+            disabled={failed.length > 0}
+            onClick={() => setDecision('verify')}
+          >
+            Verify
+          </button>
+          {status === 'review' ? (
+            <button type="button" className={buttonClass('danger', true)} onClick={() => setDecision('decline')}>
+              Decline
+            </button>
+          ) : (
+            <button type="button" className={buttonClass('secondary', true)} onClick={() => setDecision('reopen')}>
+              Reopen for them
+            </button>
+          )}
+        </div>
+        {failed.length ? (
+          <p className="text-[13px] text-ink-3">{failed.join(', ')} failed, so this check can only be declined.</p>
+        ) : null}
+      </div>
+    );
+  }
+  const copy = ID_DECISION_COPY[decision];
+  return (
+    <form action={action} className="space-y-3">
+      <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="decision" value={decision} />
+      <p className="text-sm text-ink-2">{copy.about}</p>
+      <Reason key={decision} label={copy.reason} placeholder={copy.example} />
+      <Notice>{state.error}</Notice>
+      <div className="flex gap-2">
+        <SubmitButton kind={decision === 'decline' ? 'danger' : 'primary'} small pendingLabel="Saving…">
           {copy.confirm}
         </SubmitButton>
         <button type="button" className={buttonClass('ghost', true)} onClick={() => setDecision(null)}>

@@ -9,8 +9,9 @@ import { api, ApiError, getCountry, getMe } from '@/lib/api';
 import { ACCOUNT, JOURNAL, nameOf, STATUS } from '@/lib/errands';
 import { ago, dateTime, money } from '@/lib/format';
 import { OUTCOME, statusOf, type Check } from '@/lib/applications';
+import { idCheckStatus } from '@/lib/id-checks';
 import { AdjustForm } from './adjust';
-import { AccessForm, DecisionForm, TierForm, type TierTerms } from './forms';
+import { AccessForm, DecisionForm, IdDecisionForm, TierForm, type TierTerms } from './forms';
 
 export const metadata: Metadata = { title: 'Person' };
 
@@ -57,7 +58,7 @@ interface Detail {
     payoutAccount: { bankName: string; accountName: string; last4: string; since: string } | null;
     application: Application | null;
   } | null;
-  customer: { walletKobo: number; rating: number | null; stats: Stats };
+  customer: { identity: CustomerIdentity | null; walletKobo: number; rating: number | null; stats: Stats };
   ratings: Array<{ raterRole: string; stars: number; comment: string | null; errandId: string; createdAt: string }>;
   errands: Array<{
     id: string;
@@ -76,6 +77,22 @@ interface Detail {
     createdAt: string;
   }>;
   liveErrands: string[];
+}
+
+interface CustomerIdentity {
+  status: string;
+  idType: string;
+  idName: string;
+  provider: string;
+  outcome: string | null;
+  legalName: string | null;
+  dateOfBirth: string | null;
+  checks: Check[];
+  checkedAt: string | null;
+  decidedAt: string | null;
+  decidedBy: string | null;
+  decisionNote: string | null;
+  createdAt: string;
 }
 
 /** The agent's application: the provider's results and what the agent typed, never their documents. */
@@ -102,6 +119,9 @@ const DONE: Record<string, string> = {
   approved: 'Application approved. The agent has been told and can go online.',
   declined: 'Application declined. The agent sees your reason in the app.',
   reopened: 'Application reopened. The agent can change it and send it again.',
+  'id-verified': 'ID check verified. The customer has been told and can add money.',
+  'id-declined': 'ID check declined. The customer sees your reason in the app.',
+  'id-reopened': 'ID check reopened. The customer can check their ID again.',
   tier: 'Tier changed. The agent has been told.',
   suspend: 'Account suspended. They have been signed out everywhere.',
   reactivate: 'Account reactivated.',
@@ -186,6 +206,15 @@ export default async function PersonPage({
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0 space-y-6">
+          {d.customer.identity || d.apps.includes('customer') ? (
+            <IdentityCard
+              id={p.id}
+              identity={d.customer.identity}
+              canDecide={canOperate}
+              time={time}
+              timeZone={country.timezone}
+            />
+          ) : null}
           {d.agent ? (
             <ApplicationCard
               id={p.id}
@@ -421,7 +450,7 @@ function ApplicationCard({
   }
   const status = statusOf(app.status);
   const rows: Array<[string, ReactNode]> = [
-    ['Name on the NIN', app.legalName ?? '—'],
+    ['Name on the ID', app.legalName ?? '—'],
     ['Date of birth', app.dateOfBirth ? `${app.dateOfBirth} · ${yearsOld(app.dateOfBirth)} years old` : '—'],
     ['Works in', app.stateName ? `${app.area ?? ''}${app.area ? ', ' : ''}${app.stateName}` : '—'],
     ['Home address', app.address ?? '—'],
@@ -474,7 +503,7 @@ function ApplicationCard({
           ))}
         </dl>
         <p className="mt-4 text-[13px] text-ink-3">
-          The NIN, BVN and selfie stay with the identity provider. Jiffo keeps the results above.
+          The ID, BVN and selfie stay with the identity provider. Jiffo keeps the results above.
         </p>
         {app.decidedAt && app.decidedBy ? (
           <div className="mt-4 rounded-xl bg-surface-2 px-3.5 py-2.5 text-sm">
@@ -492,6 +521,92 @@ function ApplicationCard({
               id={id}
               status={app.status}
               failed={app.checks.filter((c) => c.outcome === 'failed').map((c) => c.label)}
+            />
+          </div>
+        ) : null}
+      </Card>
+    </section>
+  );
+}
+
+/** The customer's ID check: the provider's results and support's decision, never the ID or the selfie. */
+function IdentityCard({
+  id,
+  identity,
+  canDecide,
+  time,
+  timeZone,
+}: {
+  id: string;
+  identity: CustomerIdentity | null;
+  canDecide: boolean;
+  time: (iso: string) => string;
+  timeZone: string;
+}) {
+  if (!identity) {
+    return (
+      <Card title="ID check">
+        <p className="text-sm text-ink-3">
+          They haven&apos;t checked their ID yet, so they can&apos;t add money or request errands.
+        </p>
+      </Card>
+    );
+  }
+  const status = idCheckStatus(identity.status);
+  const rows: Array<[string, ReactNode]> = [
+    ['ID', identity.idName],
+    ['Name on the ID', identity.legalName ?? '—'],
+    [
+      'Date of birth',
+      identity.dateOfBirth ? `${identity.dateOfBirth} · ${yearsOld(identity.dateOfBirth)} years old` : '—',
+    ],
+    ['Checked by', identity.provider],
+  ];
+  return (
+    <section id="identity" className="scroll-mt-6">
+      <Card title="ID check" action={<Badge tone={status.tone}>{status.label}</Badge>}>
+        <p className="text-sm text-ink-3">
+          {status.about}
+          {identity.checkedAt ? ` · result back ${ago(identity.checkedAt, timeZone)}` : ''}
+        </p>
+        {identity.checks.length ? (
+          <ul className="mt-4 divide-y divide-line rounded-xl border border-line">
+            {identity.checks.map((c) => (
+              <li key={c.key} className="flex items-start justify-between gap-3 px-3.5 py-2.5">
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold">{c.label}</span>
+                  {c.note ? <span className="block text-[13px] text-ink-3">{c.note}</span> : null}
+                </span>
+                <Badge tone={OUTCOME[c.outcome]?.tone ?? 'warn'}>{OUTCOME[c.outcome]?.label ?? c.outcome}</Badge>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+          {rows.map(([label, value]) => (
+            <div key={label}>
+              <dt className="text-ink-3">{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="mt-4 text-[13px] text-ink-3">
+          The ID and selfie stay with the identity provider. Jiffo keeps the results above.
+        </p>
+        {identity.decidedAt && identity.decidedBy ? (
+          <div className="mt-4 rounded-xl bg-surface-2 px-3.5 py-2.5 text-sm">
+            <span className="font-semibold">
+              Decided by {identity.decidedBy}, {time(identity.decidedAt)}
+            </span>
+            {identity.decisionNote ? <span className="block text-ink-2">{identity.decisionNote}</span> : null}
+          </div>
+        ) : null}
+        {(identity.status === 'review' || identity.status === 'declined') && canDecide ? (
+          <div className="mt-4 border-t border-line pt-4">
+            <IdDecisionForm
+              id={id}
+              status={identity.status}
+              failed={identity.checks.filter((c) => c.outcome === 'failed').map((c) => c.label)}
             />
           </div>
         ) : null}

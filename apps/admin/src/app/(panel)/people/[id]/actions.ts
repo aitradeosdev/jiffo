@@ -93,3 +93,26 @@ export async function decideApplication(_: PersonState, form: FormData): Promise
   back(id, DECISIONS[decision]);
   return {};
 }
+
+const ID_DECISIONS = { verify: 'id-verified', decline: 'id-declined', reopen: 'id-reopened' } as const;
+
+/**
+ * Verifies or declines a customer's ID check in review, or reopens a declined one so they can check again.
+ * A decline's reason is what the customer is told.
+ */
+export async function decideIdentity(_: PersonState, form: FormData): Promise<PersonState> {
+  const id = String(form.get('id') ?? '');
+  const asked = String(form.get('decision') ?? '');
+  if (!(asked in ID_DECISIONS)) return { error: 'Choose what to do' };
+  const decision = asked as keyof typeof ID_DECISIONS;
+  try {
+    await api(`/admin/people/${encodeURIComponent(id)}/identity`, {
+      method: 'POST',
+      body: { decision, note: String(form.get('note') ?? '') },
+    });
+  } catch (error) {
+    return { error: messageOf(error) };
+  }
+  back(id, ID_DECISIONS[decision]);
+  return {};
+}

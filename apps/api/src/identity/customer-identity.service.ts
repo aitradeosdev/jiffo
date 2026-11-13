@@ -2,9 +2,9 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, eq, ne, sql } from 'drizzle-orm';
 import { ID_TYPES, yearsOld, type IdType } from '@jiffo/shared';
 import type { IdentityResult } from '../adapters/identity';
-import { conflict, forbidden } from '../common/errors';
+import { conflict, forbidden, notFound } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
-import { DB, type Db } from '../db/database.module';
+import { DB, type Db, type Tx } from '../db/database.module';
 import { customerVerifications, users } from '../db/schema';
 import {
   ID_CHECK_LABELS,
@@ -237,6 +237,63 @@ export class CustomerIdentityService implements IdentityOwner {
         .returning({ status: customerVerifications.status });
       return updated ? { status: updated.status, outcome: judged.outcome } : null;
     });
+  }
+
+  /**
+   * Support's decision on a check the provider couldn't settle: verify it (claiming the ID, unless another
+   * customer account holds it), decline it (the note is said to the customer), or reopen a declined one so
+   * the customer can check again. Runs in the caller's transaction, beside its audit entry.
+   */
+  async decide(
+    tx: Tx,
+    input: { userId: string; decision: 'verify' | 'decline' | 'reopen'; adminId: string; note: string },
+  ) {
+    const [before] = await tx
+      .select()
+      .from(customerVerifications)
+      .where(eq(customerVerifications.userId, input.userId))
+      .for('update');
+    if (!before) throw notFound('identity_not_found', 'This customer has not checked their ID');
+    const from = { verify: ['review', 'declined'], decline: ['review'], reopen: ['declined'] }[input.decision];
+    if (!from.includes(before.status)) {
+      throw conflict(
+        input.decision === 'reopen' ? 'not_declined' : 'not_in_review',
+        input.decision === 'reopen' ? 'Only a declined check can be reopened' : 'Only a check in review can be decided',
+        { status: before.status },
+      );
+    }
+    const decided = {
+      decidedAt: new Date(),
+      decidedBy: input.adminId,
+      decisionNote: input.note,
+      updatedAt: new Date(),
+    };
+    let set: Partial<Verification>;
+    if (input.decision === 'verify') {
+      const fingerprint = before.idFingerprint ?? before.pendingIdFingerprint;
+      if (fingerprint) {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'cid:' + fingerprint}))`);
+        const [holder] = await tx
+          .select({ userId: customerVerifications.userId })
+          .from(customerVerifications)
+          .where(
+            and(eq(customerVerifications.idFingerprint, fingerprint), ne(customerVerifications.userId, input.userId)),
+          );
+        if (holder) throw conflict('id_held', 'Another customer account is verified with this ID');
+      }
+      set = { status: 'verified', idFingerprint: fingerprint, pendingIdFingerprint: null, ...decided };
+    } else if (input.decision === 'decline') {
+      set = { status: 'declined', ...decided };
+    } else {
+      // Back to a check that didn't pass, which the customer can try again.
+      set = { status: 'failed', ...decided, decisionNote: null };
+    }
+    const [after] = await tx
+      .update(customerVerifications)
+      .set(set)
+      .where(eq(customerVerifications.userId, input.userId))
+      .returning();
+    return { before, after: after! };
   }
 
   /** Whether the customer may add money and request errands. */

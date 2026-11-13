@@ -18,6 +18,10 @@ export interface ProviderView {
   name: string;
   about: string;
   fields: ProviderField[];
+  /** Identity providers: the IDs it checks with a selfie match, and how it takes an agent's BVN. */
+  idTypes: string[] | null;
+  bvnAlongside: boolean | null;
+  idChosenOnPage: boolean | null;
   webhookUrl: string | null;
   webhookHint: string | null;
   /** Its callback address carries a secret token, which can be replaced. */
@@ -81,6 +85,16 @@ export function ProviderCard({
         ) : null}
       </div>
       <p className="mt-1 text-sm text-ink-3">{p.about}</p>
+      {p.idTypes ? (
+        <p className="mt-2 text-[13px] text-ink-2">
+          <span className="font-semibold">Checks: </span>
+          {p.idTypes.join(', ')}.{' '}
+          {p.bvnAlongside
+            ? "An agent's BVN can be checked alongside their ID."
+            : "Can't check a BVN alongside another ID, so when agents must give their BVN, it is their ID."}
+          {p.idChosenOnPage ? ' People pick their ID on its page, from those set up in its dashboard.' : ''}
+        </p>
+      ) : null}
       {updated ? (
         <div className="mt-3">
           <Notice tone="brand">{updated}</Notice>

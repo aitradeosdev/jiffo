@@ -3,6 +3,7 @@ import { ErrandsModule } from '../errands/errands.module';
 import { ErrandsAdminService } from './errands-admin.service';
 import { PeopleAdminService } from './people-admin.service';
 import { ApplicationsAdminService } from './applications-admin.service';
+import { IdChecksAdminService } from './id-checks-admin.service';
 import { ProvidersAdminService } from './providers-admin.service';
 import { MoneyAdminService } from './money-admin.service';
 import { SettingsAdminService } from './settings-admin.service';
@@ -23,6 +24,7 @@ import { TeamService } from './team.service';
     AdminAuthService,
     AdminGuard,
     ApplicationsAdminService,
+    IdChecksAdminService,
     AuditService,
     ErrandsAdminService,
     MoneyAdminService,
