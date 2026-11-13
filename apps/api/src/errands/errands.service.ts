@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { and, desc, eq, inArray, lt, ne, sql } from 'drizzle-orm';
 import {
   canRevealPin,
@@ -71,6 +71,8 @@ const PRECHECKED: Partial<Record<string, 'customer' | 'agent'>> = {
 
 @Injectable()
 export class ErrandsService implements OnModuleInit {
+  private readonly logger = new Logger('Errands');
+
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -455,11 +457,18 @@ export class ErrandsService implements OnModuleInit {
     };
   }
 
-  /** Once an agent is off an errand, their location is kept only if they are still online or busy. */
+  /**
+   * Once an agent is off an errand, their location is kept only if they are still online or busy.
+   * Best effort: the change is already saved, so a failure here is logged, not returned. The scheduled
+   * sweep deletes any position left behind.
+   */
   private async afterAgentLeft(before: ErrandRow, after: ErrandRow) {
     const travelling = (status: string) => (TRAVEL_STATES as readonly string[]).includes(status);
-    if (before.agentId && travelling(before.status) && !travelling(after.status)) {
+    if (!before.agentId || !travelling(before.status) || travelling(after.status)) return;
+    try {
       await this.presence.forgetIfIdle(before.agentId);
+    } catch (error) {
+      this.logger.warn(`Could not clear agent ${before.agentId}'s position: ${String(error)}`);
     }
   }
 

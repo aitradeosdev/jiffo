@@ -22,6 +22,17 @@ export type ErrandState = (typeof ERRAND_STATES)[number];
 
 export const TERMINAL_STATES: ReadonlySet<ErrandState> = new Set(['completed', 'cancelled', 'expired']);
 
+/** The agent is out doing the errand: their app shares where they are, and the customer can see it. */
+export const AGENT_OUT_STATES = [
+  'accepted',
+  'started',
+  'item_pending',
+  'items_locked',
+  'delivered',
+  'photo_pending',
+  'unreachable',
+] as const satisfies readonly ErrandState[];
+
 export type Actor = 'customer' | 'agent' | 'system' | 'admin';
 
 export interface TransitionContext {

@@ -1,4 +1,5 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Inject, Module, OnModuleInit } from '@nestjs/common';
+import { RECURRING_JOBS, type RecurringJobs } from '../timers/recurring-jobs';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
 import { PresenceController } from './presence.controller';
@@ -10,4 +11,14 @@ import { PresenceService } from './presence.service';
   providers: [AgentsService, PresenceService],
   exports: [AgentsService, PresenceService],
 })
-export class AgentsModule {}
+export class AgentsModule implements OnModuleInit {
+  constructor(
+    @Inject(RECURRING_JOBS) private readonly jobs: RecurringJobs,
+    private readonly presence: PresenceService,
+  ) {}
+
+  onModuleInit() {
+    // Every 10 minutes, delete positions that stopped being refreshed.
+    this.jobs.register('presence.sweep', '*/10 * * * *', () => this.presence.sweep());
+  }
+}

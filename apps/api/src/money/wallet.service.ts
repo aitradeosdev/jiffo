@@ -281,7 +281,7 @@ export class WalletService {
   /* ---------- Reading ---------- */
 
   async summary(auth: AuthContext) {
-    const { currency } = await this.countries.basics(auth.countryCode);
+    const { currency, timezone } = await this.countries.basics(auth.countryCode);
     if (auth.app === 'customer') {
       const [balanceKobo, holding] = await Promise.all([
         this.ledger.balance(this.db, wallet(auth.userId), auth.countryCode),
@@ -291,7 +291,6 @@ export class WalletService {
     }
     // Read only: earnings whose hold has ended count as available here, and are moved in the ledger by
     // the recurring job or when the agent withdraws.
-    const { timezone } = await this.countries.basics(auth.countryCode);
     const [availableKobo, heldKobo, holds, todayKobo] = await Promise.all([
       this.ledger.balance(this.db, available(auth.userId), auth.countryCode),
       this.ledger.balance(this.db, held(auth.userId), auth.countryCode),

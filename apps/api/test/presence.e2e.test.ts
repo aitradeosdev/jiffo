@@ -40,6 +40,7 @@ describe('agent presence and live location', () => {
     expect(await count()).toEqual({ count: before + 1, radiusKm: 3 });
     expect((await request(t.http).get('/v1/agent/presence').set(near.headers).expect(200)).body).toEqual({
       online: true,
+      onErrand: false,
     });
 
     // Going offline with nothing running stops counting and forgets where the agent was.
@@ -51,11 +52,27 @@ describe('agent presence and live location', () => {
     await put(near, { online: true, lat: 6.4 }, 400);
   });
 
+  it('deletes positions nobody refreshed for half an hour', async () => {
+    const agent = await signIn(t, 'agent');
+    await put(agent, { online: true, lat: 6.448, lng: 3.47 });
+    await t.db
+      .update(agentPresence)
+      .set({ locatedAt: new Date(Date.now() - 31 * 60_000) })
+      .where(eq(agentPresence.userId, agent.userId));
+    await t.jobs.run('presence.sweep');
+    expect(await presenceOf(agent)).toMatchObject({ online: false, lat: null, location: null, locatedAt: null });
+  });
+
   it('shows the customer their agent live during the errand, and forgets it once it ends', async () => {
     const agent = await signIn(t, 'agent');
     const errand = await createErrand(t, customer);
     await act(t, agent, errand.id, 'accept');
     expect((await view(customer, errand.id)).agentLocation).toBeNull();
+    // The agent app learns it should keep sharing while the errand runs, even offline.
+    expect((await request(t.http).get('/v1/agent/presence').set(agent.headers).expect(200)).body).toEqual({
+      online: false,
+      onErrand: true,
+    });
 
     const socket = io(`${t.url}/realtime`, {
       auth: { token: customer.accessToken },

@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { goBack } from '../nav';
 import { useCountryConfig } from '../api/useCountryConfig';
@@ -113,11 +112,7 @@ export function AgentRequest({
           </Text>
         ) : null}
         <Button label="Accept errand" onPress={onAccept} loading={accepting} />
-        <Button
-          kind="plain"
-          label="Decline"
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/home'))}
-        />
+        <Button kind="plain" label="Decline" onPress={goBack} />
       </Sheet>
     </View>
   );

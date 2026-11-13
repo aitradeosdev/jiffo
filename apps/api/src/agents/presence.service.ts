@@ -1,20 +1,15 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, gt, inArray, ne, sql } from 'drizzle-orm';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { AGENT_OUT_STATES } from '@jiffo/shared';
+import { and, eq, gt, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { agentPresence, errands } from '../db/schema';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { AuthContext } from '../auth/auth.types';
 
 /** States in which the agent is out doing the errand, so the customer may see where they are. */
-export const TRAVEL_STATES = [
-  'accepted',
-  'started',
-  'item_pending',
-  'items_locked',
-  'delivered',
-  'photo_pending',
-  'unreachable',
-] as const;
+export const TRAVEL_STATES = AGENT_OUT_STATES;
+/** A position not refreshed for this long is deleted, whatever the agent's app last said. */
+const KEEP_FOR_MS = 30 * 60_000;
 
 /** A location older than this is not shown to a customer. */
 const SHOW_FOR_MS = 2 * 60_000;
@@ -30,6 +25,8 @@ const point = (lat: number, lng: number) => sql`ST_SetSRID(ST_MakePoint(${lng}, 
  */
 @Injectable()
 export class PresenceService {
+  private readonly logger = new Logger('Presence');
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly realtime: RealtimeGateway,
@@ -55,6 +52,9 @@ export class PresenceService {
         target: agentPresence.userId,
         set: { countryCode: auth.countryCode, online: body.online, ...place, updatedAt: now },
       });
+    // An errand may have ended while this was being written: if the agent is offline and now idle,
+    // forget the position again rather than keep it.
+    if (!body.online && sharing) await this.forgetIfIdle(auth.userId);
     if (located) {
       for (const e of running) {
         this.realtime.toUser(e.customerId, 'customer', 'agent.location', {
@@ -66,6 +66,20 @@ export class PresenceService {
       }
     }
     return { online: body.online, sharingLocation: sharing };
+  }
+
+  /**
+   * Deletes positions nobody has refreshed for a while (an app closed while online, say), and marks
+   * those agents offline. Runs on a schedule.
+   */
+  async sweep() {
+    const cleared = await this.db
+      .update(agentPresence)
+      .set({ online: false, lat: null, lng: null, location: null, locatedAt: null, updatedAt: new Date() })
+      .where(and(isNotNull(agentPresence.locatedAt), lt(agentPresence.locatedAt, new Date(Date.now() - KEEP_FOR_MS))))
+      .returning({ userId: agentPresence.userId });
+    if (cleared.length) this.logger.log(`Cleared ${cleared.length} stale agent positions`);
+    return cleared.length;
   }
 
   /** Clears the agent's location if they are offline and have no errand running. */
@@ -82,11 +96,21 @@ export class PresenceService {
       .where(and(eq(agentPresence.userId, agentId), eq(agentPresence.online, false)));
   }
 
-  /** Whether the agent counts as online now: switched on, and reported recently. */
+  /**
+   * Whether the agent counts as online now (switched on, and reported recently), and whether they have
+   * an errand running, which means their app should keep sharing where they are.
+   */
   async status(userId: string) {
-    const [row] = await this.db.select().from(agentPresence).where(eq(agentPresence.userId, userId));
+    const [[row], [busy]] = await Promise.all([
+      this.db.select().from(agentPresence).where(eq(agentPresence.userId, userId)),
+      this.db
+        .select({ id: errands.id })
+        .from(errands)
+        .where(and(eq(errands.agentId, userId), inArray(errands.status, [...TRAVEL_STATES])))
+        .limit(1),
+    ]);
     const fresh = !!row?.locatedAt && Date.now() - row.locatedAt.getTime() < ONLINE_FOR_MS;
-    return { online: !!row?.online && fresh };
+    return { online: !!row?.online && fresh, onErrand: !!busy };
   }
 
   /** The agent's last position, if recent enough to show the customer. */

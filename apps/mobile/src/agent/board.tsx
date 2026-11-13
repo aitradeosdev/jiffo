@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -63,16 +63,25 @@ export function AgentBoard() {
   }, [peek]);
   const at = presence.coords ?? here.coords;
 
+  // The position is read through a ref so a new GPS fix doesn't restart the 20-second rhythm.
+  const coordsRef = useRef(presence.coords);
+  coordsRef.current = presence.coords;
   const load = useCallback(async () => {
-    if (!presence.online || !presence.coords) return;
-    const { lat, lng } = presence.coords;
+    const here = coordsRef.current;
+    if (!presence.online || !here) return;
+    const { lat, lng } = here;
     try {
       setBoard(await api.get<Board>(`/v1/errands/board?lat=${lat}&lng=${lng}&radiusKm=${RADIUS_KM}`));
       setError(null);
     } catch (e) {
       setError(errorMessage(e));
     }
-  }, [api, presence.online, presence.coords]);
+  }, [api, presence.online]);
+  // The first fix after going online loads the board straight away.
+  const located = !!presence.coords;
+  useEffect(() => {
+    if (located) void load();
+  }, [located, load]);
   // New errands don't arrive as live events yet, so the board checks every 20 seconds while in front.
   useFocusEffect(
     useCallback(() => {

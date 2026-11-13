@@ -2,11 +2,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Linking } from 'react-native';
 import * as Location from 'expo-location';
 import { useSession } from '../auth/session';
+import { useRealtimeEvent } from '../realtime/realtime';
 import { errorMessage } from '../api/client';
 import type { Coords } from '../location';
 
 /** How often a moving agent's position is sent at most. */
 const REPORT_EVERY_MS = 10_000;
+/** Sent this often even when the agent isn't moving, so a parked agent stays visible and online. */
+const HEARTBEAT_MS = 60_000;
 
 interface Presence {
   /** Taking errands now. */
@@ -19,8 +22,8 @@ interface Presence {
   blocked: boolean;
   setOnline: (online: boolean) => Promise<void>;
   openSettings: () => void;
-  /** An errand screen holds this while the agent is out on the errand, so the customer can follow them. */
-  holdForErrand: () => () => void;
+  /** The agent has an errand running, so their position keeps flowing to that customer. */
+  onErrand: boolean;
 }
 
 const PresenceContext = createContext<Presence | null>(null);
@@ -36,17 +39,49 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [blocked, setBlocked] = useState(false);
-  const [holds, setHolds] = useState(0);
+  const [onErrand, setOnErrand] = useState(false);
   const lastSent = useRef(0);
   const onlineRef = useRef(online);
   onlineRef.current = online;
+  const coordsRef = useRef(coords);
+  coordsRef.current = coords;
+  /** Set once the agent switches; a slower first read must not undo it. */
+  const switched = useRef(false);
 
-  useEffect(() => {
-    api
-      .get<{ online: boolean }>('/v1/agent/presence')
-      .then((r) => setOnlineState(r.online))
-      .catch(() => undefined);
+  // Where things stood when the app opened, and whenever one of the agent's errands changes.
+  const refresh = useCallback(async () => {
+    try {
+      const r = await api.get<{ online: boolean; onErrand: boolean }>('/v1/agent/presence');
+      setOnErrand(r.onErrand);
+      return r;
+    } catch {
+      return null;
+    }
   }, [api]);
+  useEffect(() => {
+    (async () => {
+      const r = await refresh();
+      if (!r?.online || switched.current) return;
+      // Back online after a restart: carry on only if location still works, else say why and go offline.
+      const permission = await Location.getForegroundPermissionsAsync().catch(() => null);
+      const position = permission?.granted
+        ? await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null)
+        : null;
+      if (switched.current) return;
+      if (!position) {
+        setBlocked(!!permission && !permission.granted && !permission.canAskAgain);
+        setError("You're offline because Jiffo Agent can't read your location. Go online again when it's on.");
+        await api.put('/v1/agent/presence', { online: false }).catch(() => undefined);
+        return;
+      }
+      const here = { lat: position.coords.latitude, lng: position.coords.longitude };
+      setCoords(here);
+      setOnlineState(true);
+    })();
+  }, [api, refresh]);
+  useRealtimeEvent('errand.updated', () => {
+    void refresh();
+  });
 
   const permit = useCallback(async () => {
     const permission = await Location.requestForegroundPermissionsAsync();
@@ -72,6 +107,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
 
   const setOnline = useCallback(
     async (next: boolean) => {
+      switched.current = true;
       setSwitching(true);
       setError(null);
       try {
@@ -101,7 +137,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   );
 
   // Follow the agent while online or out on an errand, sending at most every few seconds.
-  const tracking = online || holds > 0;
+  const tracking = online || onErrand;
   useEffect(() => {
     if (!tracking) return;
     let watch: Location.LocationSubscription | null = null;
@@ -120,16 +156,19 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
       );
       if (stopped) watch.remove();
     })();
+    // A phone that isn't moving sends nothing above, so send the last position every minute too.
+    const heartbeat = setInterval(() => {
+      const here = coordsRef.current;
+      if (here && Date.now() - lastSent.current >= HEARTBEAT_MS) {
+        send({ online: onlineRef.current, ...here }).catch(() => undefined);
+      }
+    }, HEARTBEAT_MS / 4);
     return () => {
       stopped = true;
       watch?.remove();
+      clearInterval(heartbeat);
     };
   }, [tracking, send]);
-
-  const holdForErrand = useCallback(() => {
-    setHolds((n) => n + 1);
-    return () => setHolds((n) => n - 1);
-  }, []);
 
   const value = useMemo<Presence>(
     () => ({
@@ -140,9 +179,9 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
       blocked,
       setOnline,
       openSettings: () => Linking.openSettings(),
-      holdForErrand,
+      onErrand,
     }),
-    [online, coords, switching, error, blocked, setOnline, holdForErrand],
+    [online, coords, switching, error, blocked, setOnline, onErrand],
   );
   return <PresenceContext.Provider value={value}>{children}</PresenceContext.Provider>;
 }
@@ -151,10 +190,4 @@ export function usePresence() {
   const value = useContext(PresenceContext);
   if (!value) throw new Error('usePresence must be used inside AgentPresenceProvider');
   return value;
-}
-
-/** Keeps the agent's position flowing to the customer while this errand needs it. */
-export function useShareLocationDuring(active: boolean) {
-  const { holdForErrand } = usePresence();
-  useEffect(() => (active ? holdForErrand() : undefined), [active, holdForErrand]);
 }
