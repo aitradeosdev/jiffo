@@ -28,8 +28,9 @@ function savedOutcome(app: Application): CheckOutcome | 'pending' | null {
   if (!app.steps.identity) return null;
   const own = app.checks.filter((c) => ['nin', 'bvn', 'selfie', 'duplicate'].includes(c.key));
   if (own.some((c) => c.outcome === 'failed')) return 'failed';
-  // As the API decides: the NIN and the selfie must pass, and the BVN too when it was checked.
-  const all = ['nin', 'selfie'].every((key) => own.some((c) => c.key === key));
+  // As the API decides: the NIN and the selfie must pass, and the BVN too when the app asks for it.
+  const needed = app.identityFlow === 'hosted' ? ['nin', 'selfie'] : ['nin', 'bvn', 'selfie'];
+  const all = needed.every((key) => own.some((c) => c.key === key));
   return all && own.every((c) => c.outcome === 'passed') ? 'passed' : 'review';
 }
 
@@ -67,14 +68,17 @@ export default function Identity() {
     [],
   );
   const provider = providerName(app);
-  const hosted = app?.identityFlow === 'hosted';
+  /** How a new check runs, with the provider switched on now. */
+  const hostedNow = app?.identityFlow === 'hosted';
+  /** How the check on this screen runs: the one started here, even if admin has switched provider since. */
+  const hosted = started ? started.url !== null : hostedNow;
   const back = () => router.dismissTo('/apply');
 
   const start = async () => {
     setBusy(true);
     setError(null);
     try {
-      const body = hosted ? { consent: true } : { nin, bvn, consent: true };
+      const body = hostedNow ? { consent: true } : { nin, bvn, consent: true };
       const result = await api.post<Started>('/v1/agent/application/identity', body);
       setStarted(result);
       if (result.url) await visit(result.url);
@@ -189,11 +193,19 @@ export default function Identity() {
         footer={
           <View style={{ gap: 8 }}>
             <Button label="Back to your application" onPress={back} />
-            <Button
-              kind="secondary"
-              label={outcome === 'failed' && !hosted ? 'Check the numbers and try again' : 'Check again'}
-              onPress={again}
-            />
+            {outcome === 'pending' ? (
+              // Asks about the check already running: starting a new one would mean doing it all again.
+              <>
+                <Button kind="secondary" label="Ask for the result again" onPress={finish} />
+                <Button kind="plain" label="Start a new check" onPress={again} />
+              </>
+            ) : (
+              <Button
+                kind="secondary"
+                label={outcome === 'failed' && !hosted ? 'Check the numbers and try again' : 'Check again'}
+                onPress={again}
+              />
+            )}
             {outcome === 'passed' ? (
               <Text variant="note" tone="ink3" style={{ textAlign: 'center' }}>
                 Checking again replaces this result.
@@ -218,7 +230,7 @@ export default function Identity() {
             title={`${ProviderName(app)} is still checking`}
             sub={
               hosted
-                ? `Carry on with the other steps. The result is on your application when it's back. If you closed ${provider}'s page before the end, check again.`
+                ? `Carry on with the other steps. The result is on your application when it's back. If you closed ${provider}'s page before the end, start a new check.`
                 : "Carry on with the other steps. The result is on your application when it's back."
             }
           />
@@ -277,7 +289,7 @@ export default function Identity() {
     );
   }
 
-  if (hosted) {
+  if (hostedNow) {
     return (
       <ObScreen onBack={back} footer={<Button label="Continue" onPress={start} loading={busy} />}>
         <Question

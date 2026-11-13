@@ -45,49 +45,79 @@ describe('Smile ID', () => {
     expect(form.get('notice_privacy_policy_url')).toBe('https://jiffo.test/privacy');
   });
 
-  it('takes a result only with a signature made with our API key', () => {
-    const smile = make(fakeFetch(() => json({})).impl);
-    const body = Buffer.from(
-      JSON.stringify({
-        status: 'clear',
-        reason: null,
-        partner_params: { user_id: 'jid-1', job_id: 'job_1' },
-        id_fields: {
-          first_name: 'Tunde',
-          other_names: 'Ade',
-          last_name: 'Bakare',
-          date_of_birth: '1995-04-12',
-          id_number: '12345678901',
+  describe('results', () => {
+    const fields = {
+      first_name: 'Tunde',
+      other_names: 'Ade',
+      last_name: 'Bakare',
+      date_of_birth: '1995-04-12',
+      id_number: '12345678901',
+    };
+    const callback = (status: string, extra: object = {}) =>
+      Buffer.from(JSON.stringify({ status, partner_params: { user_id: 'jid-1' }, id_fields: fields, ...extra }));
+    const signed = (at = new Date()) => {
+      const timestamp = at.toISOString();
+      return {
+        'response-timestamp': timestamp,
+        'response-signature': createHmac('sha256', 'smile-key').update(`${timestamp}1234sid_request`).digest('base64'),
+        'smileid-job-id': 'job_01',
+      };
+    };
+    /** Smile ID's own answer for the job, whatever the callback's body says. */
+    const withStatus = (job: object, status = 200) =>
+      fakeFetch(({ url }) => (url.endsWith('/v3/token') ? json({ token: 'jwt-1' }) : json(job, status)));
+
+    it('takes the verdict from their status API, for a callback signed with our key just now', async () => {
+      const { impl, calls } = withStatus({ status: 'clear', job_id: 'job_01', user_id: 'jid-1' });
+      expect(await make(impl).parseWebhook(callback('clear'), signed())).toEqual({
+        reference: 'jid-1',
+        result: {
+          status: 'done',
+          outcome: 'passed',
+          legalName: 'TUNDE ADE BAKARE',
+          dateOfBirth: '1995-04-12',
+          checks: [
+            { key: 'nin', outcome: 'passed' },
+            { key: 'selfie', outcome: 'passed' },
+          ],
+          idNumber: '12345678901',
         },
-      }),
-    );
-    const timestamp = '2026-11-13T10:00:00.000Z';
-    const signature = createHmac('sha256', 'smile-key').update(`${timestamp}1234sid_request`).digest('base64');
-    const parsed = smile.parseWebhook(body, { 'response-timestamp': timestamp, 'response-signature': signature });
-    expect(parsed).toEqual({
-      reference: 'jid-1',
-      result: {
-        status: 'done',
-        outcome: 'passed',
-        legalName: 'TUNDE ADE BAKARE',
-        dateOfBirth: '1995-04-12',
-        checks: [
-          { key: 'nin', outcome: 'passed' },
-          { key: 'selfie', outcome: 'passed' },
-        ],
-        idNumber: '12345678901',
-      },
+      });
+      expect(calls[1]!.url).toBe('https://testapi.smileidentity.com/v3/status/job_01');
+      expect(calls[1]!.init.headers).toMatchObject({ 'SmileID-Partner-ID': '1234', 'SmileID-Token': 'jwt-1' });
     });
-    expect(smile.parseWebhook(body, { 'response-timestamp': timestamp, 'response-signature': 'forged' })).toBeNull();
-    // A blocked check failed; attention means a person should look.
-    const blocked = Buffer.from(
-      JSON.stringify({ status: 'block', reason: 'face_mismatch', partner_params: { user_id: 'jid-2' } }),
-    );
-    expect(
-      smile.parseWebhook(blocked, { 'response-timestamp': timestamp, 'response-signature': signature })?.result,
-    ).toMatchObject({
-      outcome: 'failed',
-      checks: [{ key: 'nin', outcome: 'failed', note: 'face_mismatch' }, expect.anything()],
+
+    it("doesn't believe the body: the status API's verdict wins", async () => {
+      const blocked = withStatus({ status: 'block', user_id: 'jid-1', message: 'Face did not match' });
+      expect((await make(blocked.impl).parseWebhook(callback('clear'), signed()))?.result).toMatchObject({
+        outcome: 'failed',
+        checks: [{ key: 'nin', outcome: 'failed', note: 'Face did not match' }, expect.anything()],
+      });
+      const look = withStatus({ status: 'attention', user_id: 'jid-1' });
+      expect((await make(look.impl).parseWebhook(callback('clear'), signed()))?.result.outcome).toBe('review');
+      const running = withStatus({ status: 'processing', user_id: 'jid-1' }, 202);
+      expect((await make(running.impl).parseWebhook(callback('clear'), signed()))?.result.status).toBe('pending');
+    });
+
+    it('refuses forged, old or misdirected callbacks', async () => {
+      const ok = withStatus({ status: 'clear', user_id: 'jid-1' });
+      const smile = make(ok.impl);
+      expect(await smile.parseWebhook(callback('clear'), { ...signed(), 'response-signature': 'forged' })).toBeNull();
+      // A signature from an hour ago could be one seen before.
+      expect(await smile.parseWebhook(callback('clear'), signed(new Date(Date.now() - 3_600_000)))).toBeNull();
+      // A job of another check.
+      const other = withStatus({ status: 'clear', user_id: 'jid-someone-else' });
+      expect(await make(other.impl).parseWebhook(callback('clear'), signed())).toBeNull();
+      const unknown = withStatus({ message: 'not found' }, 404);
+      expect(await make(unknown.impl).parseWebhook(callback('clear'), signed())).toBeNull();
+      // Smile ID out of reach: an error, so the callback is answered 503 and sent again.
+      const down = withStatus({}, 500);
+      await expect(make(down.impl).parseWebhook(callback('clear'), signed())).rejects.toThrow(/Smile ID/);
+      // Older callbacks carry the signature in the body.
+      const { 'response-timestamp': timestamp, 'response-signature': signature } = signed();
+      expect(
+        (await smile.parseWebhook(callback('clear', { timestamp, signature, job_id: 'job_01' }), {}))?.reference,
+      ).toBe('jid-1');
     });
   });
 });
@@ -158,8 +188,8 @@ describe('Dojah', () => {
     const dojah = make(fakeFetch(() => json({})).impl);
     const raw = Buffer.from(JSON.stringify(completed));
     const signature = createHmac('sha256', 'hook-secret').update(raw).digest('hex');
-    expect(dojah.parseWebhook(raw, { 'x-dojah-signature': signature })?.reference).toBe('jid-3');
-    expect(dojah.parseWebhook(raw, { 'x-dojah-signature': 'nope' })).toBeNull();
+    expect((await dojah.parseWebhook(raw, { 'x-dojah-signature': signature }))?.reference).toBe('jid-3');
+    expect(await dojah.parseWebhook(raw, { 'x-dojah-signature': 'nope' })).toBeNull();
 
     const { impl, calls } = fakeFetch(({ init }) =>
       init.method === 'POST'

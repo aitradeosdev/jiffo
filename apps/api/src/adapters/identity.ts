@@ -60,8 +60,11 @@ export interface IdentityAdapter {
     area?: string;
   }): Promise<{ reference: string }>;
   addressResult(reference: string): Promise<AddressResult>;
-  /** A result the provider sent us, once its signature shows it came from them; null when it doesn't. */
-  parseWebhook?(rawBody: Buffer, headers: Headers): { reference: string; result: IdentityResult } | null;
+  /**
+   * A result the provider sent us, once its signature shows it came from them; null when it doesn't. May ask
+   * the provider to confirm it, and throws IdentityProviderError when it can't, so the provider sends it again.
+   */
+  parseWebhook?(rawBody: Buffer, headers: Headers): Promise<{ reference: string; result: IdentityResult } | null>;
   /** For providers whose widget runs in a page Jiffo serves: that page. */
   page?(reference: string): string;
 }

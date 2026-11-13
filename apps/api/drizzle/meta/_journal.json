@@ -92,13 +92,6 @@
       "when": 1794600984981,
       "tag": "0012_callback_token",
       "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "7",
-      "when": 1794602462426,
-      "tag": "0013_identity_results",
-      "breakpoints": true
     }
   ]
 }

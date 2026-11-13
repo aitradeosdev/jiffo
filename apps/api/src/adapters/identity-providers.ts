@@ -1,4 +1,5 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac } from 'node:crypto';
+import { safeEqual } from '../common/crypto';
 import {
   headerOf,
   type AddressResult,
@@ -25,12 +26,6 @@ export class IdentityProviderError extends Error {}
 
 /** Where the provider's page sends the agent when they finish: back into the agent app. */
 export const identityDoneUrl = (ctx: ProviderContext) => `${ctx.publicApiUrl}/v1/identity/done`;
-
-const constantTimeEqual = (a: string, b: string) => {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual(left, right);
-};
 
 /** A legal name in one form, whatever parts the provider gives. */
 const legalNameOf = (parts: Array<string | null | undefined>) =>
@@ -64,11 +59,29 @@ const ADDRESS_BY_SUPPORT: AddressResult = {
   note: "This provider doesn't check addresses; our team does",
 };
 
+/** How old a Smile ID callback's signed timestamp may be. Their signature doesn't cover the body. */
+const SMILE_CALLBACK_MAX_AGE_MS = 30 * 60_000;
+
 /**
  * Smile ID (v3): Biometric KYC with the NIN, on a Smile Link: their hosted page asks for the NIN and takes
- * a selfie with a liveness check. The result arrives only by webhook, signed with our API key; their status
- * API carries no names, so it isn't used. They don't check addresses.
+ * a selfie with a liveness check. The result arrives by webhook, and its verdict is confirmed with their
+ * status API, which carries no names. They don't check addresses.
  */
+interface SmileCallback {
+  timestamp?: string;
+  signature?: string;
+  job_id?: string;
+  partner_params?: { user_id?: string; job_id?: string; reference?: string };
+  id_fields?: {
+    first_name?: string;
+    other_names?: string;
+    last_name?: string;
+    full_name?: string;
+    date_of_birth?: string;
+    id_number?: string;
+  } | null;
+}
+
 export class SmileIdIdentityAdapter implements IdentityAdapter {
   readonly name = 'smileid';
   readonly flow = 'hosted' as const;
@@ -133,35 +146,39 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
 
   /**
    * Signed as Smile ID documents: base64 HMAC-SHA256, keyed with our API key, of the Response-Timestamp
-   * header, our partner ID and "sid_request", as given.
+   * header, our partner ID and "sid_request" (older callbacks carry the two in the body). That signature
+   * covers no part of the body, so the timestamp must be recent, and the verdict is not taken from the body:
+   * Smile ID's status API is asked for this job, which must belong to the same check. The legal name, date
+   * of birth and NIN come from the body, as the status API doesn't give them.
    */
-  parseWebhook(rawBody: Buffer, headers: Headers) {
-    const timestamp = headerOf(headers, 'response-timestamp');
-    const signature = headerOf(headers, 'response-signature');
+  async parseWebhook(rawBody: Buffer, headers: Headers) {
+    let body: SmileCallback;
+    try {
+      body = JSON.parse(rawBody.toString('utf8')) as SmileCallback;
+    } catch {
+      return null;
+    }
+    const timestamp = headerOf(headers, 'response-timestamp') ?? body.timestamp;
+    const signature = headerOf(headers, 'response-signature') ?? body.signature;
     if (!timestamp || !signature) return null;
     const expected = createHmac('sha256', this.apiKey)
       .update(`${timestamp}${this.partnerId}sid_request`)
       .digest('base64');
-    if (!constantTimeEqual(signature, expected)) return null;
-    const body = JSON.parse(rawBody.toString('utf8')) as {
-      status?: string;
-      reason?: string | null;
-      message?: string;
-      partner_params?: { user_id?: string; reference?: string };
-      id_fields?: {
-        first_name?: string;
-        other_names?: string;
-        last_name?: string;
-        full_name?: string;
-        date_of_birth?: string;
-        id_number?: string;
-      } | null;
-    };
+    if (!safeEqual(signature, expected)) return null;
+    const signedAt = Date.parse(timestamp);
+    if (!Number.isFinite(signedAt) || Math.abs(Date.now() - signedAt) > SMILE_CALLBACK_MAX_AGE_MS) return null;
     const reference = body.partner_params?.reference ?? body.partner_params?.user_id;
-    if (!reference) return null;
-    // clear: passed. block: the ID or the face didn't match. attention or error: a person should look.
-    const outcome: CheckOutcome = body.status === 'clear' ? 'passed' : body.status === 'block' ? 'failed' : 'review';
-    const note = outcome === 'passed' ? undefined : (body.reason ?? body.message ?? body.status);
+    const jobId = headerOf(headers, 'smileid-job-id') ?? body.job_id ?? body.partner_params?.job_id;
+    if (!reference || !jobId || !/^[\w-]{1,100}$/.test(jobId)) return null;
+
+    const job = await this.jobStatus(jobId);
+    if (!job || job.user_id !== reference) return null;
+    if (job.status === 'processing') return { reference, result: { status: 'pending', checks: [] } as IdentityResult };
+    // clear: passed. block: the ID or the face didn't match. error: the check couldn't be finished, and is
+    // best done again. attention: a person should look.
+    const outcome: CheckOutcome =
+      job.status === 'clear' ? 'passed' : job.status === 'block' || job.status === 'error' ? 'failed' : 'review';
+    const note = outcome === 'passed' ? undefined : (job.message ?? job.status);
     const fields = body.id_fields ?? undefined;
     const result: IdentityResult = {
       status: 'done',
@@ -177,6 +194,27 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
       idNumber: fields?.id_number,
     };
     return { reference, result };
+  }
+
+  /** A job's verdict from Smile ID itself; null when they don't know the job. */
+  private async jobStatus(jobId: string) {
+    const token = await this.token();
+    const res = await this.fetchImpl(`${this.base}/v3/status/${encodeURIComponent(jobId)}`, {
+      headers: { 'SmileID-Partner-ID': this.partnerId, 'SmileID-Token': token },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    }).catch((error: Error) => {
+      throw new IdentityProviderError(`Smile ID didn't answer: ${error.message}`);
+    });
+    if (res.status === 404) return null;
+    const json = (await res.json().catch(() => null)) as {
+      status?: string;
+      user_id?: string;
+      message?: string;
+    } | null;
+    if (res.status === 202) return { status: 'processing', user_id: json?.user_id, message: json?.message };
+    if (!res.ok || !json?.status)
+      throw new IdentityProviderError(`Smile ID couldn't say how the check went: ${res.status}`);
+    return json;
   }
 
   async startAddress(input: { person: IdentityPerson }) {
@@ -339,11 +377,11 @@ connect.open();
   }
 
   /** Signed as Dojah documents: hex HMAC-SHA256 of the raw body, keyed with the webhook secret. */
-  parseWebhook(rawBody: Buffer, headers: Headers) {
+  async parseWebhook(rawBody: Buffer, headers: Headers) {
     const signature = headerOf(headers, 'x-dojah-signature');
     if (!signature || !this.webhookSecret) return null;
     const expected = createHmac('sha256', this.webhookSecret).update(rawBody).digest('hex');
-    if (!constantTimeEqual(signature, expected)) return null;
+    if (!safeEqual(signature, expected)) return null;
     const body = JSON.parse(rawBody.toString('utf8')) as DojahVerification;
     if (!body.reference_id) return null;
     return { reference: body.reference_id, result: this.toResult(body) };

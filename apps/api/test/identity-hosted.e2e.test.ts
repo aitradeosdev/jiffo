@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DojahIdentityAdapter, SmileIdIdentityAdapter } from '../src/adapters/identity-providers';
-import { agentApplications, identityResults, providerSettings } from '../src/db/schema';
+import { agentApplications, providerSettings } from '../src/db/schema';
 import { ProvidersService } from '../src/providers/providers.service';
 import { adminAs, createTestApp, signIn, uniqueNin, type Person, type TestApp } from './helpers';
 
@@ -68,6 +68,10 @@ describe("identity checks on the provider's own page", () => {
       'pending',
     );
 
+    // Smile ID's status API confirms the verdict for this check's job.
+    const status = vi
+      .spyOn(SmileIdIdentityAdapter.prototype as unknown as { jobStatus: (id: string) => Promise<object> }, 'jobStatus')
+      .mockResolvedValue({ status: 'clear', user_id: reference });
     const nin = uniqueNin();
     const body = JSON.stringify({
       status: 'clear',
@@ -82,20 +86,69 @@ describe("identity checks on the provider's own page", () => {
         .set('content-type', 'application/json')
         .set('response-timestamp', timestamp)
         .set('response-signature', signature)
+        .set('smileid-job-id', 'job_01')
         .send(body);
     await deliver(sign('someone-else')).expect(401);
     await deliver(sign('smile-key')).expect(200);
-    const [kept] = await t.db.select().from(identityResults).where(eq(identityResults.reference, reference));
-    // Only the result is kept: no NIN, no payload.
-    expect(kept).toMatchObject({ outcome: 'passed', legalName: 'TUNDE BAKARE', dateOfBirth: '1995-04-12' });
-    expect(JSON.stringify(kept)).not.toContain(nin);
-
+    expect(status).toHaveBeenCalledWith('job_01');
+    // Settled at once, keeping only the result: no NIN, no payload.
+    const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
+    expect(row).toMatchObject({
+      identityProvider: 'smileid',
+      legalName: 'TUNDE BAKARE',
+      dateOfBirth: '1995-04-12',
+      identityOutcome: 'passed',
+      pendingNinFingerprint: null,
+    });
+    expect(row!.ninFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(row)).not.toContain(nin);
     const done = await request(t.http).post('/v1/agent/application/identity/finish').set(agent.headers).expect(200);
     expect(done.body).toMatchObject({ status: 'done', outcome: 'passed' });
-    const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
-    expect(row).toMatchObject({ identityProvider: 'smileid', legalName: 'TUNDE BAKARE', identityOutcome: 'passed' });
-    // The NIN Smile ID read is what's held, so a second account on it is caught.
-    expect(row!.ninFingerprint).toBe(kept!.ninFingerprint);
+
+    // A second account on the same NIN goes to support, with the NIN waiting so approval can't take it twice.
+    const second = await newAgent();
+    const again = await request(t.http)
+      .post('/v1/agent/application/identity')
+      .set(second.headers)
+      .send({ consent: true })
+      .expect(200);
+    const secondRef = String(again.body.url).split('/').pop()!;
+    status.mockResolvedValue({ status: 'clear', user_id: secondRef });
+    const secondBody = body.replace(reference, secondRef);
+    await request(t.http)
+      .post('/v1/webhooks/identity/smileid')
+      .set('content-type', 'application/json')
+      .set('response-timestamp', timestamp)
+      .set('response-signature', sign('smile-key'))
+      .set('smileid-job-id', 'job_02')
+      .send(secondBody)
+      .expect(200);
+    const [dup] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, second.userId));
+    expect(dup).toMatchObject({
+      identityOutcome: 'review',
+      ninFingerprint: null,
+      pendingNinFingerprint: row!.ninFingerprint,
+    });
+    expect(dup!.checks).toContainEqual(expect.objectContaining({ key: 'duplicate', outcome: 'review' }));
+
+    // A result for a check started again since is no longer wanted.
+    const fresh = await request(t.http)
+      .post('/v1/agent/application/identity')
+      .set(second.headers)
+      .send({ consent: true })
+      .expect(200);
+    expect(String(fresh.body.url)).not.toContain(secondRef);
+    status.mockResolvedValue({ status: 'block', user_id: secondRef });
+    await request(t.http)
+      .post('/v1/webhooks/identity/smileid')
+      .set('content-type', 'application/json')
+      .set('response-timestamp', timestamp)
+      .set('response-signature', sign('smile-key'))
+      .set('smileid-job-id', 'job_02')
+      .send(secondBody)
+      .expect(200);
+    const [after] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, second.userId));
+    expect(after!.identityOutcome).toBeNull();
     await panel('post', '/identity/active').send({ provider: null }).expect(200);
   });
 
