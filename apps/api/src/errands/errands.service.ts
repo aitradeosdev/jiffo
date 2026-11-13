@@ -46,6 +46,13 @@ interface EventEffect {
 const HOUR_MS = 3_600_000;
 const MINUTE_MS = 60_000;
 
+/** Events checked outside the errand's transaction first, and who may send them. */
+const PRECHECKED: Partial<Record<string, 'customer' | 'agent'>> = {
+  send_item_amount: 'agent',
+  send_dropoff_photo: 'agent',
+  raise_fee: 'customer',
+};
+
 @Injectable()
 export class ErrandsService implements OnModuleInit {
   constructor(
@@ -219,13 +226,7 @@ export class ErrandsService implements OnModuleInit {
     }
     // Nothing is held until an agent accepts, but the wallet must cover the errand before it goes out.
     const serviceFeeKobo = serviceFee(input.feeKobo, settings.fees);
-    const balanceKobo = await this.wallet.customerBalance(customer.id, country);
-    if (balanceKobo < input.feeKobo + serviceFeeKobo) {
-      throw conflict('insufficient_funds', 'Top up your wallet to send this errand', {
-        neededKobo: input.feeKobo + serviceFeeKobo,
-        balanceKobo,
-      });
-    }
+    await this.assertWalletCovers(customer.id, country, input.feeKobo, settings, 'send this errand');
 
     const created = await this.db.transaction(async (tx) => {
       const [errand] = await tx
@@ -373,24 +374,22 @@ export class ErrandsService implements OnModuleInit {
     );
     if (!money) throw notFound('errand_not_found', 'Errand not found');
     const { settings } = money;
-    // Photos are checked before the errand is locked, because the check may call the file store. First
-    // make sure the caller may do this at all, so a stranger or a wrong state gets the right answer.
-    if (input.event === 'send_item_amount' || input.event === 'send_dropoff_photo') {
+    // Some events need checks outside the errand's transaction: photos (the file store) and a raised fee
+    // (the wallet). First make sure the caller may do this at all and is looking at the current errand,
+    // so a stranger, a wrong state or a stale screen gets the right answer before any of that.
+    const precheckActor = PRECHECKED[input.event];
+    if (precheckActor) {
       const [current] = await this.db.select().from(errands).where(eq(errands.id, errandId));
-      if (!current || this.roleFor(current, auth) !== 'agent') throw notFound('errand_not_found', 'Errand not found');
-      nextState(current.status, input.event, transitionContext(current, 'agent'));
-    }
-    // A raised fee must still be covered by the wallet, like a new errand. Read before the errand is locked.
-    if (input.event === 'raise_fee') {
-      const { amountKobo } = this.parse('raise_fee', input.data);
-      const [current] = await this.db.select().from(errands).where(eq(errands.id, errandId));
-      if (!current || this.roleFor(current, auth) !== 'customer')
+      if (!current || this.roleFor(current, auth) !== precheckActor) {
         throw notFound('errand_not_found', 'Errand not found');
-      nextState(current.status, input.event, transitionContext(current, 'customer'));
-      const neededKobo = amountKobo + serviceFee(amountKobo, settings.fees);
-      const balanceKobo = await this.wallet.customerBalance(current.customerId, current.countryCode);
-      if (balanceKobo < neededKobo) {
-        throw conflict('insufficient_funds', 'Top up your wallet to raise the fee', { neededKobo, balanceKobo });
+      }
+      if (input.version !== undefined && input.version !== current.version) {
+        throw conflict('errand_changed', 'This errand changed. Refresh and try again.', { version: current.version });
+      }
+      nextState(current.status, input.event, transitionContext(current, precheckActor));
+      if (input.event === 'raise_fee') {
+        const { amountKobo } = this.parse('raise_fee', input.data);
+        await this.assertWalletCovers(current.customerId, current.countryCode, amountKobo, settings, 'raise the fee');
       }
     }
     if (input.event === 'send_item_amount') {
@@ -433,6 +432,21 @@ export class ErrandsService implements OnModuleInit {
     if ('error' in outcome) throw outcome.error;
     await this.notifier.transitioned(outcome.result);
     return this.viewOne(outcome.result.after, outcome.role, auth.userId);
+  }
+
+  /** The wallet must hold the fee and its service fee before an errand goes out or its fee goes up. */
+  private async assertWalletCovers(
+    customerId: string,
+    countryCode: string,
+    feeKobo: number,
+    settings: CountrySettings,
+    action: string,
+  ) {
+    const neededKobo = feeKobo + serviceFee(feeKobo, settings.fees);
+    const balanceKobo = await this.wallet.customerBalance(customerId, countryCode);
+    if (balanceKobo < neededKobo) {
+      throw conflict('insufficient_funds', `Top up your wallet to ${action}`, { neededKobo, balanceKobo });
+    }
   }
 
   /** A timer came due. It applies only if the errand has not moved since the timer was set. */

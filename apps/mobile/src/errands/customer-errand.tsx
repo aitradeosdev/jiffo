@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { goBack } from '../nav';
 import type { ErrandEvent } from '@jiffo/shared';
 import { useSession } from '@/auth/session';
@@ -38,6 +38,13 @@ export function CustomerErrand({ id }: { id: string }) {
   /** How much a refused fee raise was short by, to offer a top-up. */
   const [shortKobo, setShortKobo] = useState<number | null>(null);
   useErrandSubscription(id);
+  // Coming back (from a top-up, say), an old refusal no longer applies.
+  useFocusEffect(
+    useCallback(() => {
+      setActionError(null);
+      setShortKobo(null);
+    }, []),
+  );
   // The same update arrives on the errand's room and the customer's own room: reload once per new version.
   useRealtimeEvent<{ errandId: string; version: number }>('errand.updated', (u) => {
     if (u.errandId === id && (!errand || u.version > errand.version)) reload();

@@ -26,8 +26,6 @@ const ALIASES: Record<string, string> = {
   'rotate-ccw': 'history',
 };
 
-export const hasIcon = (name: string) => name in ICONS || name in ALIASES;
-
 /** A line icon from the prototype's set, drawn in the given colour. */
 export function SvgIcon({
   name,

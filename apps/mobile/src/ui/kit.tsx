@@ -117,7 +117,11 @@ export function Button({
       ) : (
         <>
           {icon}
-          <RNText style={[styles.buttonLabel, small && { fontSize: 14 }, { color: fg }]}>{label}</RNText>
+          <RNText
+            style={[styles.buttonLabel, small && { fontSize: 14 }, { color: fg, flexShrink: 1, textAlign: 'center' }]}
+          >
+            {label}
+          </RNText>
         </>
       )}
     </Pressable>
@@ -189,7 +193,8 @@ const styles = StyleSheet.create({
   body: { flex: 1, paddingHorizontal: space.lg, paddingTop: space.lg, gap: space.lg },
   footer: { paddingHorizontal: space.lg, paddingBottom: space.md, paddingTop: space.sm },
   button: {
-    height: 52,
+    minHeight: 52,
+    paddingVertical: 8,
     borderRadius: 10,
     flexDirection: 'row',
     gap: 8,
@@ -197,8 +202,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 20,
   },
-  buttonSmall: { height: 38, paddingHorizontal: 14, borderRadius: radius.pill },
-  buttonText: { height: 44 },
+  buttonSmall: { minHeight: 38, paddingVertical: 6, paddingHorizontal: 14, borderRadius: radius.pill },
+  buttonText: { minHeight: 44 },
   buttonLabel: { fontFamily: fonts.bold, fontSize: 16 },
   field: {
     flexDirection: 'row',

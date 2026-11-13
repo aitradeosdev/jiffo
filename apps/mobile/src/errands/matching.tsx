@@ -12,7 +12,9 @@ import { JiffoMap } from '@/ui/map/map';
 import { StopMark } from '@/ui/map/pins';
 import type { MapPin } from '@/ui/map/types';
 import type { ErrandView } from './types';
-import { liveSchedule, whenLabel } from './when';
+import { upcoming, whenLabel } from './when';
+
+const PIN_KIND = { pickup: 'pick', stop: 'stop', dropoff: 'drop' } as const;
 
 /** The prototype's "+ ₦200" raise. */
 const RAISE_STEP_KOBO = 20_000;
@@ -40,8 +42,7 @@ export function Matching({
   const insets = useSafeAreaInsets();
   const [sheetHeight, setSheetHeight] = useState(0);
   const pickup = errand.stops.find((s) => s.kind === 'pickup');
-  const dropoff = errand.stops.find((s) => s.kind === 'dropoff');
-  const scheduled = liveSchedule(errand.scheduledFor);
+  const scheduled = upcoming(errand.scheduledFor);
   // Like the prototype: the map centres on the pickup, with rings while nearby agents are asked.
   const pins: MapPin[] = pickup
     ? [{ key: 'pickup', kind: 'pick', lat: pickup.lat, lng: pickup.lng, radar: !scheduled }]
@@ -72,20 +73,15 @@ export function Matching({
           </Text>
         </View>
         <List>
-          {pickup ? (
+          {errand.stops.map((stop) => (
             <Row
-              iconNode={<MarkWell kind="pick" />}
-              title={pickup.label ?? pickup.address}
-              subtitle={pickup.label ? pickup.address : null}
+              key={stop.seq}
+              iconNode={<MarkWell kind={PIN_KIND[stop.kind]} />}
+              title={stop.label ?? stop.address}
+              subtitle={stop.label ? stop.address : null}
             />
-          ) : null}
-          {dropoff ? (
-            <Row
-              iconNode={<MarkWell kind="drop" />}
-              title={dropoff.label ?? dropoff.address}
-              subtitle={dropoff.label ? dropoff.address : null}
-            />
-          ) : null}
+          ))}
+          <Row icon="doc" title="Your request" subtitle={errand.description} subtitleLines={3} />
           <Row
             icon="wallet"
             title={`${naira(errand.feeKobo)} offer`}
@@ -120,7 +116,7 @@ export function Matching({
   );
 }
 
-function MarkWell({ kind }: { kind: 'pick' | 'drop' }) {
+function MarkWell({ kind }: { kind: 'pick' | 'stop' | 'drop' }) {
   return (
     <IconCircle>
       <StopMark kind={kind} />

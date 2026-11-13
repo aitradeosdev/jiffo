@@ -239,6 +239,15 @@ describe('money', () => {
       const tooMuch = await act(t, buyer, errand.id, 'raise_fee', { amountKobo: FEE + 40_000 }, 409);
       expect(tooMuch.error).toMatchObject({ code: 'insufficient_funds', neededKobo: FEE + 40_000 + SERVICE + 4_000 });
       await act(t, agent, errand.id, 'raise_fee', { amountKobo: FEE + 30_000 }, 404);
+      // A stranger gets "not found" even with a malformed request; a stale screen is told to refresh
+      // before any money check.
+      await act(t, await signIn(t, 'customer'), errand.id, 'raise_fee', {}, 404);
+      const stale = await request(t.http)
+        .post(`/v1/errands/${errand.id}/events`)
+        .set(buyer.headers)
+        .send({ event: 'raise_fee', version: 0, data: { amountKobo: FEE + 40_000 } })
+        .expect(409);
+      expect(stale.body.error.code).toBe('errand_changed');
 
       // The agent who accepts gets the raised fee, and that is what is held.
       const accepted = await act(t, agent, errand.id, 'accept');

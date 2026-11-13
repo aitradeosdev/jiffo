@@ -51,7 +51,11 @@ export function useCurrentLocation() {
   const peek = useCallback(async (): Promise<Coords | null> => {
     try {
       const permission = await Location.getForegroundPermissionsAsync();
-      if (!permission.granted) return null;
+      if (!permission.granted) {
+        // Refused for good: say so up front, since tapping locate would do nothing.
+        setBlocked(!permission.canAskAgain);
+        return null;
+      }
       const position =
         (await Location.getLastKnownPositionAsync().catch(() => null)) ??
         (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null));

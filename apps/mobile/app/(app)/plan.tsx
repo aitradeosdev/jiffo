@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { goBack } from '@/nav';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { useDraft, type StopField } from '@/errands/draft';
-import { liveSchedule, whenLabel } from '@/errands/when';
+import { liveSchedule, staleSchedule, whenLabel } from '@/errands/when';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
 import { Button, Text } from '@/ui/kit';
@@ -74,7 +74,12 @@ export default function Plan() {
         </Pressable>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-          <Chip label={whenLabel(schedule)} icon="clock" trailingIcon="down" onPress={() => router.push('/when')} />
+          <Chip
+            label={staleSchedule(draft.scheduledFor) ? 'Pick a new time' : whenLabel(schedule)}
+            icon="clock"
+            trailingIcon="down"
+            onPress={() => router.push('/when')}
+          />
           <Chip
             label="Urgent"
             icon="zap"

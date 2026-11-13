@@ -10,7 +10,7 @@ import { useCountryConfig } from '@/api/useCountryConfig';
 import { useResource } from '@/api/useResource';
 import { draftStops, useDraft } from '@/errands/draft';
 import type { ErrandView, Quote } from '@/errands/types';
-import { liveSchedule, whenLabel } from '@/errands/when';
+import { liveSchedule, staleSchedule, whenLabel } from '@/errands/when';
 import { naira } from '@/money';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
@@ -39,6 +39,14 @@ export default function Review() {
   const category = config?.categories.find((k) => k.key === draft.categoryKey);
   const buy = draft.buy ?? category?.buyDefault ?? false;
   const schedule = liveSchedule(draft.scheduledFor);
+  const stale = staleSchedule(draft.scheduledFor);
+  // A chosen time can come too close while this screen is open: look again every half minute.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!draft.scheduledFor) return;
+    const timer = setInterval(() => tick((n) => n + 1), 30_000);
+    return () => clearInterval(timer);
+  }, [draft.scheduledFor]);
   const pins: MapPin[] = stops.map((s) => ({ key: s.kind, kind: PIN_KIND[s.kind], lat: s.lat, lng: s.lng }));
 
   const points = JSON.stringify(stops.map(({ lat, lng }) => ({ lat, lng })));
@@ -65,6 +73,8 @@ export default function Review() {
 
   const request = async () => {
     if (!stateCode) return setError("Jiffo isn't available at this pickup yet");
+    // Checked again on tap: the time may have come too close since the screen last drew.
+    if (staleSchedule(draft.scheduledFor)) return tick((n) => n + 1);
     setBusy(true);
     setError(null);
     try {
@@ -75,7 +85,7 @@ export default function Review() {
         buy,
         urgent: draft.urgent,
         feeKobo: fee,
-        ...(schedule ? { scheduledFor: schedule } : {}),
+        ...(draft.scheduledFor ? { scheduledFor: draft.scheduledFor } : {}),
         stops: stops.map((s) => ({ kind: s.kind, label: s.name, address: s.address, lat: s.lat, lng: s.lng })),
       });
       reset();
@@ -89,26 +99,30 @@ export default function Review() {
     }
   };
 
-  const action =
-    balance === null ? (
-      wallet.error ? (
-        <Button label="Try again" onPress={() => wallet.reload()} />
-      ) : (
-        <Button label="Checking your wallet" loading />
-      )
-    ) : short > 0 ? (
-      <Button
-        label={`Add ${naira(short)} to continue`}
-        onPress={() => router.push({ pathname: '/topup', params: { amount: String(short) } })}
-      />
+  const action = stale ? (
+    <View style={{ gap: 8 }}>
+      <Button label="Pick a new time" onPress={() => router.push('/when')} />
+      <Button kind="plain" label="Send it now instead" onPress={() => update({ scheduledFor: null })} />
+    </View>
+  ) : balance === null ? (
+    wallet.error ? (
+      <Button label="Try again" onPress={() => wallet.reload()} />
     ) : (
-      <Button
-        label={`${schedule ? 'Schedule errand' : 'Request agent'} · ${naira(held)}`}
-        onPress={request}
-        loading={busy}
-        disabled={!stateCode}
-      />
-    );
+      <Button label="Checking your wallet" loading />
+    )
+  ) : short > 0 ? (
+    <Button
+      label={`Add ${naira(short)} to continue`}
+      onPress={() => router.push({ pathname: '/topup', params: { amount: String(short) } })}
+    />
+  ) : (
+    <Button
+      label={`${schedule ? 'Schedule errand' : 'Request agent'} · ${naira(held)}`}
+      onPress={request}
+      loading={busy}
+      disabled={!stateCode}
+    />
+  );
 
   return (
     <View style={[styles.fill, { backgroundColor: c.bg }]}>
@@ -131,6 +145,7 @@ export default function Review() {
             {category ? <Badge icon={category.icon} label={category.name} /> : null}
             <Badge icon="bag" label={buy ? 'Agent buys items' : 'No purchase'} tone={buy ? 'brand' : undefined} />
             {schedule ? <Badge icon="cal" label={whenLabel(schedule)} /> : null}
+            {stale ? <Badge icon="alert" label="Time passed" tone="urgent" /> : null}
           </View>
         </View>
 
@@ -225,6 +240,11 @@ export default function Review() {
               </Pressable>
             </List>
 
+            {stale ? (
+              <Text tone="urgent" accessibilityLiveRegion="polite">
+                The time you picked is less than 15 minutes away. Pick a new time, or send it now.
+              </Text>
+            ) : null}
             {!stateCode ? <Text tone="danger">Jiffo isn&apos;t available at this pickup yet.</Text> : null}
             {error ? (
               <Text tone="danger" accessibilityLiveRegion="polite">

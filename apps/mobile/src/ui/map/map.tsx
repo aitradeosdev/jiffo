@@ -1,10 +1,10 @@
-import { useEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react';
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { Platform, StyleSheet } from 'react-native';
 import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Polyline } from 'react-native-maps';
 import { useScheme } from '../../theme/theme';
 import { MAP_COLORS, googleStyle } from './palette';
 import { MapPinView } from './pins';
-import { DEFAULT_CENTER, routeOf, type MapHandle, type MapProps } from './types';
+import { DEFAULT_CENTER, routeOf, type MapHandle, type MapPin, type MapProps } from './types';
 
 const EDGE = 56;
 const CITY_DELTA = 0.035;
@@ -26,6 +26,8 @@ export function JiffoMap({
   const scheme = useScheme();
   const colors = MAP_COLORS[scheme];
   const map = useRef<MapView>(null);
+  // Fitting needs the map's size, which it only has once ready.
+  const ready = useRef(false);
   const customMapStyle = useMemo(() => googleStyle(colors), [colors]);
   const route = showRoute ? routeOf(pins) : [];
   const key = pins.map((p) => `${p.kind}:${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join('|');
@@ -51,7 +53,7 @@ export function JiffoMap({
   useImperativeHandle(ref, () => ({ recenter: () => fit(true) }));
   // Refit when the pins move or the sheet changes size.
   useEffect(() => {
-    fit(true);
+    if (ready.current) fit(true);
   }, [key, insets.top, insets.bottom, focus.lat, focus.lng]);
 
   return (
@@ -68,7 +70,10 @@ export function JiffoMap({
         longitudeDelta: CITY_DELTA,
       }}
       mapPadding={{ top: insets.top, bottom: insets.bottom, left: 0, right: 0 }}
-      onMapReady={() => fit(false)}
+      onMapReady={() => {
+        ready.current = true;
+        fit(false);
+      }}
       showsUserLocation={!!showsUser}
       showsMyLocationButton={false}
       showsCompass={false}
@@ -94,18 +99,34 @@ export function JiffoMap({
         </>
       ) : null}
       {pins.map((p) => (
-        <Marker
-          key={p.key}
-          coordinate={{ latitude: p.lat, longitude: p.lng }}
-          anchor={{ x: 0.5, y: 0.5 }}
-          tracksViewChanges={false}
-          accessibilityLabel={
-            p.kind === 'agent' ? 'Your agent' : p.kind === 'pick' ? 'Pickup' : p.kind === 'drop' ? 'Drop-off' : 'Stop'
-          }
-        >
-          <MapPinView kind={p.kind} label={p.label} radar={p.radar} />
-        </Marker>
+        <PinMarker key={p.key} pin={p} />
       ))}
     </MapView>
+  );
+}
+
+/**
+ * Android draws a custom marker as a picture of its view. Let it redraw until the view has laid out,
+ * and again whenever the pin's look changes, then stop so panning stays smooth.
+ */
+function PinMarker({ pin }: { pin: MapPin }) {
+  const scheme = useScheme();
+  const [tracks, setTracks] = useState(true);
+  useEffect(() => {
+    setTracks(true);
+    const timer = setTimeout(() => setTracks(false), 500);
+    return () => clearTimeout(timer);
+  }, [pin.kind, pin.label, pin.radar, scheme]);
+  return (
+    <Marker
+      coordinate={{ latitude: pin.lat, longitude: pin.lng }}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={tracks}
+      accessibilityLabel={
+        pin.kind === 'agent' ? 'Your agent' : pin.kind === 'pick' ? 'Pickup' : pin.kind === 'drop' ? 'Drop-off' : 'Stop'
+      }
+    >
+      <MapPinView kind={pin.kind} label={pin.label} radar={pin.radar} />
+    </Marker>
   );
 }

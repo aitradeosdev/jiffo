@@ -1,6 +1,6 @@
 import { Children, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
-import { Art, SvgIcon, hasArt } from './svg';
+import { SvgIcon } from './svg';
 import { useColors } from '../theme/theme';
 import { fonts, radius, space } from '../theme/tokens';
 import { Text } from './kit';
@@ -25,11 +25,6 @@ export function Icon({
 /** A category's icon by the key admin gives it (cart, food, pill, bag, shirt, box, users, spark). */
 export function CategoryIcon({ icon, size = 22, color }: { icon: string; size?: number; color?: string }) {
   return <SvgIcon name={icon} size={size} color={color} />;
-}
-
-/** A category's illustration where the prototype has one, otherwise its icon. */
-export function CategoryArt({ categoryKey, icon, size = 40 }: { categoryKey: string; icon: string; size?: number }) {
-  return hasArt(categoryKey) ? <Art name={categoryKey} size={size} /> : <CategoryIcon icon={icon} size={size * 0.6} />;
 }
 
 type RowTone = 'brand' | 'urgent' | 'ink' | 'danger';

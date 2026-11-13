@@ -56,15 +56,6 @@ export interface PlacePick {
   stateCode: string | null;
 }
 
-/** The prototype's five steps; "Items bought" reads "On the way" when nothing is bought. */
-export const stepsFor = (buy: boolean) => [
-  'Accepted',
-  'Service started',
-  buy ? 'Items bought' : 'On the way',
-  'At drop-off',
-  'Completed',
-];
-
 /** Which of the five steps a status is on (-1 while still looking for an agent). */
 export function stepOf(status: ErrandState): number {
   switch (status) {

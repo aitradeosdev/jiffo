@@ -10,7 +10,7 @@ import { useRealtimeEvent } from '@/realtime/realtime';
 import { useDraft } from '@/errands/draft';
 import { Segments } from '@/errands/progress';
 import { STATUS_TEXT, isActive, stepOf, type ErrandView, type PlacePick } from '@/errands/types';
-import { liveSchedule, whenLabel } from '@/errands/when';
+import { liveSchedule, upcoming, whenLabel } from '@/errands/when';
 import { useCurrentLocation } from '@/location';
 import { naira } from '@/money';
 import { useColors } from '@/theme/theme';
@@ -254,11 +254,11 @@ function WhereTo({ when, onPress }: { when: string; onPress: () => void }) {
 }
 
 /** .livecard: a running errand, in black, with its progress. */
-function LiveCard({ errand, timeZone }: { errand: ErrandView; timeZone?: string }) {
+function LiveCard({ errand }: { errand: ErrandView }) {
   const c = useColors();
   const step = stepOf(errand.status);
-  const scheduled = errand.status === 'requested' ? liveSchedule(errand.scheduledFor) : null;
-  const title = scheduled ? `Scheduled · ${whenLabel(scheduled, timeZone)}` : STATUS_TEXT[errand.status];
+  const scheduled = errand.status === 'requested' ? upcoming(errand.scheduledFor) : null;
+  const title = scheduled ? `Scheduled · ${whenLabel(scheduled)}` : STATUS_TEXT[errand.status];
   return (
     <Pressable
       accessibilityRole="button"
