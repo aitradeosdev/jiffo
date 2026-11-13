@@ -4,6 +4,7 @@ import { ADMIN_ROLES } from '../db/schema';
 import { ADMIN_ERRAND_EVENTS } from '../errands/errands.service';
 import { ERRAND_FILTERS, ErrandsAdminService } from './errands-admin.service';
 import { PEOPLE_ROLES, PeopleAdminService } from './people-admin.service';
+import { MAX_ADJUSTMENT_KOBO, MoneyAdminService } from './money-admin.service';
 import { AGENT_TIERS } from '@jiffo/shared';
 import { notFound } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
@@ -24,6 +25,29 @@ const PeopleQuery = z.object({
 });
 /** Why: kept in the audit log. */
 const Note = z.string().trim().min(5, 'Say why, in a few words').max(1000);
+const SummaryQuery = z.object({
+  country: z.string().length(2).toUpperCase(),
+  days: z.coerce.number().int().min(1).max(90).default(30),
+});
+const MoneyListQuery = z.object({
+  country: z.string().length(2).toUpperCase(),
+  q: z.string().trim().max(80).optional(),
+  before: z.string().max(80).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+const DepositsQuery = MoneyListQuery.extend({
+  filter: z.enum(['all', 'pending', 'failed', 'mismatch']).default('all'),
+});
+const PayoutsQuery = MoneyListQuery.extend({ filter: z.enum(['all', 'pending', 'failed']).default('all') });
+const AdjustBody = z.object({
+  personId: z.string().uuid(),
+  account: z.enum(['customer_wallet', 'agent_available']),
+  direction: z.enum(['credit', 'debit']),
+  amountKobo: z.number().int().min(1).max(MAX_ADJUSTMENT_KOBO),
+  note: z.string().trim().min(5, 'Say why, in a few words').max(1000),
+  errandId: z.string().uuid().optional(),
+  requestId: z.string().uuid(),
+});
 const TierBody = z.object({ tier: z.enum(AGENT_TIERS), note: Note });
 const NoteBody = z.object({ note: Note });
 const ErrandId = new ParseUUIDPipe({ exceptionFactory: () => notFound('errand_not_found', 'Errand not found') });
@@ -68,7 +92,40 @@ export class AdminController {
     private readonly audit: AuditService,
     private readonly errands: ErrandsAdminService,
     private readonly people: PeopleAdminService,
+    private readonly money: MoneyAdminService,
   ) {}
+
+  @Get('money/summary')
+  @Needs('read')
+  moneySummary(@Query(new ZodBody(SummaryQuery)) query: z.infer<typeof SummaryQuery>) {
+    return this.money.summary(query.country, query.days);
+  }
+
+  @Get('money/deposits')
+  @Needs('read')
+  moneyDeposits(@Query(new ZodBody(DepositsQuery)) query: z.infer<typeof DepositsQuery>) {
+    return this.money.deposits(query);
+  }
+
+  @Get('money/payouts')
+  @Needs('read')
+  moneyPayouts(@Query(new ZodBody(PayoutsQuery)) query: z.infer<typeof PayoutsQuery>) {
+    return this.money.payouts(query);
+  }
+
+  @Get('money/reconciliation')
+  @Needs('read')
+  moneyReconciliation(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
+    return this.money.reconciliation(query.country);
+  }
+
+  /** Finance and owners only: a credit or debit on a wallet or agent balance, with a reason. */
+  @Post('money/adjustments')
+  @HttpCode(200)
+  @Needs('money')
+  adjust(@CurrentAdmin() admin: AdminContext, @Body(new ZodBody(AdjustBody)) body: z.infer<typeof AdjustBody>) {
+    return this.money.adjust(admin, body);
+  }
 
   @Get('people')
   @Needs('read')
