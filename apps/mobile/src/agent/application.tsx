@@ -6,6 +6,7 @@ import { useColors } from '../theme/theme';
 import { fonts } from '../theme/tokens';
 import { Text } from '../ui/kit';
 import { Icon } from '../ui/parts';
+import type { IdType } from '@jiffo/shared';
 
 export type ApplicationStatus = 'draft' | 'checking' | 'approved' | 'review' | 'rejected';
 export type CheckOutcome = 'passed' | 'failed' | 'review';
@@ -20,6 +21,14 @@ export interface Application {
    * "hosted" opens the provider's own page, which asks for everything itself.
    */
   identityFlow: 'numbers' | 'hosted';
+  /** The IDs the agent can verify with now (those admin accepts that the provider checks). */
+  idTypes: Array<{ key: IdType; name: string }>;
+  /** Their BVN is checked as well. */
+  withBvn: boolean;
+  /** The agent picks the ID on the provider's page rather than in the app. */
+  idChosenOnPage: boolean;
+  /** The ID the current or last check used. */
+  identityIdType: IdType | null;
   stateCode: string | null;
   stateName: string | null;
   waitlisted: boolean;
@@ -35,16 +44,27 @@ export interface Application {
   reviewHours: number;
 }
 
-/** The checks in the order the checking screen lists them, with the words for the ones not back yet. */
-export const CHECK_ORDER: Array<[key: string, label: string]> = [
-  ['nin', 'NIN matches your details'],
-  ['bvn', 'BVN matches your details'],
-  ['selfie', 'Selfie matches your ID photo'],
-  ['age', 'Age 18 or older'],
-  ['name', 'Your name matches your NIN'],
-  ['address', 'Address confirmed'],
-  ['bank', 'Bank account name matches your ID'],
-];
+/** The words for each check not back yet. */
+const PENDING_LABELS: Record<string, string> = {
+  nin: 'NIN matches your details',
+  bvn: 'BVN matches your details',
+  drivers_licence: "Driver's licence matches your details",
+  voters_card: "Voter's card matches your details",
+  passport: 'Passport matches your details',
+  selfie: 'Selfie matches your ID photo',
+  age: 'Age 18 or older',
+  name: 'Your name matches your ID',
+  address: 'Address confirmed',
+  bank: 'Bank account name matches your ID',
+};
+
+/** The checks in the order the checking screen lists them: the agent's ID first, then their BVN if asked. */
+export function checkOrder(app: Pick<Application, 'identityIdType' | 'withBvn' | 'checks'>): Array<[string, string]> {
+  const id = app.identityIdType ?? 'nin';
+  const bvn = id !== 'bvn' && (app.withBvn || app.checks.some((c) => c.key === 'bvn'));
+  const keys = [id, ...(bvn ? ['bvn'] : []), 'selfie', 'age', 'name', 'address', 'bank'];
+  return keys.map((key) => [key, PENDING_LABELS[key] ?? key]);
+}
 
 /** The provider's name in a sentence, for when admin hasn't named one yet. */
 export const providerName = (app: Pick<Application, 'provider'> | null) => app?.provider ?? 'our identity provider';
@@ -163,9 +183,7 @@ export function CheckList({ app }: { app: Application }) {
   const c = useColors();
   const byKey = new Map(app.checks.map((ch) => [ch.key, ch]));
   const running = app.status === 'checking';
-  // A provider with its own page checks the NIN and the selfie only, so there is no BVN result to wait for.
-  const noBvn = !byKey.has('bvn') && (app.steps.identity || app.identityFlow === 'hosted');
-  const order = CHECK_ORDER.filter(([key]) => key !== 'bvn' || !noBvn);
+  const order = checkOrder(app);
   const firstMissing = order.findIndex(([key]) => !byKey.has(key));
   const rows: Array<{ key: string; label: string; state: CheckState; note?: string }> = [
     ...order.map(([key, label], i) => {
@@ -181,7 +199,7 @@ export function CheckList({ app }: { app: Application }) {
     }),
     // Results the app has no row for, such as a second account on the same NIN.
     ...app.checks
-      .filter((ch) => !CHECK_ORDER.some(([key]) => key === ch.key))
+      .filter((ch) => !order.some(([key]) => key === ch.key))
       .map((ch) => ({
         key: ch.key,
         label: ch.label,

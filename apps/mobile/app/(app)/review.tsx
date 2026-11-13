@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { goBack } from '@/nav';
 import { FEE_STEP_KOBO, serviceFee } from '@jiffo/shared';
 import { useSession } from '@/auth/session';
-import { errorMessage } from '@/api/client';
+import { ApiError, errorMessage } from '@/api/client';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { useResource } from '@/api/useResource';
 import { draftStops, useDraft } from '@/errands/draft';
@@ -92,6 +92,11 @@ export default function Review() {
       router.dismissAll();
       router.replace(`/errand/${errand.id}`);
     } catch (e) {
+      // Only verified customers send errands: the check comes first, and the errand waits here.
+      if (e instanceof ApiError && e.code === 'identity_required') {
+        router.push('/verify');
+        return;
+      }
       setError(errorMessage(e));
       wallet.reload();
     } finally {

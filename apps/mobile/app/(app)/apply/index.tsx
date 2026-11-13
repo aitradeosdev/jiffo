@@ -1,3 +1,4 @@
+import { ID_COPY } from '@/identity/ids';
 import { useCallback, useState, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Redirect, router, useFocusEffect, type Href } from 'expo-router';
@@ -21,10 +22,12 @@ const STEPS: Array<{ key: StepKey; title: string; sub: (app: Application) => str
   {
     key: 'identity',
     title: 'Identity',
-    sub: (app) =>
-      app.identityFlow === 'hosted'
-        ? `Your NIN and a selfie, checked by ${providerName(app)}`
-        : `NIN, BVN and a selfie, checked by ${providerName(app)}`,
+    sub: (app) => {
+      const only = app.idTypes.length === 1 && !app.idChosenOnPage ? app.idTypes[0]!.key : null;
+      const id = only ? ID_COPY[only].short : 'Your ID';
+      const bvn = app.withBvn && only !== 'bvn' ? ', BVN' : '';
+      return `${id.charAt(0).toUpperCase()}${id.slice(1)}${bvn} and a selfie, checked by ${providerName(app)}`;
+    },
     icon: 'shield',
     href: '/apply/identity',
   },

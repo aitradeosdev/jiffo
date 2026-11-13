@@ -8,6 +8,7 @@ import { formatE164 } from '@/auth/phone';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { useResource } from '@/api/useResource';
 import { VARIANT } from '@/config';
+import { useCustomerIdentity } from '@/identity/customer';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
 import { Text } from '@/ui/kit';
@@ -80,6 +81,12 @@ export default function Account() {
         <Stat value={s ? String(s.disputes) : '…'} label="Disputes" />
       </View>
 
+      {agent ? null : (
+        <View style={styles.menu}>
+          <CustomerIdRow />
+        </View>
+      )}
+
       {agent ? (
         <View style={styles.menu}>
           <MenuRow icon="tune" label="Errand preferences" onPress={() => router.push('/preferences')} />
@@ -118,6 +125,19 @@ function Stat({ value, label }: { value: string; label: string }) {
       </Text>
     </View>
   );
+}
+
+/** The customer's identity check: verified, being checked, or still to do. */
+function CustomerIdRow() {
+  const { identity } = useCustomerIdentity();
+  const label = !identity
+    ? 'Your ID'
+    : identity.status === 'verified'
+      ? 'ID verified'
+      : identity.status === 'checking' || identity.status === 'review'
+        ? 'ID being checked'
+        : 'Verify your ID';
+  return <MenuRow icon="verified" label={label} onPress={() => router.push('/verify')} />;
 }
 
 /** .mrow: a big settings row with an icon. */

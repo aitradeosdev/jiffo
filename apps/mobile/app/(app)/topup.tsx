@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { goBack } from '@/nav';
 import * as Clipboard from 'expo-clipboard';
 import { useSession } from '@/auth/session';
-import { errorMessage } from '@/api/client';
+import { ApiError, errorMessage } from '@/api/client';
+import { useCustomerIdentity } from '@/identity/customer';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { naira, parseNaira } from '@/money';
 import { timeLabel } from '@/errands/when';
@@ -43,6 +44,7 @@ export default function TopUp() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const { identity } = useCustomerIdentity();
   const kobo = parseNaira(text);
   const valid = kobo !== null && kobo >= min && (max === null || kobo <= max);
 
@@ -66,11 +68,40 @@ export default function TopUp() {
     try {
       setDeposit(await api.post<Deposit>('/v1/wallet/deposits', { amountKobo: kobo }));
     } catch (e) {
+      // Money comes in only from verified customers: the check comes first.
+      if (e instanceof ApiError && e.code === 'identity_required') {
+        router.push('/verify');
+        return;
+      }
       setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
   };
+
+  // Money comes in only from verified customers: said before an amount is chosen.
+  if (identity && identity.status !== 'verified' && !deposit) {
+    const checking = identity.status === 'checking' || identity.status === 'review';
+    return (
+      <Screen
+        footer={
+          <Button label={checking ? 'See your check' : 'Verify your ID'} onPress={() => router.push('/verify')} />
+        }
+      >
+        <View style={styles.hero}>
+          <Icon name="verified" size={40} color={c.brand} />
+          <Text variant="title" accessibilityRole="header">
+            {checking ? "We're checking your ID" : 'Verify your ID first'}
+          </Text>
+          <Text variant="sub" tone="ink3" style={{ textAlign: 'center' }}>
+            {checking
+              ? 'You can add money once your ID is checked.'
+              : 'Every customer is verified before adding money. It takes a couple of minutes.'}
+          </Text>
+        </View>
+      </Screen>
+    );
+  }
 
   if (deposit?.status === 'succeeded') {
     return (
