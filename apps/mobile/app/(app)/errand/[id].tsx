@@ -33,7 +33,10 @@ export default function ErrandScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [pin, setPin] = useState<string | null>(null);
   useErrandSubscription(id);
-  useRealtimeEvent<{ errandId: string }>('errand.updated', (u) => u.errandId === id && reload());
+  // The same update arrives on the errand's room and the customer's own room: reload once per new version.
+  useRealtimeEvent<{ errandId: string; version: number }>('errand.updated', (u) => {
+    if (u.errandId === id && (!errand || u.version > errand.version)) reload();
+  });
 
   // The hand-off PIN only exists once the agent marks the errand delivered.
   useEffect(() => {

@@ -23,7 +23,8 @@ function CustomerHome() {
   const { update, reset } = useDraft();
   const wallet = useResource<{ balanceKobo: number }>('/v1/wallet');
   const errands = useResource<ErrandView[]>('/v1/errands?limit=5');
-  useRealtimeEvent('errand.updated', () => errands.reload());
+  useRealtimeEvent('errand.updated', errands.reloadSoon);
+  useRealtimeEvent('wallet.updated', wallet.reloadSoon);
   const live = errands.data?.filter(isActive) ?? [];
 
   const start = (categoryKey: string | null) => {

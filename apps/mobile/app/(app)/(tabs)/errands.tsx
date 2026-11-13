@@ -12,8 +12,8 @@ import { Empty, Row, Section } from '@/ui/parts';
 
 export default function Errands() {
   const c = useColors();
-  const { data, loading, reload } = useResource<ErrandView[]>('/v1/errands?limit=50');
-  useRealtimeEvent('errand.updated', () => reload());
+  const { data, refreshing, refresh, reloadSoon } = useResource<ErrandView[]>('/v1/errands?limit=50');
+  useRealtimeEvent('errand.updated', reloadSoon);
   const active = data?.filter(isActive) ?? [];
   const past = data?.filter((e) => !isActive(e)) ?? [];
   const row = (e: ErrandView) => (
@@ -30,7 +30,7 @@ export default function Errands() {
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
       <ScrollView
         contentContainerStyle={{ padding: space.lg, gap: space.xl }}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={reload} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
       >
         <Text variant="title">Errands</Text>
         {data && data.length === 0 ? (

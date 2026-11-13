@@ -269,6 +269,21 @@ describe('Google maps', () => {
     expect(route.distanceMeters).toBeGreaterThan(8_000);
   });
 
+  it('treats an unknown place as not found, and other failures as unavailable', async () => {
+    let status = 404;
+    const { impl } = fakeFetch(() => new Response('{"error":{"status":"NOT_FOUND"}}', { status }));
+    const maps = new GoogleMapsAdapter('key-1', impl);
+    expect(await maps.place('stale-id')).toBeNull();
+    status = 500;
+    await expect(maps.place('abc')).rejects.toMatchObject({ status: 503 });
+    status = 200;
+    const broken = new GoogleMapsAdapter(
+      'key-1',
+      (async () => new Response('<html>', { status: 200 })) as typeof fetch,
+    );
+    await expect(broken.place('abc')).rejects.toMatchObject({ status: 503 });
+  });
+
   it('reads the route distance and duration', async () => {
     const { impl, calls } = fakeFetch(() => Response.json({ routes: [{ distanceMeters: 9_120, duration: '1260s' }] }));
     const maps = new GoogleMapsAdapter('key-1', impl);

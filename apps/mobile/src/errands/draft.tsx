@@ -39,7 +39,13 @@ export function DraftProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       draft,
-      update: (changes: Partial<Draft>) => setDraft((d) => ({ ...d, ...changes })),
+      // A fee chosen for one route must not carry over to another: changing a stop resets it to the suggestion.
+      update: (changes: Partial<Draft>) =>
+        setDraft((d) => ({
+          ...d,
+          ...changes,
+          ...('pickup' in changes || 'stop' in changes || 'dropoff' in changes ? { feeKobo: null } : {}),
+        })),
       reset: () => setDraft(EMPTY),
     }),
     [draft],

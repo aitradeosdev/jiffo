@@ -38,6 +38,7 @@ export default function PlaceSearch() {
     latest.current = q;
     if (q.length < 2) {
       setResults([]);
+      setBusy(false);
       return;
     }
     const timer = setTimeout(async () => {
@@ -53,19 +54,25 @@ export default function PlaceSearch() {
       } catch (e) {
         if (latest.current === q) setError(errorMessage(e));
       } finally {
+        // Only the latest search clears the spinner; a newer one (or a short query) manages its own.
         if (latest.current === q) setBusy(false);
       }
     }, 300);
     return () => clearTimeout(timer);
   }, [query, api, session]);
 
+  const [choosing, setChoosing] = useState(false);
   const choose = async (s: Suggestion) => {
+    // A double tap must not fetch twice or close two screens.
+    if (choosing) return;
+    setChoosing(true);
     try {
       const place = await api.get<PlacePick>(`/v1/places/${encodeURIComponent(s.placeId)}?session=${session}`);
       update({ [field]: place });
       router.back();
     } catch (e) {
       setError(errorMessage(e));
+      setChoosing(false);
     }
   };
 
@@ -80,7 +87,7 @@ export default function PlaceSearch() {
         error={error}
         returnKeyType="search"
       />
-      {busy ? <ActivityIndicator /> : null}
+      {busy || choosing ? <ActivityIndicator /> : null}
       <View>
         {results.map((r) => (
           <Row key={r.placeId} icon="map-pin" title={r.title} subtitle={r.subtitle} onPress={() => choose(r)} />

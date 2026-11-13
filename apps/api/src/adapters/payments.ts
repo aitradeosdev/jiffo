@@ -293,6 +293,9 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
     private readonly autoPayAfterMs = 0,
   ) {}
 
+  /** Set by the deposits service, so an auto-paid top-up is applied like one confirmed by webhook. */
+  onAutoPaid?: (reference: string) => void;
+
   async createTransferDeposit(input: { reference: string; amountKobo: number; expiresAt: Date }) {
     this.deposits.set(input.reference, {
       amountKobo: input.amountKobo,
@@ -302,7 +305,10 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
     });
     if (this.autoPayAfterMs > 0) {
       setTimeout(() => {
-        if (this.deposits.get(input.reference)?.status === 'pending') this.pay(input.reference);
+        if (this.deposits.get(input.reference)?.status !== 'pending') return;
+        this.pay(input.reference);
+        // As Paystack would: tell the API the money arrived.
+        this.onAutoPaid?.(input.reference);
       }, this.autoPayAfterMs).unref?.();
     }
     return {

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { RefreshControl, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,18 +23,24 @@ export default function Wallet() {
   const c = useColors();
   const wallet = useResource<{ balanceKobo: number }>('/v1/wallet');
   const history = useResource<Movement[]>('/v1/wallet/transactions?limit=50');
-  const reload = () => {
-    wallet.reload();
-    history.reload();
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = async () => {
+    setRefreshing(true);
+    await Promise.all([wallet.reload(), history.reload()]);
+    setRefreshing(false);
   };
-  useRealtimeEvent('wallet.updated', reload);
-  useRealtimeEvent('errand.updated', reload);
+  const reloadSoon = () => {
+    wallet.reloadSoon();
+    history.reloadSoon();
+  };
+  useRealtimeEvent('wallet.updated', reloadSoon);
+  useRealtimeEvent('errand.updated', reloadSoon);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
       <ScrollView
         contentContainerStyle={{ padding: space.lg, gap: space.xl }}
-        refreshControl={<RefreshControl refreshing={wallet.loading || history.loading} onRefresh={reload} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
       >
         <Text variant="title">Wallet</Text>
         <Card>

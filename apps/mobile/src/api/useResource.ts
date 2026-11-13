@@ -4,15 +4,18 @@ import { useSession } from '../auth/session';
 import { errorMessage } from './client';
 
 /**
- * Loads a GET resource for a screen, reloads it each time the screen comes back into view, and exposes
- * reload() for pull-to-refresh and realtime events. Keeps the last good data while reloading.
+ * Loads a GET resource for a screen and reloads it each time the screen comes back into view. Keeps the
+ * last good data while reloading. `refresh` is for pull-to-refresh (its spinner shows only then);
+ * `reloadSoon` is for live events, so a burst of them costs one request.
  */
 export function useResource<T>(path: string | null) {
   const { api } = useSession();
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!!path);
+  const [refreshing, setRefreshing] = useState(false);
   const live = useRef(true);
+  const soon = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const reload = useCallback(async () => {
     if (!path) return;
@@ -30,10 +33,22 @@ export function useResource<T>(path: string | null) {
     }
   }, [api, path]);
 
+  const reloadSoon = useCallback(() => {
+    clearTimeout(soon.current);
+    soon.current = setTimeout(() => reload(), 150);
+  }, [reload]);
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    await reload();
+    if (live.current) setRefreshing(false);
+  }, [reload]);
+
   useEffect(() => {
     live.current = true;
     return () => {
       live.current = false;
+      clearTimeout(soon.current);
     };
   }, []);
 
@@ -43,5 +58,5 @@ export function useResource<T>(path: string | null) {
     }, [reload]),
   );
 
-  return { data, error, loading, reload, setData };
+  return { data, error, loading, refreshing, reload, reloadSoon, refresh, setData };
 }

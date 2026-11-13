@@ -23,6 +23,7 @@ export default function Review() {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const stops = draftStops(draft);
   const category = config?.categories.find((k) => k.key === draft.categoryKey);
   const buy = draft.buy ?? category?.buyDefault ?? false;
@@ -31,21 +32,37 @@ export default function Review() {
   useEffect(() => {
     // The draft is cleared once the errand is sent, while this screen is still closing.
     if (JSON.parse(points).length < 2) return;
+    setError(null);
     api
       .post<Quote>('/v1/errands/quote', { stops: JSON.parse(points) })
       .then(setQuote)
       .catch((e) => setError(errorMessage(e)));
-  }, [api, points]);
+  }, [api, points, attempt]);
+
+  const back = (
+    <View style={styles.head}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={12}>
+        <Icon name="arrow-left" size={24} />
+      </Pressable>
+      <Text variant="heading">Confirm your errand</Text>
+    </View>
+  );
 
   if (!quote || !config) {
-    return <Screen>{error ? <Text tone="danger">{error}</Text> : <ActivityIndicator />}</Screen>;
+    return (
+      <Screen footer={error ? <Button label="Try again" onPress={() => setAttempt((n) => n + 1)} /> : undefined}>
+        {back}
+        {error ? <Text tone="danger">{error}</Text> : <ActivityIndicator />}
+      </Screen>
+    );
   }
 
   const fee = draft.feeKobo ?? quote.suggestedFeeKobo;
   const service = serviceFee(fee, config.settings.fees);
   const held = fee + service;
-  const balance = wallet.data?.balanceKobo ?? 0;
-  const short = Math.max(0, held - balance);
+  // Unknown until the wallet loads: never tell a funded customer they're short while it does.
+  const balance = wallet.data?.balanceKobo ?? null;
+  const short = balance === null ? 0 : Math.max(0, held - balance);
   const diff = fee - quote.suggestedFeeKobo;
   const stateCode = stops[0]?.stateCode ?? null;
 
@@ -77,7 +94,13 @@ export default function Review() {
   return (
     <Screen
       footer={
-        short > 0 ? (
+        balance === null ? (
+          wallet.error ? (
+            <Button label="Try again" onPress={() => wallet.reload()} />
+          ) : (
+            <Button label="Checking your wallet" loading />
+          )
+        ) : short > 0 ? (
           <Button
             label={`Add ${naira(short)} to continue`}
             onPress={() => router.push({ pathname: '/topup', params: { amount: String(short) } })}
@@ -87,12 +110,7 @@ export default function Review() {
         )
       }
     >
-      <View style={styles.head}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} hitSlop={12}>
-          <Icon name="arrow-left" size={24} />
-        </Pressable>
-        <Text variant="heading">Confirm your errand</Text>
-      </View>
+      {back}
       <Text tone="ink2">
         {stops[0]?.name} to {stops[stops.length - 1]?.name} · {(quote.distanceMeters / 1000).toFixed(1)} km · about{' '}
         {Math.max(1, Math.round(quote.durationSeconds / 60))} min
@@ -146,11 +164,13 @@ export default function Review() {
 
       <Row
         icon="credit-card"
-        title={`Wallet · ${naira(balance)}`}
+        title={balance === null ? 'Wallet' : `Wallet · ${naira(balance)}`}
         subtitle={
-          short > 0
-            ? `Top up ${naira(short)} to continue`
-            : 'Covers this errand. Nothing is held until an agent accepts.'
+          balance === null
+            ? (wallet.error ?? 'Checking your balance…')
+            : short > 0
+              ? `Top up ${naira(short)} to continue`
+              : 'Covers this errand. Nothing is held until an agent accepts.'
         }
         tone={short > 0 ? 'danger' : undefined}
         onPress={() => router.push('/topup')}

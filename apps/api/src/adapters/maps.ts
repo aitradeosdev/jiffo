@@ -72,7 +72,11 @@ export class GoogleMapsAdapter implements MapsAdapter {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  private async call<T>(url: string, init: { method: 'GET' | 'POST'; fieldMask: string; body?: unknown }): Promise<T> {
+  /** Returns null when Google says the thing doesn't exist (an unknown or stale place id). */
+  private async call<T>(
+    url: string,
+    init: { method: 'GET' | 'POST'; fieldMask: string; body?: unknown },
+  ): Promise<T | null> {
     let res: Response;
     try {
       res = await this.fetchImpl(url, {
@@ -87,8 +91,13 @@ export class GoogleMapsAdapter implements MapsAdapter {
     } catch {
       throw unavailable('maps_unavailable', 'Address search is not available right now');
     }
+    if (res.status === 404 || res.status === 400) return null;
     if (!res.ok) throw unavailable('maps_unavailable', 'Address search is not available right now');
-    return (await res.json()) as T;
+    try {
+      return (await res.json()) as T;
+    } catch {
+      throw unavailable('maps_unavailable', 'Address search is not available right now');
+    }
   }
 
   async autocomplete(input: { query: string; near?: LatLng; countryCode: string; sessionToken?: string }) {
@@ -117,7 +126,7 @@ export class GoogleMapsAdapter implements MapsAdapter {
           : {}),
       },
     });
-    return (body.suggestions ?? [])
+    return (body?.suggestions ?? [])
       .map((s) => s.placePrediction)
       .filter((p): p is NonNullable<typeof p> => !!p)
       .map((p) => ({
@@ -139,7 +148,7 @@ export class GoogleMapsAdapter implements MapsAdapter {
       method: 'GET',
       fieldMask: 'id,displayName,formattedAddress,location,addressComponents',
     });
-    if (!p.location) return null;
+    if (!p?.location) return null;
     return {
       placeId: p.id,
       name: p.displayName?.text ?? p.formattedAddress ?? '',
@@ -167,7 +176,7 @@ export class GoogleMapsAdapter implements MapsAdapter {
           },
         },
       );
-      const route = body.routes?.[0];
+      const route = body?.routes?.[0];
       if (!route?.distanceMeters) return estimateRoute(points);
       return { distanceMeters: route.distanceMeters, durationSeconds: Number.parseInt(route.duration ?? '0', 10) };
     } catch {
