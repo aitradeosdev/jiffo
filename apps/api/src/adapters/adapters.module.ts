@@ -14,6 +14,7 @@ import { ConsolePushAdapter, FcmPushAdapter, MemoryPushAdapter, PUSH, type PushA
 import { FakePaymentsAdapter, PAYMENTS, PaystackPaymentsAdapter, type PaymentsAdapter } from './payments';
 import { FakeMapsAdapter, GoogleMapsAdapter, MAPS, type MapsAdapter } from './maps';
 import { MemoryStorageAdapter, S3StorageAdapter, STORAGE, type StorageAdapter } from './storage';
+import { FakeIdentityAdapter, IDENTITY, UnconfiguredIdentityAdapter, type IdentityAdapter } from './identity';
 
 /**
  * Picks one implementation per port from the environment. Admin-selected providers (identity, payments)
@@ -22,6 +23,14 @@ import { MemoryStorageAdapter, S3StorageAdapter, STORAGE, type StorageAdapter } 
 @Global()
 @Module({
   providers: [
+    {
+      provide: IDENTITY,
+      inject: [APP_CONFIG],
+      // Only the fake for now; the real provider's adapter comes with its keys and SDK before launch. The fake
+      // never runs in production, where it would approve every agent.
+      useFactory: (c: AppConfig): IdentityAdapter =>
+        c.NODE_ENV === 'production' ? new UnconfiguredIdentityAdapter() : new FakeIdentityAdapter(),
+    },
     {
       provide: MESSAGING,
       inject: [APP_CONFIG],
@@ -78,6 +87,6 @@ import { MemoryStorageAdapter, S3StorageAdapter, STORAGE, type StorageAdapter } 
       useFactory: (db: Db): ChatAdapter => new BuiltinChatAdapter(db),
     },
   ],
-  exports: [MESSAGING, PUSH, PAYMENTS, MAPS, STORAGE, CHAT],
+  exports: [IDENTITY, MESSAGING, PUSH, PAYMENTS, MAPS, STORAGE, CHAT],
 })
 export class AdaptersModule {}

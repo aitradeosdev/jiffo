@@ -25,6 +25,7 @@ import { ERRAND_TIMERS, type ErrandTimerJob, type ErrandTimers } from '../timers
 import { CustomerFundsLow, WalletService, type DisputeSplit } from '../money/wallet.service';
 import { AgentsService } from '../agents/agents.service';
 import { PresenceService, TRAVEL_STATES } from '../agents/presence.service';
+import { AgentApplicationService } from '../agents/application.service';
 import { MAPS, type MapsAdapter } from '../adapters/maps';
 import { UploadsService } from '../files/uploads.service';
 import { participantRole } from './access';
@@ -106,6 +107,7 @@ export class ErrandsService implements OnModuleInit {
     @Inject(MAPS) private readonly maps: MapsAdapter,
     private readonly uploads: UploadsService,
     private readonly presence: PresenceService,
+    private readonly applications: AgentApplicationService,
   ) {}
 
   onModuleInit() {
@@ -191,6 +193,7 @@ export class ErrandsService implements OnModuleInit {
 
   /** Open errands whose pickup is within the radius, nearest first. */
   async board(auth: AuthContext, q: { lat: number; lng: number; radiusKm: number; limit: number }) {
+    await this.applications.assertApproved(auth.userId);
     // Only errands in the agent's chosen categories, and purchase errands only if they take them.
     const [prefs, tier] = await Promise.all([this.agents.profile(auth.userId), this.agents.tier(auth.userId)]);
     const here = sql`ST_SetSRID(ST_MakePoint(${q.lng}, ${q.lat}), 4326)::geography`;
@@ -562,6 +565,7 @@ export class ErrandsService implements OnModuleInit {
   }
 
   private async runTransition(errandId: string, auth: AuthContext, input: ErrandEventInput) {
+    if (input.event === 'accept' && auth.app === 'agent') await this.applications.assertApproved(auth.userId);
     const money = await this.settingsOf(
       errandId,
       input.event === 'accept' && auth.app === 'agent' ? auth.userId : undefined,

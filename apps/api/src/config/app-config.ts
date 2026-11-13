@@ -30,6 +30,8 @@ const EnvSchema = z
     PUBLIC_API_URL: z.string().url().default('http://localhost:3000'),
     GOOGLE_MAPS_API_KEY: z.string().optional(),
     PAYMENTS_PROVIDER: z.enum(['paystack', 'fake']).default('fake'),
+    /** Identity checks for agents. Only the fake exists until the provider's keys and SDK are set up. */
+    IDENTITY_PROVIDER: z.enum(['fake']).default('fake'),
     PAYSTACK_SECRET_KEY: z.string().optional(),
     PAYSTACK_BASE_URL: z.string().url().default('https://api.paystack.co'),
     /** The fake provider signs its webhooks with this, so the webhook endpoint runs as in production. */

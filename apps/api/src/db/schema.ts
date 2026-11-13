@@ -669,6 +669,59 @@ export const errandRatings = pgTable(
   ],
 );
 
+/* ---------- Agent applications ---------- */
+
+/**
+ * An agent's application to work on Jiffo. Agents see the board only once it is approved. Identity documents
+ * stay with the identity provider: this keeps the results, the legal name and date of birth from the NIN
+ * record, and a one-way fingerprint of the NIN so one person can't open two agent accounts.
+ */
+export const agentApplications = pgTable(
+  'agent_applications',
+  {
+    userId: uuid('user_id')
+      .primaryKey()
+      .references(() => users.id),
+    countryCode: char('country_code', { length: 2 })
+      .notNull()
+      .references(() => countries.code),
+    status: text('status', { enum: ['draft', 'checking', 'approved', 'review', 'rejected'] })
+      .notNull()
+      .default('draft'),
+    stateCode: text('state_code'),
+    area: text('area'),
+    /** HMAC of the NIN: equal NINs give equal fingerprints, and the NIN can't be read back. */
+    ninFingerprint: text('nin_fingerprint'),
+    identityReference: text('identity_reference'),
+    identityOutcome: text('identity_outcome', { enum: ['passed', 'failed', 'review'] }),
+    identityCheckedAt: timestamp('identity_checked_at', { withTimezone: true }),
+    legalName: text('legal_name'),
+    dateOfBirth: text('date_of_birth'),
+    /** Only our safety team sees it. */
+    address: text('address'),
+    emergencyName: text('emergency_name'),
+    emergencyPhone: text('emergency_phone'),
+    emergencyRelationship: text('emergency_relationship'),
+    addressReference: text('address_reference'),
+    addressOutcome: text('address_outcome', { enum: ['passed', 'failed', 'review'] }),
+    termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
+    /** Each check's result, in words, for the agent and for support. Never the documents. */
+    checks: jsonb('checks').$type<Array<{ key: string; outcome: string; note?: string }>>().notNull().default([]),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    decidedBy: uuid('decided_by'),
+    decisionNote: text('decision_note'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('agent_applications_nin_uq')
+      .on(t.ninFingerprint)
+      .where(sql`${t.ninFingerprint} is not null`),
+    index('agent_applications_status_idx').on(t.countryCode, t.status),
+  ],
+);
+
 /* ---------- Admin ---------- */
 
 /** What each role may do is in @jiffo/shared (ADMIN_ROLE_INFO), so the API and the panel agree. */

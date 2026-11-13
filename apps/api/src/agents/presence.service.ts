@@ -3,6 +3,7 @@ import { AGENT_OUT_STATES } from '@jiffo/shared';
 import { and, eq, gt, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { agentPresence, errands } from '../db/schema';
+import { AgentApplicationService } from './application.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { AuthContext } from '../auth/auth.types';
 
@@ -30,9 +31,12 @@ export class PresenceService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly realtime: RealtimeGateway,
+    private readonly applications: AgentApplicationService,
   ) {}
 
   async report(auth: AuthContext, body: { online: boolean; lat?: number; lng?: number }) {
+    // Going online is for approved agents; going offline always works.
+    if (body.online) await this.applications.assertApproved(auth.userId);
     const running = await this.db
       .select({ id: errands.id, customerId: errands.customerId })
       .from(errands)

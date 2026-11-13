@@ -1,0 +1,139 @@
+import { randomUUID } from 'node:crypto';
+
+/**
+ * Identity checks for agents, done by a provider (QoreID in the prototypes) that holds the documents. Jiffo
+ * never stores a NIN, BVN or selfie: it starts a check, the app runs the provider's SDK for the parts that
+ * need the person (the BVN approval with NIBSS and the selfie), and Jiffo keeps only the result, the legal
+ * name and the date of birth.
+ */
+export type CheckOutcome = 'passed' | 'failed' | 'review';
+
+export interface IdentityPerson {
+  firstName: string;
+  lastName: string;
+  phone: string;
+}
+
+export interface IdentityResult {
+  status: 'pending' | 'done';
+  /** Overall: passed only when every check passed. */
+  outcome?: CheckOutcome;
+  /** As on the NIN record. */
+  legalName?: string;
+  /** YYYY-MM-DD, as on the NIN record. */
+  dateOfBirth?: string;
+  checks: Array<{ key: 'nin' | 'bvn' | 'selfie'; outcome: CheckOutcome; note?: string }>;
+}
+
+export interface AddressResult {
+  status: 'pending' | 'done';
+  outcome?: CheckOutcome;
+  note?: string;
+}
+
+export interface IdentityAdapter {
+  readonly name: string;
+  /** Starts the NIN, BVN and selfie checks. The token is for the provider's SDK in the app. */
+  startIdentity(input: {
+    person: IdentityPerson;
+    nin: string;
+    bvn: string;
+  }): Promise<{ reference: string; sdkToken: string }>;
+  identityResult(reference: string): Promise<IdentityResult>;
+  /** Starts the address check; a provider may send someone to visit. */
+  startAddress(input: { person: IdentityPerson; address: string; state: string }): Promise<{ reference: string }>;
+  addressResult(reference: string): Promise<AddressResult>;
+}
+
+export const IDENTITY = Symbol('IDENTITY');
+
+/**
+ * For development and tests: checks finish at once. The NIN's last four digits pick the result, so every
+ * path can be tried: 0000 fails the NIN, 1111 sends the selfie to review, 1818 is someone under 18.
+ * An address containing "unknown" goes to review.
+ */
+export class FakeIdentityAdapter implements IdentityAdapter {
+  readonly name = 'fake';
+  private readonly identities = new Map<string, IdentityResult>();
+  private readonly addresses = new Map<string, AddressResult>();
+
+  async startIdentity(input: { person: IdentityPerson; nin: string; bvn: string }) {
+    const reference = `fake_id_${randomUUID()}`;
+    const ending = input.nin.slice(-4);
+    const checks: IdentityResult['checks'] = [
+      {
+        key: 'nin',
+        outcome: ending === '0000' ? 'failed' : 'passed',
+        note: ending === '0000' ? 'No record for this NIN' : undefined,
+      },
+      { key: 'bvn', outcome: 'passed' },
+      {
+        key: 'selfie',
+        outcome: ending === '1111' ? 'review' : 'passed',
+        note: ending === '1111' ? 'Selfie did not clearly match the ID photo' : undefined,
+      },
+    ];
+    const outcome: CheckOutcome = checks.some((c) => c.outcome === 'failed')
+      ? 'failed'
+      : checks.some((c) => c.outcome === 'review')
+        ? 'review'
+        : 'passed';
+    this.identities.set(reference, {
+      status: 'done',
+      outcome,
+      legalName: `${input.person.firstName} ${input.person.lastName}`.toUpperCase(),
+      dateOfBirth:
+        ending === '1818' ? new Date(Date.now() - 16 * 365.25 * 86_400_000).toISOString().slice(0, 10) : '1995-04-12',
+      checks,
+    });
+    return { reference, sdkToken: `fake_sdk_${randomUUID()}` };
+  }
+
+  async identityResult(reference: string): Promise<IdentityResult> {
+    return this.identities.get(reference) ?? { status: 'pending', checks: [] };
+  }
+
+  async startAddress(input: { person: IdentityPerson; address: string; state: string }) {
+    const reference = `fake_addr_${randomUUID()}`;
+    const unclear = /unknown/i.test(input.address);
+    this.addresses.set(reference, {
+      status: 'done',
+      outcome: unclear ? 'review' : 'passed',
+      note: unclear ? 'The address could not be confirmed' : undefined,
+    });
+    return { reference };
+  }
+
+  async addressResult(reference: string): Promise<AddressResult> {
+    return this.addresses.get(reference) ?? { status: 'pending' };
+  }
+}
+
+/**
+ * What production gets until a real provider is set up: every check is refused, so no agent is ever approved
+ * by the fake, and the rest of the API still runs.
+ */
+export class UnconfiguredIdentityAdapter implements IdentityAdapter {
+  readonly name = 'unconfigured';
+  private refuse(): never {
+    throw new IdentityUnavailable();
+  }
+  startIdentity(): Promise<never> {
+    return Promise.resolve().then(() => this.refuse());
+  }
+  identityResult(): Promise<never> {
+    return Promise.resolve().then(() => this.refuse());
+  }
+  startAddress(): Promise<never> {
+    return Promise.resolve().then(() => this.refuse());
+  }
+  addressResult(): Promise<never> {
+    return Promise.resolve().then(() => this.refuse());
+  }
+}
+
+export class IdentityUnavailable extends Error {
+  constructor() {
+    super('No identity provider is set up');
+  }
+}
