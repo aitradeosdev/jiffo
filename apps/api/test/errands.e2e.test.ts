@@ -6,6 +6,7 @@ import {
   act,
   createErrand,
   createTestApp,
+  photo,
   errandBody,
   fund,
   LAGOS_STOPS,
@@ -150,7 +151,9 @@ describe('errands', () => {
       for (let i = 0; i < 5; i++) await act(t, agent, errand.id, 'confirm_pin', { pin: wrong }, 422);
       expect((await act(t, agent, errand.id, 'confirm_pin', { pin: code }, 423)).error.code).toBe('pin_locked');
 
-      await act(t, agent, errand.id, 'send_dropoff_photo', { photo: 'dropoffs/abc.jpg' });
+      await act(t, agent, errand.id, 'send_dropoff_photo', {
+        photo: await photo(t, agent, errand.id, 'dropoff_photo'),
+      });
       const approved = await act(t, customer, errand.id, 'approve_photo');
       expect(approved.status).toBe('completed');
     });
@@ -170,7 +173,7 @@ describe('errands', () => {
       expect(bad.error.code).toBe('invalid_request');
       const pending = await act(t, agent, errand.id, 'send_item_amount', {
         amountKobo: 1_500_000,
-        photos: ['receipts/1.jpg'],
+        photos: [await photo(t, agent, errand.id, 'receipt')],
       });
       expect(pending).toMatchObject({ status: 'item_pending', itemAmountKobo: 1_500_000 });
 
@@ -315,7 +318,14 @@ describe('errands', () => {
         throw new Error('Redis is down');
       };
       try {
-        await act(t, agent, errand.id, 'send_dropoff_photo', { photo: 'p.jpg' }, 500);
+        await act(
+          t,
+          agent,
+          errand.id,
+          'send_dropoff_photo',
+          { photo: await photo(t, agent, errand.id, 'dropoff_photo') },
+          500,
+        );
       } finally {
         t.timers.schedule = schedule;
       }
@@ -323,7 +333,9 @@ describe('errands', () => {
       expect(row).toMatchObject({ status: 'delivered', version: 3 });
 
       // Once the timer store is back, the same request goes through and its timer is set.
-      await act(t, agent, errand.id, 'send_dropoff_photo', { photo: 'p.jpg' });
+      await act(t, agent, errand.id, 'send_dropoff_photo', {
+        photo: await photo(t, agent, errand.id, 'dropoff_photo'),
+      });
       expect(t.timers.pending.some((p) => p.job.errandId === errand.id && p.job.event === 'auto_release')).toBe(true);
     });
 
@@ -341,7 +353,10 @@ describe('errands', () => {
       const errand = await createErrand(t, customer, { categoryKey: 'groceries' });
       await act(t, agent, errand.id, 'accept');
       await act(t, agent, errand.id, 'start');
-      await act(t, agent, errand.id, 'send_item_amount', { amountKobo: 900_000, photos: ['r.jpg'] });
+      await act(t, agent, errand.id, 'send_item_amount', {
+        amountKobo: 900_000,
+        photos: [await photo(t, agent, errand.id, 'receipt')],
+      });
       await act(t, customer, errand.id, 'lock_item_amount');
       const fired = await t.timers.fireAll(errand.id);
       expect(fired.map((j) => j.event)).toEqual(['item_lock_timeout']);
@@ -352,7 +367,10 @@ describe('errands', () => {
       const buy = await createErrand(t, customer, { categoryKey: 'groceries' });
       await act(t, agent, buy.id, 'accept');
       await act(t, agent, buy.id, 'start');
-      await act(t, agent, buy.id, 'send_item_amount', { amountKobo: 900_000, photos: ['r.jpg'] });
+      await act(t, agent, buy.id, 'send_item_amount', {
+        amountKobo: 900_000,
+        photos: [await photo(t, agent, buy.id, 'receipt')],
+      });
       await t.timers.fireAll(buy.id);
       expect((await get(customer, buy.id)).body.status).toBe('disputed');
 
@@ -360,7 +378,7 @@ describe('errands', () => {
       await act(t, agent, drop.id, 'accept');
       await act(t, agent, drop.id, 'start');
       await act(t, agent, drop.id, 'mark_delivered');
-      await act(t, agent, drop.id, 'send_dropoff_photo', { photo: 'p.jpg' });
+      await act(t, agent, drop.id, 'send_dropoff_photo', { photo: await photo(t, agent, drop.id, 'dropoff_photo') });
       const [job] = await t.timers.fireAll(drop.id);
       expect(job).toMatchObject({ event: 'auto_release' });
       expect((await get(customer, drop.id)).body.status).toBe('completed');

@@ -140,3 +140,24 @@ export async function fund(t: TestApp, person: Person, amountKobo = 5_000_000) {
 export async function balanceOf(t: TestApp, person: Person) {
   return (await request(t.http).get('/v1/wallet').set(person.headers).expect(200)).body;
 }
+
+/** Uploads a small photo for an errand the way the apps do, and returns its key for an event or message. */
+export async function photo(
+  t: TestApp,
+  person: Person,
+  errandId: string,
+  purpose: 'receipt' | 'item_photo' | 'dropoff_photo' | 'chat_photo',
+) {
+  const res = await request(t.http)
+    .post('/v1/uploads')
+    .set(person.headers)
+    .send({ errandId, purpose, contentType: 'image/jpeg' })
+    .expect(201);
+  const url = new URL(res.body.upload.url);
+  await request(t.http)
+    .put(url.pathname + url.search)
+    .set('content-type', 'image/jpeg')
+    .send(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]))
+    .expect(200);
+  return res.body.key as string;
+}

@@ -334,7 +334,7 @@ export const messages = pgTable(
     senderId: uuid('sender_id').references(() => users.id),
     senderRole: text('sender_role', { enum: ['customer', 'agent', 'system'] }).notNull(),
     clientId: text('client_id'),
-    kind: text('kind', { enum: ['text', 'system'] }).notNull(),
+    kind: text('kind', { enum: ['text', 'system', 'photo'] }).notNull(),
     body: text('body').notNull(),
     data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
@@ -580,3 +580,58 @@ export const reconciliationRuns = pgTable('reconciliation_runs', {
   stuckPayouts: integer('stuck_payouts').notNull(),
   createdAt: createdAt(),
 });
+
+/* ---------- Files ---------- */
+
+export const UPLOAD_PURPOSES = ['receipt', 'item_photo', 'dropoff_photo', 'chat_photo'] as const;
+export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
+
+/**
+ * A file someone was allowed to upload for an errand. An errand event or chat message may only point
+ * at uploads its sender made for that errand, so nobody can attach someone else's photo.
+ */
+export const uploads = pgTable(
+  'uploads',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    key: text('key').notNull(),
+    ownerId: uuid('owner_id')
+      .notNull()
+      .references(() => users.id),
+    errandId: uuid('errand_id')
+      .notNull()
+      .references(() => errands.id),
+    purpose: text('purpose', { enum: UPLOAD_PURPOSES }).notNull(),
+    contentType: text('content_type').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('uploads_key_uq').on(t.key), index('uploads_errand_idx').on(t.errandId)],
+);
+
+/* ---------- Ratings ---------- */
+
+/** One rating each way per errand, given after it completes. */
+export const errandRatings = pgTable(
+  'errand_ratings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    errandId: uuid('errand_id')
+      .notNull()
+      .references(() => errands.id),
+    raterRole: text('rater_role', { enum: ['customer', 'agent'] }).notNull(),
+    raterId: uuid('rater_id')
+      .notNull()
+      .references(() => users.id),
+    rateeId: uuid('ratee_id')
+      .notNull()
+      .references(() => users.id),
+    stars: smallint('stars').notNull(),
+    comment: text('comment'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('errand_ratings_errand_role_uq').on(t.errandId, t.raterRole),
+    index('errand_ratings_ratee_idx').on(t.rateeId),
+    check('errand_ratings_stars_ck', sql`${t.stars} between 1 and 5`),
+  ],
+);

@@ -30,6 +30,9 @@ export interface ErrandView {
   createdAt: string;
   completedAt: string | null;
   cancelledAt: string | null;
+  /** Only on a single errand's view, for its customer and agent: short-lived photo links. */
+  photos?: { items: string[]; dropoff: string | null };
+  ratedByMe?: boolean;
 }
 
 export interface Quote {

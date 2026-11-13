@@ -13,6 +13,7 @@ import {
 import { ConsolePushAdapter, FcmPushAdapter, MemoryPushAdapter, PUSH, type PushAdapter } from './push';
 import { FakePaymentsAdapter, PAYMENTS, PaystackPaymentsAdapter, type PaymentsAdapter } from './payments';
 import { FakeMapsAdapter, GoogleMapsAdapter, MAPS, type MapsAdapter } from './maps';
+import { MemoryStorageAdapter, S3StorageAdapter, STORAGE, type StorageAdapter } from './storage';
 
 /**
  * Picks one implementation per port from the environment. Admin-selected providers (identity, payments)
@@ -64,11 +65,19 @@ import { FakeMapsAdapter, GoogleMapsAdapter, MAPS, type MapsAdapter } from './ma
         c.MAPS_PROVIDER === 'google' ? new GoogleMapsAdapter(c.GOOGLE_MAPS_API_KEY!) : new FakeMapsAdapter(),
     },
     {
+      provide: STORAGE,
+      inject: [APP_CONFIG],
+      useFactory: (c: AppConfig): StorageAdapter =>
+        c.STORAGE_PROVIDER === 's3'
+          ? new S3StorageAdapter(c.S3_BUCKET!, c.S3_REGION, c.S3_ENDPOINT)
+          : new MemoryStorageAdapter(c.PUBLIC_API_URL, c.JWT_SECRET),
+    },
+    {
       provide: CHAT,
       inject: [DB],
       useFactory: (db: Db): ChatAdapter => new BuiltinChatAdapter(db),
     },
   ],
-  exports: [MESSAGING, PUSH, PAYMENTS, MAPS, CHAT],
+  exports: [MESSAGING, PUSH, PAYMENTS, MAPS, STORAGE, CHAT],
 })
 export class AdaptersModule {}

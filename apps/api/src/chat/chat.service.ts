@@ -6,6 +6,7 @@ import { conversations, errands, users } from '../db/schema';
 import { CHAT, type ChatAdapter, type ChatMessage } from '../adapters/chat';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PushService } from '../push/push.service';
+import { UploadsService } from '../files/uploads.service';
 import type { AuthContext } from '../auth/auth.types';
 import { conflict, notFound } from '../common/errors';
 
@@ -28,6 +29,7 @@ export class ChatService {
     @Inject(CHAT) private readonly chat: ChatAdapter,
     private readonly realtime: RealtimeGateway,
     private readonly push: PushService,
+    private readonly uploads: UploadsService,
   ) {}
 
   /** The caller's conversation on this errand: the customer sees the current agent's, an agent only their own. */
@@ -66,24 +68,35 @@ export class ChatService {
         open: !conversation.closedAt && !TERMINAL_STATES.has(errand.status),
         access: await this.chat.clientAccess(conversation.id, auth.userId),
       },
-      messages: rows.map(messageView),
+      messages: await Promise.all(rows.map((m) => this.view(m))),
     };
   }
 
-  async send(errandId: string, auth: AuthContext, input: { body: string; clientId: string }) {
+  /** A message as the apps see it: a photo message carries a short-lived link to the photo. */
+  private async view(m: ChatMessage) {
+    const key = m.kind === 'photo' ? (m.data.key as string | undefined) : undefined;
+    return { ...messageView(m), photoUrl: key ? await this.uploads.url(key) : null };
+  }
+
+  async send(errandId: string, auth: AuthContext, input: { body?: string; photo?: string; clientId: string }) {
     const { errand, conversation, role } = await this.conversationFor(errandId, auth);
     if (conversation.closedAt || TERMINAL_STATES.has(errand.status)) {
       throw conflict('chat_closed', 'This chat has ended');
     }
+    if (input.photo) {
+      await this.uploads.assertUploaded([input.photo], { ownerId: auth.userId, errandId, purposes: ['chat_photo'] });
+    }
+    const text = input.body ?? '';
     const { message, duplicate } = await this.chat.post({
       conversationId: conversation.id,
       senderId: auth.userId,
       senderRole: role,
-      kind: 'text',
-      body: input.body,
+      kind: input.photo ? 'photo' : 'text',
+      body: text,
+      data: input.photo ? { key: input.photo } : {},
       clientId: input.clientId,
     });
-    const view = messageView(message);
+    const view = await this.view(message);
     if (!duplicate) {
       this.realtime.toErrand(errandId, 'message.created', { errandId, message: view });
       const [sender] = await this.db
@@ -93,7 +106,7 @@ export class ChatService {
       const recipient = role === 'customer' ? conversation.agentId : conversation.customerId;
       await this.push.notifyUser(recipient, role === 'customer' ? 'agent' : 'customer', {
         title: sender?.firstName ?? (role === 'customer' ? 'Customer' : 'Your agent'),
-        body: input.body.length > 120 ? `${input.body.slice(0, 117)}...` : input.body,
+        body: input.photo && !text ? 'Sent a photo' : text.length > 120 ? `${text.slice(0, 117)}...` : text,
         data: { type: 'chat.message', errandId },
       });
     }

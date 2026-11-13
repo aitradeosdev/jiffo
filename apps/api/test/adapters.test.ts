@@ -334,6 +334,8 @@ describe('config', () => {
       PAYSTACK_SECRET_KEY: 'sk_test_x',
       MAPS_PROVIDER: 'google',
       GOOGLE_MAPS_API_KEY: 'maps-key',
+      STORAGE_PROVIDER: 's3',
+      S3_BUCKET: 'jiffo-files',
     };
     expect(() => loadConfig(live)).toThrow(/TRUST_PROXY_HOPS/);
     expect(loadConfig({ ...live, TRUST_PROXY_HOPS: '1' }).TRUST_PROXY_HOPS).toBe(1);

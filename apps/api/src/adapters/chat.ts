@@ -8,7 +8,7 @@ export interface ChatMessage {
   conversationId: string;
   senderId: string | null;
   senderRole: 'customer' | 'agent' | 'system';
-  kind: 'text' | 'system';
+  kind: 'text' | 'system' | 'photo';
   body: string;
   data: Record<string, unknown>;
   clientId: string | null;
