@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { goBack } from '../nav';
 import type { ErrandEvent } from '@jiffo/shared';
 import { useSession } from '@/auth/session';
-import { errorMessage } from '@/api/client';
+import { ApiError, errorMessage } from '@/api/client';
 import { useResource } from '@/api/useResource';
 import { useErrandSubscription, useRealtimeEvent } from '@/realtime/realtime';
 import { STATUS_TEXT, type ErrandView } from '@/errands/types';
@@ -14,6 +14,7 @@ import { Button, Screen, Text } from '@/ui/kit';
 import { Card, Chip, Icon, Row } from '@/ui/parts';
 import { Photos } from '@/ui/photos';
 import { AfterCompletion } from '@/errands/after-completion';
+import { Matching } from '@/errands/matching';
 
 const SUBTEXT: Partial<Record<ErrandView['status'], string>> = {
   requested: 'Nearby agents can see it and accept. Nothing is held until one does.',
@@ -34,6 +35,8 @@ export function CustomerErrand({ id }: { id: string }) {
   const [busy, setBusy] = useState<ErrandEvent | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pin, setPin] = useState<string | null>(null);
+  /** How much a refused fee raise was short by, to offer a top-up. */
+  const [shortKobo, setShortKobo] = useState<number | null>(null);
   useErrandSubscription(id);
   // The same update arrives on the errand's room and the customer's own room: reload once per new version.
   useRealtimeEvent<{ errandId: string; version: number }>('errand.updated', (u) => {
@@ -62,18 +65,36 @@ export function CustomerErrand({ id }: { id: string }) {
   }
 
   const can = (e: ErrandEvent) => errand.allowedEvents.includes(e);
-  const act = async (event: ErrandEvent) => {
+  const act = async (event: ErrandEvent, data?: Record<string, unknown>) => {
     setBusy(event);
     setActionError(null);
+    setShortKobo(null);
     try {
-      setData(await api.post<ErrandView>(`/v1/errands/${errand.id}/events`, { event, version: errand.version }));
+      setData(await api.post<ErrandView>(`/v1/errands/${errand.id}/events`, { event, version: errand.version, data }));
     } catch (e) {
       setActionError(errorMessage(e));
+      if (e instanceof ApiError && e.code === 'insufficient_funds') {
+        setShortKobo(Number(e.details.neededKobo ?? 0) - Number(e.details.balanceKobo ?? 0));
+      }
       reload();
     } finally {
       setBusy(null);
     }
   };
+
+  if (errand.status === 'requested') {
+    return (
+      <Matching
+        errand={errand}
+        onCancel={can('cancel') ? () => act('cancel') : undefined}
+        cancelling={busy === 'cancel'}
+        onRaise={can('raise_fee') ? (amountKobo) => act('raise_fee', { amountKobo }) : undefined}
+        raising={busy === 'raise_fee'}
+        shortKobo={shortKobo}
+        error={actionError}
+      />
+    );
+  }
 
   return (
     <Screen>
@@ -159,11 +180,7 @@ export function CustomerErrand({ id }: { id: string }) {
           icon="user"
           title={errand.agent.firstName ?? 'Your agent'}
           subtitle="Your agent"
-          right={
-            errand.status !== 'requested' ? (
-              <Chip label="Message" icon="message-circle" onPress={() => router.push(`/errand/${errand.id}/chat`)} />
-            ) : null
-          }
+          right={<Chip label="Message" icon="chat" onPress={() => router.push(`/errand/${errand.id}/chat`)} />}
         />
       ) : null}
 

@@ -47,5 +47,22 @@ export function useCurrentLocation() {
     }
   }, []);
 
-  return { coords, error, blocked, locate, openSettings: () => Linking.openSettings() };
+  /** The location only if it is already allowed: never shows the permission prompt. */
+  const peek = useCallback(async (): Promise<Coords | null> => {
+    try {
+      const permission = await Location.getForegroundPermissionsAsync();
+      if (!permission.granted) return null;
+      const position =
+        (await Location.getLastKnownPositionAsync().catch(() => null)) ??
+        (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null));
+      if (!position) return null;
+      const next = { lat: position.coords.latitude, lng: position.coords.longitude };
+      setCoords(next);
+      return next;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  return { coords, error, blocked, locate, peek, openSettings: () => Linking.openSettings() };
 }

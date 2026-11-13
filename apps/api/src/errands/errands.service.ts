@@ -380,6 +380,19 @@ export class ErrandsService implements OnModuleInit {
       if (!current || this.roleFor(current, auth) !== 'agent') throw notFound('errand_not_found', 'Errand not found');
       nextState(current.status, input.event, transitionContext(current, 'agent'));
     }
+    // A raised fee must still be covered by the wallet, like a new errand. Read before the errand is locked.
+    if (input.event === 'raise_fee') {
+      const { amountKobo } = this.parse('raise_fee', input.data);
+      const [current] = await this.db.select().from(errands).where(eq(errands.id, errandId));
+      if (!current || this.roleFor(current, auth) !== 'customer')
+        throw notFound('errand_not_found', 'Errand not found');
+      nextState(current.status, input.event, transitionContext(current, 'customer'));
+      const neededKobo = amountKobo + serviceFee(amountKobo, settings.fees);
+      const balanceKobo = await this.wallet.customerBalance(current.customerId, current.countryCode);
+      if (balanceKobo < neededKobo) {
+        throw conflict('insufficient_funds', 'Top up your wallet to raise the fee', { neededKobo, balanceKobo });
+      }
+    }
     if (input.event === 'send_item_amount') {
       const { photos } = this.parse('send_item_amount', input.data);
       await this.uploads.assertUploaded(photos, {
@@ -545,6 +558,18 @@ export class ErrandsService implements OnModuleInit {
           });
         }
         return { patch: { pendingOfferKobo: amountKobo }, record: { amountKobo, previousFeeKobo: errand.feeKobo } };
+      }
+      case 'raise_fee': {
+        const { amountKobo } = this.parse('raise_fee', data);
+        if (amountKobo <= errand.feeKobo) {
+          throw unprocessable('fee_not_raised', 'The new fee must be higher than the current one', {
+            feeKobo: errand.feeKobo,
+          });
+        }
+        return {
+          patch: { feeKobo: amountKobo, serviceFeeKobo: serviceFee(amountKobo, settings.fees) },
+          record: { amountKobo, previousFeeKobo: errand.feeKobo },
+        };
       }
       case 'accept_offer':
         return {

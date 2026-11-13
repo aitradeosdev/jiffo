@@ -48,6 +48,11 @@ export const ERRAND_EVENTS = {
   cancel: { from: ['requested', 'accepted'], to: 'cancelled', actors: ['customer'] },
   /** The agent leaves before starting; the errand goes back to matching. */
   withdraw: { from: ['accepted'], to: 'requested', actors: ['agent'] },
+  /**
+   * While it waits for an agent, the customer raises the fee to draw one in. Nothing is held yet. On an
+   * urgent errand this starts the urgent window again, like sending it afresh.
+   */
+  raise_fee: { from: ['requested'], to: 'requested', actors: ['customer'] },
 
   send_offer: {
     from: ['accepted'],

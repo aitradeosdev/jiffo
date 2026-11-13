@@ -24,6 +24,14 @@ export const light = {
   dangerSoft: '#FDEBEB',
   onDanger: '#FFFFFF',
   scrim: 'rgba(0,0,0,0.48)',
+  /** Illustration colours, from the prototypes. */
+  illA: '#0A7A4A',
+  illB: '#86D3A9',
+  illC: '#F5B342',
+  illD: '#E2E2E2',
+  illE: '#E0602B',
+  illF: '#FFFFFF',
+  promo: '#0A3B26',
 };
 
 export type Palette = typeof light;
@@ -53,6 +61,13 @@ export const dark: Palette = {
   dangerSoft: '#351414',
   onDanger: '#1A0404',
   scrim: 'rgba(0,0,0,0.66)',
+  illA: '#3DD68C',
+  illB: '#1E6B45',
+  illC: '#F0A93B',
+  illD: '#2B2B2B',
+  illE: '#F07A45',
+  illF: '#1F1F1F',
+  promo: '#0F2B1D',
 };
 
 export const fonts = {
@@ -60,6 +75,7 @@ export const fonts = {
   medium: 'Figtree_500Medium',
   semibold: 'Figtree_600SemiBold',
   bold: 'Figtree_700Bold',
+  extrabold: 'Figtree_800ExtraBold',
 } as const;
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;

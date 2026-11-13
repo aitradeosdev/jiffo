@@ -47,6 +47,7 @@ export type CreateErrandInput = z.infer<typeof CreateErrandBody>;
 export const EVENT_DATA = {
   cancel: z.object({ reason: z.string().trim().max(300).optional() }),
   send_offer: z.object({ amountKobo: Kobo }),
+  raise_fee: z.object({ amountKobo: Kobo }),
   send_item_amount: z.object({ amountKobo: Kobo, photos: z.array(StorageKey).min(1).max(6) }),
   confirm_pin: z.object({ pin: z.string().regex(/^\d{4}$/, 'The PIN is 4 digits') }),
   send_dropoff_photo: z.object({ photo: StorageKey, note: z.string().trim().max(300).optional() }),

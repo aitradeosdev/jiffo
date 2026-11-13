@@ -41,7 +41,7 @@ describe('errands', () => {
         version: 0,
         buy: true,
         role: 'customer',
-        allowedEvents: ['cancel'],
+        allowedEvents: ['cancel', 'raise_fee'],
       });
       const parcel = await createErrand(t, customer);
       expect(parcel.buy).toBe(false);

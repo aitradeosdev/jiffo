@@ -22,6 +22,7 @@ export interface ErrandView {
   pendingOfferKobo: number | null;
   itemAmountKobo: number | null;
   scheduledFor: string | null;
+  stateCode: string;
   stops: StopView[];
   customer: { id: string; firstName: string | null } | null;
   agent: { id: string; firstName: string | null } | null;
@@ -53,6 +54,37 @@ export interface PlacePick {
   lng: number;
   /** The state the place is in, when Jiffo is live there. */
   stateCode: string | null;
+}
+
+/** The prototype's five steps; "Items bought" reads "On the way" when nothing is bought. */
+export const stepsFor = (buy: boolean) => [
+  'Accepted',
+  'Service started',
+  buy ? 'Items bought' : 'On the way',
+  'At drop-off',
+  'Completed',
+];
+
+/** Which of the five steps a status is on (-1 while still looking for an agent). */
+export function stepOf(status: ErrandState): number {
+  switch (status) {
+    case 'requested':
+      return -1;
+    case 'accepted':
+      return 0;
+    case 'started':
+    case 'item_pending':
+      return 1;
+    case 'items_locked':
+      return 2;
+    case 'delivered':
+    case 'photo_pending':
+    case 'unreachable':
+    case 'disputed':
+      return 3;
+    default:
+      return 4;
+  }
 }
 
 /** How each status reads to the customer. */
