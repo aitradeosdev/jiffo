@@ -1,5 +1,6 @@
 import { naira } from '@/money';
 import { stepOf, type ErrandView } from './types';
+import { timeLabel } from './when';
 
 export type StageTone = 'brand' | 'urgent' | 'danger' | 'neutral';
 
@@ -167,5 +168,5 @@ export const heldKobo = (e: ErrandView) => (e.held?.feeKobo ?? 0) + (e.held?.ite
 /** The time a step was reached, where the errand records it. */
 export function stepTime(e: ErrandView, step: number) {
   const at = [e.acceptedAt, e.startedAt, null, e.deliveredAt, e.completedAt][step];
-  return at ? new Date(at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+  return at ? timeLabel(new Date(at)) : '';
 }

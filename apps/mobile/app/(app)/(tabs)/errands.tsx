@@ -5,14 +5,14 @@ import { useResource } from '@/api/useResource';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { useRealtimeEvent } from '@/realtime/realtime';
 import { LiveCard } from '@/errands/live-card';
-import { AGENT_STATUS, isActive, type ErrandView } from '@/errands/types';
+import { AGENT_BADGE, isActive, type ErrandView } from '@/errands/types';
 import { shortWhen, upcoming, whenLabel } from '@/errands/when';
 import { VARIANT } from '@/config';
 import { naira } from '@/money';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
 import { Button, Text } from '@/ui/kit';
-import { Badge, Icon, IconCircle } from '@/ui/parts';
+import { Badge, Empty, Icon } from '@/ui/parts';
 import { Art, hasArt } from '@/ui/svg';
 import { TabPage } from '@/ui/tab-page';
 
@@ -25,20 +25,26 @@ export default function Errands() {
   const now = data?.filter((e) => isActive(e) && !booked(e)) ?? [];
   const later = data?.filter(booked) ?? [];
   const past = data?.filter((e) => !isActive(e)) ?? [];
+  // Read once here rather than in every row.
+  const { config } = useCountryConfig();
+  const categories = new Map(config?.categories.map((k) => [k.key, k]) ?? []);
+  const row = (e: ErrandView) => <ErrandRow key={e.id} errand={e} category={categories.get(e.categoryKey)} />;
 
   return (
     <TabPage title={agent ? 'Jobs' : 'Errands'} refreshing={refreshing} onRefresh={refresh}>
       {data && data.length === 0 ? (
-        <View style={styles.empty}>
-          <IconCircle icon="history" size={52} />
-          <Text style={styles.emptyTitle}>{agent ? 'No jobs yet' : 'No errands yet'}</Text>
-          <Text variant="note" tone="ink3" style={{ textAlign: 'center' }}>
-            {agent
+        <Empty
+          icon="history"
+          title={agent ? 'No jobs yet' : 'No errands yet'}
+          body={
+            agent
               ? 'Errands you accept show here, with what you earned.'
-              : 'Errands you request show here, with a receipt for each one.'}
-          </Text>
-          <Button small label={agent ? 'Find errands' : 'Request an errand'} onPress={() => router.push('/home')} />
-        </View>
+              : 'Errands you request show here, with a receipt for each one.'
+          }
+          action={
+            <Button small label={agent ? 'Find errands' : 'Request an errand'} onPress={() => router.push('/home')} />
+          }
+        />
       ) : null}
 
       {now.length ? (
@@ -48,20 +54,8 @@ export default function Errands() {
             : now.map((e) => <LiveCard key={e.id} errand={e} />)}
         </Block>
       ) : null}
-      {later.length ? (
-        <Block title="Upcoming">
-          {later.map((e) => (
-            <ErrandRow key={e.id} errand={e} />
-          ))}
-        </Block>
-      ) : null}
-      {past.length ? (
-        <Block title="Past">
-          {past.map((e) => (
-            <ErrandRow key={e.id} errand={e} />
-          ))}
-        </Block>
-      ) : null}
+      {later.length ? <Block title="Upcoming">{later.map(row)}</Block> : null}
+      {past.length ? <Block title="Past">{past.map(row)}</Block> : null}
     </TabPage>
   );
 }
@@ -78,16 +72,15 @@ function Block({ title, children }: { title: string; children: ReactNode }) {
 }
 
 /** .erow: the category's picture, what it was, when and where, and the total or how it ended. */
-function ErrandRow({ errand: e }: { errand: ErrandView }) {
+function ErrandRow({ errand: e, category }: { errand: ErrandView; category?: { key: string; icon: string } }) {
   const c = useColors();
-  const { config } = useCountryConfig();
   const agent = VARIANT === 'agent';
-  const category = config?.categories.find((k) => k.key === e.categoryKey);
   const place = e.stops.find((s) => s.kind === (agent ? 'pickup' : 'dropoff'));
   const other = agent ? e.customer?.firstName : e.agent?.firstName;
   const scheduled = e.status === 'requested' ? upcoming(e.scheduledFor) : null;
   const when = scheduled ? whenLabel(scheduled) : shortWhen(e.completedAt ?? e.cancelledAt ?? e.createdAt);
-  const total = agent ? e.feeKobo : e.feeKobo + e.serviceFeeKobo + (e.itemAmountKobo ?? 0);
+  // Item money counts only if the customer locked it; an unlocked amount was never paid.
+  const total = agent ? e.feeKobo : e.feeKobo + e.serviceFeeKobo + (e.itemsLocked ? (e.itemAmountKobo ?? 0) : 0);
   const right =
     e.status === 'completed' ? (
       <Text style={styles.amt}>{naira(total)}</Text>
@@ -98,7 +91,7 @@ function ErrandRow({ errand: e }: { errand: ErrandView }) {
     ) : scheduled ? (
       <Badge label="Booked" />
     ) : agent ? (
-      <Badge label={AGENT_STATUS[e.status]} tone="brand" />
+      <Badge label={AGENT_BADGE[e.status] ?? 'Open'} tone="brand" />
     ) : null;
   return (
     <Pressable
@@ -129,8 +122,6 @@ function ErrandRow({ errand: e }: { errand: ErrandView }) {
 }
 
 const styles = StyleSheet.create({
-  empty: { alignItems: 'center', gap: 8, paddingVertical: 40, paddingHorizontal: 24 },
-  emptyTitle: { fontFamily: fonts.bold, fontSize: 16 },
   erow: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 76, paddingVertical: 10 },
   thumb: { width: 48, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   title: { fontFamily: fonts.bold, fontSize: 16 },

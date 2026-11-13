@@ -102,10 +102,18 @@ export class ErrandsService implements OnModuleInit {
   private async views(rows: ErrandRow[], roleOf: (row: ErrandRow) => ViewerRole) {
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.id);
-    const [stops, people] = await Promise.all([
+    const withItems = rows.filter((r) => r.itemAmountKobo !== null).map((r) => r.id);
+    const [stops, people, locks] = await Promise.all([
       this.db.select().from(errandStops).where(inArray(errandStops.errandId, ids)),
       this.people(rows),
+      withItems.length
+        ? this.db
+            .select({ errandId: errandEvents.errandId })
+            .from(errandEvents)
+            .where(and(inArray(errandEvents.errandId, withItems), eq(errandEvents.event, 'lock_item_amount')))
+        : Promise.resolve([]),
     ]);
+    const locked = new Set(locks.map((l) => l.errandId));
     const stopsBy = new Map<string, StopRow[]>();
     for (const s of stops) stopsBy.set(s.errandId, [...(stopsBy.get(s.errandId) ?? []), s]);
     return rows.map((r) =>
@@ -114,6 +122,7 @@ export class ErrandsService implements OnModuleInit {
         stopsBy.get(r.id) ?? [],
         { customer: people.get(r.customerId) ?? null, agent: r.agentId ? (people.get(r.agentId) ?? null) : null },
         roleOf(r),
+        locked.has(r.id),
       ),
     );
   }

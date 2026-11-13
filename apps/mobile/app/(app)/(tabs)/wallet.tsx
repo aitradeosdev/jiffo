@@ -8,7 +8,7 @@ import { useRealtimeEvent } from '@/realtime/realtime';
 import { naira } from '@/money';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
-import { dayLabel } from '@/errands/when';
+import { dayLabel, timeLabel } from '@/errands/when';
 import { Button, Text } from '@/ui/kit';
 import { Empty, Icon, List, Row } from '@/ui/parts';
 import { ModalSheet } from '@/ui/modal-sheet';
@@ -203,7 +203,7 @@ function Wallet() {
 function TxRow({ m }: { m: Movement }) {
   const c = useColors();
   const isIn = m.amountKobo > 0;
-  const time = new Date(m.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const time = timeLabel(new Date(m.createdAt));
   return (
     <Row
       iconNode={

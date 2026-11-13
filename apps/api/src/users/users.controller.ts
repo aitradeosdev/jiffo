@@ -50,11 +50,12 @@ export class UsersController {
         .select({ n: sql<number>`count(*)::int` })
         .from(errands)
         .where(and(mine, eq(errands.status, 'completed'))),
+      // Every way into a dispute counts: opened by either side, a missed deadline, or support stepping in.
       this.db
         .select({ n: sql<number>`count(distinct ${errandEvents.errandId})::int` })
         .from(errandEvents)
         .innerJoin(errands, eq(errands.id, errandEvents.errandId))
-        .where(and(mine, eq(errandEvents.event, 'open_dispute'))),
+        .where(and(mine, eq(errandEvents.toStatus, 'disputed'))),
     ]);
     return {
       ratingAvg: rating?.avg ? Math.round(Number(rating.avg) * 10) / 10 : null,

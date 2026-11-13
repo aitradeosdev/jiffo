@@ -354,6 +354,7 @@ describe('money', () => {
       const locked = await act(t, buyer, errand.id, 'lock_item_amount');
       expect((await balanceOf(t, buyer)).balanceKobo).toBe(4_000_000 - FEE - SERVICE - 3_000_000);
       expect(locked.held).toEqual({ feeKobo: FEE + SERVICE, itemsKobo: 3_000_000 });
+      expect(locked.itemsLocked).toBe(true);
 
       const agentBefore = (await balanceOf(t, agent)).availableKobo;
       const revenueBefore = await revenue();

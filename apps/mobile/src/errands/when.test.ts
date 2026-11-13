@@ -44,6 +44,7 @@ describe('list dates', () => {
     expect(dayLabel(new Date(2026, 10, 13, 9, 5))).toBe('Today');
     expect(dayLabel(new Date(2026, 10, 12, 23, 59))).toBe('Yesterday');
     expect(dayLabel(new Date(2026, 10, 4, 11, 40))).toBe('4 Nov');
+    expect(dayLabel(new Date(2025, 10, 4, 11, 40))).toBe('4 Nov 2025');
     expect(shortWhen(new Date(2026, 10, 12, 18, 12).toISOString())).toBe('Yesterday, 6:12 PM');
   });
 });

@@ -7,6 +7,7 @@ import { useSession } from '@/auth/session';
 import { errorMessage } from '@/api/client';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { naira, parseNaira } from '@/money';
+import { timeLabel } from '@/errands/when';
 import { useColors } from '@/theme/theme';
 import { fonts, space } from '@/theme/tokens';
 import { Button, Field, Screen, Text } from '@/ui/kit';
@@ -35,8 +36,9 @@ export default function TopUp() {
   const { config } = useCountryConfig();
   const min = config?.settings.wallet.minDepositKobo ?? 10_000;
   const max = config?.settings.wallet.maxDepositKobo ?? null;
-  const suggested = amount ? Math.max(Number(amount), min) : null;
-  const [text, setText] = useState(suggested ? String(Math.ceil(suggested / 100)) : '');
+  // Whole naira, as in the amount field.
+  const suggested = amount ? Math.ceil(Math.max(Number(amount), min) / 100) * 100 : null;
+  const [text, setText] = useState(suggested ? String(suggested / 100) : '');
   const [deposit, setDeposit] = useState<Deposit | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,7 +95,7 @@ export default function TopUp() {
       await Clipboard.setStringAsync(deposit.accountNumber);
       setCopied(true);
     };
-    const until = new Date(deposit.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const until = timeLabel(new Date(deposit.expiresAt));
     return (
       <Screen footer={<Button kind="secondary" label="I'll do it later" onPress={() => goBack()} />}>
         <View style={{ gap: 6 }}>

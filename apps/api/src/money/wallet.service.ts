@@ -1,6 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNull, lt, lte } from 'drizzle-orm';
 import {
+  ERRAND_STATES,
+  TERMINAL_STATES,
   commissionBpsFor,
   holdsEarnings,
   splitFeeEscrow,
@@ -33,19 +35,10 @@ const feeEscrow = (errandId: string): AccountRef => ({ type: 'fee_escrow', owner
 const itemEscrow = (errandId: string): AccountRef => ({ type: 'item_escrow', ownerId: errandId });
 const REVENUE: AccountRef = { type: 'platform_revenue' };
 
-/** What each journal kind looks like in the wallet history. */
 /** Between accept and the end of an errand, its money sits in escrow. */
-const HOLDING_STATES = [
-  'accepted',
-  'started',
-  'item_pending',
-  'items_locked',
-  'delivered',
-  'photo_pending',
-  'unreachable',
-  'disputed',
-] as const;
+const HOLDING_STATES = ERRAND_STATES.filter((s) => s !== 'requested' && !TERMINAL_STATES.has(s));
 
+/** What each journal kind looks like in the wallet history. */
 const HISTORY_LABELS: Record<string, string> = {
   deposit: 'Bank transfer top-up',
   fee_lock: 'Errand fee held',
@@ -327,7 +320,7 @@ export class WalletService {
         and(
           eq(errands.customerId, auth.userId),
           eq(errands.countryCode, auth.countryCode),
-          inArray(errands.status, [...HOLDING_STATES]),
+          inArray(errands.status, HOLDING_STATES),
         ),
       );
     if (running.length === 0) return [];
