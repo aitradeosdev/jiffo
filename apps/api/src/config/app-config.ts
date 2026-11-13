@@ -36,6 +36,11 @@ const EnvSchema = z
      * production.
      */
     IDENTITY_PROVIDER: z.enum(['fake', 'none']).default('fake'),
+    /**
+     * Masked calls between a customer and their agent. "none" turns them off. Only the fake exists until a
+     * provider's keys are in, and it never runs in production.
+     */
+    CALLS_PROVIDER: z.enum(['fake', 'none']).default('fake'),
     PAYSTACK_SECRET_KEY: z.string().optional(),
     PAYSTACK_BASE_URL: z.string().url().default('https://api.paystack.co'),
     /** The fake provider signs its webhooks with this, so the webhook endpoint runs as in production. */

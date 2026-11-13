@@ -1,3 +1,4 @@
+import { CallButton, canCall } from './call';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
@@ -316,6 +317,7 @@ function StatusCard({
             {stage.doing}
           </Text>
         </View>
+        {canCall(errand.status) ? <CallButton errandId={errand.id} name={name} /> : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Chat with ${name}`}

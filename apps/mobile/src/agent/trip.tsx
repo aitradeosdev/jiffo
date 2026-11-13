@@ -16,6 +16,7 @@ import { ModalSheet } from '../ui/modal-sheet';
 import { JiffoMap } from '../ui/map/map';
 import { StopMark } from '../ui/map/pins';
 import type { MapPin } from '../ui/map/types';
+import { CallButton, canCall } from '../errands/call';
 import { Segments } from '../errands/progress';
 import { stepTime } from '../errands/stage';
 import { Lines, StageChip } from '../errands/trip';
@@ -131,6 +132,7 @@ export function AgentTrip({ errand, actions }: { errand: ErrandView; actions: Ag
               {stage.doing}
             </Text>
           </View>
+          {canCall(errand.status) ? <CallButton errandId={errand.id} name={name} /> : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Chat with ${name}`}

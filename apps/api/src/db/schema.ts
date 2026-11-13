@@ -372,6 +372,31 @@ export const messages = pgTable(
   ],
 );
 
+/**
+ * Masked calls between an errand's customer and agent: who called whom and when, for support. Nothing of
+ * the call itself is kept; calls aren't recorded.
+ */
+export const errandCalls = pgTable(
+  'errand_calls',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    errandId: uuid('errand_id')
+      .notNull()
+      .references(() => errands.id),
+    callerId: uuid('caller_id')
+      .notNull()
+      .references(() => users.id),
+    calleeId: uuid('callee_id')
+      .notNull()
+      .references(() => users.id),
+    callerRole: text('caller_role', { enum: ['customer', 'agent'] }).notNull(),
+    provider: text('provider').notNull(),
+    providerRef: text('provider_ref'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('errand_calls_errand_idx').on(t.errandId, t.createdAt)],
+);
+
 /* ---------- Money ---------- */
 
 /**
