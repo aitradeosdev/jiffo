@@ -77,7 +77,13 @@ export function Question({ title, sub }: { title: string; sub?: ReactNode }) {
 }
 
 /** .tin: a big text box with its name in the placeholder; black border while typing. In a row, pass flex: 1. */
-export function TextBox({ style, onFocus, onBlur, ...rest }: TextInputProps & { accessibilityLabel: string }) {
+export function TextBox({
+  style,
+  onFocus,
+  onBlur,
+  invalid,
+  ...rest
+}: TextInputProps & { accessibilityLabel: string; invalid?: boolean }) {
   const c = useColors();
   const [focused, setFocused] = useState(false);
   return (
@@ -96,7 +102,7 @@ export function TextBox({ style, onFocus, onBlur, ...rest }: TextInputProps & { 
         {
           color: c.ink,
           backgroundColor: focused ? c.surface : c.surface2,
-          borderColor: focused ? c.ink : 'transparent',
+          borderColor: invalid ? c.danger : focused ? c.ink : 'transparent',
         },
         noWebOutline,
         style,

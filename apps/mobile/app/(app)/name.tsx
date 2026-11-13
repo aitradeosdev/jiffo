@@ -24,7 +24,8 @@ export default function Name() {
       await updateProfile({
         firstName: first.trim(),
         lastName: last.trim(),
-        ...(email.trim() ? { email: email.trim() } : {}),
+        // Clearing a saved email removes it.
+        ...(email.trim() ? { email: email.trim() } : user?.email ? { email: null } : {}),
       });
       router.replace('/home');
     } catch (e) {
@@ -79,9 +80,12 @@ export default function Name() {
           autoComplete="email"
           textContentType="emailAddress"
           onSubmitEditing={() => ready && save()}
+          invalid={!emailOk}
         />
-        <Text variant="note" tone="ink3">
-          For receipts. No marketing unless you ask for it.
+        <Text variant="note" tone={emailOk ? 'ink3' : 'danger'} accessibilityLiveRegion="polite">
+          {emailOk
+            ? 'For receipts. No marketing unless you ask for it.'
+            : 'Check the email address, or leave it empty.'}
         </Text>
       </View>
       {error ? (

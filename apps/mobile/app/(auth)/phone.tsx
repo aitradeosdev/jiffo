@@ -5,7 +5,6 @@ import { useCountryConfig } from '@/api/useCountryConfig';
 import { formatNational, nationalDigits, plausibleNumber, toE164 } from '@/auth/phone';
 import { ApiError, errorMessage } from '@/api/client';
 import { StyleSheet, View } from 'react-native';
-import { goBack } from '@/nav';
 import { COUNTRY } from '@/config';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
@@ -45,7 +44,7 @@ export default function Phone() {
 
   return (
     <ObScreen
-      onBack={goBack}
+      onBack={() => (router.canGoBack() ? router.back() : router.replace('/welcome'))}
       progress={0.25}
       footer={<Button label="Continue" onPress={send} disabled={!ready} loading={busy} />}
     >
@@ -61,6 +60,7 @@ export default function Phone() {
         <TextBox
           accessibilityLabel="Phone number"
           style={{ flex: 1 }}
+          invalid={!!error}
           value={formatNational(digits)}
           onChangeText={(t) => setDigits(nationalDigits(t, prefix ?? ''))}
           keyboardType="phone-pad"

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -32,6 +33,9 @@ const icon = { customer: require('../../assets/customer/icon.png'), agent: requi
 export default function Welcome() {
   const c = useColors();
   const copy = COPY[VARIANT];
+  // Tiles shrink on short screens so the two rows never overlap: each at most 40% of the space.
+  const [room, setRoom] = useState(340);
+  const tile = Math.max(64, Math.min(132, room * 0.4));
   return (
     <View style={[styles.fill, { backgroundColor: c.bg }]}>
       <SafeAreaView edges={['top']} style={styles.top}>
@@ -45,10 +49,15 @@ export default function Welcome() {
             </View>
           ) : null}
         </View>
-        <View style={styles.collage} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        <View
+          style={styles.collage}
+          onLayout={(e) => setRoom(e.nativeEvent.layout.height)}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
           {TILES.map((t) => (
-            <View key={t.art} style={[styles.tile, t.style]}>
-              <Art name={t.art} size={92} />
+            <View key={t.art} style={[styles.tile, t.style, { width: tile, height: tile, borderRadius: tile * 0.21 }]}>
+              <Art name={t.art} size={tile * 0.7} />
             </View>
           ))}
         </View>
@@ -86,9 +95,6 @@ const styles = StyleSheet.create({
   collage: { flex: 1 },
   tile: {
     position: 'absolute',
-    width: 132,
-    height: 132,
-    borderRadius: 28,
     backgroundColor: '#1C1C1C',
     alignItems: 'center',
     justifyContent: 'center',
