@@ -21,7 +21,8 @@ export function clientOf(req: AdminRequest, config: AppConfig): ClientInfo {
   const presented = req.header('x-jiffo-panel');
   if (secret && presented && safeEqual(presented, secret)) {
     return {
-      ip: req.header('x-jiffo-client-ip')?.slice(0, 64) || null,
+      // Without the admin's IP, the panel's own counts instead, so the network limit still applies.
+      ip: req.header('x-jiffo-client-ip')?.slice(0, 64) || req.ip || null,
       userAgent: req.header('x-jiffo-client-ua')?.slice(0, 300) || null,
     };
   }

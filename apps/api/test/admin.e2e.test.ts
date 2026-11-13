@@ -123,7 +123,7 @@ describe('admin', () => {
 
   it('takes a new teammate from invite link to signed in', async () => {
     const { email, token } = await invite('operations');
-    const info = await request(t.http).get(`/v1/admin/auth/invite?token=${token}`).expect(200);
+    const info = await request(t.http).post('/v1/admin/auth/invite/check').send({ token }).expect(200);
     expect(info.body).toEqual({ email, name: 'Test Admin', role: 'operations' });
 
     const short = await request(t.http).post('/v1/admin/auth/invite/accept').send({ token, password: 'short' });
@@ -132,7 +132,7 @@ describe('admin', () => {
     await request(t.http).post('/v1/admin/auth/invite/accept').send({ token, password: PASSWORD }).expect(200);
     // The link works once.
     await request(t.http).post('/v1/admin/auth/invite/accept').send({ token, password: PASSWORD }).expect(404);
-    await request(t.http).get(`/v1/admin/auth/invite?token=${token}`).expect(404);
+    await request(t.http).post('/v1/admin/auth/invite/check').send({ token }).expect(404);
 
     const wrong = await request(t.http)
       .post('/v1/admin/auth/sign-in')
@@ -198,20 +198,24 @@ describe('admin', () => {
     expect(res.status).toBe(200);
   });
 
-  it('pauses sign-in after five wrong attempts for one email', async () => {
+  it('pauses wrong passwords per network, so a stranger elsewhere cannot lock a teammate out', async () => {
     const admin = await makeAdmin('support');
+    const attacker = randomIp();
     for (let i = 0; i < 5; i++) {
       await request(t.http)
         .post('/v1/admin/auth/sign-in')
-        .set(fromIp())
+        .set(fromIp(attacker))
         .send({ email: admin.email, password: `wrong password ${i}` })
         .expect(401);
     }
-    const locked = await request(t.http)
+    const paused = await request(t.http)
       .post('/v1/admin/auth/sign-in')
-      .set(fromIp())
+      .set(fromIp(attacker))
       .send({ email: admin.email, password: PASSWORD });
-    expect(locked.status).toBe(429);
+    expect(paused.status).toBe(429);
+    // The teammate, on their own network, still signs in.
+    const { res } = await signInAgain(admin);
+    expect(res.status).toBe(200);
     // Unknown emails get the same answers, so nobody can find out who is on the team.
     const unknown = await request(t.http)
       .post('/v1/admin/auth/sign-in')
@@ -219,6 +223,47 @@ describe('admin', () => {
       .send({ email: 'nobody@jiffoapp.com', password: PASSWORD });
     expect(unknown.status).toBe(401);
     expect(unknown.body.error.code).toBe('invalid_credentials');
+  });
+
+  it('pauses wrong codes per admin, even when a burst arrives at once, until a reset', async () => {
+    const admin = await makeAdmin('support');
+    const first = await request(t.http)
+      .post('/v1/admin/auth/sign-in')
+      .set(fromIp())
+      .send({ email: admin.email, password: PASSWORD })
+      .expect(200);
+    const right = totpCode(admin.secret, totpStep());
+    const wrong = (i: number) => String((Number(right) + 1 + i) % 1_000_000).padStart(6, '0');
+    // Twelve guesses at the same moment, from twelve networks: only five are ever checked.
+    const answers = await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        request(t.http)
+          .post('/v1/admin/auth/code')
+          .set(fromIp())
+          .send({ challenge: first.body.challenge, code: wrong(i) }),
+      ),
+    );
+    const statuses = answers.map((a) => a.status);
+    expect(statuses.filter((code) => code === 401)).toHaveLength(5);
+    expect(statuses.filter((code) => code === 429)).toHaveLength(7);
+    // The right code is refused too while paused.
+    await request(t.http)
+      .post('/v1/admin/auth/code')
+      .set(fromIp())
+      .send({ challenge: first.body.challenge, code: right })
+      .expect(429);
+
+    // A reset by an owner lifts the pause along with everything else.
+    const reset = await request(t.http).post(`/v1/admin/team/${admin.id}/reset`).set(owner.headers).expect(201);
+    await request(t.http)
+      .post('/v1/admin/auth/invite/accept')
+      .send({ token: tokenOf(reset.body.inviteUrl), password: PASSWORD })
+      .expect(200);
+    await request(t.http)
+      .post('/v1/admin/auth/sign-in')
+      .set(fromIp())
+      .send({ email: admin.email, password: PASSWORD })
+      .expect(200);
   });
 
   it('believes the forwarded IP only with the panel secret', async () => {
@@ -320,7 +365,8 @@ describe('admin', () => {
     const [row] = await t.db.select().from(admins).where(eq(admins.id, ops.id));
     expect(row).toMatchObject({ status: 'invited', passwordHash: null, totpEnabledAt: null });
     await request(t.http)
-      .get(`/v1/admin/auth/invite?token=${tokenOf(reset.body.inviteUrl)}`)
+      .post('/v1/admin/auth/invite/check')
+      .send({ token: tokenOf(reset.body.inviteUrl) })
       .expect(200);
 
     const audit = await request(t.http)

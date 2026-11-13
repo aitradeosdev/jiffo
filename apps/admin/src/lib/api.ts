@@ -2,6 +2,7 @@ import 'server-only';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { cache } from 'react';
+import type { AdminPermission, AdminRole } from '@jiffo/shared';
 import { clientIp } from './client-ip';
 import { COUNTRY_COOKIE, SESSION_COOKIE } from './cookies';
 import { env } from './env';
@@ -36,6 +37,8 @@ interface CallOptions {
   body?: unknown;
   /** Sign-in calls are made before there is a session. */
   anonymous?: boolean;
+  /** A session token already taken from the cookie, for signing out after the cookie is gone. */
+  token?: string;
 }
 
 /**
@@ -43,7 +46,7 @@ interface CallOptions {
  * never render half-signed-in.
  */
 export async function api<T>(path: string, options: CallOptions = {}): Promise<T> {
-  const token = options.anonymous ? null : (await cookies()).get(SESSION_COOKIE)?.value;
+  const token = options.anonymous ? null : (options.token ?? (await cookies()).get(SESSION_COOKIE)?.value);
   if (!options.anonymous && !token) redirect('/sign-in');
   const res = await fetch(`${env().apiUrl}/v1${path}`, {
     method: options.method ?? 'GET',
@@ -59,7 +62,9 @@ export async function api<T>(path: string, options: CallOptions = {}): Promise<T
   const json = (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string } };
   if (!res.ok) {
     const { code = 'error', message = 'Something went wrong. Try again.', ...details } = json.error ?? {};
-    if (res.status === 401 && !options.anonymous) redirect(`/sign-in?ended=${code === 'session_idle' ? 'idle' : '1'}`);
+    if (res.status === 401 && !options.anonymous && !options.token) {
+      redirect(`/sign-in?ended=${code === 'session_idle' ? 'idle' : '1'}`);
+    }
     throw new ApiError(res.status, code, message, details);
   }
   return json as T;
@@ -72,13 +77,13 @@ export interface Country {
   timezone: string;
 }
 
-export type Permission = 'read' | 'operate' | 'money' | 'settings' | 'team';
+export type Permission = AdminPermission;
 
 export interface Me {
   id: string;
   email: string;
   name: string;
-  role: 'owner' | 'operations' | 'finance' | 'support';
+  role: AdminRole;
   permissions: Permission[];
   countries: Country[];
 }

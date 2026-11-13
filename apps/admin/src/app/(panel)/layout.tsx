@@ -1,16 +1,10 @@
 import type { ReactNode } from 'react';
+import { adminRoleLabel } from '@jiffo/shared';
 import { AuditIcon, OverviewIcon, SignOutIcon, TeamIcon } from '@/components/icons';
 import { Wordmark } from '@/components/wordmark';
 import { getCountry, getMe, type Permission } from '@/lib/api';
 import { chooseCountry, signOut } from './actions';
 import { CountrySelect, Nav, type NavItem } from './nav';
-
-const ROLE: Record<string, string> = {
-  owner: 'Owner',
-  operations: 'Operations',
-  finance: 'Finance',
-  support: 'Support',
-};
 
 const SECTIONS: Array<NavItem & { needs: Permission }> = [
   { href: '/', label: 'Overview', icon: <OverviewIcon />, needs: 'read' },
@@ -56,7 +50,7 @@ export default async function PanelLayout({ children }: { children: ReactNode })
           )}
           <p className="truncate text-sm font-bold">{me.name}</p>
           <p className="truncate text-[13px] text-ink-3">
-            {ROLE[me.role] ?? me.role} · {me.email}
+            {adminRoleLabel(me.role)} · {me.email}
           </p>
           <form action={signOut} className="mt-3">
             <button

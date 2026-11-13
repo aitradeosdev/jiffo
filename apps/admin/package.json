@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fontsource-variable/figtree": "^5.3.0",
+    "@jiffo/shared": "workspace:*",
     "next": "16.4.6",
     "qrcode": "^1.5.4",
     "react": "19.3.0",

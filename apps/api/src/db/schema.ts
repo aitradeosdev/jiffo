@@ -17,7 +17,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { AGENT_TIERS, type CountrySettings, type ErrandState } from '@jiffo/shared';
+import { ADMIN_ROLES, AGENT_TIERS, type AdminRole, type CountrySettings, type ErrandState } from '@jiffo/shared';
 
 /** PostGIS point (longitude, latitude). Written with ST_MakePoint, read back through the lat/lng columns. */
 const geographyPoint = customType<{ data: string; driverData: string }>({
@@ -659,13 +659,8 @@ export const errandRatings = pgTable(
 
 /* ---------- Admin ---------- */
 
-/**
- * What each admin may do is decided by their role (see admin/permissions.ts). Owners can do everything,
- * including managing the team; operations runs errands, disputes and people; finance runs money; support
- * can look but not change anything.
- */
-export const ADMIN_ROLES = ['owner', 'operations', 'finance', 'support'] as const;
-export type AdminRole = (typeof ADMIN_ROLES)[number];
+/** What each role may do is in @jiffo/shared (ADMIN_ROLE_INFO), so the API and the panel agree. */
+export { ADMIN_ROLES, type AdminRole };
 
 /** A Jiffo staff member. They join by invite, set a password, then must set up an authenticator app. */
 export const admins = pgTable(

@@ -12,7 +12,8 @@ export interface InviteInfo {
 export async function readInvite(token: string): Promise<{ invite?: InviteInfo; error?: string }> {
   try {
     return {
-      invite: await api<InviteInfo>(`/admin/auth/invite?token=${encodeURIComponent(token)}`, { anonymous: true }),
+      // In the body, never the URL, so the token stays out of access logs.
+      invite: await api<InviteInfo>('/admin/auth/invite/check', { method: 'POST', anonymous: true, body: { token } }),
     };
   } catch (error) {
     return { error: messageOf(error) };

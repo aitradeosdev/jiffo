@@ -3,7 +3,7 @@ import { and, asc, eq, ne } from 'drizzle-orm';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { admins, type AdminRole } from '../db/schema';
 import { conflict, forbidden, notFound } from '../common/errors';
-import { AdminAuthService, normaliseEmail } from './admin-auth.service';
+import { AdminAuthService } from './admin-auth.service';
 import { AuditService } from './audit.service';
 import type { AdminContext } from './admin.types';
 
@@ -39,22 +39,18 @@ export class TeamService {
   }
 
   async invite(by: AdminContext, input: { email: string; name: string; role: AdminRole }) {
-    const email = normaliseEmail(input.email);
     return this.db.transaction(async (tx) => {
-      const [existing] = await tx.select({ id: admins.id }).from(admins).where(eq(admins.email, email));
-      if (existing) throw conflict('admin_exists', 'Someone on the team already uses this email');
-      const [admin] = await tx
-        .insert(admins)
-        .values({ email, name: input.name.trim(), role: input.role, invitedBy: by.adminId })
-        .returning({ id: admins.id });
-      const invite = await this.auth.issueInvite(tx, admin!.id);
+      const { id, email, inviteUrl, expiresInHours } = await this.auth.addAdmin(tx, {
+        ...input,
+        invitedBy: by.adminId,
+      });
       await this.audit.record(tx, by, {
         action: 'team.invite',
         targetType: 'admin',
-        targetId: admin!.id,
+        targetId: id,
         data: { email, role: input.role },
       });
-      return { id: admin!.id, ...invite };
+      return { id, inviteUrl, expiresInHours };
     });
   }
 
@@ -92,21 +88,8 @@ export class TeamService {
     if (id === by.adminId) throw forbidden('own_account', "You can't reset your own access. Ask another owner.");
     return this.db.transaction(async (tx) => {
       const target = await this.lockTarget(tx, id);
-      if (target.status === 'disabled') throw conflict('admin_disabled', 'Enable this teammate first');
       if (target.role === 'owner' && target.status === 'active') await this.assertAnotherOwner(tx, id);
-      await tx
-        .update(admins)
-        .set({
-          status: 'invited',
-          passwordHash: null,
-          totpCipher: null,
-          totpEnabledAt: null,
-          totpLastStep: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(admins.id, id));
-      await this.auth.revokeAll(tx, id, 'reset');
-      const invite = await this.auth.issueInvite(tx, id);
+      const invite = await this.auth.resetAccess(tx, id);
       await this.audit.record(tx, by, { action: 'team.reset', targetType: 'admin', targetId: id });
       return invite;
     });

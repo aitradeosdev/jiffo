@@ -151,4 +151,6 @@ Open the printed link to choose a password. The first sign-in sets up an authent
 | Finance    | Money: refunds, wallet adjustments and payouts         |
 | Support    | Look at everything, change nothing                     |
 
-Sessions end after 30 minutes without activity, or 12 hours after sign-in. Five wrong attempts for one email pause sign-in for 15 minutes. Every change an admin makes is written to the audit log.
+Sessions end after 30 minutes without activity, or 12 hours after sign-in. Five wrong passwords for one email from one network, or five wrong codes for one admin, pause sign-in for 15 minutes; a reset lifts the pause. Every change an admin makes is written to the audit log.
+
+In production the panel must sit behind a load balancer (`TRUST_PROXY_HOPS` of at least 1), and the API needs `ADMIN_URL` set to the panel's address for invite links.

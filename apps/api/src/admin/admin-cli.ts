@@ -4,7 +4,8 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { loadConfig } from '../config/app-config';
 import * as schema from '../db/schema';
-import { ADMIN_ROLES, admins, type AdminRole } from '../db/schema';
+import { ADMIN_ROLES, admins } from '../db/schema';
+import { isAdminRole } from '@jiffo/shared';
 import { AdminAuthService, normaliseEmail } from './admin-auth.service';
 
 const USAGE = `Jiffo admin accounts, from the server.
@@ -37,39 +38,26 @@ async function main() {
   const auth = new AdminAuthService(db, config);
   try {
     if (command === 'invite') {
-      const role = values.role as AdminRole;
-      if (!values.name?.trim() || !ADMIN_ROLES.includes(role)) {
+      const role = values.role ?? '';
+      if (!values.name?.trim() || !isAdminRole(role)) {
         process.stdout.write(USAGE);
         process.exitCode = 1;
         return;
       }
-      const invite = await db.transaction(async (tx) => {
-        const [existing] = await tx.select({ id: admins.id }).from(admins).where(eq(admins.email, email));
-        if (existing) throw new Error(`${email} is already on the team. Use reset instead.`);
-        const [admin] = await tx
-          .insert(admins)
-          .values({ email, name: values.name!.trim(), role })
-          .returning({ id: admins.id });
-        return auth.issueInvite(tx, admin!.id);
-      });
+      const invite = await db.transaction((tx) =>
+        auth.addAdmin(tx, { email, name: values.name!, role, invitedBy: null }),
+      );
       process.stdout.write(
-        `Invited ${email} as ${role}. Send them this link (it works for ${invite.expiresInHours} hours):\n${invite.inviteUrl}` +
-          '\n',
+        `Invited ${email} as ${role}. Send them this link (it works for ${invite.expiresInHours} hours):\n${invite.inviteUrl}\n`,
       );
     } else {
       const invite = await db.transaction(async (tx) => {
         const [admin] = await tx.select({ id: admins.id }).from(admins).where(eq(admins.email, email));
         if (!admin) throw new Error(`${email} is not on the team`);
-        await tx
-          .update(admins)
-          .set({ status: 'invited', passwordHash: null, totpCipher: null, totpEnabledAt: null, totpLastStep: null })
-          .where(eq(admins.id, admin.id));
-        await auth.revokeAll(tx, admin.id, 'reset');
-        return auth.issueInvite(tx, admin.id);
+        return auth.resetAccess(tx, admin.id);
       });
       process.stdout.write(
-        `Reset ${email}. Send them this link (it works for ${invite.expiresInHours} hours):\n${invite.inviteUrl}` +
-          '\n',
+        `Reset ${email}. Send them this link (it works for ${invite.expiresInHours} hours):\n${invite.inviteUrl}\n`,
       );
     }
   } finally {
@@ -78,6 +66,8 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : error);
+  // The shared helpers refuse with API errors; print their message, not the HTTP wrapper's.
+  const body = (error as { getResponse?: () => { error?: { message?: string } } }).getResponse?.();
+  console.error(body?.error?.message ?? (error instanceof Error ? error.message : error));
   process.exit(1);
 });

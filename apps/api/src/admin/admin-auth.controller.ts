@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Inject, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Post, Req, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { ZodBody } from '../common/zod-body';
@@ -7,7 +7,7 @@ import { AdminGuard, clientOf, CurrentAdmin, Needs } from './admin.guard';
 import { OverviewService } from './overview.service';
 import type { AdminContext, AdminRequest } from './admin.types';
 
-const InviteQuery = z.object({ token: z.string().min(20).max(200) });
+const InviteBody = z.object({ token: z.string().min(20).max(200) });
 const AcceptBody = z.object({ token: z.string().min(20).max(200), password: z.string().min(1).max(200) });
 const SignInBody = z.object({ email: z.string().email().max(200), password: z.string().min(1).max(200) });
 const ChallengeBody = z.object({ challenge: z.string().min(20).max(2000) });
@@ -22,9 +22,11 @@ export class AdminAuthController {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  @Get('auth/invite')
-  inviteInfo(@Query(new ZodBody(InviteQuery)) query: z.infer<typeof InviteQuery>) {
-    return this.auth.inviteInfo(query.token);
+  /** A POST, so the token travels in the body and never lands in access logs with the URL. */
+  @Post('auth/invite/check')
+  @HttpCode(200)
+  inviteInfo(@Body(new ZodBody(InviteBody)) body: z.infer<typeof InviteBody>) {
+    return this.auth.inviteInfo(body.token);
   }
 
   @Post('auth/invite/accept')

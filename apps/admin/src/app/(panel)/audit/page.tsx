@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { buttonClass, Card, Empty, PageHeader, tableClass, tdClass, thClass } from '@/components/ui';
+import { adminRoleLabel } from '@jiffo/shared';
 import { api, getCountry, getMe } from '@/lib/api';
 import { dateTime } from '@/lib/format';
 
@@ -17,19 +18,12 @@ interface Entry {
   admin: { id: string; name: string; email: string };
 }
 
-const ROLE: Record<string, string> = {
-  owner: 'owner',
-  operations: 'operations',
-  finance: 'finance',
-  support: 'support',
-};
-
 /** One line a person can read, from the action and what it changed. */
 function describe(entry: Entry, names: Map<string, string>): string {
   const who = (entry.targetId && names.get(entry.targetId)) || String(entry.data.email ?? 'a teammate');
   switch (entry.action) {
     case 'team.invite':
-      return `Invited ${String(entry.data.email)} as ${ROLE[String(entry.data.role)] ?? entry.data.role}`;
+      return `Invited ${String(entry.data.email)} as ${adminRoleLabel(String(entry.data.role)).toLowerCase()}`;
     case 'team.reset':
       return `Reset ${who}'s password and authenticator app`;
     case 'team.update': {
@@ -37,7 +31,9 @@ function describe(entry: Entry, names: Map<string, string>): string {
       const to = entry.data.to as { role: string; status: string } | undefined;
       const changes: string[] = [];
       if (from && to && from.role !== to.role)
-        changes.push(`changed ${who} from ${ROLE[from.role]} to ${ROLE[to.role]}`);
+        changes.push(
+          `changed ${who} from ${adminRoleLabel(from.role).toLowerCase()} to ${adminRoleLabel(to.role).toLowerCase()}`,
+        );
       if (from && to && from.status !== to.status)
         changes.push(to.status === 'disabled' ? `disabled ${who}` : `enabled ${who}`);
       const line = changes.join(' and ') || `updated ${who}`;

@@ -55,8 +55,8 @@ const EnvSchema = z
     /** Load balancers in front of the API, so the client IP is read from X-Forwarded-For correctly. */
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).optional(),
     CORS_ORIGINS: z.string().default('*'),
-    /** Where the admin panel runs, for the invite links it sends. */
-    ADMIN_URL: z.string().url().default('http://localhost:3001'),
+    /** Where the admin panel runs, for invite links. Locally it defaults to http://localhost:3001. */
+    ADMIN_URL: z.string().url().optional(),
     /**
      * Shared with the admin panel's server, which calls the API on the admin's behalf. With it, the panel
      * passes on the admin's own IP address, so sign-in limits and the audit log see the person, not the panel.
@@ -103,12 +103,13 @@ const EnvSchema = z
       need(env.MAPS_PROVIDER !== 'fake', 'MAPS_PROVIDER', 'must be a real provider in production');
       need(env.STORAGE_PROVIDER !== 'memory', 'STORAGE_PROVIDER', 'must be s3 in production');
       // Behind a load balancer, 0 would make every client share one IP and one sign-in limit.
-      need(!!env.ADMIN_PANEL_SECRET, 'ADMIN_PANEL_SECRET', 'must be set in production');
       need(
         env.TRUST_PROXY_HOPS !== undefined,
         'TRUST_PROXY_HOPS',
         'must be set in production (load balancers in front)',
       );
+      need(!!env.ADMIN_PANEL_SECRET, 'ADMIN_PANEL_SECRET', 'must be set in production');
+      need(!!env.ADMIN_URL, 'ADMIN_URL', 'must be set in production, or invite links point at localhost');
     }
   });
 

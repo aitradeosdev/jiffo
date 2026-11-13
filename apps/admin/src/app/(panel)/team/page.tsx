@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 import { Badge, Card, Empty, PageHeader, tableClass, tdClass, thClass } from '@/components/ui';
+import { adminRoleLabel } from '@jiffo/shared';
 import { api, getCountry, getMe } from '@/lib/api';
 import { ago } from '@/lib/format';
-import { ROLES } from './roles';
 import { InviteForm, MemberActions } from './team-client';
 
 export const metadata: Metadata = { title: 'Team' };
@@ -28,7 +28,6 @@ export default async function TeamPage() {
     );
   }
   const [team, country] = await Promise.all([api<Teammate[]>('/admin/team'), getCountry()]);
-  const roleName = (role: string) => ROLES.find((r) => r.value === role)?.label ?? role;
 
   return (
     <>
@@ -59,7 +58,7 @@ export default async function TeamPage() {
                     </td>
                     <td className={tdClass}>
                       <div className="flex flex-wrap gap-1.5">
-                        <Badge>{roleName(t.role)}</Badge>
+                        <Badge>{adminRoleLabel(t.role)}</Badge>
                         {t.status === 'disabled' ? <Badge tone="danger">Disabled</Badge> : null}
                         {t.status === 'invited' ? (
                           <Badge tone="warn">{t.inviteExpired ? 'Invite expired' : 'Invited'}</Badge>
