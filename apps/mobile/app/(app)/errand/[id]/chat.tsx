@@ -11,7 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Crypto from 'expo-crypto';
 import { goBack } from '@/nav';
@@ -124,13 +124,7 @@ export default function Chat() {
   const open = thread?.conversation.open ?? false;
   const other = VARIANT === 'agent' ? errand?.customer : errand?.agent;
   const otherName = other?.firstName ?? (VARIANT === 'agent' ? 'Customer' : 'Your agent');
-  const status = errand
-    ? VARIANT === 'agent'
-      ? AGENT_STATUS[errand.status]
-      : errand.status === 'requested'
-        ? 'Finding your agent'
-        : customerStage(errand).big
-    : '';
+  const status = errand ? (VARIANT === 'agent' ? AGENT_STATUS[errand.status] : customerStage(errand).big) : '';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top', 'bottom']}>
@@ -266,7 +260,8 @@ function Pinned({ errand }: { errand: ErrandView }) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${title}. Open the errand`}
-      onPress={() => goBack()}
+      // Back to the errand if it is underneath, otherwise open it.
+      onPress={() => router.dismissTo(`/errand/${errand.id}`)}
       style={[styles.pinned, { backgroundColor: c.bg2 }]}
     >
       <View style={{ flex: 1, minWidth: 0, gap: 6 }}>

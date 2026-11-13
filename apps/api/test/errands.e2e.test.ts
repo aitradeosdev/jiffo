@@ -101,6 +101,8 @@ describe('errands', () => {
       expect((await act(t, agent, errand.id, 'start', {}, 409)).error.code).toBe('errand_blocked');
 
       const customerView = await get(customer, errand.id);
+      // What accepting would hold is worked out with the errand's own settings: 10% service fee.
+      expect(customerView.body.pendingOfferServiceFeeKobo).toBe(30_000);
       expect(customerView.body.allowedEvents).toEqual(
         expect.arrayContaining(['accept_offer', 'decline_offer', 'cancel', 'release_agent']),
       );
@@ -127,6 +129,7 @@ describe('errands', () => {
       const done = await act(t, agent, errand.id, 'confirm_pin', { pin: code });
       expect(done).toMatchObject({ status: 'completed', allowedEvents: [] });
       expect(done.completedAt).toBeTruthy();
+      expect((await get(customer, errand.id)).body.completedBy).toBe('pin');
 
       const events = await request(t.http).get(`/v1/errands/${errand.id}/events`).set(customer.headers).expect(200);
       expect(events.body.map((e: { event: string }) => e.event)).toEqual([
@@ -155,6 +158,7 @@ describe('errands', () => {
         photo: await photo(t, agent, errand.id, 'dropoff_photo'),
       });
       const approved = await act(t, customer, errand.id, 'approve_photo');
+      expect(approved.completedBy).toBe('photo');
       expect(approved.status).toBe('completed');
     });
   });

@@ -15,6 +15,7 @@ import { ModalSheet } from '@/ui/modal-sheet';
 import { JiffoMap } from '@/ui/map/map';
 import { StopMark } from '@/ui/map/pins';
 import type { MapPin } from '@/ui/map/types';
+import { Segments } from './progress';
 import { customerNeeds, customerStage, heldKobo, stepTime, type StageTone } from './stage';
 import { stepsFor, type ErrandView } from './types';
 
@@ -299,7 +300,7 @@ function StatusCard({
           {stage.sub}
         </Text>
       ) : null}
-      <TBar step={stage.step} />
+      <Segments step={stage.step} thick />
       <View style={[styles.tagent, { borderTopColor: c.line }]}>
         <Avatar name={name} size={42} />
         <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
@@ -326,26 +327,12 @@ function StatusCard({
 /** .tchip: the small coloured status label. */
 export function StageChip({ label, tone }: { label: string; tone: StageTone }) {
   const c = useColors();
-  const bg = tone === 'urgent' ? c.urgentSoft : tone === 'danger' ? c.dangerSoft : c.brandSoft;
-  const fg = tone === 'urgent' ? c.urgent : tone === 'danger' ? c.danger : c.brandInk;
+  const bg = { urgent: c.urgentSoft, danger: c.dangerSoft, neutral: c.surface2, brand: c.brandSoft }[tone];
+  const fg = { urgent: c.urgent, danger: c.danger, neutral: c.ink2, brand: c.brandInk }[tone];
   return (
     <View style={[styles.tchip, { backgroundColor: bg }]}>
       {tone === 'brand' ? <View style={[styles.dot, { backgroundColor: fg }]} /> : null}
       <Text style={[styles.tchipText, { color: fg }]}>{label}</Text>
-    </View>
-  );
-}
-
-/** .tbar: the tracker's thicker five-step bar. */
-function TBar({ step }: { step: number }) {
-  const c = useColors();
-  return (
-    <View style={styles.tbar} accessibilityLabel={`Step ${Math.max(0, step) + 1} of 5`}>
-      {[0, 1, 2, 3, 4].map((i) => (
-        <View key={i} style={[styles.tbarSeg, { backgroundColor: i < step ? c.brand2 : c.surface3 }]}>
-          {i === step ? <View style={[styles.tbarNow, { backgroundColor: c.brand2 }]} /> : null}
-        </View>
-      ))}
     </View>
   );
 }
@@ -572,9 +559,6 @@ const styles = StyleSheet.create({
   tchipText: { fontFamily: fonts.bold, fontSize: 13 },
   dot: { width: 7, height: 7, borderRadius: 4 },
   tbig: { fontFamily: fonts.extrabold, fontSize: 31, lineHeight: 34, letterSpacing: -0.87 },
-  tbar: { flexDirection: 'row', gap: 5 },
-  tbarSeg: { flex: 1, height: 7, borderRadius: 4, overflow: 'hidden' },
-  tbarNow: { position: 'absolute', top: 0, bottom: 0, left: 0, width: '50%' },
   tagent: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6, paddingTop: 12, borderTopWidth: 1 },
   agentName: { fontFamily: fonts.bold, fontSize: 15.5 },
   cbtn: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },

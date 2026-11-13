@@ -7,9 +7,10 @@ import { ApiError, errorMessage } from '@/api/client';
 import { naira } from '@/money';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
-import { Button, Text } from '@/ui/kit';
+import { Button, Field, Text } from '@/ui/kit';
 import { Avatar, Icon } from '@/ui/parts';
 import { PageFooter } from '@/ui/floating';
+import { COMPLETED_BY_TEXT, stepTime } from './stage';
 import { Lines } from './trip';
 import type { ErrandView } from './types';
 
@@ -20,6 +21,7 @@ export function CustomerRate({ errand, onDone }: { errand: ErrandView; onDone: (
   const c = useColors();
   const { api } = useSession();
   const [stars, setStars] = useState(0);
+  const [comment, setComment] = useState('');
   const [tip, setTip] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,10 +29,8 @@ export function CustomerRate({ errand, onDone }: { errand: ErrandView; onDone: (
   const [rated, setRated] = useState(!!errand.ratedByMe);
   const name = errand.agent?.firstName ?? 'your agent';
   const dropoff = errand.stops.find((s) => s.kind === 'dropoff');
-  const when = errand.completedAt
-    ? new Date(errand.completedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-    : '';
-  const how = errand.photos?.dropoff ? 'drop-off photo approved' : 'confirmed with your PIN';
+  const when = stepTime(errand, 4);
+  const how = errand.completedBy ? COMPLETED_BY_TEXT[errand.completedBy] : 'completed';
   const items = errand.itemAmountKobo ?? 0;
   const tipNow = tipped ? 0 : tip;
   const total = errand.feeKobo + errand.serviceFeeKobo + items + tipNow;
@@ -54,7 +54,7 @@ export function CustomerRate({ errand, onDone }: { errand: ErrandView; onDone: (
       }
       if (stars && !rated) {
         try {
-          await api.post(`/v1/errands/${errand.id}/rating`, { stars });
+          await api.post(`/v1/errands/${errand.id}/rating`, { stars, comment: comment.trim() || undefined });
         } catch (e) {
           if (!(e instanceof ApiError && e.code === 'already_rated')) throw e;
         }
@@ -115,6 +115,17 @@ export function CustomerRate({ errand, onDone }: { errand: ErrandView; onDone: (
                   </Pressable>
                 ))}
               </View>
+              {stars ? (
+                <View style={{ alignSelf: 'stretch' }}>
+                  <Field
+                    label="Anything to add? (optional)"
+                    value={comment}
+                    onChangeText={setComment}
+                    maxLength={500}
+                    multiline
+                  />
+                </View>
+              ) : null}
             </>
           )}
         </View>

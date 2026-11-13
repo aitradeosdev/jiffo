@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useIsFocused } from 'expo-router';
 import type { ErrandEvent } from '@jiffo/shared';
 import { useSession } from '@/auth/session';
 import { ApiError, errorMessage } from '@/api/client';
@@ -19,24 +19,37 @@ export function useErrand(id: string | undefined) {
   /** How much a refused fee raise was short by, to offer a top-up. */
   const [shortKobo, setShortKobo] = useState<number | null>(null);
   useErrandSubscription(id);
+  // The tracker stays mounted under the chat. Only the screen in front fetches; one behind notes that it
+  // missed an update and catches up when it comes back to the front.
+  const focused = useIsFocused();
+  const missed = useRef(false);
+  const hasPhotos = !!errand?.photos && (errand.photos.items.length > 0 || !!errand.photos.dropoff);
+  const photosShown = useRef(hasPhotos);
+  photosShown.current = hasPhotos;
   // The same update arrives on the errand's room and the user's own room: reload once per new version.
   useRealtimeEvent<{ errandId: string; version: number }>('errand.updated', (u) => {
-    if (u.errandId === id && (!errand || u.version > errand.version)) reload();
+    if (u.errandId !== id || (errand && u.version <= errand.version)) return;
+    if (focused) reload();
+    else missed.current = true;
   });
-  // Coming back (from a top-up, say), an old refusal no longer applies.
+  // Coming back (from a top-up or the chat, say), an old refusal no longer applies.
   useFocusEffect(
     useCallback(() => {
       setActionError(null);
       setShortKobo(null);
-    }, []),
+      // Also refresh photo links, which may have expired while another screen was in front.
+      if (missed.current || photosShown.current) {
+        missed.current = false;
+        reload();
+      }
+    }, [reload]),
   );
-  // Photo links expire after 15 minutes: refresh every 10 while there are photos to show.
-  const hasPhotos = !!errand?.photos && (errand.photos.items.length > 0 || !!errand.photos.dropoff);
+  // Photo links expire after 15 minutes: refresh every 10 while there are photos on screen.
   useEffect(() => {
-    if (!hasPhotos) return;
+    if (!hasPhotos || !focused) return;
     const timer = setInterval(reload, 10 * 60_000);
     return () => clearInterval(timer);
-  }, [hasPhotos, reload]);
+  }, [hasPhotos, focused, reload]);
 
   const can = (event: ErrandEvent) => !!errand?.allowedEvents.includes(event);
 

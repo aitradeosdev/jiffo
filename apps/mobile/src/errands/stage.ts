@@ -1,7 +1,7 @@
 import { naira } from '@/money';
 import { stepOf, type ErrandView } from './types';
 
-export type StageTone = 'brand' | 'urgent' | 'danger';
+export type StageTone = 'brand' | 'urgent' | 'danger' | 'neutral';
 
 export interface Stage {
   step: number;
@@ -98,10 +98,42 @@ export function customerStage(e: ErrandView): Stage {
         sub: 'The money stays held until they decide',
         doing: 'Support is looking at the chat and photos',
       };
-    default:
+    case 'completed':
       return { step, chip: { label: 'Completed', tone: 'brand' }, big: 'Delivered', sub: '', doing: 'Errand complete' };
+    case 'cancelled':
+      return {
+        step,
+        chip: { label: 'Cancelled', tone: 'neutral' },
+        big: 'Errand cancelled',
+        sub: 'Anything held went back to your wallet',
+        doing: 'Cancelled',
+      };
+    case 'expired':
+      return {
+        step,
+        chip: { label: 'Expired', tone: 'neutral' },
+        big: 'No agent found',
+        sub: 'Nothing was held',
+        doing: 'No agent took it',
+      };
+    case 'requested':
+      return {
+        step,
+        chip: { label: 'Matching', tone: 'neutral' },
+        big: 'Finding your agent',
+        sub: 'Nothing is held until an agent accepts',
+        doing: 'Looking for an agent',
+      };
   }
 }
+
+/** How the hand-off happened, for the receipt. */
+export const COMPLETED_BY_TEXT: Record<NonNullable<ErrandView['completedBy']>, string> = {
+  pin: 'confirmed with your PIN',
+  photo: 'drop-off photo approved',
+  auto: 'drop-off photo approved after 24 hours',
+  support: 'completed by support',
+};
 
 /** What waits on the customer right now, if anything, for the orange card. */
 export function customerNeeds(e: ErrandView): { icon: string; title: string; sub: string } | null {

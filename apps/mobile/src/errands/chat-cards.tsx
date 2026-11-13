@@ -1,8 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Image, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
-import { serviceFee } from '@jiffo/shared';
-import { useCountryConfig } from '@/api/useCountryConfig';
 import { naira } from '@/money';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
@@ -34,7 +32,7 @@ export function CustomerCards({
     <View style={{ gap: 14 }}>
       {errand.pendingOfferKobo !== null && can('accept_offer') ? <OfferCard errand={errand} actions={actions} /> : null}
       {can('lock_item_amount') && errand.itemAmountKobo !== null ? (
-        <ItemCard errand={errand} actions={actions} shortKobo={shortKobo} onAsk={onAsk} />
+        <ItemCard errand={errand} actions={actions} onAsk={onAsk} />
       ) : null}
       {errand.status === 'delivered' && pin ? <PinCard errand={errand} pin={pin} /> : null}
       {can('approve_photo') ? <PhotoCard errand={errand} actions={actions} /> : null}
@@ -42,6 +40,13 @@ export function CustomerCards({
         <Text tone="danger" accessibilityLiveRegion="polite">
           {actions.actionError}
         </Text>
+      ) : null}
+      {/* A new price or the item amount the wallet can't cover: offer the top-up it needs. */}
+      {shortKobo && shortKobo > 0 ? (
+        <Button
+          label={`Add ${naira(shortKobo)} to your wallet`}
+          onPress={() => router.push({ pathname: '/topup', params: { amount: String(shortKobo) } })}
+        />
       ) : null}
     </View>
   );
@@ -93,9 +98,9 @@ function CardHead({
 
 function OfferCard({ errand, actions }: { errand: ErrandView; actions: ErrandActions }) {
   const c = useColors();
-  const { config } = useCountryConfig();
   const amount = errand.pendingOfferKobo!;
-  const service = config ? serviceFee(amount, config.settings.fees) : null;
+  // From the API, under the settings this errand was created with, so it matches what accepting holds.
+  const service = errand.pendingOfferServiceFeeKobo ?? null;
   const { act, busy } = actions;
   return (
     <CardShell>
@@ -137,17 +142,7 @@ function OfferCard({ errand, actions }: { errand: ErrandView; actions: ErrandAct
   );
 }
 
-function ItemCard({
-  errand,
-  actions,
-  shortKobo,
-  onAsk,
-}: {
-  errand: ErrandView;
-  actions: ErrandActions;
-  shortKobo: number | null;
-  onAsk: () => void;
-}) {
+function ItemCard({ errand, actions, onAsk }: { errand: ErrandView; actions: ErrandActions; onAsk: () => void }) {
   const c = useColors();
   const amount = errand.itemAmountKobo!;
   const photos = errand.photos?.items ?? [];
@@ -184,13 +179,6 @@ function ItemCard({
           style={styles.half}
         />
       </View>
-      {shortKobo && shortKobo > 0 ? (
-        <Button
-          kind="secondary"
-          label={`Add ${naira(shortKobo)} to your wallet`}
-          onPress={() => router.push({ pathname: '/topup', params: { amount: String(shortKobo) } })}
-        />
-      ) : null}
     </CardShell>
   );
 }

@@ -41,6 +41,10 @@ export interface ErrandView {
   tipped?: boolean;
   /** Single errand view: what is held in escrow now. */
   held?: { feeKobo: number; itemsKobo: number };
+  /** Single errand view: the service fee a pending new price would bring, under the errand's own settings. */
+  pendingOfferServiceFeeKobo?: number | null;
+  /** Single errand view, once completed: how the hand-off happened. */
+  completedBy?: 'pin' | 'photo' | 'auto' | 'support' | null;
 }
 
 export interface Quote {
