@@ -8,5 +8,6 @@ import { ErrandsService } from './errands.service';
   imports: [ChatModule],
   controllers: [ErrandsController],
   providers: [ErrandsService, ErrandNotifier],
+  exports: [ErrandsService],
 })
 export class ErrandsModule {}

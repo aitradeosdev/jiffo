@@ -52,6 +52,8 @@ export interface ErrandView {
     itemsKobo: number;
     tipKobo: number;
     tier: string | null;
+    /** Settled by Jiffo support, which may have shared the fee differently. */
+    bySupport?: boolean;
     heldUntil: string | null;
   } | null;
   /** Agent app list: what a finished job earned them (fee share and tip). */

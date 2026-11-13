@@ -22,7 +22,7 @@ import type { AuthContext } from '../auth/auth.types';
 import { decrypt, encrypt, numericCode, safeEqual } from '../common/crypto';
 import { ApiError, badRequest, conflict, locked, notFound, unprocessable } from '../common/errors';
 import { ERRAND_TIMERS, type ErrandTimerJob, type ErrandTimers } from '../timers/errand-timers';
-import { CustomerFundsLow, WalletService } from '../money/wallet.service';
+import { CustomerFundsLow, WalletService, type DisputeSplit } from '../money/wallet.service';
 import { AgentsService } from '../agents/agents.service';
 import { PresenceService, TRAVEL_STATES } from '../agents/presence.service';
 import { MAPS, type MapsAdapter } from '../adapters/maps';
@@ -56,9 +56,15 @@ export interface Settlement {
   itemsKobo: number;
   tipKobo: number;
   tier: string | null;
+  /** Settled by support, which may have shared the fee differently from a hand-off. */
+  bySupport: boolean;
   /** Bronze earnings wait before they can be withdrawn; null once available. */
   heldUntil: Date | null;
 }
+
+/** The events support sends from the admin panel. */
+export const ADMIN_ERRAND_EVENTS = ['admin_intervene', 'redeliver', 'resolve_complete', 'resolve_cancel'] as const;
+export type AdminErrandEvent = (typeof ADMIN_ERRAND_EVENTS)[number];
 
 /** How far from the pickup the matching screen counts online agents. */
 const NEARBY_RADIUS_KM = 3;
@@ -245,7 +251,8 @@ export class ErrandsService implements OnModuleInit {
       fromStatus: e.fromStatus,
       toStatus: e.toStatus,
       actorRole: e.actorRole,
-      data: e.data,
+      // Support's notes and splits are internal; the apps only learn that support acted.
+      data: e.actorRole === 'admin' ? { by: 'support' } : e.data,
       createdAt: e.createdAt,
     }));
   }
@@ -455,7 +462,10 @@ export class ErrandsService implements OnModuleInit {
             )
           : Promise.resolve(null),
         role === 'agent' ? this.agentEarns(errand, errand.agentTier ?? 'bronze') : Promise.resolve(null),
-        completed && role === 'agent' ? this.settlementOf(errand) : Promise.resolve(null),
+        // Support can pay the agent on an errand it settles as cancelled, too.
+        (completed || errand.status === 'cancelled') && role === 'agent'
+          ? this.settlementOf(errand)
+          : Promise.resolve(null),
       ]);
     const items = (photoEvents.find((e) => e.event === 'send_item_amount')?.data.photos as string[] | undefined) ?? [];
     const dropoff = photoEvents.find((e) => e.event === 'send_dropoff_photo')?.data.photo as string | undefined;
@@ -645,6 +655,46 @@ export class ErrandsService implements OnModuleInit {
       await this.notifier.transitioned(result);
       await this.afterAgentLeft(result.before, result.after);
     }
+  }
+
+  /**
+   * Support's own events: stepping into an errand, arranging a redelivery, and settling a dispute, either
+   * the standard way (completed pays the agent as at a hand-off; cancelled returns everything) or with a
+   * split. The caller's audit record is written in the same transaction as the change.
+   */
+  async adminTransition(
+    errandId: string,
+    adminId: string,
+    input: { event: AdminErrandEvent; version: number; note: string; split?: DisputeSplit },
+    audit: (tx: Tx, before: ErrandRow, after: ErrandRow) => Promise<unknown>,
+  ) {
+    const money = await this.settingsOf(errandId);
+    if (!money) throw notFound('errand_not_found', 'Errand not found');
+    const { settings } = money;
+    if (input.split && input.event !== 'resolve_complete' && input.event !== 'resolve_cancel') {
+      throw badRequest('split_not_allowed', 'Only settling a dispute shares out the money');
+    }
+    const result = await this.db.transaction(async (tx) => {
+      const [errand] = await tx.select().from(errands).where(eq(errands.id, errandId)).for('update');
+      if (!errand) throw notFound('errand_not_found', 'Errand not found');
+      if (input.version !== errand.version) {
+        throw conflict('errand_changed', 'This errand changed. Refresh and try again.', { version: errand.version });
+      }
+      const to = nextState(errand.status, input.event, transitionContext(errand, 'admin'));
+      const effect: EventEffect = {
+        patch: { pendingOfferKobo: null },
+        record: { note: input.note, by: 'support', ...(input.split ? { split: input.split } : {}) },
+      };
+      const after = await this.write(tx, errand, input.event, to, effect, 'admin', adminId);
+      if (input.split) await this.wallet.resolveDispute(tx, after, input.split, money);
+      else await this.wallet.onErrandTransition(tx, { before: errand, after, event: input.event, ...money });
+      await this.scheduleTimers(after, settings);
+      await audit(tx, errand, after);
+      return { before: errand, after, event: input.event as ErrandEvent, record: effect.record, settings };
+    });
+    await this.notifier.transitioned(result);
+    await this.afterAgentLeft(result.before, result.after);
+    return { id: result.after.id, status: result.after.status, version: result.after.version };
   }
 
   private async write(

@@ -34,6 +34,9 @@ export function AgentDone({ errand, onRated }: { errand: ErrandView; onRated: ()
     auto: 'Your drop-off photo was approved after 24 hours',
     support: 'Completed by support',
   }[errand.completedBy ?? 'pin'];
+  const headline = s?.bySupport ? 'Settled by Jiffo support' : how;
+  // What support moved away from the usual share, so the lines still add up to the earnings.
+  const changedBySupport = s?.bySupport ? errand.feeKobo - s.commissionKobo - s.agentKobo : 0;
   const pct = s && errand.feeKobo ? Math.round((s.commissionKobo / errand.feeKobo) * 100) : null;
 
   const rate = async () => {
@@ -62,7 +65,7 @@ export function AgentDone({ errand, onRated }: { errand: ErrandView; onRated: ()
             {naira(earned)} earned
           </Text>
           <Text variant="sub" tone="ink3" style={{ textAlign: 'center' }}>
-            {how}
+            {headline}
           </Text>
         </View>
 
@@ -76,6 +79,14 @@ export function AgentDone({ errand, onRated }: { errand: ErrandView; onRated: ()
                   `Commission${s.tier ? ` (${TIER[s.tier] ?? s.tier}${pct !== null ? `, ${pct}%` : ''})` : ''}`,
                   `−${naira(s.commissionKobo)}`,
                 ],
+                ...(changedBySupport
+                  ? ([
+                      [
+                        'Changed by support',
+                        changedBySupport > 0 ? `−${naira(changedBySupport)}` : naira(-changedBySupport),
+                      ],
+                    ] as const)
+                  : []),
                 ...(s.tipKobo ? ([[`Tip from ${name}`, naira(s.tipKobo)]] as const) : []),
               ]}
               total={['Your earnings', naira(earned)]}
@@ -100,47 +111,50 @@ export function AgentDone({ errand, onRated }: { errand: ErrandView; onRated: ()
           </View>
         ) : null}
 
-        <View style={[styles.block, { alignItems: 'center' }]}>
-          <Avatar name={errand.customer?.firstName} size={56} />
-          {rated ? (
-            <Text variant="heading">Thanks for rating {name}</Text>
-          ) : (
-            <>
-              <Text variant="heading">How was {name}?</Text>
-              <View style={styles.stars} accessibilityRole="radiogroup" accessibilityLabel="Rating">
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <Pressable
-                    key={n}
-                    accessibilityRole="radio"
-                    accessibilityState={{ checked: n === stars }}
-                    accessibilityLabel={`${n} star${n > 1 ? 's' : ''}`}
-                    onPress={() => setStars(n)}
-                    style={styles.star}
-                  >
-                    <Icon
-                      name="star"
-                      size={34}
-                      weight={1.6}
-                      filled={n <= stars}
-                      color={n <= stars ? c.ink : c.surface3}
-                    />
-                  </Pressable>
-                ))}
-              </View>
-              {stars ? (
-                <View style={{ alignSelf: 'stretch', gap: 10 }}>
-                  <Field
-                    label="Anything to add? (optional)"
-                    value={comment}
-                    onChangeText={setComment}
-                    maxLength={500}
-                  />
-                  <Button kind="secondary" label="Send rating" onPress={rate} loading={busy} />
+        {/* Ratings are for completed errands only. */}
+        {errand.status === 'completed' ? (
+          <View style={[styles.block, { alignItems: 'center' }]}>
+            <Avatar name={errand.customer?.firstName} size={56} />
+            {rated ? (
+              <Text variant="heading">Thanks for rating {name}</Text>
+            ) : (
+              <>
+                <Text variant="heading">How was {name}?</Text>
+                <View style={styles.stars} accessibilityRole="radiogroup" accessibilityLabel="Rating">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Pressable
+                      key={n}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: n === stars }}
+                      accessibilityLabel={`${n} star${n > 1 ? 's' : ''}`}
+                      onPress={() => setStars(n)}
+                      style={styles.star}
+                    >
+                      <Icon
+                        name="star"
+                        size={34}
+                        weight={1.6}
+                        filled={n <= stars}
+                        color={n <= stars ? c.ink : c.surface3}
+                      />
+                    </Pressable>
+                  ))}
                 </View>
-              ) : null}
-            </>
-          )}
-        </View>
+                {stars ? (
+                  <View style={{ alignSelf: 'stretch', gap: 10 }}>
+                    <Field
+                      label="Anything to add? (optional)"
+                      value={comment}
+                      onChangeText={setComment}
+                      maxLength={500}
+                    />
+                    <Button kind="secondary" label="Send rating" onPress={rate} loading={busy} />
+                  </View>
+                ) : null}
+              </>
+            )}
+          </View>
+        ) : null}
         {error ? (
           <Text tone="danger" accessibilityLiveRegion="polite">
             {error}

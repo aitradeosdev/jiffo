@@ -19,8 +19,8 @@ export interface TransitionResult {
 type Party = 'customer' | 'agent';
 const FUNDS_LOW_EVERY_MS = 10 * 60_000;
 interface Note {
-  /** Who gets the push notification. */
-  to: Party;
+  /** Who gets the push notification: one side, or both when support acted. */
+  to: Party | 'both';
   title: string;
   body: string;
   /** Also written in the chat as a timeline note. */
@@ -143,11 +143,39 @@ function noteFor(event: ErrandEvent, r: TransitionResult): Note | null {
         chat: 'Customer unreachable',
       };
     case 'redeliver':
+      return r.record.by === 'support'
+        ? {
+            to: 'both',
+            title: 'Redelivery arranged',
+            body: 'Jiffo support arranged a redelivery at the same fee.',
+            chat: 'Support arranged a redelivery',
+          }
+        : {
+            to: 'agent',
+            title: 'Redelivery',
+            body: 'The customer asked for redelivery.',
+            chat: 'Redelivery requested',
+          };
+    case 'admin_intervene':
       return {
-        to: 'agent',
-        title: 'Redelivery',
-        body: 'The customer asked for redelivery.',
-        chat: 'Redelivery requested',
+        to: 'both',
+        title: 'Support is reviewing this errand',
+        body: 'Jiffo support stepped in. Your money stays held until they decide.',
+        chat: 'Support stepped in and is reviewing this errand',
+      };
+    case 'resolve_complete':
+      return {
+        to: 'both',
+        title: 'Errand settled by support',
+        body: 'Jiffo support marked this errand complete. Check your wallet for the details.',
+        chat: 'Support settled this errand as complete',
+      };
+    case 'resolve_cancel':
+      return {
+        to: 'both',
+        title: 'Errand settled by support',
+        body: 'Jiffo support cancelled this errand. Check your wallet for the details.',
+        chat: 'Support settled this errand as cancelled',
       };
     case 'open_dispute':
       return {
@@ -231,13 +259,21 @@ export class ErrandNotifier {
     if (TERMINAL_STATES.has(after.status)) await this.chat.closeOpen(after.id);
 
     if (note) {
-      const userId = note.to === 'customer' ? after.customerId : agentId;
-      if (userId) {
-        await this.push.notifyUser(userId, note.to, {
-          title: note.title,
-          body: note.body,
-          data: { type: 'errand.updated', errandId: after.id, event, status: after.status },
-        });
+      const parties: Party[] = note.to === 'both' ? ['customer', 'agent'] : [note.to];
+      // Each side on its own, so one failed push never stops the other.
+      const sent = await Promise.allSettled(
+        parties.map((party) => {
+          const userId = party === 'customer' ? after.customerId : agentId;
+          if (!userId) return Promise.resolve();
+          return this.push.notifyUser(userId, party, {
+            title: note.title,
+            body: note.body,
+            data: { type: 'errand.updated', errandId: after.id, event, status: after.status },
+          });
+        }),
+      );
+      for (const r of sent) {
+        if (r.status === 'rejected') this.logger.warn(`Push for ${event} on ${after.id} failed: ${String(r.reason)}`);
       }
     }
   }

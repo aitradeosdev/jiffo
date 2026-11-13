@@ -14,11 +14,30 @@ import { DB, type Db, type Tx } from '../db/database.module';
 import { earningHolds, errands, journalEntries, ledgerAccounts, postings, type LedgerAccountType } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
 import { AgentsService } from '../agents/agents.service';
-import { ApiError, conflict, notFound } from '../common/errors';
+import { ApiError, conflict, notFound, unprocessable } from '../common/errors';
 import type { AuthContext } from '../auth/auth.types';
 import { InsufficientFunds, LedgerService, accountKey, transfer, type AccountRef } from './ledger.service';
 
 type ErrandRow = typeof errands.$inferSelect;
+
+/**
+ * Item money the customer can be charged from their wallet when support settles: the amount the agent sent
+ * with the receipt, on a purchase errand whose item amount was never locked (nothing is held for items).
+ */
+export const chargeableItemsKobo = (errand: { buy: boolean; itemAmountKobo: number | null }, heldItemsKobo: number) =>
+  errand.buy && heldItemsKobo === 0 ? (errand.itemAmountKobo ?? 0) : 0;
+
+/** How support shares out a disputed errand's money. Amounts in kobo; whatever is left goes back to the customer. */
+export interface DisputeSplit {
+  /** From the fee escrow, to the agent. */
+  agentKobo: number;
+  /** From the fee escrow, kept by Jiffo. */
+  jiffoKobo: number;
+  /** From the item escrow, to the agent. */
+  itemsToAgentKobo: number;
+  /** From the customer's wallet to the agent, for items bought but never locked. */
+  chargeCustomerKobo: number;
+}
 
 const HOUR_MS = 3_600_000;
 
@@ -157,6 +176,96 @@ export class WalletService {
         movements: [transfer(feeEscrow(after.id), customer, fee), transfer(itemEscrow(after.id), customer, items)],
       });
     }
+  }
+
+  /**
+   * Support settles a dispute by hand: the fee escrow goes to the agent, to Jiffo and back to the customer in
+   * the amounts given; the item escrow to the agent or back; and, when the customer never locked the item
+   * amount, up to that amount can be taken from their wallet for the agent. Posted under the errand's settle
+   * key, so the agent's earnings and the receipts read it like any other settlement.
+   */
+  async resolveDispute(
+    tx: Tx,
+    errand: ErrandRow,
+    split: DisputeSplit,
+    ctx: { settings: CountrySettings; currency: string; tier: AgentTier },
+  ) {
+    const { currency, tier } = ctx;
+    const [fee, items] = await Promise.all([
+      this.ledger.balance(tx, feeEscrow(errand.id), errand.countryCode),
+      this.ledger.balance(tx, itemEscrow(errand.id), errand.countryCode),
+    ]);
+    const refundKobo = fee - split.agentKobo - split.jiffoKobo;
+    const itemsRefundKobo = items - split.itemsToAgentKobo;
+    if (refundKobo < 0) {
+      throw unprocessable('split_too_large', 'The agent and Jiffo shares are more than the fee held', {
+        heldKobo: fee,
+      });
+    }
+    if (itemsRefundKobo < 0) {
+      throw unprocessable('items_too_large', 'More than the item money held', { heldKobo: items });
+    }
+    const chargeable = chargeableItemsKobo(errand, items);
+    if (split.chargeCustomerKobo > chargeable) {
+      throw unprocessable(
+        'charge_not_allowed',
+        "The customer's wallet can only be charged up to the item amount they never locked",
+        { chargeableKobo: chargeable },
+      );
+    }
+    const agentId = errand.agentId;
+    if (!agentId && split.agentKobo + split.itemsToAgentKobo + split.chargeCustomerKobo > 0) {
+      throw unprocessable('no_agent', 'This errand has no agent to pay');
+    }
+    const hold = holdsEarnings(tier);
+    const customer = wallet(errand.customerId);
+    try {
+      await this.ledger.post(tx, {
+        key: `errand:${errand.id}:settle`,
+        kind: 'settle',
+        countryCode: errand.countryCode,
+        currency,
+        errandId: errand.id,
+        data: {
+          tier,
+          agentKobo: split.agentKobo,
+          // Jiffo's share counts as the service fee first, then as commission, as at a normal hand-off.
+          serviceFeeKobo: Math.min(split.jiffoKobo, errand.serviceFeeKobo),
+          commissionKobo: split.jiffoKobo - Math.min(split.jiffoKobo, errand.serviceFeeKobo),
+          itemsKobo: split.itemsToAgentKobo + split.chargeCustomerKobo,
+          resolution: { refundKobo, itemsRefundKobo, chargeCustomerKobo: split.chargeCustomerKobo },
+        },
+        movements: agentId
+          ? [
+              transfer(feeEscrow(errand.id), hold ? held(agentId) : available(agentId), split.agentKobo),
+              transfer(feeEscrow(errand.id), REVENUE, split.jiffoKobo),
+              transfer(feeEscrow(errand.id), customer, refundKobo),
+              transfer(itemEscrow(errand.id), available(agentId), split.itemsToAgentKobo),
+              transfer(itemEscrow(errand.id), customer, itemsRefundKobo),
+              transfer(customer, available(agentId), split.chargeCustomerKobo),
+            ]
+          : [
+              transfer(feeEscrow(errand.id), REVENUE, split.jiffoKobo),
+              transfer(feeEscrow(errand.id), customer, refundKobo),
+              transfer(itemEscrow(errand.id), customer, itemsRefundKobo),
+            ],
+      });
+    } catch (error) {
+      if (error instanceof InsufficientFunds) {
+        throw conflict('customer_funds_low', "The customer's wallet doesn't hold that much. Charge less.");
+      }
+      throw error;
+    }
+    if (agentId && hold && split.agentKobo > 0) {
+      await tx.insert(earningHolds).values({
+        userId: agentId,
+        countryCode: errand.countryCode,
+        errandId: errand.id,
+        amountKobo: split.agentKobo,
+        availableAt: new Date(Date.now() + ctx.settings.timers.bronzePayoutHoldHours * HOUR_MS),
+      });
+    }
+    return { refundKobo, itemsRefundKobo };
   }
 
   /** Hand-off: the item money goes to the agent untouched; the fee escrow is shared out. */
@@ -323,7 +432,15 @@ export class WalletService {
   async settlements(errandIds: string[]) {
     const out = new Map<
       string,
-      { agentKobo: number; commissionKobo: number; itemsKobo: number; tipKobo: number; tier: string | null }
+      {
+        agentKobo: number;
+        commissionKobo: number;
+        itemsKobo: number;
+        tipKobo: number;
+        tier: string | null;
+        /** Settled by support, which may have shared the fee differently. */
+        bySupport: boolean;
+      }
     >();
     if (errandIds.length === 0) return out;
     const keys = errandIds.flatMap((id) => [`errand:${id}:settle`, `errand:${id}:tip`]);
@@ -343,12 +460,20 @@ export class WalletService {
       .where(inArray(journalEntries.key, keys));
     for (const r of rows) {
       if (!r.errandId) continue;
-      const entry = out.get(r.errandId) ?? { agentKobo: 0, commissionKobo: 0, itemsKobo: 0, tipKobo: 0, tier: null };
+      const entry = out.get(r.errandId) ?? {
+        agentKobo: 0,
+        commissionKobo: 0,
+        itemsKobo: 0,
+        tipKobo: 0,
+        tier: null,
+        bySupport: false,
+      };
       if (r.kind === 'settle') {
         entry.agentKobo = Number(r.data.agentKobo ?? 0);
         entry.commissionKobo = Number(r.data.commissionKobo ?? 0);
         entry.itemsKobo = Number(r.data.itemsKobo ?? 0);
         entry.tier = typeof r.data.tier === 'string' ? r.data.tier : null;
+        entry.bySupport = !!r.data.resolution;
       } else {
         entry.tipKobo = Number(r.amount);
       }
@@ -452,6 +577,8 @@ export class WalletService {
         amount: postings.amount,
         accountType: ledgerAccounts.type,
         kind: journalEntries.kind,
+        // Settled by support rather than at the hand-off.
+        resolved: sql<boolean>`${journalEntries.data} ? 'resolution'`,
         errandId: journalEntries.errandId,
         errandDescription: errands.description,
         createdAt: postings.createdAt,
@@ -468,7 +595,7 @@ export class WalletService {
       // Every person-facing account is owed by the platform, so a credit is money in.
       amountKobo: -r.amount,
       kind: r.kind,
-      label: HISTORY_LABELS[r.kind] ?? r.kind,
+      label: r.resolved ? 'Settled by Jiffo support' : (HISTORY_LABELS[r.kind] ?? r.kind),
       balance: r.accountType === 'agent_held' ? 'held' : 'available',
       errandId: r.errandId,
       /** What the errand was for, so a movement reads as more than its kind. */
