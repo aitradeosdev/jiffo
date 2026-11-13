@@ -10,7 +10,7 @@ import { DB, type Db } from '../src/db/database.module';
 import { ERRAND_TIMERS, type MemoryErrandTimers } from '../src/timers/errand-timers';
 import { RECURRING_JOBS, type MemoryRecurringJobs } from '../src/timers/recurring-jobs';
 import { PAYMENTS, type FakePaymentsAdapter } from '../src/adapters/payments';
-import { admins, adminSessions, deposits, type AdminRole } from '../src/db/schema';
+import { admins, adminSessions, agentApplications, deposits, type AdminRole } from '../src/db/schema';
 import { sha256 } from '../src/common/crypto';
 import { eq } from 'drizzle-orm';
 import type { AppName } from '../src/db/schema';
@@ -62,7 +62,7 @@ export interface Person {
 export async function signIn(
   t: TestApp,
   app: AppName,
-  options: { phone?: string; firstName?: string | null; ip?: string } = {},
+  options: { phone?: string; firstName?: string | null; ip?: string; unapproved?: boolean } = {},
 ): Promise<Person> {
   const phone = options.phone ?? randomPhone();
   const ip = options.ip ?? randomIp();
@@ -79,6 +79,13 @@ export async function signIn(
     refreshToken: res.body.refreshToken,
     headers: { Authorization: `Bearer ${res.body.accessToken}` },
   };
+  // Test agents are approved, as if they had finished their application, unless a test says otherwise.
+  if (app === 'agent' && !options.unapproved) {
+    await t.db
+      .insert(agentApplications)
+      .values({ userId: person.userId, countryCode: 'NG', status: 'approved', decidedAt: new Date() })
+      .onConflictDoNothing();
+  }
   const firstName = options.firstName === undefined ? (app === 'customer' ? 'Ada' : 'Tunde') : options.firstName;
   if (firstName) await request(t.http).patch('/v1/me').set(person.headers).send({ firstName }).expect(200);
   return person;

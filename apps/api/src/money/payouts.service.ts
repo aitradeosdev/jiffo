@@ -14,6 +14,7 @@ import { nameWords, plainName } from '../common/names';
 import { LedgerService, transfer } from './ledger.service';
 import { WalletService } from './wallet.service';
 import { AgentsService } from '../agents/agents.service';
+import { AgentApplicationService, matchesLegalName } from '../agents/application.service';
 
 type PayoutRow = typeof payouts.$inferSelect;
 const BANKS_TTL_MS = 24 * 3_600_000;
@@ -49,6 +50,7 @@ export class PayoutsService {
     private readonly ledger: LedgerService,
     private readonly wallet: WalletService,
     private readonly agents: AgentsService,
+    private readonly applications: AgentApplicationService,
     private readonly countries: CountriesService,
     private readonly push: PushService,
     private readonly realtime: RealtimeGateway,
@@ -84,8 +86,9 @@ export class PayoutsService {
   }
 
   /**
-   * Saves the agent's payout account. The bank's name for the account must contain the agent's first
-   * and last name. Once identity checks are in, this matches the verified ID name instead of the profile.
+   * Saves the agent's payout account. The bank's name for the account must be the agent's: once the
+   * provider has checked their NIN, every word of it must be in the legal name on the NIN record;
+   * before that, it must contain the first and last name in the app.
    */
   async setAccount(auth: AuthContext, bankCode: string, accountNumber: string) {
     const [me] = await this.db.select().from(users).where(eq(users.id, auth.userId));
@@ -100,8 +103,12 @@ export class PayoutsService {
       if (error instanceof PaystackError) throw unprocessable('account_not_found', 'Check the account number and bank');
       throw error;
     }
+    const legalName = await this.applications.legalName(auth.userId);
     const held = nameWords(accountName);
-    if (!held.has(plainName(me.firstName)) || !held.has(plainName(me.lastName))) {
+    const own = legalName
+      ? matchesLegalName(accountName, legalName)
+      : held.has(plainName(me.firstName)) && held.has(plainName(me.lastName));
+    if (!own) {
       throw unprocessable('account_name_mismatch', 'The account must be in your own name', { accountName });
     }
 
