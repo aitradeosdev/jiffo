@@ -93,6 +93,8 @@ interface CustomerIdentity {
   decidedBy: string | null;
   decisionNote: string | null;
   createdAt: string;
+  /** The provider gave the ID's number, so a second account on it can be caught; needed to verify. */
+  hasIdNumber: boolean;
 }
 
 /** The agent's application: the provider's results and what the agent typed, never their documents. */
@@ -607,6 +609,7 @@ function IdentityCard({
               id={id}
               status={identity.status}
               failed={identity.checks.filter((c) => c.outcome === 'failed').map((c) => c.label)}
+              noIdNumber={!identity.hasIdNumber}
             />
           </div>
         ) : null}

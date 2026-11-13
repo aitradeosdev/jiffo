@@ -6,6 +6,7 @@ import { admins, customerVerifications, users } from '../db/schema';
 import { CustomerIdentityService } from '../identity/customer-identity.service';
 import { PushService } from '../push/push.service';
 import { AuditService } from './audit.service';
+import { SUPPORT_CHECK_LABELS, type Check } from './check-labels';
 import { requireCountry } from './countries';
 import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
@@ -13,17 +14,9 @@ import type { AdminContext } from './admin.types';
 export const ID_CHECK_STATUSES = ['review', 'checking', 'failed', 'verified', 'declined'] as const;
 export type IdCheckStatus = (typeof ID_CHECK_STATUSES)[number];
 
-type Check = { key: string; outcome: string; note?: string };
 /** Each check as support reads it. */
 const LABELS: Record<string, string> = {
-  nin: 'NIN matches their details',
-  bvn: 'BVN matches their details',
-  drivers_licence: "Driver's licence matches their details",
-  voters_card: "Voter's card matches their details",
-  passport: 'Passport matches their details',
-  id_type: 'An ID we accept',
-  selfie: 'Selfie matches the ID photo',
-  age: '18 or older',
+  ...SUPPORT_CHECK_LABELS,
   duplicate: 'No other customer account on this ID',
 };
 const labelled = (checks: Check[]) => checks.map((c) => ({ ...c, label: LABELS[c.key] ?? c.key }));
@@ -143,12 +136,22 @@ export class IdChecksAdminService {
         decidedBy: admins.name,
         decisionNote: customerVerifications.decisionNote,
         createdAt: customerVerifications.createdAt,
+        held: customerVerifications.idFingerprint,
+        pending: customerVerifications.pendingIdFingerprint,
       })
       .from(customerVerifications)
       .leftJoin(admins, eq(admins.id, customerVerifications.decidedBy))
       .where(eq(customerVerifications.userId, userId));
     if (!row) return null;
-    return { ...row, provider: providerName(row.provider), idName: idName(row.idType), checks: labelled(row.checks) };
+    const { held, pending, ...rest } = row;
+    return {
+      ...rest,
+      provider: providerName(row.provider),
+      idName: idName(row.idType),
+      checks: labelled(row.checks),
+      /** The provider gave the ID's number, so a second account on it can be caught; needed to verify. */
+      hasIdNumber: !!(held ?? pending),
+    };
   }
 
   async decide(

@@ -88,11 +88,42 @@ describe("admin: customers' ID checks", () => {
       .select()
       .from(customerVerifications)
       .where(eq(customerVerifications.userId, second.userId));
-    expect(row!.status).toBe('failed');
+    // Reopened: no decision stands.
+    expect(row).toMatchObject({ status: 'failed', decidedAt: null, decidedBy: null, decisionNote: null });
     await request(t.http)
       .post('/v1/me/identity')
       .set(second.headers)
       .send({ consent: true, idType: 'nin', idNumber: `5${String(Date.now()).slice(-6)}4567` })
       .expect(200);
+    const [fresh] = await t.db
+      .select()
+      .from(customerVerifications)
+      .where(eq(customerVerifications.userId, second.userId));
+    // A new check waits from when it started.
+    expect(Date.now() - fresh!.createdAt.getTime()).toBeLessThan(60_000);
+  });
+
+  it("won't verify a check with a failed result, or one without the ID's number; the overview counts the queue", async () => {
+    const who = await customerChecked(passport('1111'));
+    const overview = await request(t.http).get('/v1/admin/overview?country=NG').set(ops.headers).expect(200);
+    expect(overview.body.attention.idChecks).toBeGreaterThanOrEqual(1);
+    // The provider gave no number (as a provider's own page may not): another account couldn't be caught.
+    await t.db
+      .update(customerVerifications)
+      .set({ pendingIdFingerprint: null })
+      .where(eq(customerVerifications.userId, who.userId));
+    const person = await request(t.http).get(`/v1/admin/people/${who.userId}`).set(ops.headers).expect(200);
+    expect(person.body.customer.identity.hasIdNumber).toBe(false);
+    await decide(who, { decision: 'verify', note: 'Selfie fine on a second look' })
+      .expect(409)
+      .expect(/no_id_number/);
+    // A failed check can only be declined, whatever asks.
+    await t.db
+      .update(customerVerifications)
+      .set({ checks: [{ key: 'age', outcome: 'failed', note: 'Customers must be 18 or older' }] })
+      .where(eq(customerVerifications.userId, who.userId));
+    await decide(who, { decision: 'verify', note: 'They look older than that' })
+      .expect(409)
+      .expect(/check_failed/);
   });
 });

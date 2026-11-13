@@ -116,6 +116,11 @@ export class CustomerIdentityService implements IdentityOwner {
       idFingerprint: null,
       pendingIdFingerprint: started.pendingFingerprint,
       checkedAt: null,
+      // A new check: no decision yet, and its waiting time counts from now.
+      decidedAt: null,
+      decidedBy: null,
+      decisionNote: null,
+      createdAt: new Date(),
       updatedAt: new Date(),
     };
     await this.db
@@ -270,23 +275,34 @@ export class CustomerIdentityService implements IdentityOwner {
     };
     let set: Partial<Verification>;
     if (input.decision === 'verify') {
-      const fingerprint = before.idFingerprint ?? before.pendingIdFingerprint;
-      if (fingerprint) {
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'cid:' + fingerprint}))`);
-        const [holder] = await tx
-          .select({ userId: customerVerifications.userId })
-          .from(customerVerifications)
-          .where(
-            and(eq(customerVerifications.idFingerprint, fingerprint), ne(customerVerifications.userId, input.userId)),
-          );
-        if (holder) throw conflict('id_held', 'Another customer account is verified with this ID');
+      const failed = before.checks.filter((c) => c.outcome === 'failed');
+      if (failed.length) {
+        throw conflict('check_failed', 'A check failed, so this can only be declined', {
+          failed: failed.map((c) => c.key),
+        });
       }
+      // Without the ID's number nobody can tell whether another account uses the ID: a new check is needed.
+      const fingerprint = before.idFingerprint ?? before.pendingIdFingerprint;
+      if (!fingerprint) {
+        throw conflict(
+          'no_id_number',
+          "The provider didn't give the ID's number, so we can't make sure no other account uses it. Decline it, saying to check again.",
+        );
+      }
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'cid:' + fingerprint}))`);
+      const [holder] = await tx
+        .select({ userId: customerVerifications.userId })
+        .from(customerVerifications)
+        .where(
+          and(eq(customerVerifications.idFingerprint, fingerprint), ne(customerVerifications.userId, input.userId)),
+        );
+      if (holder) throw conflict('id_held', 'Another customer account is verified with this ID');
       set = { status: 'verified', idFingerprint: fingerprint, pendingIdFingerprint: null, ...decided };
     } else if (input.decision === 'decline') {
       set = { status: 'declined', ...decided };
     } else {
-      // Back to a check that didn't pass, which the customer can try again.
-      set = { status: 'failed', ...decided, decisionNote: null };
+      // Back to a check that didn't pass, which the customer can try again; no decision stands.
+      set = { status: 'failed', decidedAt: null, decidedBy: null, decisionNote: null, updatedAt: new Date() };
     }
     const [after] = await tx
       .update(customerVerifications)

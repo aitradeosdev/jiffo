@@ -233,7 +233,18 @@ const ID_DECISION_COPY: Record<IdDecision, { about: string; reason: string; exam
  * What support can do with a customer's ID check: verify or decline one in review; verify one declined by
  * mistake, or reopen it for the customer. Each asks for a reason. One with a failed check can't be verified.
  */
-export function IdDecisionForm({ id, status, failed }: { id: string; status: string; failed: string[] }) {
+export function IdDecisionForm({
+  id,
+  status,
+  failed,
+  noIdNumber,
+}: {
+  id: string;
+  status: string;
+  failed: string[];
+  /** The provider didn't give the ID's number: another account on it couldn't be caught, so no verifying. */
+  noIdNumber: boolean;
+}) {
   const [state, action] = useActionState<PersonState, FormData>(decideIdentity, {});
   const [decision, setDecision] = useState<IdDecision | null>(null);
   if (!decision) {
@@ -243,7 +254,7 @@ export function IdDecisionForm({ id, status, failed }: { id: string; status: str
           <button
             type="button"
             className={buttonClass('primary', true)}
-            disabled={failed.length > 0}
+            disabled={failed.length > 0 || noIdNumber}
             onClick={() => setDecision('verify')}
           >
             Verify
@@ -260,6 +271,11 @@ export function IdDecisionForm({ id, status, failed }: { id: string; status: str
         </div>
         {failed.length ? (
           <p className="text-[13px] text-ink-3">{failed.join(', ')} failed, so this check can only be declined.</p>
+        ) : noIdNumber ? (
+          <p className="text-[13px] text-ink-3">
+            The provider didn&apos;t give the ID&apos;s number, so we can&apos;t make sure no other account uses it.
+            Decline it, saying to check again.
+          </p>
         ) : null}
       </div>
     );
