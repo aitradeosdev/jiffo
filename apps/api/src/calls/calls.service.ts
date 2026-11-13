@@ -6,6 +6,7 @@ import { ProvidersService } from '../providers/providers.service';
 import type { AuthContext } from '../auth/auth.types';
 import { ChatService } from '../chat/chat.service';
 import { conflict, notFound, tooMany, unavailable } from '../common/errors';
+import { safeEqual } from '../common/crypto';
 import { DB, type Db } from '../db/database.module';
 import { errandCalls, errands, users } from '../db/schema';
 import { participantRole } from '../errands/access';
@@ -37,19 +38,28 @@ export class CallsService {
    */
   async answered(provider: string, token: string, body: Record<string, string | undefined>) {
     const adapter = this.providers.named('calls', provider);
-    if (!adapter?.connect || token !== this.providers.callbackToken('calls', provider)) {
-      throw notFound('not_found', 'Not found');
-    }
+    const expected = this.providers.callbackToken('calls', provider);
+    if (!adapter?.connect || !expected || !safeEqual(token, expected)) throw notFound('not_found', 'Not found');
     // Sent again when the call ends, with isActive 0: nothing to do then.
     if (body.isActive !== '1') return { contentType: 'text/plain', body: '' };
     const [row] = body.sessionId
       ? await this.db
-          .select({ calleeId: errandCalls.calleeId, status: errands.status })
+          .select({
+            callerId: errandCalls.callerId,
+            calleeId: errandCalls.calleeId,
+            status: errands.status,
+            customerId: errands.customerId,
+            agentId: errands.agentId,
+          })
           .from(errandCalls)
           .innerJoin(errands, eq(errands.id, errandCalls.errandId))
           .where(and(eq(errandCalls.provider, provider), eq(errandCalls.providerRef, body.sessionId)))
       : [];
-    if (!row || !CALLABLE_STATES.has(row.status)) return adapter.connect(null);
+    // Both still on the errand: a call placed before the agent changed doesn't reach the one who left.
+    const onErrand = (id: string) => id === row?.customerId || id === row?.agentId;
+    if (!row || !CALLABLE_STATES.has(row.status) || !onErrand(row.callerId) || !onErrand(row.calleeId)) {
+      return adapter.connect(null);
+    }
     const [callee] = await this.db.select({ phone: users.phone }).from(users).where(eq(users.id, row.calleeId));
     return adapter.connect(callee?.phone ?? null);
   }
@@ -65,6 +75,8 @@ export class CallsService {
    */
   async call(errandId: string, auth: AuthContext) {
     if (!this.available) throw notAvailable();
+    // One provider for the whole call: the row records the one that rings.
+    const calls = this.providers.current('calls');
     const { row, errand, role, callerName, calleeName } = await this.db.transaction(async (tx) => {
       // One at a time per caller and errand, so two quick taps can't both ring.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`call:${errandId}:${auth.userId}`}))`);
@@ -109,12 +121,12 @@ export class CallsService {
         .where(inArray(users.id, [auth.userId, calleeId]));
       const [inserted] = await tx
         .insert(errandCalls)
-        .values({ errandId, callerId: auth.userId, calleeId, callerRole: role, provider: this.calls.name })
+        .values({ errandId, callerId: auth.userId, calleeId, callerRole: role, provider: calls.name })
         .returning();
       // Rung inside the transaction: if the provider refuses, nothing is kept and the next tap rings at once.
       let providerRef: string;
       try {
-        ({ providerRef } = await this.calls.bridge({
+        ({ providerRef } = await calls.bridge({
           reference: inserted!.id,
           from: people.find((p) => p.id === auth.userId)!.phone,
           to: people.find((p) => p.id === calleeId)!.phone,

@@ -21,6 +21,8 @@ const DONE: Record<string, string> = {
   on: 'Switched on. New requests use it now; things already started finish where they began.',
   off: "Switched off. The server's own setting is used now.",
   removed: 'Removed, with its keys.',
+  callback:
+    "New callback address made. Set it in the provider's dashboard now: the old one stops working within 30 seconds.",
 };
 
 /** What a category uses while no provider is switched on. */

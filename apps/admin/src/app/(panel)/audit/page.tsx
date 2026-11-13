@@ -92,6 +92,8 @@ function describe(entry: Entry, names: Map<string, string>, currencyOf: (code: s
       const to = entry.data.to ? (providerInfo(category, String(entry.data.to))?.name ?? String(entry.data.to)) : null;
       return to ? `Switched ${label} to ${to}` : `Switched ${label} back to the server's own setting`;
     }
+    case 'provider.callback':
+      return `Made a new callback address for ${String(entry.data.name)}`;
     case 'provider.remove':
       return `Removed ${String(entry.data.name)} settings and keys`;
     case 'application.approve':

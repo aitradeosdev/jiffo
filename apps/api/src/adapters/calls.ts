@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { africasTalkingCheck, africasTalkingVoice, e164Digits, PROVIDER_TIMEOUT_MS } from './africastalking';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -61,7 +62,6 @@ export class CallsProviderError extends Error {}
  */
 export class AfricasTalkingCallsAdapter implements CallsAdapter {
   readonly name = 'africastalking';
-  private readonly base: string;
 
   constructor(
     private readonly username: string,
@@ -69,15 +69,10 @@ export class AfricasTalkingCallsAdapter implements CallsAdapter {
     /** Jiffo's voice number with Africa's Talking, in +234… form. */
     private readonly phoneNumber: string,
     private readonly fetchImpl: typeof fetch = fetch,
-  ) {
-    this.base =
-      username.toLowerCase() === 'sandbox'
-        ? 'https://voice.sandbox.africastalking.com'
-        : 'https://voice.africastalking.com';
-  }
+  ) {}
 
   async bridge(input: { reference: string; from: string; to: string }) {
-    const res = await this.fetchImpl(`${this.base}/call`, {
+    const res = await request(this.fetchImpl, "Africa's Talking", `${africasTalkingVoice(this.username)}/call`, {
       method: 'POST',
       headers: { apikey: this.apiKey, accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -102,9 +97,8 @@ export class AfricasTalkingCallsAdapter implements CallsAdapter {
 
   /** With no one to connect (an unknown or ended call), the caller hears why and the call ends. */
   connect(to: string | null) {
-    const attr = (v: string) => v.replace(/[^+\d]/g, '');
     const action = to
-      ? `<Dial phoneNumbers="${attr(to)}" callerId="${attr(this.phoneNumber)}" record="false"/>`
+      ? `<Dial phoneNumbers="${e164Digits(to)}" callerId="${e164Digits(this.phoneNumber)}" record="false"/>`
       : '<Say>Sorry, this call can no longer be connected. Please use the chat in the Jiffo app.</Say>';
     return {
       contentType: 'application/xml',
@@ -112,18 +106,8 @@ export class AfricasTalkingCallsAdapter implements CallsAdapter {
     };
   }
 
-  /** For the panel's Test button: the account and its balance. Rings no one. */
-  async check() {
-    const api =
-      this.username.toLowerCase() === 'sandbox'
-        ? 'https://api.sandbox.africastalking.com'
-        : 'https://api.africastalking.com';
-    const res = await this.fetchImpl(`${api}/version1/user?username=${encodeURIComponent(this.username)}`, {
-      headers: { apikey: this.apiKey, accept: 'application/json' },
-    });
-    const body = (await res.json().catch(() => null)) as { UserData?: { balance?: string } } | null;
-    if (!res.ok) throw new Error(`Africa's Talking answered ${res.status}`);
-    return `Connected. Balance: ${body?.UserData?.balance ?? 'not shown'}`;
+  check() {
+    return africasTalkingCheck(this.username, this.apiKey, this.fetchImpl);
   }
 }
 
@@ -147,9 +131,10 @@ export class TwilioCallsAdapter implements CallsAdapter {
   }
 
   async bridge(input: { reference: string; from: string; to: string }) {
-    const digits = (v: string) => v.replace(/[^+\d]/g, '');
-    const twiml = `<Response><Dial callerId="${digits(this.fromNumber)}" record="do-not-record"><Number>${digits(input.to)}</Number></Dial></Response>`;
-    const res = await this.fetchImpl(
+    const twiml = `<Response><Dial callerId="${e164Digits(this.fromNumber)}" record="do-not-record"><Number>${e164Digits(input.to)}</Number></Dial></Response>`;
+    const res = await request(
+      this.fetchImpl,
+      'Twilio',
       `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(this.accountSid)}/Calls.json`,
       {
         method: 'POST',
@@ -167,11 +152,20 @@ export class TwilioCallsAdapter implements CallsAdapter {
   async check() {
     const res = await this.fetchImpl(
       `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(this.accountSid)}.json`,
-      { headers: { authorization: this.auth() } },
+      { headers: { authorization: this.auth() }, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) },
     );
     const json = (await res.json().catch(() => null)) as { status?: string; message?: string } | null;
     if (!res.ok) throw new Error(`Twilio answered ${res.status}: ${json?.message ?? 'no details'}`);
     if (json?.status !== 'active') throw new Error(`The Twilio account is ${json?.status ?? 'not active'}`);
     return 'Connected. The account is active.';
+  }
+}
+
+/** A request to a calls provider, with a time limit; no answer at all is the provider failing too. */
+async function request(fetchImpl: typeof fetch, who: string, url: string, init: RequestInit) {
+  try {
+    return await fetchImpl(url, { ...init, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) });
+  } catch (error) {
+    throw new CallsProviderError(`${who} didn't answer: ${(error as Error).message}`);
   }
 }

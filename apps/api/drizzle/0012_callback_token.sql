@@ -1,0 +1,2 @@
+ALTER TABLE "provider_settings" ADD COLUMN "callback_token" text;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "errand_calls_provider_ref_idx" ON "errand_calls" USING btree ("provider","provider_ref");

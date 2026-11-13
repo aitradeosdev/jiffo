@@ -78,3 +78,15 @@ export async function removeProvider(_: ProviderState, form: FormData): Promise<
   back(category, provider, 'removed');
   return {};
 }
+
+/** A new callback address, should the old one have leaked; it must then be set in the provider's dashboard. */
+export async function renewCallback(_: ProviderState, form: FormData): Promise<ProviderState> {
+  const { category, provider } = target(form);
+  try {
+    await api(`/admin/providers/${category}/${provider}/callback`, { method: 'POST' });
+  } catch (error) {
+    return { error: messageOf(error) };
+  }
+  back(category, provider, 'callback');
+  return {};
+}

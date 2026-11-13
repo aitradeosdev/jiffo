@@ -136,6 +136,21 @@ describe('masked calls', () => {
       expect((await answer({ isActive: '1', sessionId: 'someone-else' })).text).toContain('<Say>');
       expect((await answer({ isActive: '0', sessionId: 'ATVId_42' })).text).toBe('');
       await answer({ isActive: '1', sessionId: 'ATVId_42' }, path.replace(/[0-9a-f]{32}$/, '0'.repeat(32))).expect(404);
+
+      // The agent changed before the caller answered: the one who left isn't rung.
+      const other = await signIn(t, 'agent');
+      await t.db.update(errands).set({ agentId: other.userId }).where(eq(errands.id, errand.id));
+      expect((await answer({ isActive: '1', sessionId: 'ATVId_42' })).text).toContain('<Say>');
+      await t.db.update(errands).set({ agentId: agent.userId }).where(eq(errands.id, errand.id));
+
+      // A new address, should the old one leak: the old one stops working.
+      await panel('post', '/calls/africastalking/callback').expect(200);
+      await answer({ isActive: '1', sessionId: 'ATVId_42' }).expect(404);
+      const renewed = await request(t.http).get('/v1/admin/providers').set(admin.headers).expect(200);
+      const next: string = renewed.body.categories
+        .find((c: { category: string }) => c.category === 'calls')
+        .providers.find((p: { key: string }) => p.key === 'africastalking').webhookUrl;
+      expect((await answer({ isActive: '1', sessionId: 'ATVId_42' }, new URL(next).pathname)).text).toContain('<Dial');
     });
   });
 });

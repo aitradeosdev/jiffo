@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, count, eq, gt, inArray, sql } from 'drizzle-orm';
 import {
@@ -73,9 +74,12 @@ export class ProvidersAdminService {
             name: p.name,
             about: p.about,
             fields: p.fields,
-            webhookUrl: p.webhookPath
-              ? `${this.config.PUBLIC_API_URL}${p.webhookPath.replace('{token}', this.providers.callbackToken(category, p.key))}`
-              : null,
+            // A callback address with a token exists once the settings are saved.
+            webhookUrl:
+              p.webhookPath && (!p.webhookPath.includes('{token}') || row?.callbackToken)
+                ? `${this.config.PUBLIC_API_URL}${p.webhookPath.replace('{token}', row?.callbackToken ?? '')}`
+                : null,
+            hasCallbackToken: !!p.webhookPath?.includes('{token}'),
             webhookHint: p.webhookHint ?? null,
             saved: !!row,
             complete: this.complete(row, category, p.key),
@@ -176,7 +180,8 @@ export class ProvidersAdminService {
         if (before) {
           await tx.update(providerSettings).set(values).where(eq(providerSettings.id, before.id));
         } else {
-          await tx.insert(providerSettings).values({ category, provider, ...values });
+          const callbackToken = info.webhookPath?.includes('{token}') ? randomBytes(16).toString('hex') : null;
+          await tx.insert(providerSettings).values({ category, provider, callbackToken, ...values });
         }
         await this.audit.record(tx, admin, {
           action: 'provider.save',
@@ -185,6 +190,32 @@ export class ProvidersAdminService {
           data: { category, provider, name: info.name, changed },
         });
         return { changed };
+      })
+      .finally(() => this.providers.reload());
+  }
+
+  /**
+   * A new callback address for a provider that calls us, should the old one have leaked. The old one stops
+   * working within 30 seconds, so the new one must be set in the provider's dashboard straight away.
+   */
+  async newCallbackToken(admin: AdminContext, category: ProviderCategory, provider: string) {
+    const info = this.info(category, provider);
+    if (!info.webhookPath?.includes('{token}')) throw badRequest('no_callback', `${info.name} has no callback address`);
+    return this.db
+      .transaction(async (tx) => {
+        const [row] = await tx
+          .update(providerSettings)
+          .set({ callbackToken: randomBytes(16).toString('hex') })
+          .where(and(eq(providerSettings.category, category), eq(providerSettings.provider, provider)))
+          .returning({ id: providerSettings.id });
+        if (!row) throw conflict('provider_not_saved', 'Save the settings first');
+        await this.audit.record(tx, admin, {
+          action: 'provider.callback',
+          targetType: 'provider',
+          targetId: `${category}:${provider}`,
+          data: { category, provider, name: info.name },
+        });
+        return { renewed: true };
       })
       .finally(() => this.providers.reload());
   }

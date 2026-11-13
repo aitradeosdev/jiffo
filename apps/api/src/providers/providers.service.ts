@@ -1,4 +1,3 @@
-import { createHmac, hkdfSync } from 'node:crypto';
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { PROVIDER_CATEGORIES, type ProviderCategory } from '@jiffo/shared';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
@@ -25,7 +24,6 @@ export const secretBinding = (category: string, provider: string) => `provider:$
 export class ProvidersService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ProvidersService.name);
   readonly box: SecretBox;
-  private readonly callbackKey: Buffer;
   private rows = new Map<string, Row>();
   private active = new Map<ProviderCategory, string>();
   /** Built adapters, kept while their settings are unchanged. */
@@ -37,11 +35,7 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
     @Inject(APP_CONFIG) config: AppConfig,
     @Inject(ENV_ADAPTERS) private readonly env: Adapters,
   ) {
-    const master = secretsKeyFrom(config);
-    this.box = new SecretBox(master);
-    this.callbackKey = Buffer.from(
-      hkdfSync('sha256', Buffer.from(master, 'hex'), Buffer.alloc(0), 'jiffo callbacks', 32),
-    );
+    this.box = new SecretBox(secretsKeyFrom(config));
   }
 
   async onModuleInit() {
@@ -122,12 +116,9 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
     return { ...row.config, ...secrets };
   }
 
-  /**
-   * The secret part of a callback address for a provider that calls us without signing its requests
-   * (Africa's Talking Voice). Derived from the master key, so it is stable and needs no storing.
-   */
+  /** The secret part of a provider's callback address, or null before its settings are saved. */
   callbackToken(category: string, provider: string) {
-    return createHmac('sha256', this.callbackKey).update(`callback:${category}:${provider}`).digest('hex').slice(0, 32);
+    return this.rows.get(`${category}:${provider}`)?.callbackToken ?? null;
   }
 
   /** What the environment uses for each category, for the panel to show when nothing is switched on. */

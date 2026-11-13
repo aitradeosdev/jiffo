@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { unavailable } from '../common/errors';
+import { africasTalkingApi, africasTalkingCheck, PROVIDER_TIMEOUT_MS } from './africastalking';
 
 /** SMS and one-time codes. Each provider (Termii, Africa's Talking, ...) is one implementation. */
 export interface MessagingAdapter {
@@ -81,23 +82,14 @@ const AT_ACCEPTED = new Set([100, 101, 102]);
  */
 export class AfricasTalkingMessagingAdapter implements MessagingAdapter {
   readonly name = 'africastalking';
-  private readonly base: string;
+  private readonly logger = new Logger('AfricasTalkingSms');
 
   constructor(
     private readonly username: string,
     private readonly apiKey: string,
     private readonly senderId?: string,
     private readonly fetchImpl: typeof fetch = fetch,
-  ) {
-    this.base =
-      username.toLowerCase() === 'sandbox'
-        ? 'https://api.sandbox.africastalking.com'
-        : 'https://api.africastalking.com';
-  }
-
-  private headers() {
-    return { apikey: this.apiKey, accept: 'application/json' };
-  }
+  ) {}
 
   async sendOtp(phone: string, code: string, ttlSeconds: number) {
     const body = new URLSearchParams({
@@ -107,29 +99,36 @@ export class AfricasTalkingMessagingAdapter implements MessagingAdapter {
       bulkSMSMode: '1',
       ...(this.senderId ? { from: this.senderId } : {}),
     });
-    const res = await this.fetchImpl(`${this.base}/version1/messaging`, {
-      method: 'POST',
-      headers: { ...this.headers(), 'content-type': 'application/x-www-form-urlencoded' },
-      body,
-    }).catch(() => null);
-    const json = res
-      ? ((await res.json().catch(() => null)) as {
-          SMSMessageData?: { Recipients?: Array<{ statusCode?: number; status?: string }> };
-        } | null)
-      : null;
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${africasTalkingApi(this.username)}/version1/messaging`, {
+        method: 'POST',
+        headers: {
+          apikey: this.apiKey,
+          accept: 'application/json',
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body,
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      });
+    } catch (error) {
+      this.logger.warn(`Sign-in code not sent: ${(error as Error).message}`);
+      throw unavailable('sms_failed', 'We could not send the code. Try again in a moment.');
+    }
+    const json = (await res.json().catch(() => null)) as {
+      SMSMessageData?: { Message?: string; Recipients?: Array<{ statusCode?: number; status?: string }> };
+    } | null;
     const recipient = json?.SMSMessageData?.Recipients?.[0];
-    if (!res || res.status !== 201 || !recipient || !AT_ACCEPTED.has(Number(recipient.statusCode))) {
+    if (res.status !== 201 || !recipient || !AT_ACCEPTED.has(Number(recipient.statusCode))) {
+      // Why, without the number: an empty balance, an unapproved sender ID and an outage look alike to the person.
+      this.logger.warn(
+        `Sign-in code not sent: HTTP ${res.status}, ${recipient ? `${recipient.statusCode} ${recipient.status}` : (json?.SMSMessageData?.Message ?? 'no recipient')}`,
+      );
       throw unavailable('sms_failed', 'We could not send the code. Try again in a moment.');
     }
   }
 
-  /** For the panel's Test button: the account and its balance. Sends nothing. */
-  async check() {
-    const res = await this.fetchImpl(`${this.base}/version1/user?username=${encodeURIComponent(this.username)}`, {
-      headers: this.headers(),
-    });
-    const body = (await res.json().catch(() => null)) as { UserData?: { balance?: string } } | null;
-    if (!res.ok) throw new Error(`Africa's Talking answered ${res.status}`);
-    return `Connected. Balance: ${body?.UserData?.balance ?? 'not shown'}`;
+  check() {
+    return africasTalkingCheck(this.username, this.apiKey, this.fetchImpl);
   }
 }
