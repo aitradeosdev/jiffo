@@ -15,6 +15,7 @@ import { FakePaymentsAdapter, PAYMENTS, PaystackPaymentsAdapter, type PaymentsAd
 import { FakeMapsAdapter, GoogleMapsAdapter, MAPS, type MapsAdapter } from './maps';
 import { MemoryStorageAdapter, S3StorageAdapter, STORAGE, type StorageAdapter } from './storage';
 import { FakeIdentityAdapter, IDENTITY, UnconfiguredIdentityAdapter, type IdentityAdapter } from './identity';
+import { CALLS, FakeCallsAdapter, UnconfiguredCallsAdapter, type CallsAdapter } from './calls';
 
 /**
  * Picks one implementation per port from the environment. Admin-selected providers (identity, payments)
@@ -36,6 +37,15 @@ import { FakeIdentityAdapter, IDENTITY, UnconfiguredIdentityAdapter, type Identi
             return new UnconfiguredIdentityAdapter();
         }
       },
+    },
+    {
+      provide: CALLS,
+      inject: [APP_CONFIG],
+      // The fake never runs in production, where it would tell people a phone is ringing when none is.
+      useFactory: (c: AppConfig): CallsAdapter =>
+        c.CALLS_PROVIDER === 'fake' && c.NODE_ENV !== 'production'
+          ? new FakeCallsAdapter()
+          : new UnconfiguredCallsAdapter(),
     },
     {
       provide: MESSAGING,
@@ -93,6 +103,6 @@ import { FakeIdentityAdapter, IDENTITY, UnconfiguredIdentityAdapter, type Identi
       useFactory: (db: Db): ChatAdapter => new BuiltinChatAdapter(db),
     },
   ],
-  exports: [IDENTITY, MESSAGING, PUSH, PAYMENTS, MAPS, STORAGE, CHAT],
+  exports: [CALLS, IDENTITY, MESSAGING, PUSH, PAYMENTS, MAPS, STORAGE, CHAT],
 })
 export class AdaptersModule {}

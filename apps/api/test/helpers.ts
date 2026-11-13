@@ -10,6 +10,7 @@ import { DB, type Db } from '../src/db/database.module';
 import { ERRAND_TIMERS, type MemoryErrandTimers } from '../src/timers/errand-timers';
 import { RECURRING_JOBS, type MemoryRecurringJobs } from '../src/timers/recurring-jobs';
 import { PAYMENTS, type FakePaymentsAdapter } from '../src/adapters/payments';
+import { CALLS, type FakeCallsAdapter } from '../src/adapters/calls';
 import { admins, adminSessions, agentApplications, deposits, type AdminRole } from '../src/db/schema';
 import { sha256 } from '../src/common/crypto';
 import { eq } from 'drizzle-orm';
@@ -25,6 +26,7 @@ export interface TestApp {
   timers: MemoryErrandTimers;
   jobs: MemoryRecurringJobs;
   payments: FakePaymentsAdapter;
+  calls: FakeCallsAdapter;
   close: () => Promise<void>;
 }
 
@@ -42,6 +44,7 @@ export async function createTestApp(): Promise<TestApp> {
     timers: app.get(ERRAND_TIMERS),
     jobs: app.get(RECURRING_JOBS),
     payments: app.get(PAYMENTS),
+    calls: app.get(CALLS),
     close: () => app.close(),
   };
 }

@@ -20,6 +20,7 @@ import { useSession } from '@/auth/session';
 import { errorMessage } from '@/api/client';
 import { pickPhoto, uploadPhoto } from '@/api/upload';
 import { useRealtimeEvent } from '@/realtime/realtime';
+import { CallButton, canCall } from '@/errands/call';
 import { CustomerCards } from '@/errands/chat-cards';
 import { Segments } from '@/errands/progress';
 import { customerStage } from '@/errands/stage';
@@ -36,6 +37,8 @@ export interface ChatMessage {
   senderRole: 'customer' | 'agent' | 'system';
   kind: 'text' | 'system' | 'photo';
   body: string;
+  /** For timeline notes: what they are about, such as { type: 'call' }. */
+  data?: Record<string, unknown>;
   photoUrl: string | null;
   clientId: string | null;
   createdAt: string;
@@ -142,6 +145,9 @@ export default function Chat() {
               {status}
             </Text>
           </View>
+          {errand && canCall(errand.status) ? (
+            <CallButton errandId={errand.id} name={otherName} style={{ backgroundColor: 'transparent' }} />
+          ) : null}
         </View>
         {errand ? <Pinned errand={errand} /> : null}
 
@@ -297,7 +303,8 @@ function Message({
   otherName: string;
 }) {
   const c = useColors();
-  if (message.kind === 'system') return <SysLine icon="info" text={message.body} />;
+  if (message.kind === 'system')
+    return <SysLine icon={message.data?.type === 'call' ? 'phone' : 'info'} text={message.body} />;
   const bubble = (
     <View
       style={[

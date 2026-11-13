@@ -33,6 +33,12 @@ export const AGENT_OUT_STATES = [
   'unreachable',
 ] as const satisfies readonly ErrandState[];
 
+/**
+ * The customer and agent can call each other through Jiffo while the agent is out on the errand, until it
+ * ends. In a dispute, support talks to each side instead.
+ */
+export const CALLABLE_STATES: ReadonlySet<ErrandState> = new Set(AGENT_OUT_STATES);
+
 export type Actor = 'customer' | 'agent' | 'system' | 'admin';
 
 export interface TransitionContext {

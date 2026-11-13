@@ -3,6 +3,7 @@ import { AdaptersModule } from './adapters/adapters.module';
 import { AdminModule } from './admin/admin.module';
 import { AgentsModule } from './agents/agents.module';
 import { AuthModule } from './auth/auth.module';
+import { CallsModule } from './calls/calls.module';
 import { ChatModule } from './chat/chat.module';
 import { ConfigModule } from './config/app-config';
 import { CountriesModule } from './countries/countries.module';
@@ -31,6 +32,7 @@ import { UsersModule } from './users/users.module';
     PushModule,
     RealtimeModule,
     ChatModule,
+    CallsModule,
     MoneyModule,
     PlacesModule,
     FilesModule,
