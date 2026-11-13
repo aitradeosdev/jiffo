@@ -22,6 +22,16 @@ export const agentTierLabel = (tier: string) => AGENT_TIER_LABELS[tier as AgentT
  * Everything admin can change for a country. Each saved change becomes a new version,
  * so an errand can always be explained by the settings that applied when it ran.
  */
+/**
+ * Customers' IDs as saved before they were limited to the NIN and BVN: a list with an ID document in it
+ * meant customers had a choice, which is now the NIN or the BVN; any other list is kept as it is.
+ */
+export function customerIdTypesOf(value: unknown) {
+  if (!Array.isArray(value)) return value;
+  const numbers = (CUSTOMER_ID_TYPES as readonly unknown[]).includes.bind(CUSTOMER_ID_TYPES);
+  return value.every(numbers) ? value : [...CUSTOMER_ID_TYPES];
+}
+
 export const CountrySettingsSchema = z.object({
   pricing: z.object({
     baseFeeKobo: kobo,
@@ -73,14 +83,11 @@ export const CountrySettingsSchema = z.object({
   }),
   identity: z.object({
     /**
-     * IDs a customer may verify with, one of them: the NIN or BVN, with a selfie. Settings saved when other
-     * IDs could be chosen keep only these.
+     * IDs a customer may verify with, one of them: the NIN or BVN, with a selfie. Settings saved when ID
+     * documents could be chosen for customers read as both numbers (see customerIdTypesOf); saving such a
+     * list is refused.
      */
-    customerIdTypes: z.preprocess(
-      (value) =>
-        Array.isArray(value) ? value.filter((t) => (CUSTOMER_ID_TYPES as readonly unknown[]).includes(t)) : value,
-      z.array(z.enum(CUSTOMER_ID_TYPES)).min(1),
-    ),
+    customerIdTypes: z.preprocess(customerIdTypesOf, z.array(z.enum(CUSTOMER_ID_TYPES)).min(1)),
     /** IDs an agent may verify with, one of them. */
     agentIdTypes: z.array(z.enum(ID_TYPE_KEYS)).min(1),
     requireBvnForAgents: z.boolean(),

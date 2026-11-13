@@ -20,8 +20,9 @@ export interface IdentityPerson {
   phone: string;
 }
 
-/** What a check is for: the ID the person verifies with, and whether their BVN is checked as well. */
+/** What a check is for: whose it is, the ID they verify with, and whether their BVN is checked as well. */
 export interface IdentityRequest {
+  role: 'customer' | 'agent';
   idType: IdType;
   withBvn: boolean;
 }

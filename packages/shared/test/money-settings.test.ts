@@ -11,7 +11,7 @@ import {
   serviceFee,
   splitFeeEscrow,
 } from '../src/money';
-import { CountrySettingsSchema, NIGERIA_DEFAULT_SETTINGS, publicSettings } from '../src/settings';
+import { CountrySettingsSchema, NIGERIA_DEFAULT_SETTINGS, publicSettings, customerIdTypesOf } from '../src/settings';
 import { normaliseIdNumber, yearsOld } from '../src/identity';
 
 describe('money', () => {
@@ -119,5 +119,20 @@ describe('ID numbers', () => {
     expect(yearsOld('2008-06-15', on('2026-06-15'))).toBe(18);
     expect(yearsOld('2008-02-29', on('2026-02-28'))).toBe(17);
     expect(yearsOld('2008-02-29', on('2026-03-01'))).toBe(18);
+  });
+});
+
+describe("customers' IDs as saved", () => {
+  it('reads a list with an ID document in it as the NIN or the BVN, and keeps any other', () => {
+    expect(customerIdTypesOf(['nin', 'drivers_licence', 'voters_card', 'passport'])).toEqual(['nin', 'bvn']);
+    expect(customerIdTypesOf(['passport'])).toEqual(['nin', 'bvn']);
+    expect(customerIdTypesOf(['bvn'])).toEqual(['bvn']);
+    expect(customerIdTypesOf(['nin', 'bvn'])).toEqual(['nin', 'bvn']);
+  });
+
+  it('keeps saved settings readable after customers were limited to the NIN and BVN', () => {
+    const old = structuredClone(NIGERIA_DEFAULT_SETTINGS) as unknown as { identity: { customerIdTypes: string[] } };
+    old.identity.customerIdTypes = ['nin', 'drivers_licence', 'voters_card', 'passport'];
+    expect(CountrySettingsSchema.parse(old).identity.customerIdTypes).toEqual(['nin', 'bvn']);
   });
 });

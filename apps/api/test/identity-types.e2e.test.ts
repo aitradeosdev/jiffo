@@ -2,7 +2,7 @@ import { createHmac, hkdfSync } from 'node:crypto';
 import { and, eq, gt } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { SmileIdIdentityAdapter } from '../src/adapters/identity-providers';
+import { SmileIdIdentityAdapter, YouverifyIdentityAdapter } from '../src/adapters/identity-providers';
 import { agentApplications, customerVerifications, providerSettings, settingsVersions } from '../src/db/schema';
 import { ProvidersService } from '../src/providers/providers.service';
 import { APP_CONFIG, type AppConfig } from '../src/config/app-config';
@@ -138,6 +138,8 @@ describe('identity checks: ID types, and customers', () => {
       .expect(400)
       .expect(/invalid_bvn/);
     await begin({ idType: 'drivers_licence', idNumber: unique('LAG', 12), bvn: '22212345678' }).expect(200);
+    // Admin stops accepting licences while the check runs: it was on offer when it started, so it stands.
+    await identitySettings({ agentIdTypes: ['nin', 'bvn'], requireBvnForAgents: true });
     const done = await request(t.http).post('/v1/agent/application/identity/finish').set(agent.headers).expect(200);
     expect(done.body.status).toBe('done');
     expect(done.body.checks.map((c: { key: string }) => c.key)).toEqual(['drivers_licence', 'bvn', 'selfie']);
@@ -163,6 +165,37 @@ describe('identity checks: ID types, and customers', () => {
     const bvnOnly = await request(t.http).post('/v1/agent/application/identity/finish').set(second.headers).expect(200);
     expect(bvnOnly.body.checks.map((c: { key: string }) => c.key)).toEqual(['bvn', 'selfie']);
     await identitySettings({ agentIdTypes: ['nin', 'bvn'], requireBvnForAgents: true });
+  });
+
+  it('refuses settings that give customers a document, or leave a side no ID the provider checks', async () => {
+    const save = async (changes: Record<string, unknown>) => {
+      const now = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
+      const settings = structuredClone(now.settings);
+      Object.assign(settings.identity, changes);
+      return request(t.http)
+        .post('/v1/admin/settings?country=NG')
+        .set(owner.headers)
+        .send({ basedOn: now.version, settings, note: 'Trying ID settings' });
+    };
+    const docs = await save({ customerIdTypes: ['nin', 'passport'] });
+    expect(docs.status).toBe(400);
+    expect(docs.body.error.issues[0]).toMatchObject({ path: 'identity.customerIdTypes' });
+    expect(docs.body.error.issues[0].message).toMatch(/ID documents are for agents/);
+    // With Smile ID and the BVN rule on, agents verify with their BVN; without BVN accepted from customers too.
+    const panel = (method: 'put' | 'post', path: string) =>
+      request(t.http)[method](`/v1/admin/providers${path}`).set(owner.headers);
+    await panel('put', '/identity/youverify')
+      .send({ config: { publicMerchantKey: 'pmk-1', mode: 'sandbox' }, secrets: { secretKey: 'yv-secret' } })
+      .expect(200);
+    vi.spyOn(YouverifyIdentityAdapter.prototype, 'check').mockResolvedValue('Connected');
+    await panel('post', '/identity/youverify/test').expect(200);
+    await panel('post', '/identity/active').send({ provider: 'youverify' }).expect(200);
+    // Youverify checks the NIN (and a licence) with a selfie, not the BVN: customers left with only the BVN
+    // couldn't verify.
+    const none = await save({ customerIdTypes: ['bvn'] });
+    expect(none.status).toBe(400);
+    expect(none.body.error.issues[0].message).toMatch(/Youverify checks NIN slip or card/);
+    await panel('post', '/identity/active').send({ provider: null }).expect(200);
   });
 
   it('still knows NINs fingerprinted before other IDs, so a second account on one is caught', async () => {
@@ -215,7 +248,7 @@ describe('identity checks: ID types, and customers', () => {
       .spyOn(SmileIdIdentityAdapter.prototype, 'startIdentity')
       .mockImplementation(async ({ reference }) => ({ reference, url: `https://links.smile.test/${reference}` }));
     const started = await start(who, { idType: 'nin' }).expect(200);
-    expect(link.mock.calls.at(-1)![0].request).toEqual({ idType: 'nin', withBvn: false });
+    expect(link.mock.calls.at(-1)![0].request).toEqual({ role: 'customer', idType: 'nin', withBvn: false });
     const reference = String(started.body.url).split('/').pop()!;
     expect(reference).toMatch(/^cid-/);
     vi.spyOn(

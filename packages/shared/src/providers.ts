@@ -267,7 +267,7 @@ export const PROVIDERS: ProviderInfo[] = [
         label: 'Widget ID for customers',
         secret: false,
         required: false,
-        hint: "A flow with only the government data step (NIN or BVN) and the selfie: customers don't photograph a document. Without it, customers use the agents' flow.",
+        hint: "A flow with only the government data step (NIN or BVN) and the selfie: customers don't photograph a document. Without it customers use the agents' flow, and one who picks a document there goes to our team.",
       },
       {
         key: 'webhookSecret',

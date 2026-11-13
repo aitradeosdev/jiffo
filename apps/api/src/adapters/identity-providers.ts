@@ -10,7 +10,6 @@ import {
   type IdentityRequest,
   type IdentityResult,
   type PageInput,
-  referenceRole,
 } from './identity';
 import { ID_TYPES, providerInfo, type IdType } from '@jiffo/shared';
 import { matchesLegalName } from '../common/names';
@@ -42,9 +41,9 @@ export class IdentityProviderError extends Error {}
 /** What the agent sent from a provider's page can't be used; the message says what to do. */
 export class IdentityPageError extends Error {}
 
-/** Where the provider's page sends the person when they finish: back into their app (by the reference). */
-export const identityDoneUrl = (ctx: ProviderContext, reference: string) =>
-  `${ctx.publicApiUrl}/v1/identity/done?for=${referenceRole(reference)}`;
+/** Where the provider's page sends the person when they finish: back into their app. */
+export const identityDoneUrl = (ctx: ProviderContext, role: IdentityRequest['role']) =>
+  `${ctx.publicApiUrl}/v1/identity/done?for=${role}`;
 
 /** A legal name in one form, whatever parts the provider gives. */
 const legalNameOf = (parts: Array<string | null | undefined>) =>
@@ -157,7 +156,7 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
     form.append('notice_privacy_policy_url', this.privacyPolicyUrl);
     form.append('is_single_use', 'true');
     form.append('callback_url', `${this.ctx.publicApiUrl}/v1/webhooks/identity/smileid`);
-    form.append('redirect_url', identityDoneUrl(this.ctx, input.reference));
+    form.append('redirect_url', identityDoneUrl(this.ctx, input.request.role));
     form.append('user_id', input.reference);
     form.append('partner_params', json({ reference: input.reference }));
     const res = await this.fetchImpl(`${this.base}/v3/smile_links`, {
@@ -381,17 +380,17 @@ export class DojahIdentityAdapter implements IdentityAdapter {
   }
 
   /** The widget page, opened in the app's browser; when Dojah is done it goes back to the app. */
-  page(reference: string) {
+  page(reference: string, request: IdentityRequest) {
     const options = {
       app_id: this.appId,
       p_key: this.publicKey,
       type: 'custom',
       config: {
-        widget_id: referenceRole(reference) === 'customer' ? (this.customerWidgetId ?? this.widgetId) : this.widgetId,
+        widget_id: request.role === 'customer' ? (this.customerWidgetId ?? this.widgetId) : this.widgetId,
       },
       reference_id: reference,
     };
-    const done = identityDoneUrl(this.ctx, reference);
+    const done = identityDoneUrl(this.ctx, request.role);
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Identity check</title><script src="https://widget.dojah.io/widget.js"></script></head>
 <body style="font-family:system-ui,sans-serif;padding:24px"><p>Opening the identity check…</p>
@@ -706,7 +705,7 @@ export class YouverifyIdentityAdapter implements IdentityAdapter {
       sig: this.ctx.sign(`youverify:${reference}`),
       session: sessionId,
       sessionSig: this.ctx.sign(`youverify-session:${reference}:${sessionId}`),
-      done: identityDoneUrl(this.ctx, reference),
+      done: identityDoneUrl(this.ctx, request.role),
     };
     const json = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c');
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

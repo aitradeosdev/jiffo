@@ -1,6 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
-import { CountrySettingsSchema, settingChanges, type CountrySettings } from '@jiffo/shared';
+import {
+  CUSTOMER_ID_TYPES,
+  CountrySettingsSchema,
+  ID_TYPES,
+  settingChanges,
+  type CountrySettings,
+} from '@jiffo/shared';
+import { IdentityChecksService } from '../identity/identity-checks.service';
 import { sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { admins, categories, settingsVersions, states } from '../db/schema';
@@ -21,6 +28,7 @@ export class SettingsAdminService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly audit: AuditService,
+    private readonly identity: IdentityChecksService,
   ) {}
 
   private country(code: string) {
@@ -73,9 +81,37 @@ export class SettingsAdminService {
    * can't overwrite each other.
    */
   async saveSettings(admin: AdminContext, code: string, input: { basedOn: number; settings: unknown; note: string }) {
+    // Customers verify with a number and a selfie: an ID document for them is refused, not quietly dropped.
+    const asked = (input.settings as { identity?: { customerIdTypes?: unknown } } | null)?.identity?.customerIdTypes;
+    if (Array.isArray(asked) && asked.some((t) => !(CUSTOMER_ID_TYPES as readonly unknown[]).includes(t))) {
+      throw badRequest('invalid_settings', 'Some settings are not valid', {
+        issues: [
+          {
+            path: 'identity.customerIdTypes',
+            message: 'Customers verify with their NIN or BVN and a selfie; ID documents are for agents',
+          },
+        ],
+      });
+    }
     const parsed = CountrySettingsSchema.safeParse(input.settings);
     if (!parsed.success) {
       throw badRequest('invalid_settings', 'Some settings are not valid', { issues: issuesOf(parsed.error) });
+    }
+    // Each side must keep an ID the identity provider in use checks, or nobody on it could verify.
+    for (const role of ['customer', 'agent'] as const) {
+      const options = this.identity.options(role, parsed.data.identity);
+      if (options.adapter.name !== 'none' && options.idTypes.length === 0) {
+        const name = options.providerName ?? 'The identity provider in use';
+        const checks = options.adapter.idTypes.map((t) => ID_TYPES[t].name).join(', ');
+        throw badRequest('invalid_settings', 'Some settings are not valid', {
+          issues: [
+            {
+              path: `identity.${role}IdTypes`,
+              message: `${name} checks ${checks}${role === 'agent' && options.withBvn && !options.adapter.bvnAlongside ? ', and with the BVN rule on takes the BVN as the ID' : ''}. Keep one of those for ${role}s, or nobody can verify.`,
+            },
+          ],
+        });
+      }
     }
     await this.country(code);
     return this.db.transaction(async (tx) => {

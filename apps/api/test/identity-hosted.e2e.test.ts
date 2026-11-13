@@ -270,7 +270,7 @@ describe("identity checks on the provider's own page", () => {
     expect((await first).body).toEqual({ status: 'done', outcome: 'passed' });
     expect(run).toHaveBeenCalledWith(
       ref,
-      { idType: 'nin', withBvn: true },
+      { role: 'agent', idType: 'nin', withBvn: true },
       { idNumber: nin, bvn: '22212345678', session: 'sess-1', sessionSig: 'whatever-youverify-checks' },
     );
     const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));

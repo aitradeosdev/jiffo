@@ -30,6 +30,7 @@ export const CHECK_LABELS: Record<string, string> = {
 const IDENTITY_CHECKS: string[] = [...ID_TYPE_KEYS, 'selfie', 'id_type', 'duplicate'];
 /** The check an application started, as the identity service takes it. */
 const requestOf = (app: Application): IdentityRequest => ({
+  role: 'agent',
   idType: (app.identityIdType ?? 'nin') as IdType,
   withBvn: app.identityWithBvn,
 });
