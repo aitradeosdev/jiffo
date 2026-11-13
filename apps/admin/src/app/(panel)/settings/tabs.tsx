@@ -7,6 +7,7 @@ const TABS = [
   { href: '/settings', label: 'Prices and rules' },
   { href: '/settings/categories', label: 'Categories' },
   { href: '/settings/states', label: 'States' },
+  { href: '/settings/providers', label: 'Providers' },
 ];
 
 export function SettingsTabs() {

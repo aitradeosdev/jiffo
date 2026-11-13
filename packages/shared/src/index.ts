@@ -3,3 +3,4 @@ export * from './errands';
 export * from './identity';
 export * from './settings';
 export * from './admin';
+export * from './providers';

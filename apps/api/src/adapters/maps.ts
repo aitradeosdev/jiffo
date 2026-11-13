@@ -72,6 +72,20 @@ export class GoogleMapsAdapter implements MapsAdapter {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
+  /** For the panel's Test button: one place search, with Google's own words if it is refused. */
+  async check() {
+    const res = await this.fetchImpl('https://places.googleapis.com/v1/places:autocomplete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
+      body: JSON.stringify({ input: 'Lagos', includedRegionCodes: ['ng'] }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+      throw new Error(`Google answered ${res.status}: ${body?.error?.message ?? 'no details'}`);
+    }
+    return 'Connected. Place search works.';
+  }
+
   /** Returns null when Google says the thing doesn't exist (an unknown or stale place id). */
   private async call<T>(
     url: string,

@@ -58,4 +58,16 @@ export class TermiiMessagingAdapter implements MessagingAdapter {
     });
     if (!res.ok) throw unavailable('sms_failed', 'We could not send the code. Try again in a moment.');
   }
+
+  /** For the panel's Test button: the key works, and how much credit is left. Sends nothing. */
+  async check() {
+    const res = await this.fetchImpl(`${this.baseUrl}/api/get-balance?api_key=${encodeURIComponent(this.apiKey)}`);
+    const body = (await res.json().catch(() => null)) as {
+      balance?: number;
+      currency?: string;
+      message?: string;
+    } | null;
+    if (!res.ok) throw new Error(`Termii answered ${res.status}: ${body?.message ?? 'no details'}`);
+    return `Connected. Balance: ${body?.balance ?? '?'} ${body?.currency ?? ''}`.trim();
+  }
 }

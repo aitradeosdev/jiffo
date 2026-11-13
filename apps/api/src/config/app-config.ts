@@ -9,6 +9,14 @@ const EnvSchema = z
     JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
     OTP_SECRET: z.string().min(32, 'OTP_SECRET must be at least 32 characters'),
     PIN_KEY: z.string().regex(/^[0-9a-f]{64}$/i, 'PIN_KEY must be 32 bytes written as 64 hex characters'),
+    /**
+     * Encrypts the providers' keys that admin enters in the panel. Keep it apart from the database: whoever
+     * has both can read the keys. Changing it makes the stored keys unreadable, so they must be entered again.
+     */
+    SECRETS_KEY: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/i, 'SECRETS_KEY must be 32 bytes written as 64 hex characters')
+      .optional(),
     ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
     REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
     DEFAULT_COUNTRY: z.string().length(2).default('NG'),
@@ -99,20 +107,9 @@ const EnvSchema = z
       need(!!env.FCM_SERVICE_ACCOUNT_JSON, 'FCM_SERVICE_ACCOUNT_JSON', 'required when PUSH_PROVIDER is fcm');
     }
     if (env.NODE_ENV === 'production') {
-      need(
-        env.MESSAGING_PROVIDER !== 'console' && env.MESSAGING_PROVIDER !== 'memory',
-        'MESSAGING_PROVIDER',
-        'must be a real provider in production',
-      );
-      need(
-        env.PUSH_PROVIDER !== 'console' && env.PUSH_PROVIDER !== 'memory',
-        'PUSH_PROVIDER',
-        'must be a real provider in production',
-      );
+      // Providers may come from the environment or from the admin panel, so none is required here. In
+      // production a category set in neither answers that it isn't set up; a stand-in is never used.
       need(env.TIMER_PROVIDER !== 'memory', 'TIMER_PROVIDER', 'must be bullmq in production');
-      need(env.PAYMENTS_PROVIDER !== 'fake', 'PAYMENTS_PROVIDER', 'must be a real provider in production');
-      need(env.MAPS_PROVIDER !== 'fake', 'MAPS_PROVIDER', 'must be a real provider in production');
-      need(env.STORAGE_PROVIDER !== 'memory', 'STORAGE_PROVIDER', 'must be s3 in production');
       // Behind a load balancer, 0 would make every client share one IP and one sign-in limit.
       need(
         env.TRUST_PROXY_HOPS !== undefined,
@@ -120,6 +117,7 @@ const EnvSchema = z
         'must be set in production (load balancers in front)',
       );
       need(!!env.ADMIN_PANEL_SECRET, 'ADMIN_PANEL_SECRET', 'must be set in production');
+      need(!!env.SECRETS_KEY, 'SECRETS_KEY', "must be set in production, to encrypt providers' keys");
       need(!!env.ADMIN_URL, 'ADMIN_URL', 'must be set in production, or invite links point at localhost');
     }
   });

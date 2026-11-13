@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { UPLOAD_PURPOSES } from '../db/schema';
@@ -6,7 +6,8 @@ import { AuthGuard, CurrentAuth } from '../auth/auth.guard';
 import type { AuthContext } from '../auth/auth.types';
 import { ZodBody } from '../common/zod-body';
 import { forbidden, notFound } from '../common/errors';
-import { MemoryStorageAdapter, STORAGE, type StorageAdapter } from '../adapters/storage';
+import { MemoryStorageAdapter } from '../adapters/storage';
+import { ProvidersService } from '../providers/providers.service';
 import { UploadsService } from './uploads.service';
 
 const UploadBody = z.object({
@@ -42,14 +43,15 @@ const SignedQuery = z.object({
  */
 @Controller('dev-files')
 export class DevFilesController {
-  constructor(@Inject(STORAGE) private readonly storage: StorageAdapter) {}
+  constructor(private readonly providers: ProvidersService) {}
 
   private memory(method: 'GET' | 'PUT', key: string, q: z.infer<typeof SignedQuery>) {
-    if (!(this.storage instanceof MemoryStorageAdapter)) throw notFound('not_found', 'Not found');
-    if (q.m !== method || !this.storage.verify(method, key, q.exp, q.size, q.sig)) {
+    const storage = this.providers.current('storage');
+    if (!(storage instanceof MemoryStorageAdapter)) throw notFound('not_found', 'Not found');
+    if (q.m !== method || !storage.verify(method, key, q.exp, q.size, q.sig)) {
       throw forbidden('bad_signature', 'Link expired or invalid');
     }
-    return this.storage;
+    return storage;
   }
 
   @Put(':key')

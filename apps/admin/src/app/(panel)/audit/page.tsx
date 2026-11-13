@@ -2,7 +2,13 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Pager } from '@/components/list-controls';
 import { Card, Empty, PageHeader, tableClass, tdClass, thClass } from '@/components/ui';
-import { adminRoleLabel, agentTierLabel } from '@jiffo/shared';
+import {
+  adminRoleLabel,
+  agentTierLabel,
+  isProviderCategory,
+  PROVIDER_CATEGORY_INFO,
+  providerInfo,
+} from '@jiffo/shared';
 import { api, getCountry, getMe } from '@/lib/api';
 import { dateTime, money } from '@/lib/format';
 import { FIELD_BY_PATH } from '@/lib/settings-fields';
@@ -73,6 +79,21 @@ function describe(entry: Entry, names: Map<string, string>, currencyOf: (code: s
       return `Suspended ${entry.targetLabel ?? 'an account'}`;
     case 'person.reactivate':
       return `Reactivated ${entry.targetLabel ?? 'an account'}`;
+    case 'provider.save': {
+      const info = providerInfo(String(entry.data.category), String(entry.data.provider));
+      const fields = ((entry.data.changed as string[] | undefined) ?? []).map(
+        (k) => info?.fields.find((f) => f.key === k)?.label ?? k,
+      );
+      return `Saved ${String(entry.data.name)} settings${fields.length ? `: ${fields.join(', ')}` : ''}`;
+    }
+    case 'provider.activate': {
+      const category = String(entry.data.category);
+      const label = isProviderCategory(category) ? PROVIDER_CATEGORY_INFO[category].label : category;
+      const to = entry.data.to ? (providerInfo(category, String(entry.data.to))?.name ?? String(entry.data.to)) : null;
+      return to ? `Switched ${label} to ${to}` : `Switched ${label} back to the server's own setting`;
+    }
+    case 'provider.remove':
+      return `Removed ${String(entry.data.name)} settings and keys`;
     case 'application.approve':
       return `Approved ${entry.targetLabel ?? 'an agent'}'s application`;
     case 'application.reject':

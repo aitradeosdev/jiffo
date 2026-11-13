@@ -5,7 +5,13 @@ import { normaliseIdNumber, yearsOld } from '@jiffo/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { agentApplications, agentPresence, agentProfiles, payoutAccounts, states, users } from '../db/schema';
-import { IDENTITY, IdentityUnavailable, type CheckOutcome, type IdentityAdapter } from '../adapters/identity';
+import {
+  IdentityUnavailable,
+  UnconfiguredIdentityAdapter,
+  type CheckOutcome,
+  type IdentityAdapter,
+} from '../adapters/identity';
+import { ProvidersService } from '../providers/providers.service';
 import { badRequest, conflict, forbidden, notFound, unavailable, unprocessable } from '../common/errors';
 import { nameWords } from '../common/names';
 import { PushService } from '../push/push.service';
@@ -52,7 +58,7 @@ export class AgentApplicationService {
 
   constructor(
     @Inject(DB) private readonly db: Db,
-    @Inject(IDENTITY) private readonly identity: IdentityAdapter,
+    private readonly providers: ProvidersService,
     @Inject(APP_CONFIG) config: AppConfig,
     private readonly push: PushService,
     private readonly countries: CountriesService,
@@ -80,6 +86,14 @@ export class AgentApplicationService {
       throw conflict('profile_incomplete', 'Add your first and last name, as on your NIN, first');
     }
     return { firstName: user.firstName, lastName: user.lastName, phone: user.phone };
+  }
+
+  /**
+   * The provider a check was started with. If it is no longer set up, the check can't be finished there;
+   * that is said as identity checks being unavailable, and support can look at the application.
+   */
+  private startedWith(name: string | null): IdentityAdapter {
+    return (name ? this.providers.named('identity', name) : null) ?? new UnconfiguredIdentityAdapter();
   }
 
   /** Calls the provider, turning "no provider set up" into an answer the app can show. */
@@ -200,14 +214,17 @@ export class AgentApplicationService {
       throw conflict('application_submitted', 'Your application is already sent. We will text you when it is checked.');
     }
     const person = await this.person(userId);
-    const started = await this.provider(() => this.identity.startIdentity({ person, nin, bvn }));
+    // The provider in use now: the check finishes with it, even if admin switches in between.
+    const identity = this.providers.current('identity');
+    const started = await this.provider(() => identity.startIdentity({ person, nin, bvn }));
     await this.updateDraft(userId, {
       pendingNinFingerprint: this.fingerprint(nin),
+      identityProvider: identity.name,
       identityReference: started.reference,
       identityOutcome: null,
       identityCheckedAt: null,
     });
-    return { sdkToken: started.sdkToken, provider: this.identity.name };
+    return { sdkToken: started.sdkToken, provider: identity.name };
   }
 
   /**
@@ -227,7 +244,9 @@ export class AgentApplicationService {
   /** Asks the provider for the identity result, and keeps it once it is back. */
   private async settleIdentity(app: Application) {
     const userId = app.userId;
-    const result = await this.provider(() => this.identity.identityResult(app.identityReference!));
+    const result = await this.provider(() =>
+      this.startedWith(app.identityProvider).identityResult(app.identityReference!),
+    );
     if (result.status === 'pending') {
       // Remembered, so the checklist doesn't ask the provider again before POLL_EVERY_MS.
       await this.db
@@ -315,9 +334,10 @@ export class AgentApplicationService {
     const person = await this.person(userId);
     const claimed = await this.updateDraft(userId, { status: 'checking', submittedAt: new Date() });
     let reference: string;
+    const identity = this.providers.current('identity');
     try {
       ({ reference } = await this.provider(() =>
-        this.identity.startAddress({
+        identity.startAddress({
           person,
           address: claimed.address!,
           state: before.stateName ?? claimed.stateCode ?? '',
@@ -333,7 +353,7 @@ export class AgentApplicationService {
     }
     const [sent] = await this.db
       .update(agentApplications)
-      .set({ addressReference: reference, updatedAt: new Date() })
+      .set({ addressProvider: identity.name, addressReference: reference, updatedAt: new Date() })
       .where(eq(agentApplications.userId, userId))
       .returning();
     await this.refresh(sent!);
@@ -345,7 +365,7 @@ export class AgentApplicationService {
     if (!app.addressReference) return app;
     let address: Awaited<ReturnType<IdentityAdapter['addressResult']>>;
     try {
-      address = await this.provider(() => this.identity.addressResult(app.addressReference!));
+      address = await this.provider(() => this.startedWith(app.addressProvider).addressResult(app.addressReference!));
     } catch (error) {
       this.logger.warn(`Address check for ${app.userId} could not be read: ${String(error)}`);
       address = { status: 'pending' };

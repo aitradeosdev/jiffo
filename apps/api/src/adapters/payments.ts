@@ -257,12 +257,20 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
   }
 }
 
-export class PaystackError extends Error {
+/** A payments provider refused or failed a request, with the HTTP status it answered. */
+export class PaymentsProviderError extends Error {
   constructor(
     readonly status: number,
     message: string,
   ) {
     super(message);
+    this.name = 'PaymentsProviderError';
+  }
+}
+
+export class PaystackError extends PaymentsProviderError {
+  constructor(status: number, message: string) {
+    super(status, message);
     this.name = 'PaystackError';
   }
 }

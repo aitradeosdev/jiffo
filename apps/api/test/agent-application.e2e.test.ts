@@ -1,7 +1,8 @@
 import { and, eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { IDENTITY, IdentityUnavailable, type IdentityAdapter } from '../src/adapters/identity';
+import { IdentityUnavailable } from '../src/adapters/identity';
+import { ENV_ADAPTERS, type Adapters } from '../src/providers/env-adapters';
 import { agentApplications, states } from '../src/db/schema';
 import {
   act,
@@ -153,7 +154,7 @@ describe('agent application', () => {
   });
 
   it('closes the application for edits once it is sent, and reopens it if the check never started', async () => {
-    const identity = t.app.get<IdentityAdapter>(IDENTITY);
+    const identity = t.app.get<Adapters>(ENV_ADAPTERS).identity;
     const agent = await newAgent();
     await complete(agent);
     const spy = vi.spyOn(identity, 'startAddress').mockRejectedValueOnce(new IdentityUnavailable());
@@ -180,7 +181,7 @@ describe('agent application', () => {
   });
 
   it('records an identity result that comes back after the app stopped asking', async () => {
-    const identity = t.app.get<IdentityAdapter>(IDENTITY);
+    const identity = t.app.get<Adapters>(ENV_ADAPTERS).identity;
     const agent = await newAgent();
     await call(agent, 'patch', '', { stateCode: 'LA', area: 'Lekki' }).expect(200);
     await call(agent, 'post', '/identity', { nin: nin(), bvn: '22212345678', consent: true }).expect(200);

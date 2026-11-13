@@ -1,9 +1,10 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, count, eq, inArray, lt, sum } from 'drizzle-orm';
+import { and, count, eq, inArray, lt, sum, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { countries, deposits, payouts, reconciliationRuns } from '../db/schema';
 import { PAYMENTS, type PaymentsAdapter } from '../adapters/payments';
 import { LedgerService } from './ledger.service';
+import { ProvidersService } from '../providers/providers.service';
 import { DepositsService } from './deposits.service';
 
 const DAY_MS = 86_400_000;
@@ -22,15 +23,39 @@ export class ReconciliationService {
     @Inject(PAYMENTS) private readonly payments: PaymentsAdapter,
     private readonly ledger: LedgerService,
     private readonly deposits: DepositsService,
+    private readonly providers: ProvidersService,
   ) {}
+
+  /**
+   * What every payments provider still holding Jiffo's money reports, added up: the one in use, and any
+   * that top-ups or payouts went through before admin switched. The ledger's cash is one number for all.
+   */
+  private async balances(countryCode: string, currency: string) {
+    const used = await this.db.execute<{ provider: string }>(sql`
+      select distinct provider from deposits where country_code = ${countryCode} and status = 'succeeded'
+      union select distinct provider from payouts where country_code = ${countryCode} and provider is not null`);
+    const names: string[] = [];
+    let providerBalanceKobo = 0;
+    for (const name of [...new Set([this.payments.name, ...used.rows.map((r) => r.provider)])].sort()) {
+      const adapter = this.providers.named('payments', name);
+      // Its keys were removed: its balance can't be read, and any money left there shows as a difference.
+      if (!adapter) {
+        this.logger.warn(`Reconciliation leaves out ${name}, which is no longer set up`);
+        continue;
+      }
+      providerBalanceKobo += await adapter.balance(currency);
+      names.push(name);
+    }
+    return { providerBalanceKobo, names };
+  }
 
   async run() {
     await this.deposits.syncExpired();
     const live = await this.db.select().from(countries).where(eq(countries.enabled, true));
     const results = [];
     for (const country of live) {
-      const [providerBalanceKobo, ledgerCashKobo, [transit], [pending], [stuck]] = await Promise.all([
-        this.payments.balance(country.currency),
+      const [{ providerBalanceKobo, names }, ledgerCashKobo, [transit], [pending], [stuck]] = await Promise.all([
+        this.balances(country.code, country.currency),
         this.ledger.balance(this.db, { type: 'provider_cash' }, country.code),
         this.db
           .select({ total: sum(payouts.sendKobo) })
@@ -63,7 +88,7 @@ export class ReconciliationService {
         .insert(reconciliationRuns)
         .values({
           countryCode: country.code,
-          provider: this.payments.name,
+          provider: names.join('+'),
           providerBalanceKobo,
           ledgerCashKobo,
           inTransitKobo,

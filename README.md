@@ -103,9 +103,13 @@ All routes are under `/v1` except `GET /health`. Errors always look like `{ "err
 
 Every errand change goes through one endpoint, `POST /errands/:id/events`, with an event name such as `accept`, `send_offer`, `start`, `send_item_amount`, `mark_delivered` or `confirm_pin`. Who is acting comes from the session (customer app or agent app), never from the request. Each errand view lists the `allowedEvents` for the caller, so the apps show only the actions that are possible.
 
-### Adapters
+### Adapters and providers
 
-Outside services are chosen by environment variable, one implementation per port:
+Each outside service is a port with one adapter per provider. **Owners choose the provider in the admin panel** (Settings, Providers): they enter the keys from Jiffo's account with it, test them, and switch it on. The change reaches every API process within 30 seconds, with no restart. Keys are stored encrypted (AES-256-GCM) under `SECRETS_KEY`, a 64-character hex key that production requires and that should be kept apart from the database: whoever has both can read the keys, and changing it means entering them again. The panel never shows a saved key, only its last characters, and the audit log records which fields changed, never their values. A provider can be switched on only after its test passes. Things a provider started finish with it after a switch: a top-up is checked with the provider that issued its account number, an identity check finishes where it began, and a payout goes through the provider in use, which registers the agent's bank account first if it was added under another one. The nightly money check adds up every provider still holding money.
+
+Webhook addresses are shown in the panel, built from `PUBLIC_API_URL`, which must be the API's public address in production.
+
+While no provider is switched on for a service, the environment's choice below is used. In development and tests that is a stand-in (console SMS, a fake bank, and so on); in production a stand-in is never used, and a service set in neither place answers that it isn't set up yet.
 
 | Port          | Now                                          | Variable             |
 | ------------- | -------------------------------------------- | -------------------- |

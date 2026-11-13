@@ -12,6 +12,8 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { AuthContext } from '../auth/auth.types';
 import { notFound, tooMany, unprocessable } from '../common/errors';
 import { nameWords, plainName } from '../common/names';
+import { ENV_ADAPTERS, type Adapters } from '../providers/env-adapters';
+import { ProvidersService } from '../providers/providers.service';
 import { LedgerService } from './ledger.service';
 
 const MINUTE_MS = 60_000;
@@ -56,9 +58,12 @@ export class DepositsService {
     private readonly countries: CountriesService,
     private readonly push: PushService,
     private readonly realtime: RealtimeGateway,
+    @Inject(ENV_ADAPTERS) env: Adapters,
+    private readonly providers: ProvidersService,
   ) {
-    if (payments instanceof FakePaymentsAdapter) {
-      payments.onAutoPaid = (reference) => {
+    // The fake bank of development settles top-ups by itself; it then tells this service, as a webhook would.
+    if (env.payments instanceof FakePaymentsAdapter) {
+      env.payments.onAutoPaid = (reference) => {
         this.sync(reference).catch((error: Error) =>
           this.logger.warn(`Auto-pay of ${reference} failed: ${error.message}`),
         );
@@ -143,7 +148,10 @@ export class DepositsService {
     }
     if (deposit.status !== 'pending') return deposit;
 
-    const status = await this.payments.verifyDeposit(reference);
+    // Asked of the provider that issued the account number, even if admin has switched since.
+    const issuer = this.providers.named('payments', deposit.provider);
+    if (!issuer) throw new Error(`Deposit ${reference} is with ${deposit.provider}, which is no longer set up`);
+    const status = await issuer.verifyDeposit(reference);
     const { currency } = await this.countries.basics(deposit.countryCode);
     // Not paid yet, or the provider calls the charge abandoned or failed. It stays pending, never failed:
     // a transfer that lands later must still be credited.

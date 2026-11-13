@@ -4,7 +4,8 @@ import { and, desc, eq, gte, inArray, isNull, lt, sql, sum } from 'drizzle-orm';
 import { formatNaira } from '@jiffo/shared';
 import { DB, type Db } from '../db/database.module';
 import { payoutAccounts, payouts, users } from '../db/schema';
-import { PAYMENTS, PaystackError, type PaymentsAdapter } from '../adapters/payments';
+import { PAYMENTS, PaymentsProviderError, type PaymentsAdapter } from '../adapters/payments';
+import { ProvidersService } from '../providers/providers.service';
 import { CountriesService } from '../countries/countries.service';
 import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -42,7 +43,8 @@ export const payoutView = (p: PayoutRow) => ({
 @Injectable()
 export class PayoutsService {
   private readonly logger = new Logger(PayoutsService.name);
-  private banks: { at: number; list: Array<{ code: string; name: string }> } | null = null;
+  /** The bank list, per payments provider: each has its own codes. */
+  private readonly banks = new Map<string, { at: number; list: Array<{ code: string; name: string }> }>();
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -54,13 +56,16 @@ export class PayoutsService {
     private readonly countries: CountriesService,
     private readonly push: PushService,
     private readonly realtime: RealtimeGateway,
+    private readonly providers: ProvidersService,
   ) {}
 
   async listBanks() {
-    if (!this.banks || Date.now() - this.banks.at > BANKS_TTL_MS) {
-      this.banks = { at: Date.now(), list: await this.payments.listBanks() };
-    }
-    return this.banks.list;
+    const name = this.payments.name;
+    const cached = this.banks.get(name);
+    if (cached && Date.now() - cached.at < BANKS_TTL_MS) return cached.list;
+    const list = await this.payments.listBanks();
+    this.banks.set(name, { at: Date.now(), list });
+    return list;
   }
 
   /* ---------- Payout account ---------- */
@@ -105,7 +110,8 @@ export class PayoutsService {
         legalName ?? `${me.firstName} ${me.lastName}`,
       ));
     } catch (error) {
-      if (error instanceof PaystackError) throw unprocessable('account_not_found', 'Check the account number and bank');
+      if (error instanceof PaymentsProviderError)
+        throw unprocessable('account_not_found', 'Check the account number and bank');
       throw error;
     }
     const held = nameWords(accountName);
@@ -232,22 +238,39 @@ export class PayoutsService {
   async send(payoutId: string): Promise<PayoutRow | null> {
     const [payout] = await this.db.select().from(payouts).where(eq(payouts.id, payoutId));
     if (!payout || payout.status !== 'requested') return payout ?? null;
-    const [account] = await this.db.select().from(payoutAccounts).where(eq(payoutAccounts.id, payout.payoutAccountId));
+    // A payout tried before keeps the provider it was first sent to: asking another about it means nothing.
+    const via = payout.provider
+      ? this.providers.named('payments', payout.provider)
+      : this.providers.current('payments');
+    if (!via) return this.fail(payout.id, `${payout.provider} is no longer set up`);
+    let account: typeof payoutAccounts.$inferSelect;
+    try {
+      account = await this.recipientWith(via, payout.payoutAccountId);
+    } catch (error) {
+      if (error instanceof PaymentsProviderError && error.status >= 400 && error.status < 500) {
+        return this.fail(payout.id, error.message);
+      }
+      this.logger.warn(`Payout ${payout.id} not sent yet: ${(error as Error).message}`);
+      return payout;
+    }
+    if (!payout.provider) {
+      await this.db.update(payouts).set({ provider: via.name }).where(eq(payouts.id, payout.id));
+    }
 
     let result: Awaited<ReturnType<PaymentsAdapter['transfer']>>;
     try {
-      result = await this.payments.transfer({
+      result = await via.transfer({
         reference: payout.reference,
         amountKobo: payout.sendKobo,
-        recipientCode: account!.recipientCode,
+        recipientCode: account.recipientCode,
         reason: 'Jiffo earnings',
       });
     } catch (error) {
       // The provider may have taken the transfer and only the answer was lost. A retry would then be
       // refused as a duplicate reference, so ask about this reference before giving up.
-      const known = await this.payments.verifyTransfer(payout.reference).catch(() => null);
+      const known = await via.verifyTransfer(payout.reference).catch(() => null);
       // The provider never took it and said why (bad recipient, no balance, transfers off): give the money back.
-      if (!known && error instanceof PaystackError && error.status >= 400 && error.status < 500) {
+      if (!known && error instanceof PaymentsProviderError && error.status >= 400 && error.status < 500) {
         return this.fail(payout.id, error.message);
       }
       if (!known) {
@@ -267,6 +290,27 @@ export class PayoutsService {
     return sent ?? payout;
   }
 
+  /**
+   * The agent's payout account as a recipient with this provider. An account added while another provider
+   * was in use is registered with this one first, from the bank details already checked.
+   */
+  private async recipientWith(via: PaymentsAdapter, accountId: string) {
+    const [account] = await this.db.select().from(payoutAccounts).where(eq(payoutAccounts.id, accountId));
+    if (!account) throw new Error(`Payout account ${accountId} not found`);
+    if (account.provider === via.name) return account;
+    const { recipientCode } = await via.createRecipient({
+      name: account.accountName,
+      bankCode: account.bankCode,
+      accountNumber: account.accountNumber,
+    });
+    const [moved] = await this.db
+      .update(payoutAccounts)
+      .set({ provider: via.name, recipientCode })
+      .where(eq(payoutAccounts.id, account.id))
+      .returning();
+    return moved!;
+  }
+
   /** A transfer webhook arrived: ask the provider for the real status and settle the payout. */
   async sync(reference: string) {
     const [payout] = await this.db.select().from(payouts).where(eq(payouts.reference, reference));
@@ -274,7 +318,9 @@ export class PayoutsService {
       this.logger.warn(`Transfer for unknown payout reference ${reference}`);
       return null;
     }
-    const { status, reason, feeKobo } = await this.payments.verifyTransfer(reference);
+    const via = this.providers.named('payments', payout.provider ?? this.payments.name);
+    if (!via) throw new Error(`Payout ${reference} went through ${payout.provider}, which is no longer set up`);
+    const { status, reason, feeKobo } = await via.verifyTransfer(reference);
     if (status === 'success') return this.succeed(payout.id, feeKobo ?? 0);
     if (status === 'failed') return this.fail(payout.id, reason ?? 'failed');
     return payout;
