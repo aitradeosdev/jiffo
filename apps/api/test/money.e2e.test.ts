@@ -74,6 +74,19 @@ describe('money', () => {
       expect(await trialBalance()).toBe(0);
     });
 
+    it('lets the development auto-pay credit the wallet with no screen open', async () => {
+      const person = await signIn(t, 'customer');
+      const res = await request(t.http)
+        .post('/v1/wallet/deposits')
+        .set(person.headers)
+        .send({ amountKobo: 400_000 })
+        .expect(201);
+      // What auto-pay does once its delay passes.
+      t.payments.pay(await referenceOf(res.body.id));
+      t.payments.onAutoPaid?.(await referenceOf(res.body.id));
+      await expect.poll(async () => (await balanceOf(t, person)).balanceKobo).toBe(400_000);
+    });
+
     it('refuses webhooks with a wrong signature', async () => {
       const person = await signIn(t, 'customer');
       const res = await request(t.http)

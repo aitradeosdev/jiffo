@@ -5,7 +5,7 @@ import { formatNaira } from '@jiffo/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
 import { deposits, users } from '../db/schema';
-import { PAYMENTS, type PaymentsAdapter } from '../adapters/payments';
+import { FakePaymentsAdapter, PAYMENTS, type PaymentsAdapter } from '../adapters/payments';
 import { CountriesService } from '../countries/countries.service';
 import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -56,7 +56,15 @@ export class DepositsService {
     private readonly countries: CountriesService,
     private readonly push: PushService,
     private readonly realtime: RealtimeGateway,
-  ) {}
+  ) {
+    if (payments instanceof FakePaymentsAdapter) {
+      payments.onAutoPaid = (reference) => {
+        this.sync(reference).catch((error: Error) =>
+          this.logger.warn(`Auto-pay of ${reference} failed: ${error.message}`),
+        );
+      };
+    }
+  }
 
   async create(auth: AuthContext, amountKobo: number) {
     const { settings } = await this.countries.currentSettings(auth.countryCode);

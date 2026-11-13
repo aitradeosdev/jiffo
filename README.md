@@ -76,18 +76,19 @@ After changing `apps/api/src/db/schema.ts`, run `pnpm --filter @jiffo/api db:gen
 
 All routes are under `/v1` except `GET /health`. Errors always look like `{ "error": { "code": "...", "message": "..." } }`.
 
-| Area           | Routes                                                                                                                                                                                          |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sign-in        | `POST /auth/otp/request`, `POST /auth/otp/verify`, `POST /auth/refresh`, `POST /auth/logout`, `POST /auth/logout-others`                                                                        |
-| Profile        | `GET /me`, `PATCH /me`, `PUT /devices/current/push-token`                                                                                                                                       |
-| Agent profile  | `GET /agent/profile`, `PATCH /agent/profile`: categories and purchase errands the agent takes; the tier is set by admin                                                                         |
-| Country config | `GET /config/:country`: currency, states, categories and the public settings                                                                                                                    |
-| Errands        | `POST /errands`, `GET /errands`, `GET /errands/board` (agent app), `GET /errands/:id`, `GET /errands/:id/events`, `GET /errands/:id/pin` (customer, once delivered), `POST /errands/:id/events` |
-| Chat           | `GET /errands/:id/messages`, `POST /errands/:id/messages`                                                                                                                                       |
-| Wallet         | `GET /wallet`, `GET /wallet/transactions`, `POST /wallet/deposits` and `GET /wallet/deposits/:id` (customer app), `POST /wallet/withdrawals` (agent app), `POST /errands/:id/tip`               |
-| Payouts        | `GET /banks`, `GET /payout-account`, `PUT /payout-account` (agent app)                                                                                                                          |
-| Webhooks       | `POST /webhooks/paystack`: signature-checked, stored, applied once                                                                                                                              |
-| Realtime       | Socket.IO namespace `/realtime`, with the access token in `auth.token`. Emit `errand.subscribe`; receive `errand.updated` and `message.created`.                                                |
+| Area           | Routes                                                                                                                                                                                                                                              |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sign-in        | `POST /auth/otp/request`, `POST /auth/otp/verify`, `POST /auth/refresh`, `POST /auth/logout`, `POST /auth/logout-others`                                                                                                                            |
+| Profile        | `GET /me`, `PATCH /me`, `PUT /devices/current/push-token`                                                                                                                                                                                           |
+| Agent profile  | `GET /agent/profile`, `PATCH /agent/profile`: categories and purchase errands the agent takes; the tier is set by admin                                                                                                                             |
+| Country config | `GET /config/:country`: currency, states, categories and the public settings                                                                                                                                                                        |
+| Places         | `GET /places/autocomplete`, `GET /places/:id` (with the state it is in)                                                                                                                                                                             |
+| Errands        | `POST /errands/quote` (distance and suggested fee), `POST /errands`, `GET /errands`, `GET /errands/board` (agent app), `GET /errands/:id`, `GET /errands/:id/events`, `GET /errands/:id/pin` (customer, once delivered), `POST /errands/:id/events` |
+| Chat           | `GET /errands/:id/messages`, `POST /errands/:id/messages`                                                                                                                                                                                           |
+| Wallet         | `GET /wallet`, `GET /wallet/transactions`, `POST /wallet/deposits` and `GET /wallet/deposits/:id` (customer app), `POST /wallet/withdrawals` (agent app), `POST /errands/:id/tip`                                                                   |
+| Payouts        | `GET /banks`, `GET /payout-account`, `PUT /payout-account` (agent app)                                                                                                                                                                              |
+| Webhooks       | `POST /webhooks/paystack`: signature-checked, stored, applied once                                                                                                                                                                                  |
+| Realtime       | Socket.IO namespace `/realtime`, with the access token in `auth.token`. Emit `errand.subscribe`; receive `errand.updated` and `message.created`.                                                                                                    |
 
 Every errand change goes through one endpoint, `POST /errands/:id/events`, with an event name such as `accept`, `send_offer`, `start`, `send_item_amount`, `mark_delivered` or `confirm_pin`. Who is acting comes from the session (customer app or agent app), never from the request. Each errand view lists the `allowedEvents` for the caller, so the apps show only the actions that are possible.
 
@@ -102,8 +103,11 @@ Outside services are chosen by environment variable, one implementation per port
 | Chat          | Built-in (Postgres and the realtime socket) | `CHAT_PROVIDER`      |
 | Errand timers | BullMQ on Redis                             | `TIMER_PROVIDER`     |
 | Payments      | Paystack, or fake for development           | `PAYMENTS_PROVIDER`  |
+| Maps          | Google (Places and Routes), or fake         | `MAPS_PROVIDER`      |
 
-Identity checks, voice calls, maps and storage arrive in later steps on the same pattern.
+Identity checks, voice calls and storage arrive in later steps on the same pattern.
+
+With the fake payment provider, set `FAKE_PAYMENTS_AUTOPAY_SECONDS` to have top-ups land by themselves, so the apps can be tried end to end without moving money. The fake maps provider knows a handful of Lagos places (search for Shoprite, Medplus, Circle Mall, Admiralty Way, Adeola Odeku or Ikeja).
 
 ### Money
 

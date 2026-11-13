@@ -12,6 +12,7 @@ import {
 } from './messaging';
 import { ConsolePushAdapter, FcmPushAdapter, MemoryPushAdapter, PUSH, type PushAdapter } from './push';
 import { FakePaymentsAdapter, PAYMENTS, PaystackPaymentsAdapter, type PaymentsAdapter } from './payments';
+import { FakeMapsAdapter, GoogleMapsAdapter, MAPS, type MapsAdapter } from './maps';
 
 /**
  * Picks one implementation per port from the environment. Admin-selected providers (identity, payments)
@@ -54,7 +55,13 @@ import { FakePaymentsAdapter, PAYMENTS, PaystackPaymentsAdapter, type PaymentsAd
       useFactory: (c: AppConfig): PaymentsAdapter =>
         c.PAYMENTS_PROVIDER === 'paystack'
           ? new PaystackPaymentsAdapter(c.PAYSTACK_SECRET_KEY!, c.PAYSTACK_BASE_URL)
-          : new FakePaymentsAdapter(c.FAKE_PAYMENTS_SECRET),
+          : new FakePaymentsAdapter(c.FAKE_PAYMENTS_SECRET, c.FAKE_PAYMENTS_AUTOPAY_SECONDS * 1000),
+    },
+    {
+      provide: MAPS,
+      inject: [APP_CONFIG],
+      useFactory: (c: AppConfig): MapsAdapter =>
+        c.MAPS_PROVIDER === 'google' ? new GoogleMapsAdapter(c.GOOGLE_MAPS_API_KEY!) : new FakeMapsAdapter(),
     },
     {
       provide: CHAT,
@@ -62,6 +69,6 @@ import { FakePaymentsAdapter, PAYMENTS, PaystackPaymentsAdapter, type PaymentsAd
       useFactory: (db: Db): ChatAdapter => new BuiltinChatAdapter(db),
     },
   ],
-  exports: [MESSAGING, PUSH, PAYMENTS, CHAT],
+  exports: [MESSAGING, PUSH, PAYMENTS, MAPS, CHAT],
 })
 export class AdaptersModule {}

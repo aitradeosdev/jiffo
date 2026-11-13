@@ -9,6 +9,7 @@ import { DatabaseModule } from './db/database.module';
 import { ErrandsModule } from './errands/errands.module';
 import { HealthController } from './health/health.controller';
 import { MoneyModule } from './money/money.module';
+import { PlacesModule } from './places/places.module';
 import { PushModule } from './push/push.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { TimersModule } from './timers/timers.module';
@@ -28,6 +29,7 @@ import { UsersModule } from './users/users.module';
     RealtimeModule,
     ChatModule,
     MoneyModule,
+    PlacesModule,
     ErrandsModule,
   ],
   controllers: [HealthController],

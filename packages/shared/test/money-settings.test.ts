@@ -5,6 +5,7 @@ import {
   commission,
   commissionBpsFor,
   formatNaira,
+  suggestedFee,
   holdsEarnings,
   nairaToKobo,
   serviceFee,
@@ -56,6 +57,13 @@ describe('money', () => {
   it('holds earnings for Bronze only', () => {
     expect(holdsEarnings('bronze')).toBe(true);
     expect(holdsEarnings('silver')).toBe(false);
+  });
+
+  it('suggests a fee from distance, in ₦100 steps, never below the minimum', () => {
+    const pricing = NIGERIA_DEFAULT_SETTINGS.pricing; // ₦500 base, ₦200 per km, ₦1,000 minimum
+    expect(suggestedFee(pricing, 0)).toBe(100_000);
+    expect(suggestedFee(pricing, 5_000)).toBe(150_000);
+    expect(suggestedFee(pricing, 5_250)).toBe(160_000); // ₦1,550 rounds up to ₦1,600
   });
 
   it('formats naira for display', () => {

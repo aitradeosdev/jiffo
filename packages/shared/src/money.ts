@@ -71,6 +71,22 @@ export function splitFeeEscrow(input: { feeKobo: Kobo; serviceFeeKobo: Kobo; com
   };
 }
 
+/** Prices are offered in ₦100 steps. */
+export const FEE_STEP_KOBO = 10_000;
+
+/**
+ * The fee the app suggests for a distance: base fee plus a rate per km, never below the minimum,
+ * rounded up to the next ₦100. The customer can change it before sending.
+ */
+export function suggestedFee(
+  pricing: { baseFeeKobo: Kobo; ratePerKmKobo: Kobo; minFeeKobo: Kobo },
+  distanceMeters: number,
+): Kobo {
+  const raw = pricing.baseFeeKobo + Math.round((pricing.ratePerKmKobo * distanceMeters) / 1000);
+  const fee = Math.max(raw, pricing.minFeeKobo);
+  return Math.ceil(fee / FEE_STEP_KOBO) * FEE_STEP_KOBO;
+}
+
 /** Formats kobo as naira for display, for example 150050 → "₦1,500.50" and 150000 → "₦1,500". */
 export function formatNaira(amount: Kobo): string {
   assertKobo(amount);
