@@ -3,7 +3,6 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { APP_CONFIG, type AppConfig } from './config/app-config';
 import { ApiExceptionFilter } from './common/errors';
 import { allowedOrigins } from './common/origins';
-import { RateLimiter } from './common/rate-limit';
 import { securityHeaders } from './common/security-headers';
 import { ConfiguredIoAdapter } from './realtime/io-adapter';
 
@@ -21,7 +20,7 @@ export function configureApp(app: INestApplication) {
   app.setGlobalPrefix('v1', { exclude: ['health'] });
   app.useGlobalFilters(new ApiExceptionFilter());
   app.enableCors({ origin: allowedOrigins(config.CORS_ORIGINS) });
-  app.useWebSocketAdapter(new ConfiguredIoAdapter(app, config, app.get(RateLimiter)));
+  app.useWebSocketAdapter(new ConfiguredIoAdapter(app, config));
   app.enableShutdownHooks();
   return app;
 }

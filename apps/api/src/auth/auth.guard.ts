@@ -5,7 +5,7 @@ import { DB, type Db } from '../db/database.module';
 import { sessions, users, type AppName } from '../db/schema';
 import { forbidden, unauthorized } from '../common/errors';
 import { TokensService } from './tokens.service';
-import type { AuthContext, AuthedRequest } from './auth.types';
+import type { AuthContext, AuthedRequest, TokenClaims } from './auth.types';
 
 const APPS_KEY = 'jiffo:apps';
 /** How many sessions one re-check reads at a time, well inside Postgres's limit on query parameters. */
@@ -25,8 +25,9 @@ export class SessionVerifier {
   ) {}
 
   /** Checks the token and that its session is still live and the account active. */
-  async verify(token: string): Promise<AuthContext> {
-    const auth = await this.tokens.verifyAccess(token);
+  async verify(token: string, verified?: TokenClaims): Promise<AuthContext> {
+    // Claims the rate limiter already checked for this request are used as they are.
+    const auth = verified ?? (await this.tokens.verifyAccess(token));
     const [row] = await this.db
       .select({
         revokedAt: sessions.revokedAt,
@@ -68,7 +69,7 @@ export class AuthGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     const [scheme, token] = (req.headers.authorization ?? '').split(' ');
     if (scheme?.toLowerCase() !== 'bearer' || !token) throw unauthorized('missing_token', 'Sign in to continue');
-    req.auth = await this.verifier.verify(token);
+    req.auth = await this.verifier.verify(token, (req as AuthedRequest & { accessClaims?: TokenClaims }).accessClaims);
 
     const apps = this.reflector.getAllAndOverride<AppName[] | undefined>(APPS_KEY, [
       context.getHandler(),

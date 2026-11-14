@@ -58,6 +58,7 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(200)
+  @RateLimit('refresh')
   async refresh(@Body(new ZodBody(RefreshBody)) body: z.infer<typeof RefreshBody>) {
     try {
       return (await this.auth.refresh(body.refreshToken)).tokens;

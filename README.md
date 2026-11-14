@@ -170,16 +170,19 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
     - Every log line passes through the same masking. Production logs are JSON.
 - **Server defences:**
   - **Rate limits:**
-    - Every route is limited a minute, per signed-in person or else per network address, counted in Redis so every server shares the counts.
-    - Paid lookups (places, quotes), the board, chat, presence, sign-in and webhooks have their own limits, and every request also counts towards its address's overall limit.
-    - Live connections are limited per address too. Set them with `RATE_LIMITS` (for example `paid=20,auth=10`).
+    - Every route is limited a minute, counted in Redis so every server shares the counts. A signed-in person is counted as themselves, so many customers behind one mobile-network address don't add up.
+    - Anyone not signed in is counted by address, against the route's limit and an overall one. A made-up token doesn't change that.
+    - Refreshes count per session.
+    - Paid lookups (places, quotes), the board, chat, presence, sign-in and webhooks have their own limits, and new live connections are limited per person.
+    - Set them with `RATE_LIMITS` (for example `paid=20,auth=60`).
   - **Headers:**
     - Every answer says not to sniff, frame or refer, with a content policy that lets nothing load. HTTPS is insisted on in production.
     - Identity widget pages run only their own scripts, by a fresh nonce.
   - **Provider calls:**
     - Every call to a provider has a timeout and never follows a redirect.
     - Provider addresses typed in the panel must be the provider's own https hosts.
-    - Live payment keys are refused outside production, and test keys in it.
+    - Live payment keys are refused outside production, and test keys in it. This holds for keys from the environment too.
+    - A refused redirect says where it pointed, so a provider that moved is easy to tell from one that is down.
   - **Paystack:** with `PAYSTACK_WEBHOOK_IPS` set, Paystack's calls are taken only from those addresses.
   - **Development storage:** serves only photos as images. Anything else comes down as a file.
 - **Signing in:**

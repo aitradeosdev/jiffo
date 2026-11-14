@@ -30,7 +30,7 @@ const optional = (v: string | undefined) => (v && v.trim() ? v.trim() : undefine
  * A provider address typed in the panel, only if it is https on one of the provider's own hosts
  * (docs/security-plan.md, finding 18): a stolen owner session can't point a provider, and its keys, elsewhere.
  */
-const providerUrl = (v: string | undefined, hosts: (host: string) => boolean, name: string) => {
+export const providerUrl = (v: string | undefined, hosts: (host: string) => boolean, name: string) => {
   const text = optional(v);
   if (!text) return undefined;
   let url: URL;
@@ -46,7 +46,7 @@ const providerUrl = (v: string | undefined, hosts: (host: string) => boolean, na
 };
 
 /** A storage endpoint: https, and in production a public host rather than this machine or a private network. */
-const storageEndpoint = (v: string | undefined, ctx: ProviderContext) => {
+export const storageEndpoint = (v: string | undefined, ctx: Pick<ProviderContext, 'production'>) => {
   const text = optional(v);
   if (!text) return undefined;
   const url = new URL(text);
@@ -63,7 +63,16 @@ const storageEndpoint = (v: string | undefined, ctx: ProviderContext) => {
  * Live keys move real money, so they are for production only, and production refuses test keys
  * (docs/security-plan.md, P11). Tells them apart by the prefix each provider gives its keys.
  */
-const moneyKey = (key: string, ctx: ProviderContext, test: (k: string) => boolean, name: string) => {
+export const isPaystackTestKey = (k: string) => k.startsWith('sk_test_');
+export const isPaystackHost = (h: string) => h === 'api.paystack.co';
+export const isTermiiHost = (h: string) => h === 'termii.com' || h.endsWith('.termii.com');
+
+export const moneyKey = (
+  key: string,
+  ctx: Pick<ProviderContext, 'production'>,
+  test: (k: string) => boolean,
+  name: string,
+) => {
   const isTest = test(key);
   if (ctx.production && isTest) throw new Error(`This is a ${name} test key. Production needs a live key.`);
   if (!ctx.production && !isTest) throw new Error(`This is a ${name} live key. Live keys are for production only.`);
@@ -97,8 +106,8 @@ export const BUILDERS: {
       ),
     paystack: (v, ctx) =>
       new PaystackPaymentsAdapter(
-        moneyKey(v.secretKey!, ctx, (k) => k.startsWith('sk_test_'), 'Paystack'),
-        providerUrl(v.baseUrl, (h) => h === 'api.paystack.co', 'Paystack'),
+        moneyKey(v.secretKey!, ctx, isPaystackTestKey, 'Paystack'),
+        providerUrl(v.baseUrl, isPaystackHost, 'Paystack'),
         undefined,
         optional(v.dedicatedBank),
         nairaFee(v.fixedAccountFee),
@@ -110,8 +119,7 @@ export const BUILDERS: {
       new TermiiMessagingAdapter(
         v.apiKey!,
         v.senderId!,
-        providerUrl(v.baseUrl, (h) => h === 'termii.com' || h.endsWith('.termii.com'), 'Termii') ??
-          'https://api.ng.termii.com',
+        providerUrl(v.baseUrl, isTermiiHost, 'Termii') ?? 'https://api.ng.termii.com',
       ),
   },
   identity: {

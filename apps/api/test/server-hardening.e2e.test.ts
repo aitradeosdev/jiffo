@@ -23,7 +23,7 @@ describe('server hardening', () => {
   const saved = { limits: process.env.RATE_LIMITS, ips: process.env.PAYSTACK_WEBHOOK_IPS };
   beforeAll(async () => {
     // This app has low limits and a Paystack allow-list; every other test file runs with neither.
-    process.env.RATE_LIMITS = 'default=6,paid=2,auth=3,socket=2,ip=100000';
+    process.env.RATE_LIMITS = 'default=8,paid=2,auth=3,refresh=2,socket=2,ip=50';
     process.env.PAYSTACK_WEBHOOK_IPS = '52.31.139.75,52.49.173.169';
     t = await createTestApp();
   });
@@ -50,31 +50,43 @@ describe('server hardening', () => {
       expect((await request(t.http).get('/v1/places/autocomplete?q=Ikeja').set(other.headers)).status).not.toBe(429);
     });
 
-    it('count anyone not signed in by their address', async () => {
+    it('count anyone not signed in by their address, and refreshes by session', async () => {
       await freshMinute();
       const ip = randomIp();
-      const verify = () =>
-        request(t.http)
-          .post('/v1/auth/refresh')
-          .set('x-forwarded-for', ip)
-          .send({ refreshToken: 'x'.repeat(40) });
-      for (let i = 0; i < 3; i++) expect((await verify()).status).toBe(401);
-      expect((await verify()).status).toBe(429);
-      // Another address is unaffected.
-      expect(
-        (
-          await request(t.http)
-            .post('/v1/auth/refresh')
-            .set('x-forwarded-for', randomIp())
-            .send({ refreshToken: 'x'.repeat(40) })
-        ).status,
-      ).toBe(401);
+      const code = () =>
+        request(t.http).post('/v1/auth/otp/request').set('x-forwarded-for', ip).send({ phone: '12345' });
+      for (let i = 0; i < 3; i++) expect((await code()).status).toBe(400);
+      expect((await code()).status).toBe(429);
+      // A made-up token doesn't buy a fresh count: it is counted by address as well.
+      const forged = await request(t.http)
+        .post('/v1/auth/otp/request')
+        .set('x-forwarded-for', ip)
+        .set('authorization', `Bearer ${randomUUID()}`)
+        .send({ phone: '12345' });
+      expect(forged.status).toBe(429);
+      // Refreshes count per session, however many people share the address.
+      const refresh = (token: string) =>
+        request(t.http).post('/v1/auth/refresh').set('x-forwarded-for', ip).send({ refreshToken: token });
+      for (let i = 0; i < 2; i++) expect((await refresh('a'.repeat(40))).status).toBe(401);
+      expect((await refresh('a'.repeat(40))).status).toBe(429);
+      expect((await refresh('b'.repeat(40))).status).toBe(401);
     });
 
-    it('limit new live connections per address', async () => {
+    it('count signed-in people as themselves, not by the address they share', async () => {
+      await freshMinute();
+      const ip = randomIp();
+      const people = await Promise.all([0, 1, 2].map(() => signIn(t, 'customer')));
+      // Each well past the address's anonymous count, all from one address.
+      for (const who of people) {
+        for (let i = 0; i < 5; i++) {
+          expect((await request(t.http).get('/v1/me').set('x-forwarded-for', ip).set(who.headers)).status).toBe(200);
+        }
+      }
+    });
+
+    it('limit new live connections per person', async () => {
       await freshMinute();
       const who = await signIn(t, 'customer');
-      const ip = randomIp();
       const sockets: Socket[] = [];
       const connect = () =>
         new Promise<boolean>((resolve) => {
@@ -83,16 +95,25 @@ describe('server hardening', () => {
             transports: ['websocket'],
             forceNew: true,
             reconnection: false,
-            extraHeaders: { 'x-forwarded-for': ip },
           });
           sockets.push(socket);
           socket.once('ready', () => resolve(true));
-          socket.once('connect_error', () => resolve(false));
+          socket.once('auth_error', () => resolve(false));
         });
       try {
         expect(await connect()).toBe(true);
         expect(await connect()).toBe(true);
         expect(await connect()).toBe(false);
+        // Someone else is unaffected.
+        const other = await signIn(t, 'customer');
+        const theirs = io(`${t.url}/realtime`, {
+          auth: { token: other.accessToken },
+          transports: ['websocket'],
+          forceNew: true,
+          reconnection: false,
+        });
+        sockets.push(theirs);
+        expect(await new Promise((resolve) => theirs.once('ready', () => resolve(true)))).toBe(true);
       } finally {
         sockets.forEach((s) => s.disconnect());
       }
@@ -129,14 +150,17 @@ describe('server hardening', () => {
       (await store.presignUpload({ key, contentType: 'image/jpeg', size: bytes.length, ttlSeconds: 60 })).url,
     );
     // Signed for a photo, sent as an SVG.
+    const ip = randomIp();
     await request(t.http)
       .put(upload.pathname + upload.search)
+      .set('x-forwarded-for', ip)
       .set('content-type', 'image/svg+xml')
       .send(bytes)
       .expect(200);
     const download = new URL(await store.presignDownload(key, 60));
     const file = await request(t.http)
       .get(download.pathname + download.search)
+      .set('x-forwarded-for', ip)
       .expect(200);
     expect(file.headers['content-type']).toBe('application/octet-stream');
     expect(file.headers['content-disposition']).toBe('attachment');
@@ -197,7 +221,7 @@ describe('server hardening', () => {
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
       const { port } = server.address() as AddressInfo;
       try {
-        await expect(providerFetch(`http://127.0.0.1:${port}/`)).rejects.toThrow();
+        await expect(providerFetch(`http://127.0.0.1:${port}/`)).rejects.toThrow(/redirect to https:\/\/elsewhere/);
       } finally {
         server.close();
       }

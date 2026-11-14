@@ -13,6 +13,7 @@ import IORedis from 'ioredis';
 import { clientOf } from '../admin/admin.guard';
 import type { AdminRequest } from '../admin/admin.types';
 import { TokensService } from '../auth/tokens.service';
+import type { TokenClaims } from '../auth/auth.types';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { sha256 } from './crypto';
 import { tooMany } from './errors';
@@ -29,6 +30,7 @@ export const LIMIT_CLASSES = [
   'chat',
   'presence',
   'auth',
+  'refresh',
   'webhook',
   'socket',
   'ip',
@@ -43,10 +45,16 @@ const DEFAULT_LIMITS: Record<LimitClass, number> = {
   board: 30,
   chat: 60,
   presence: 60,
-  auth: 30,
-  webhook: 600,
+  // Sign-in codes, per address; the codes have their own limits per number and phone as well.
+  auth: 120,
+  // Swapping a refresh token, per session.
+  refresh: 10,
+  // Providers send from a few fixed addresses, so this is high.
+  webhook: 3_000,
+  // New live connections, per person.
   socket: 30,
-  // Every request from one address. High, since mobile networks put many people behind one address.
+  // Every request from one address by someone not signed in. Signed-in people are counted as themselves,
+  // so a mobile network's shared address doesn't add them all up.
   ip: 1_200,
 };
 
@@ -77,6 +85,8 @@ export class RateLimiter implements OnModuleDestroy {
   private readonly logger = new Logger('RateLimiter');
   private readonly redis: IORedis;
   readonly limits: Record<LimitClass, number>;
+  /** When an uncounted request was last logged, so Redis being down doesn't flood the logs. */
+  private warnedAt = 0;
 
   constructor(@Inject(APP_CONFIG) config: AppConfig) {
     this.limits = parseLimits(config.RATE_LIMITS);
@@ -100,7 +110,10 @@ export class RateLimiter implements OnModuleDestroy {
       const retryAfterSeconds = 60 - Math.floor((Date.now() / 1000) % 60);
       return { ok: count <= this.limits[limit], retryAfterSeconds };
     } catch (error) {
-      this.logger.warn(`Rate limit not counted: ${(error as Error).message}`);
+      if (Date.now() - this.warnedAt > 60_000) {
+        this.warnedAt = Date.now();
+        this.logger.warn(`Rate limits not counted (logged once a minute): ${(error as Error).message}`);
+      }
       return { ok: true, retryAfterSeconds: 0 };
     }
   }
@@ -122,17 +135,23 @@ export class RateLimitGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     if (context.getType() !== 'http') return true;
-    const req = context.switchToHttp().getRequest<Request>();
+    const req = context.switchToHttp().getRequest<Request & { accessClaims?: TokenClaims }>();
     const res = context.switchToHttp().getResponse<Response>();
     const limit =
       this.reflector.getAllAndOverride<LimitClass | undefined>(LIMIT_KEY, [context.getHandler(), context.getClass()]) ??
       'default';
-    const ip = clientOf(req as AdminRequest, this.config).ip ?? 'unknown';
-    const who = (await this.person(req)) ?? `ip:${ip}`;
-    for (const [cls, key] of [
-      ['ip', `ip:${ip}`],
-      [limit, who],
-    ] as const) {
+    const ip = `ip:${clientOf(req as AdminRequest, this.config).ip ?? 'unknown'}`;
+    // A signed-in person is counted as themselves; anyone else (an unverifiable token included) by address,
+    // which also counts towards the address's overall limit.
+    const claims = await this.claims(req);
+    if (claims) req.accessClaims = claims;
+    const checks: Array<[LimitClass, string]> = claims
+      ? [[limit, `u:${claims.userId}`]]
+      : [
+          ['ip', ip],
+          [limit, limit === 'refresh' ? (this.refreshKey(req) ?? ip) : ip],
+        ];
+    for (const [cls, key] of checks) {
       const { ok, retryAfterSeconds } = await this.limiter.hit(cls, key);
       if (!ok) {
         res.setHeader('retry-after', String(retryAfterSeconds));
@@ -142,16 +161,17 @@ export class RateLimitGuard implements CanActivate {
     return true;
   }
 
-  /** The signed-in person, from a valid access token; an admin's by their token. Null for anyone else. */
-  private async person(req: Request): Promise<string | null> {
+  /** A valid access token's claims, checked once here and kept for the route's own guard. */
+  private async claims(req: Request): Promise<TokenClaims | null> {
     const header = req.header('authorization') ?? '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : '';
     if (!token) return null;
-    try {
-      return `u:${(await this.tokens.verifyAccess(token)).userId}`;
-    } catch {
-      // An admin's token, or one that won't verify: counted by the token itself, which costs nothing to check.
-      return `t:${sha256(token).slice(0, 32)}`;
-    }
+    return this.tokens.verifyAccess(token).catch(() => null);
+  }
+
+  /** A refresh is counted per session, by its refresh token, so people sharing an address don't add up. */
+  private refreshKey(req: Request) {
+    const token = (req.body as { refreshToken?: unknown } | undefined)?.refreshToken;
+    return typeof token === 'string' && token.length >= 20 ? `rt:${sha256(token).slice(0, 32)}` : null;
   }
 }
