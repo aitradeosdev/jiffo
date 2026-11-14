@@ -28,7 +28,14 @@ const COMMISSION = 37_500;
 
 /** 50 copies of a request at once. */
 const burst = <T>(make: () => Promise<T>, n = 50) => Promise.all(Array.from({ length: n }, make));
-const succeeded = (results: Array<{ status: number }>) => results.filter((r) => r.status < 300).length;
+/**
+ * How many of a burst went through. The rest must be clean refusals (409) or repeats answered the same,
+ * never errors: a deadlock or a unique-key crash under load counts as a failure.
+ */
+const succeeded = (results: Array<{ status: number }>, refusals = [409]) => {
+  expect(results.map((r) => r.status).filter((s) => s >= 300 && !refusals.includes(s))).toEqual([]);
+  return results.filter((r) => r.status < 300).length;
+};
 
 describe('ledger guards', () => {
   let t: TestApp;
@@ -65,17 +72,16 @@ describe('ledger guards', () => {
         sql`delete from postings where id = (select id from postings limit 1)`,
         sql`update journal_entries set memo = 'changed' where id = (select id from journal_entries limit 1)`,
         sql`delete from journal_entries where id = (select id from journal_entries limit 1)`,
+        sql`truncate postings, journal_entries cascade`,
       ]) {
         await expect(t.db.execute(statement)).rejects.toThrow(/append-only/);
       }
     });
 
-    it('never lets a person’s balance go below zero, whatever the account’s flags say', async () => {
+    it('never lets a person’s balance go below zero', async () => {
       const who = await customer();
       await expect(
-        t.db.execute(
-          sql`update ledger_accounts set allow_negative = true, balance = -1 where owner_id = ${who.userId}`,
-        ),
+        t.db.execute(sql`update ledger_accounts set balance = -1 where owner_id = ${who.userId}`),
       ).rejects.toThrow(/ledger_accounts_balance_ck/);
     });
   });
@@ -100,7 +106,8 @@ describe('ledger guards', () => {
       const errand = await createErrand(t, buyer);
       const agents = await Promise.all(Array.from({ length: 10 }, agent));
       const results = await burst(() => event(agents[Math.floor(Math.random() * agents.length)]!, errand.id, 'accept'));
-      expect(succeeded(results)).toBe(1);
+      // Once taken, the errand is gone for other agents (404).
+      expect(succeeded(results, [409, 404])).toBe(1);
       expect((await balanceOf(t, buyer)).balanceKobo).toBe(2_000_000 - FEE - SERVICE);
       expect(await trialBalance()).toBe(0);
     });
@@ -175,6 +182,7 @@ describe('ledger guards', () => {
       const results = await burst(() =>
         request(t.http).post('/v1/admin/money/adjustments').set(finance.headers).send(body),
       );
+      expect(results.every((r) => r.status === 200)).toBe(true);
       expect(results.filter((r) => r.body.posted === true)).toHaveLength(1);
       expect((await balanceOf(t, who)).balanceKobo).toBe(70_000);
     });
@@ -205,23 +213,37 @@ describe('ledger guards', () => {
       const who = await signIn(t, 'customer');
       const revenue = await t.app.get(LedgerService).balance(t.db, { type: 'platform_revenue' }, 'NG');
       // Goodwill credits bigger than everything earned so far.
-      await request(t.http)
-        .post('/v1/admin/money/adjustments')
-        .set(finance.headers)
-        .send({
-          personId: who.userId,
-          account: 'customer_wallet',
-          direction: 'credit',
-          amountKobo: Math.max(0, revenue) + 100_000,
-          note: 'Goodwill bigger than revenue',
-          requestId: randomUUID(),
-        })
-        .expect(200);
+      const adjust = (direction: 'credit' | 'debit') =>
+        request(t.http)
+          .post('/v1/admin/money/adjustments')
+          .set(finance.headers)
+          .send({
+            personId: who.userId,
+            account: 'customer_wallet',
+            direction,
+            amountKobo: Math.max(0, revenue) + 100_000,
+            note: 'Goodwill bigger than revenue',
+            requestId: randomUUID(),
+          })
+          .expect(200);
+      const open = async () =>
+        (
+          (await request(t.http).get('/v1/admin/alerts?country=NG').set(finance.headers).expect(200)).body
+            .alerts as Array<{
+            kind: string;
+            resolvedAt: string | null;
+          }>
+        ).some((a) => a.kind === 'revenue_negative' && !a.resolvedAt);
+      await adjust('credit');
       await t.app.get(ReconciliationService).run();
       await clearReconciliationPauses(t);
-      const alerts = (await request(t.http).get('/v1/admin/alerts?country=NG').set(finance.headers).expect(200)).body
-        .alerts as Array<{ kind: string; resolvedAt: string | null }>;
-      expect(alerts.some((a) => a.kind === 'revenue_negative' && !a.resolvedAt)).toBe(true);
+      expect(await open()).toBe(true);
+      // Taken back, so the files after this one start from where revenue was. The alert closes by itself
+      // once revenue is back above zero (other files in the run may already have taken it below).
+      await adjust('debit');
+      await t.app.get(ReconciliationService).run();
+      await clearReconciliationPauses(t);
+      expect(await open()).toBe(revenue < 0);
     });
   });
 

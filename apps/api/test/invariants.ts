@@ -31,9 +31,10 @@ afterAll(async () => {
       `select key, balance from ledger_accounts where owner_id is not null and balance < 0`,
     );
     await check(
-      'escrows left on finished errands',
+      'escrows left on errands that hold no money (waiting, or finished)',
       `select a.key, a.balance, e.status from ledger_accounts a join errands e on e.id = a.owner_id
-        where a.type in ('fee_escrow', 'item_escrow') and e.status in ('completed', 'cancelled', 'expired')
+        where a.type in ('fee_escrow', 'item_escrow')
+        and e.status in ('requested', 'completed', 'cancelled', 'expired')
         and a.balance <> 0`,
     );
     if (problems.length) throw new Error(`Ledger invariants broken:\n${problems.join('\n')}`);

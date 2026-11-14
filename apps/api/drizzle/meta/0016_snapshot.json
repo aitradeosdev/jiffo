@@ -1,5 +1,5 @@
 {
-  "id": "2a9f865e-f01f-4bc4-ab43-739a431bd29a",
+  "id": "e1160aa9-c3f0-48c4-88ff-5936de922a04",
   "prevId": "b3331b14-5dc4-48e2-af3e-0e7c2b075574",
   "version": "7",
   "dialect": "postgresql",
@@ -3232,13 +3232,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "allow_negative": {
-          "name": "allow_negative",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "balance": {
           "name": "balance",

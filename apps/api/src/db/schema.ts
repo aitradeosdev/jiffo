@@ -434,7 +434,6 @@ export const ledgerAccounts = pgTable(
     /** The user or errand the account belongs to; null for platform accounts. */
     ownerId: uuid('owner_id'),
     normal: text('normal', { enum: ['debit', 'credit'] }).notNull(),
-    allowNegative: boolean('allow_negative').notNull().default(false),
     /**
      * For people's and errands' accounts: kept in step with the postings in the same transaction, in the
      * account's normal direction. Platform accounts stay at 0 here; their balance is summed from postings.

@@ -14,7 +14,6 @@ const CREDIT_NORMAL: ReadonlySet<LedgerAccountType> = new Set([
   'platform_revenue',
 ]);
 /** Accounts that are allowed below zero. Cash can briefly read negative between a payout and the deposit that funds it. */
-const MAY_GO_NEGATIVE: ReadonlySet<LedgerAccountType> = new Set(['provider_cash', 'provider_fees']);
 const PLATFORM: ReadonlySet<LedgerAccountType> = new Set([
   'payouts_in_transit',
   'platform_revenue',
@@ -98,7 +97,6 @@ export class LedgerService {
           currency,
           ownerId: PLATFORM.has(r.type) ? null : r.ownerId!,
           normal: CREDIT_NORMAL.has(r.type) ? ('credit' as const) : ('debit' as const),
-          allowNegative: MAY_GO_NEGATIVE.has(r.type),
         })),
       )
       .onConflictDoNothing({ target: ledgerAccounts.key });
@@ -168,7 +166,8 @@ export class LedgerService {
       lines.push({ journalId: journal.id, accountId: account.id, amount });
       if (PLATFORM.has(account.type)) continue;
       const balance = account.balance + (account.normal === 'debit' ? amount : -amount);
-      if (balance < 0 && !account.allowNegative) {
+      // A person's or errand's account never goes below zero (the database refuses it too).
+      if (balance < 0) {
         throw new InsufficientFunds(account.type, {
           balanceKobo: account.balance,
           neededKobo: account.balance - balance,
