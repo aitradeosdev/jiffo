@@ -234,9 +234,8 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
       ],
       idNumber: fields?.id_number,
     };
-    // The signature covers only the timestamp, so the API accepts it with this body once, and never again
-    // with another.
-    return { reference, result, signature };
+    // The signature covers only the timestamp, so the API accepts it, for this job, with this body only.
+    return { reference, result, replayKey: `${signature}:${jobId}` };
   }
 
   /** A job's verdict from Smile ID itself; null when they don't know the job. */

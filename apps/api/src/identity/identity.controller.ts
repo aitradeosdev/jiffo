@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { badRequest, notFound, unauthorized } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
 import { referenceRole } from '../adapters/identity';
-import { IdentityChecksService } from './identity-checks.service';
+import { HostedPageFailure, IdentityChecksService } from './identity-checks.service';
 
 /** Where each app picks up after a provider's page (their schemes, see the mobile app.config.ts). */
 const DONE_URL = { customer: 'jiffo://identity-done', agent: 'jiffo-agent://identity-done' } as const;
@@ -59,12 +59,28 @@ export class IdentityProviderController {
     @Res() res: Response,
   ) {
     let page: Awaited<ReturnType<IdentityProviderController['checks']['hostedPage']>>;
+    const keep = (binding: string | undefined) => {
+      if (!binding) return;
+      res.cookie(BINDING_COOKIE, binding, {
+        httpOnly: true,
+        secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
+        sameSite: 'lax',
+        path: '/v1/identity/hosted',
+        maxAge: 24 * 3_600_000,
+      });
+    };
     try {
       page =
         reference && expires && signature
           ? await this.checks.hostedPage(provider, { reference, expires, signature }, cookieOf(req))
           : null;
-    } catch (error) {
+    } catch (thrown) {
+      // A failed open that bound the link still gives this browser the cookie, so it can try again.
+      let error: unknown = thrown;
+      if (thrown instanceof HostedPageFailure) {
+        keep(thrown.binding);
+        error = thrown.error;
+      }
       if (error instanceof HttpException && error.getStatus() === 410) {
         res
           .status(410)
@@ -88,6 +104,16 @@ export class IdentityProviderController {
       return;
     }
     if (!page) throw notFound('not_found', 'Not found');
+    if (page === 'expired') {
+      res
+        .status(410)
+        .type('html')
+        .set('cache-control', 'no-store')
+        .send(
+          `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link expired</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1 style="font-size:24px">This link has expired</h1><p>Start the check again from the app.</p><p><a href="${DONE_URL[forReference(reference)]}">Go back to ${APP_NAME[forReference(reference)]}</a></p></body></html>`,
+        );
+      return;
+    }
     if (page === 'finished') {
       res
         .status(410)
@@ -98,15 +124,7 @@ export class IdentityProviderController {
         );
       return;
     }
-    if (page.binding) {
-      res.cookie(BINDING_COOKIE, page.binding, {
-        httpOnly: true,
-        secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
-        sameSite: 'lax',
-        path: '/v1/identity/hosted',
-        maxAge: 24 * 3_600_000,
-      });
-    }
+    keep(page.binding);
     res.type('html').set('cache-control', 'no-store').send(page.html);
   }
 

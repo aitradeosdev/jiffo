@@ -44,6 +44,8 @@ export interface ProviderView {
   updatedAt: string | null;
   updatedBy: string | null;
   lastTest: { at: string; ok: boolean; message: string; current: boolean } | null;
+  /** Why the saved settings can't be used now (sandbox mode in production, say); null when they can. */
+  problem: string | null;
 }
 
 function Hidden({ category, provider }: { category: string; provider: string }) {
@@ -95,6 +97,11 @@ export function ProviderCard({
         ) : null}
       </div>
       <p className="mt-1 text-sm text-ink-3">{p.about}</p>
+      {p.problem ? (
+        <p className="mt-2 text-[13px] font-semibold text-danger" role="alert">
+          These settings can&apos;t be used: {p.problem}
+        </p>
+      ) : null}
       {p.idTypes ? (
         <p className="mt-2 text-[13px] text-ink-2">
           <span className="font-semibold">Checks: </span>

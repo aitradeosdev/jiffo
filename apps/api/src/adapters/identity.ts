@@ -95,13 +95,13 @@ export interface IdentityAdapter {
    * the provider to confirm it, and throws IdentityProviderError when it can't, so the provider sends it again.
    */
   /**
-   * A signed result from the provider. A provider whose signature doesn't cover the body gives the signature
-   * too, so the API can make sure it never vouches for a second, different body.
+   * A signed result from the provider. A provider whose signature doesn't cover the body gives a replay key
+   * (its signature and the job), so the API can make sure it never vouches for a second, different body.
    */
   parseWebhook?(
     rawBody: Buffer,
     headers: Headers,
-  ): Promise<{ reference: string; result: IdentityResult; signature?: string } | null>;
+  ): Promise<{ reference: string; result: IdentityResult; replayKey?: string } | null>;
   /** For providers whose widget runs in a page Jiffo serves: that page, for the check as started. */
   page?(reference: string, request: IdentityRequest): string | Promise<string>;
   /**

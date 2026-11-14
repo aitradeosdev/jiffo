@@ -126,12 +126,12 @@ describe("identity checks on the provider's own page", () => {
     const secondRef = String(again.body.url).split('/').pop()!;
     status.mockResolvedValue({ status: 'clear', user_id: secondRef });
     const secondBody = body.replace(reference, secondRef);
-    const later = new Date(Date.now() + 1000).toISOString();
+    // Signed at the same moment as the first, so with the same signature: another job, so both are genuine.
     await request(t.http)
       .post('/v1/webhooks/identity/smileid')
       .set('content-type', 'application/json')
-      .set('response-timestamp', later)
-      .set('response-signature', sign('smile-key', later))
+      .set('response-timestamp', timestamp)
+      .set('response-signature', sign('smile-key'))
       .set('smileid-job-id', 'job_02')
       .send(secondBody)
       .expect(200);
@@ -224,15 +224,17 @@ describe("identity checks on the provider's own page", () => {
       .get(url.pathname + url.search)
       .expect(503);
     expect(down.headers['content-type']).toMatch(/html/);
+    // The first browser to open it keeps it, even when that open failed: the cookie it was given.
+    const cookie = String(down.headers['set-cookie']).split(';')[0]!;
+    expect(cookie).toMatch(/^jiffo_check=[0-9a-f]{64}$/);
     session.mockResolvedValue({ sessionId: 'sess-1', sessionToken: 'tok-1' });
     const page = await request(t.http)
       .get(url.pathname + url.search)
+      .set('cookie', cookie)
       .expect(200);
     expect(page.text).toContain('National Identification Number');
     expect(page.text).not.toContain('yv-secret');
-    // The browser that opened it keeps it: the cookie it was given.
-    const cookie = String(page.headers['set-cookie']).split(';')[0]!;
-    expect(cookie).toMatch(/^jiffo_check=[0-9a-f]{64}$/);
+    expect(page.headers['set-cookie']).toBeUndefined();
     // The page sends with its own signature, not the link's.
     const sig = /"sig":"([0-9a-f]{32})"/.exec(page.text)![1]!;
     expect(sig).not.toBe(url.searchParams.get('sig'));
@@ -248,6 +250,18 @@ describe("identity checks on the provider's own page", () => {
       .get(later.pathname + later.search)
       .set('cookie', cookie)
       .expect(404);
+    // An hour after it was made, the link says it has expired and to start again.
+    const now = Date.now;
+    vi.spyOn(Date, 'now').mockImplementation(() => now() + 61 * 60_000);
+    try {
+      const expired = await request(t.http)
+        .get(url.pathname + url.search)
+        .set('cookie', cookie)
+        .expect(410);
+      expect(expired.text).toContain('This link has expired');
+    } finally {
+      vi.mocked(Date.now).mockRestore();
+    }
 
     const nin = uniqueNin();
     const submit = (body: object, from = cookie) =>
@@ -320,10 +334,10 @@ describe("identity checks on the provider's own page", () => {
       .send({ consent: true, idType: 'nin' })
       .expect(200);
     const link = new URL(again.body.url);
-    // The same browser, as a person reopening it would be.
-    const opened = await request(t.http)
-      .get(link.pathname + link.search)
-      .expect(200);
+    // Two browsers opening it at the same moment: only one keeps it.
+    const both = await Promise.all([0, 1].map(() => request(t.http).get(link.pathname + link.search)));
+    expect(both.map((r) => r.status).sort()).toEqual([200, 410]);
+    const opened = both.find((r) => r.status === 200)!;
     const browser = String(opened.headers['set-cookie']).split(';')[0]!;
     for (let i = 1; i < 20; i += 1)
       await request(t.http)

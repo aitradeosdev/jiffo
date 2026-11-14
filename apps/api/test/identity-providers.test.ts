@@ -94,8 +94,8 @@ describe('Smile ID', () => {
           ],
           idNumber: '12345678901',
         },
-        // Given back so the API can refuse it with any other body.
-        signature: expect.any(String),
+        // Given back so the API can refuse it, for this job, with any other body.
+        replayKey: expect.stringMatching(/:job_01$/),
       });
       expect(calls[1]!.url).toBe('https://testapi.smileidentity.com/v3/status/job_01');
       expect(calls[1]!.init.headers).toMatchObject({ 'SmileID-Partner-ID': '1234', 'SmileID-Token': 'jwt-1' });

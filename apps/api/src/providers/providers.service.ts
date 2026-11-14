@@ -31,8 +31,8 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
   readonly box: SecretBox;
   private rows = new Map<string, Row>();
   private active = new Map<ProviderCategory, string>();
-  /** Built adapters, kept while their settings are unchanged. */
-  private readonly built = new Map<string, { stamp: number; adapter: unknown | null }>();
+  /** Built adapters, kept while their settings are unchanged, with why one couldn't be built. */
+  private readonly built = new Map<string, { stamp: number; adapter: unknown | null; problem?: string }>();
   private timer?: ReturnType<typeof setInterval>;
 
   constructor(
@@ -129,9 +129,15 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
       return adapter;
     } catch (error) {
       this.logger.error(`Provider ${key} could not be set up: ${String(error)}`);
-      this.built.set(key, { stamp, adapter: null });
+      this.built.set(key, { stamp, adapter: null, problem: error instanceof Error ? error.message : String(error) });
       return null;
     }
+  }
+
+  /** Why a provider's saved settings can't be used now, for the panel; null when they can, or none are saved. */
+  problemOf(category: ProviderCategory, name: string): string | null {
+    this.fromSettings(category, name);
+    return this.built.get(`${category}:${name}`)?.problem ?? null;
   }
 
   /** All of a provider's fields, the secret ones decrypted. Only for building its adapter. */

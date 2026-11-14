@@ -1,8 +1,11 @@
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { FakeIdentityAdapter } from '../src/adapters/identity';
+import { IdentityProviderError } from '../src/adapters/identity-providers';
 import { BUILDERS } from '../src/providers/builders';
-import { agentApplications, customerVerifications } from '../src/db/schema';
+import { agentApplications, customerVerifications, identityAttempts } from '../src/db/schema';
+import { IdentityChecksService } from '../src/identity/identity-checks.service';
 import { adminAs, createTestApp, signIn, uniqueNin, type Person, type TestApp } from './helpers';
 
 /** Abuse cases for identity checks (docs/security-plan.md, I1, I2, findings 3, 10, 22). */
@@ -59,6 +62,29 @@ describe('identity checks', () => {
       const fourth = await check(who, uniqueNin('0000'));
       expect(fourth.status).toBe(429);
       expect(fourth.body.error.code).toBe('identity_check_limit');
+    });
+
+    it('doesn’t count a start the provider couldn’t take', async () => {
+      const who = await customer();
+      const down = vi
+        .spyOn(FakeIdentityAdapter.prototype, 'startIdentity')
+        .mockRejectedValue(new IdentityProviderError('down'));
+      try {
+        for (let i = 0; i < 3; i += 1) expect((await check(who, uniqueNin('0000'))).status).toBe(503);
+      } finally {
+        down.mockRestore();
+      }
+      await check(who, uniqueNin('0000')).expect(200);
+    });
+
+    it('forgets attempts after two days', async () => {
+      const who = await customer();
+      await t.db
+        .insert(identityAttempts)
+        .values({ kind: 'start', userId: who.userId, createdAt: new Date(Date.now() - 3 * 86_400_000) });
+      await t.app.get(IdentityChecksService).prune();
+      const left = await t.db.select().from(identityAttempts).where(eq(identityAttempts.userId, who.userId));
+      expect(left).toHaveLength(0);
     });
 
     it('lets only one of a burst through when one start is left', async () => {

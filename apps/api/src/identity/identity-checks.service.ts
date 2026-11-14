@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { createHash, createHmac, hkdfSync, randomBytes, randomUUID } from 'node:crypto';
-import { and, eq, gt, isNotNull, lt, sql } from 'drizzle-orm';
+import { createHmac, hkdfSync, randomBytes, randomUUID } from 'node:crypto';
+import { and, eq, gt, lt, sql } from 'drizzle-orm';
 import { ID_TYPES, normaliseIdNumber, providerInfo, type CountrySettings, type IdType } from '@jiffo/shared';
 import {
   IdentityUnavailable,
@@ -15,8 +15,8 @@ import {
 } from '../adapters/identity';
 import { IdentityPageError, IdentityProviderError } from '../adapters/identity-providers';
 import { SessionVerifier } from '../auth/auth.guard';
-import { safeEqual } from '../common/crypto';
-import { badRequest, conflict, gone, tooMany, unavailable } from '../common/errors';
+import { safeEqual, sha256 } from '../common/crypto';
+import { ApiError, badRequest, conflict, gone, tooMany, unavailable } from '../common/errors';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
 import { identityAttempts, webhookSignatures } from '../db/schema';
@@ -79,9 +79,22 @@ export const ID_CHECK_LABELS: Record<string, string> = {
 const PAGE_OPENS_PER_HOUR = 20;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
-/** Webhook signatures are remembered this long, well past any provider's own age limit. */
-const SIGNATURES_KEPT_MS = 2 * DAY_MS;
-const hash = (text: string) => createHash('sha256').update(text).digest('hex');
+/** Attempts and webhook signatures are kept this long: well past any limit or provider's age check. */
+const KEPT_MS = 2 * DAY_MS;
+const OPENED_ELSEWHERE = 'This link was opened on another device. Start the check again from the app.';
+
+/**
+ * A hosted page couldn't be made (the provider down, or opened too often). The browser still gets the cookie
+ * if this was the open that bound the link to it.
+ */
+export class HostedPageFailure extends Error {
+  constructor(
+    readonly error: ApiError,
+    readonly binding?: string,
+  ) {
+    super(error.message);
+  }
+}
 
 /**
  * Identity checks with the provider switched on in the panel, for customers and agents alike: which IDs a
@@ -239,8 +252,15 @@ export class IdentityChecksService {
       }
     }
     const reference = `${PREFIX[role]}-${randomUUID()}`;
-    await this.countStart(userId, reference, settings.checkStartsPerDay);
-    const started = await this.call(() => adapter.startIdentity({ person, reference, request, idNumber, bvn }));
+    const attempt = await this.countStart(userId, reference, settings.checkStartsPerDay);
+    let started: Awaited<ReturnType<IdentityAdapter['startIdentity']>>;
+    try {
+      started = await this.call(() => adapter.startIdentity({ person, reference, request, idNumber, bvn }));
+    } catch (error) {
+      // The provider didn't take it, so it cost nothing and looked nothing up: it doesn't count.
+      await this.db.delete(identityAttempts).where(eq(identityAttempts.id, attempt));
+      throw error;
+    }
     return {
       reference: started.reference,
       provider: adapter.name,
@@ -253,11 +273,12 @@ export class IdentityChecksService {
 
   /**
    * Counts a check towards the account's daily limit, or refuses it once the limit is reached. Each start
-   * may be a paid check, and one that finds an ID's record could be used to look people up, so the limit
-   * holds whatever the outcome. One at a time per account, so a burst can't slip past the count.
+   * the provider takes may be a paid check, and one that finds an ID's record could be used to look people
+   * up, so the limit holds whatever the outcome. One at a time per account, so a burst can't slip past the
+   * count. Gives the attempt's ID, so a start the provider refused can be taken back.
    */
   private async countStart(userId: string, reference: string, perDay: number) {
-    await this.db.transaction(async (tx) => {
+    return this.db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'identity-start:' + userId}))`);
       const [made] = await tx
         .select({ n: sql<number>`count(*)::int` })
@@ -275,8 +296,26 @@ export class IdentityChecksService {
           'You have started too many ID checks today. Try again tomorrow, or contact support.',
         );
       }
-      await tx.insert(identityAttempts).values({ kind: 'start', userId, reference });
+      const [attempt] = await tx
+        .insert(identityAttempts)
+        .values({ kind: 'start', userId, reference })
+        .returning({ id: identityAttempts.id });
+      return attempt!.id;
     });
+  }
+
+  /** Forgets attempts and webhook signatures older than any limit looks at. Runs daily. */
+  async prune() {
+    const before = new Date(Date.now() - KEPT_MS);
+    const attempts = await this.db
+      .delete(identityAttempts)
+      .where(lt(identityAttempts.createdAt, before))
+      .returning({ id: identityAttempts.id });
+    const signatures = await this.db
+      .delete(webhookSignatures)
+      .where(lt(webhookSignatures.seenAt, before))
+      .returning({ provider: webhookSignatures.provider });
+    return { attempts: attempts.length, signatures: signatures.length };
   }
 
   /** Asks the provider a check was started with for its result. */
@@ -329,14 +368,11 @@ export class IdentityChecksService {
     };
   }
 
-  /** Whether a link to a provider's page is one this API made, and hasn't expired. */
-  private signedLink(provider: string, reference: string, expires: string, signature: string) {
+  /** Whether a link to a provider's page is one this API made: "ok", "expired", or "bad" for any other. */
+  private linkState(provider: string, reference: string, expires: string, signature: string) {
+    if (!safeEqual(signature, this.providers.context.sign(`${provider}:${reference}:${expires}`))) return 'bad';
     const at = Number(expires);
-    return (
-      Number.isFinite(at) &&
-      at > Date.now() &&
-      safeEqual(signature, this.providers.context.sign(`${provider}:${reference}:${expires}`))
-    );
+    return Number.isFinite(at) && at > Date.now() ? 'ok' : 'expired';
   }
 
   /** Whether a send from a provider's page carries the signature that page was given. */
@@ -360,7 +396,7 @@ export class IdentityChecksService {
         and(
           eq(identityAttempts.kind, 'page_open'),
           eq(identityAttempts.reference, reference),
-          eq(identityAttempts.binding, hash(cookie)),
+          eq(identityAttempts.binding, sha256(cookie)),
         ),
       )
       .limit(1);
@@ -384,7 +420,7 @@ export class IdentityChecksService {
     // A provider that can't be reached to confirm the result answers 503, so it sends the result again.
     const parsed = await this.call(() => parse(rawBody, headers));
     if (!parsed) return null;
-    if (parsed.signature && !(await this.firstUse(provider, parsed.signature, rawBody))) return null;
+    if (parsed.replayKey && !(await this.firstUse(provider, parsed.replayKey, rawBody))) return null;
     const { reference, result } = parsed;
     if (result.status !== 'done') return { reference, settled: false };
     // A check started again since, or already settled: this result is no longer wanted.
@@ -394,89 +430,80 @@ export class IdentityChecksService {
   }
 
   /**
-   * For a provider whose signature doesn't cover the body (Smile ID): true the first time a signature is
-   * seen, or when it comes again with the same body (the provider resending it); false when the same
-   * signature comes with a different body, which only a replay could do.
+   * For a provider whose signature doesn't cover the body (Smile ID): true the first time a signature is seen
+   * for a job, or when it comes again with the same body (the provider resending it); false when it comes
+   * with a different body, which only a replay could do.
    */
-  private async firstUse(provider: string, signature: string, rawBody: Buffer) {
-    const bodyHash = createHash('sha256').update(rawBody).digest('hex');
-    await this.db
-      .delete(webhookSignatures)
-      .where(lt(webhookSignatures.seenAt, new Date(Date.now() - SIGNATURES_KEPT_MS)));
-    await this.db.insert(webhookSignatures).values({ provider, signature, bodyHash }).onConflictDoNothing();
+  private async firstUse(provider: string, replayKey: string, rawBody: Buffer) {
+    const bodyHash = sha256(rawBody.toString('utf8'));
+    await this.db.insert(webhookSignatures).values({ provider, signature: replayKey, bodyHash }).onConflictDoNothing();
     const [seen] = await this.db
       .select({ bodyHash: webhookSignatures.bodyHash })
       .from(webhookSignatures)
-      .where(and(eq(webhookSignatures.provider, provider), eq(webhookSignatures.signature, signature)));
+      .where(and(eq(webhookSignatures.provider, provider), eq(webhookSignatures.signature, replayKey)));
     if (seen?.bodyHash === bodyHash) return true;
     this.logger.warn(`A ${provider} webhook signature came again with a different body; refused`);
     return false;
   }
 
   /**
-   * The page a provider's widget runs in, for a link this API made that hasn't expired and a check still
-   * waiting on it: null for any other link, "finished" for a check that is done or was started again.
+   * The page a provider's widget runs in, for a link this API made and a check still waiting on it: null for
+   * any other link, "expired" for one past its time, "finished" for a check that is done or was started
+   * again.
    * - The page works only while the app session that started the check is signed in.
    * - The first browser to open it keeps it: the link opened anywhere else is refused, so a forwarded link
    *   can't be used by someone else.
    * - Opening one may start a paid session with the provider, so each check's page opens a limited number of
    *   times an hour, counted across every server.
+   * The binding and the count are decided in one step per check, so two browsers opening at once can't both
+   * keep it.
    */
   async hostedPage(
     provider: string,
     link: { reference: string; expires: string; signature: string },
     cookie: string | undefined,
-  ): Promise<HostedPage | 'finished' | null> {
+  ): Promise<HostedPage | 'expired' | 'finished' | null> {
     const adapter = this.providers.named('identity', provider);
     const { reference } = link;
-    if (!adapter?.page || !this.signedLink(provider, reference, link.expires, link.signature)) return null;
+    if (!adapter?.page) return null;
+    const state = this.linkState(provider, reference, link.expires, link.signature);
+    if (state !== 'ok') return state === 'expired' ? 'expired' : null;
     const found = await this.waitingOn(provider, reference);
     if (!found || !(await this.sessionLive(found.check))) return 'finished';
-    const [opens] = await this.db
-      .select({
-        n: sql<number>`count(*)::int`,
-        bound: sql<number>`count(*) filter (where ${isNotNull(identityAttempts.binding)})::int`,
-      })
-      .from(identityAttempts)
-      .where(and(eq(identityAttempts.kind, 'page_open'), eq(identityAttempts.reference, reference)));
-    let binding: string | undefined;
-    if ((opens?.bound ?? 0) > 0) {
-      if (!(await this.boundHere(reference, cookie))) {
-        throw gone(
-          'identity_opened_elsewhere',
-          'This link was opened on another device. Start the check again from the app.',
-        );
+    const binding = await this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'identity-page:' + reference}))`);
+      const [opens] = await tx
+        .select({
+          bound: sql<number>`count(*) filter (where ${identityAttempts.binding} is not null)::int`,
+          here: sql<number>`count(*) filter (where ${identityAttempts.binding} = ${cookie ? sha256(cookie) : ''})::int`,
+          recent: sql<number>`count(*) filter (where ${identityAttempts.createdAt} > ${new Date(Date.now() - HOUR_MS)})::int`,
+        })
+        .from(identityAttempts)
+        .where(and(eq(identityAttempts.kind, 'page_open'), eq(identityAttempts.reference, reference)));
+      if ((opens?.bound ?? 0) > 0 && !(opens?.here ?? 0)) throw gone('identity_opened_elsewhere', OPENED_ELSEWHERE);
+      if ((opens?.recent ?? 0) >= PAGE_OPENS_PER_HOUR) {
+        throw tooMany('identity_page_limit', 'This page was opened too many times. Try again in an hour.');
       }
-    } else {
-      binding = cookie ?? randomBytes(32).toString('hex');
-    }
-    const [recent] = await this.db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(identityAttempts)
-      .where(
-        and(
-          eq(identityAttempts.kind, 'page_open'),
-          eq(identityAttempts.reference, reference),
-          gt(identityAttempts.createdAt, new Date(Date.now() - HOUR_MS)),
-        ),
-      );
-    if ((recent?.n ?? 0) >= PAGE_OPENS_PER_HOUR) {
-      throw tooMany('identity_page_limit', 'This page was opened too many times. Try again in an hour.');
-    }
-    // Counted before the page is made, as making it may start a paid session even if it then fails.
-    const [open] = await this.db
-      .insert(identityAttempts)
-      .values({ kind: 'page_open', userId: found.check.userId, reference })
-      .returning({ id: identityAttempts.id });
+      // The first open binds the link to this browser, before the page is made, as making it may start a
+      // paid session; later opens from the same browser are counted too.
+      const first = (opens?.bound ?? 0) === 0;
+      const token = first ? (cookie ?? randomBytes(32).toString('hex')) : undefined;
+      await tx.insert(identityAttempts).values({
+        kind: 'page_open',
+        userId: found.check.userId,
+        reference,
+        binding: token ? sha256(token) : null,
+      });
+      return token && token !== cookie ? token : undefined;
+    });
     const page = adapter.page.bind(adapter);
-    const html = await this.call(async () => page(reference, found.check.request));
-    // The browser keeps the link only once it has the page (and the cookie that comes with it).
-    if (!binding) return { html };
-    await this.db
-      .update(identityAttempts)
-      .set({ binding: hash(binding) })
-      .where(eq(identityAttempts.id, open!.id));
-    return cookie ? { html } : { html, binding };
+    try {
+      const html = await this.call(async () => page(reference, found.check.request));
+      return binding ? { html, binding } : { html };
+    } catch (error) {
+      if (error instanceof ApiError) throw new HostedPageFailure(error, binding);
+      throw error;
+    }
   }
 
   /**
@@ -493,10 +520,7 @@ export class IdentityChecksService {
     if (!found || !(await this.sessionLive(found.check))) throw finished();
     // Only from the browser the page was opened in.
     if (!(await this.boundHere(input.ref, cookie))) {
-      throw gone(
-        'identity_opened_elsewhere',
-        'This link was opened on another device. Start the check again from the app.',
-      );
+      throw gone('identity_opened_elsewhere', OPENED_ELSEWHERE);
     }
     const { idType, withBvn } = found.check.request;
     const idNumber = normaliseIdNumber(idType, input.idNumber);

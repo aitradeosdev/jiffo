@@ -590,15 +590,22 @@ export class AgentApplicationService implements IdentityOwner {
             ne(agentApplications.userId, input.userId),
           ),
         );
-      // An account holds an ID only once its own ID and selfie checks proved it theirs. Approving this one
-      // never takes the ID away from it: support decides that account first (docs/security-plan.md, 22).
+      // An account holds an ID only once its own ID and selfie checks proved it theirs, so it is the ID's
+      // likely owner. Approving this one never takes the ID away from it (docs/security-plan.md, 22): support
+      // reopens a declined one instead, and a draft's owner can finish their own application.
       if (holder) {
+        const why = {
+          approved: 'Another approved agent account uses this ID.',
+          rejected: 'Another agent account proved this ID and was declined. Reopen that application instead.',
+          draft: "Another agent account proved this ID and hasn't sent its application yet. Its owner can finish it.",
+        }[holder.status as 'approved' | 'rejected' | 'draft'];
         throw conflict(
           'nin_held',
-          holder.status === 'approved'
-            ? 'Another approved agent account uses this ID'
-            : 'Another agent account proved this ID with its own checks. Decide that application first.',
-          { userId: holder.userId },
+          why ?? 'Another agent account proved this ID with its own checks. Decide that one first.',
+          {
+            userId: holder.userId,
+            holderStatus: holder.status,
+          },
         );
       }
       idFingerprint = app.pendingIdFingerprint;
@@ -611,17 +618,17 @@ export class AgentApplicationService implements IdentityOwner {
     return { before: app, after: row! };
   }
 
-  /** The verified legal name: once every identity check passed, or support approved the application. */
+  /**
+   * The name on the agent's ID record, for checking a payout account is theirs: kept only for a check that
+   * didn't fail. It is used even while support reviews the check, so the account must match the ID, not the
+   * name in the app; the agent is shown it only once approved.
+   */
   async legalName(userId: string) {
     const [row] = await this.db
-      .select({
-        legalName: agentApplications.legalName,
-        outcome: agentApplications.identityOutcome,
-        status: agentApplications.status,
-      })
+      .select({ legalName: agentApplications.legalName, outcome: agentApplications.identityOutcome })
       .from(agentApplications)
       .where(eq(agentApplications.userId, userId));
-    return row?.legalName && (row.outcome === 'passed' || row.status === 'approved') ? row.legalName : null;
+    return row?.outcome && row.outcome !== 'failed' && row.legalName ? row.legalName : null;
   }
 
   /** Refuses agents whose application isn't approved: they can't see the board, go online or accept. */
