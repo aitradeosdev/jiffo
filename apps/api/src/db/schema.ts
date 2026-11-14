@@ -18,6 +18,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { encrypted } from './fields';
 import { ADMIN_ROLES, AGENT_TIERS, type AdminRole, type CountrySettings, type ErrandState } from '@jiffo/shared';
 
 /** PostGIS point (longitude, latitude). Written with ST_MakePoint, read back through the lat/lng columns. */
@@ -601,9 +602,13 @@ export const payoutAccounts = pgTable(
     provider: text('provider').notNull(),
     bankCode: text('bank_code').notNull(),
     bankName: text('bank_name').notNull(),
-    accountNumber: text('account_number').notNull(),
-    accountName: text('account_name').notNull(),
-    recipientCode: text('recipient_code').notNull(),
+    /** Encrypted at rest (fields.ts), as is the name on the account. */
+    accountNumber: encrypted('payout_accounts', 'account_number').notNull(),
+    accountName: encrypted('payout_accounts', 'account_name').notNull(),
+    /** The account number's last four digits, readable, for lists and support. */
+    accountLast4: text('account_last4'),
+    /** Some providers' recipient codes carry the account number (Flutterwave's), so it is encrypted too. */
+    recipientCode: encrypted('payout_accounts', 'recipient_code').notNull(),
     createdAt: createdAt(),
     replacedAt: timestamp('replaced_at', { withTimezone: true }),
   },
@@ -882,13 +887,17 @@ export const agentApplications = pgTable(
     identitySessionId: uuid('identity_session_id'),
     identityOutcome: text('identity_outcome', { enum: ['passed', 'failed', 'review'] }),
     identityCheckedAt: timestamp('identity_checked_at', { withTimezone: true }),
-    legalName: text('legal_name'),
-    dateOfBirth: text('date_of_birth'),
+    /** The name and date of birth on the ID record, encrypted at rest (fields.ts). */
+    legalName: encrypted('agent_applications', 'legal_name'),
+    /** Keyed hashes of the legal name's words, so support can search by name (fields.ts). */
+    legalNameIndex: text('legal_name_index').array(),
+    dateOfBirth: encrypted('agent_applications', 'date_of_birth'),
     /** Only our safety team sees it. */
-    address: text('address'),
-    emergencyName: text('emergency_name'),
-    emergencyPhone: text('emergency_phone'),
-    emergencyRelationship: text('emergency_relationship'),
+    /** Home address and emergency contact, encrypted at rest (fields.ts). */
+    address: encrypted('agent_applications', 'address'),
+    emergencyName: encrypted('agent_applications', 'emergency_name'),
+    emergencyPhone: encrypted('agent_applications', 'emergency_phone'),
+    emergencyRelationship: encrypted('agent_applications', 'emergency_relationship'),
     addressProvider: text('address_provider'),
     addressReference: text('address_reference'),
     addressOutcome: text('address_outcome', { enum: ['passed', 'failed', 'review'] }),
@@ -907,6 +916,7 @@ export const agentApplications = pgTable(
       .on(t.idFingerprint)
       .where(sql`${t.idFingerprint} is not null`),
     index('agent_applications_status_idx').on(t.countryCode, t.status),
+    index('agent_applications_legal_name_ix').using('gin', t.legalNameIndex),
   ],
 );
 
@@ -934,8 +944,11 @@ export const customerVerifications = pgTable(
     /** The provider's overall answer, once back. */
     outcome: text('outcome', { enum: ['passed', 'failed', 'review'] }),
     checks: jsonb('checks').$type<Array<{ key: string; outcome: string; note?: string }>>().notNull().default([]),
-    legalName: text('legal_name'),
-    dateOfBirth: text('date_of_birth'),
+    /** The name and date of birth on the ID record, encrypted at rest (fields.ts). */
+    legalName: encrypted('customer_verifications', 'legal_name'),
+    /** Keyed hashes of the legal name's words, so support can search by name (fields.ts). */
+    legalNameIndex: text('legal_name_index').array(),
+    dateOfBirth: encrypted('customer_verifications', 'date_of_birth'),
     /** As on agent applications: claimed once the ID is shown to be theirs, else waiting as pending. */
     idFingerprint: text('id_fingerprint'),
     pendingIdFingerprint: text('pending_id_fingerprint'),
@@ -952,6 +965,7 @@ export const customerVerifications = pgTable(
       .where(sql`${t.idFingerprint} is not null`),
     uniqueIndex('customer_verifications_reference_uq').on(t.provider, t.reference),
     index('customer_verifications_status_idx').on(t.status),
+    index('customer_verifications_legal_name_ix').using('gin', t.legalNameIndex),
   ],
 );
 

@@ -543,7 +543,7 @@ describe('config', () => {
     expect(() => loadConfig({ ...base, MESSAGING_PROVIDER: 'termii' })).toThrow(/TERMII_API_KEY/);
     expect(loadConfig(base)).toMatchObject({ PORT: 3000, MESSAGING_PROVIDER: 'console', TIMER_PROVIDER: 'bullmq' });
     // Providers can be set in the admin panel instead, so production doesn't need them in the environment.
-    const live = { ...base, NODE_ENV: 'production', SECRETS_KEY: 'a'.repeat(64) };
+    const live = { ...base, NODE_ENV: 'production', SECRETS_KEY: 'b'.repeat(64) };
     expect(() => loadConfig({ ...live, SECRETS_KEY: undefined })).toThrow(/SECRETS_KEY/);
     expect(() => loadConfig(live)).toThrow(/TRUST_PROXY_HOPS/);
     expect(() => loadConfig({ ...live, TRUST_PROXY_HOPS: '1' })).toThrow(/ADMIN_PANEL_SECRET/);
@@ -558,8 +558,19 @@ describe('config', () => {
     };
     // Any origin is never allowed in production: the list must be given.
     expect(() => loadConfig(allowed)).toThrow(/CORS_ORIGINS/);
-    const ready = { ...allowed, CORS_ORIGINS: 'https://admin.jiffoapp.com' };
+    const origins = { ...allowed, CORS_ORIGINS: 'https://admin.jiffoapp.com' };
+    // Each key has one job, and production needs each, all different.
+    expect(() => loadConfig(origins)).toThrow(/ID_FINGERPRINT_KEY/);
+    const ready = {
+      ...origins,
+      ID_FINGERPRINT_KEY: 'c'.repeat(64),
+      ADMIN_TOTP_KEY: 'd'.repeat(64),
+      FIELD_KEY: 'e'.repeat(64),
+      ADMIN_TOKEN_SECRET: 'w'.repeat(32),
+    };
     expect(loadConfig(ready).TRUST_PROXY_HOPS).toBe(1);
+    expect(() => loadConfig({ ...ready, FIELD_KEY: undefined })).toThrow(/FIELD_KEY/);
+    expect(() => loadConfig({ ...ready, FIELD_KEY: base.PIN_KEY })).toThrow(/all be different/);
     expect(() => loadConfig({ ...ready, ADMIN_PANEL_SECRET: 'too short' })).toThrow(/ADMIN_PANEL_SECRET/);
   });
 });

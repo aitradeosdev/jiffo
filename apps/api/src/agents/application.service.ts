@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { and, eq, isNull, ne, sql } from 'drizzle-orm';
 import { ID_TYPE_KEYS, ID_TYPES, yearsOld, type IdType } from '@jiffo/shared';
+import { nameIndex } from '../db/fields';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { agentApplications, agentPresence, agentProfiles, payoutAccounts, states, users } from '../db/schema';
 import { type IdentityAdapter, type IdentityRequest, type IdentityResult } from '../adapters/identity';
@@ -326,6 +327,7 @@ export class AgentApplicationService implements IdentityOwner {
           identityCheckedAt: new Date(),
           identityIdType: judged.idType,
           legalName: judged.legalName,
+          legalNameIndex: nameIndex(judged.legalName),
           dateOfBirth: judged.dateOfBirth,
           // Only an ID this check showed to be theirs is held; an earlier one is let go.
           idFingerprint: claim,

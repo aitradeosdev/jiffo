@@ -141,6 +141,13 @@
       "when": 1794660741103,
       "tag": "0019_identity_safety",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794662957731,
+      "tag": "0020_personal_fields",
+      "breakpoints": true
     }
   ]
 }
