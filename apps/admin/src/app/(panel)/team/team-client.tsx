@@ -7,33 +7,13 @@ import { inviteTeammate, resetTeammate, updateTeammate, type TeamState } from '.
 import { ROLES } from './roles';
 
 /** A new invite link, shown once, with a button to copy it. */
-function InviteLink({ url, email }: { url: string; email?: string }) {
-  const [copied, setCopied] = useState(false);
+/** Where the link went. It is never shown here, so only the teammate can use it. */
+function Emailed({ to, hours }: { to: string; hours?: number }) {
   return (
-    <div className="rounded-xl bg-brand-soft p-3.5 text-brand-ink" role="status">
-      <p className="text-sm font-semibold">
-        Send this link to {email || 'them'}. It works once, for 72 hours, and won&apos;t be shown again.
-      </p>
-      <div className="mt-2 flex gap-2">
-        <input
-          readOnly
-          value={url}
-          aria-label="Invite link"
-          onFocus={(e) => e.currentTarget.select()}
-          className="h-9 min-w-0 flex-1 rounded-lg bg-surface px-2.5 font-mono text-xs text-ink"
-        />
-        <button
-          type="button"
-          className={buttonClass('primary', true)}
-          onClick={async () => {
-            await navigator.clipboard.writeText(url);
-            setCopied(true);
-          }}
-        >
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-    </div>
+    <p className="rounded-xl bg-brand-soft p-3.5 text-sm font-semibold text-brand-ink" role="status">
+      We&apos;ve emailed a link to {to}. It works once, for {hours ?? 72} hours. If it doesn&apos;t arrive, reset their
+      access to send a new one.
+    </p>
   );
 }
 
@@ -88,7 +68,7 @@ export function InviteForm() {
         </div>
       </fieldset>
       <Notice>{state.error}</Notice>
-      {state.inviteUrl ? <InviteLink url={state.inviteUrl} email={state.forEmail} /> : null}
+      {state.emailedTo ? <Emailed to={state.emailedTo} hours={state.expiresInHours} /> : null}
       <SubmitButton pendingLabel="Inviting…">Send invite</SubmitButton>
     </form>
   );
@@ -170,7 +150,6 @@ export function MemberActions({ member }: { member: Member }) {
         {member.status === 'disabled' ? null : confirming === 'reset' ? (
           <form action={resetAction} className="flex gap-1">
             <input type="hidden" name="id" value={member.id} />
-            <input type="hidden" name="email" value={member.email} />
             <SubmitButton kind="danger" small>
               Yes, reset
             </SubmitButton>
@@ -191,7 +170,7 @@ export function MemberActions({ member }: { member: Member }) {
       </div>
       {confirming === 'reset' ? (
         <p className="text-right text-[13px] text-ink-3">
-          Clears their password and authenticator app, signs them out and makes a new invite link.
+          Clears their password and authenticator app, signs them out and emails them a new link.
         </p>
       ) : null}
       {confirming === 'disable' ? (
@@ -200,7 +179,7 @@ export function MemberActions({ member }: { member: Member }) {
         </p>
       ) : null}
       <Notice>{error}</Notice>
-      {resetState.inviteUrl ? <InviteLink url={resetState.inviteUrl} email={resetState.forEmail} /> : null}
+      {resetState.emailedTo ? <Emailed to={resetState.emailedTo} hours={resetState.expiresInHours} /> : null}
     </div>
   );
 }

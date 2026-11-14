@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -5,6 +6,7 @@ import { AdminAuthService } from '../src/admin/admin-auth.service';
 import { hashPassword, verifyPassword } from '../src/admin/passwords';
 import { base32Encode, matchTotp, totpCode, totpStep } from '../src/admin/totp';
 import { adminAudit, admins, adminSessions, adminSignInAttempts, type AdminRole } from '../src/db/schema';
+import { ProviderNotConfigured } from '../src/providers/not-configured';
 import { createErrand, createTestApp, fund, randomIp, signIn, type TestApp } from './helpers';
 
 const PANEL = 'test-panel-secret-0123456789abcdef0123';
@@ -66,6 +68,13 @@ describe('admin', () => {
 
   const auth = () => t.app.get(AdminAuthService);
   const tokenOf = (url: string) => url.split('#')[1]!;
+  /** The link in the last email to this address: invites and resets go nowhere else. */
+  const emailedToken = (email: string) => {
+    const text = t.email.lastTo(email)?.text ?? '';
+    const url = /https?:\/\/\S+\/invite#\S+/.exec(text)?.[0];
+    if (!url) throw new Error(`No link emailed to ${email}`);
+    return tokenOf(url);
+  };
   const fromIp = (ip = randomIp()) => ({ 'x-jiffo-panel': PANEL, 'x-jiffo-client-ip': ip });
 
   /** Adds a teammate the way the command-line tool does, and returns their invite token. */
@@ -254,10 +263,10 @@ describe('admin', () => {
       .expect(429);
 
     // A reset by an owner lifts the pause along with everything else.
-    const reset = await request(t.http).post(`/v1/admin/team/${admin.id}/reset`).set(owner.headers).expect(201);
+    await request(t.http).post(`/v1/admin/team/${admin.id}/reset`).set(owner.headers).expect(201);
     await request(t.http)
       .post('/v1/admin/auth/invite/accept')
-      .send({ token: tokenOf(reset.body.inviteUrl), password: PASSWORD })
+      .send({ token: emailedToken(admin.email), password: PASSWORD })
       .expect(200);
     await request(t.http)
       .post('/v1/admin/auth/sign-in')
@@ -321,7 +330,12 @@ describe('admin', () => {
       .set(owner.headers)
       .send({ email: 'New.Person@JiffoApp.com', name: 'New Person', role: 'finance' })
       .expect(201);
-    expect(res.body.inviteUrl).toMatch(/^http:\/\/localhost:3001\/invite#/);
+    // The link goes to the new teammate's email, and never back to the owner who invited them.
+    expect(res.body).toMatchObject({ emailedTo: 'new.person@jiffoapp.com', expiresInHours: 72 });
+    expect(JSON.stringify(res.body)).not.toMatch(/invite#/);
+    expect(t.email.lastTo('new.person@jiffoapp.com')?.text).toMatch(
+      /^Hi New Person,[\s\S]*http:\/\/localhost:3001\/invite#/,
+    );
     const dup = await request(t.http)
       .post('/v1/admin/team')
       .set(owner.headers)
@@ -362,11 +376,13 @@ describe('admin', () => {
     await request(t.http).post(`/v1/admin/team/${ops.id}/reset`).set(owner.headers).expect(409);
     await request(t.http).patch(`/v1/admin/team/${ops.id}`).set(owner.headers).send({ status: 'active' }).expect(200);
     const reset = await request(t.http).post(`/v1/admin/team/${ops.id}/reset`).set(owner.headers).expect(201);
+    expect(reset.body).toMatchObject({ emailedTo: ops.email });
+    expect(JSON.stringify(reset.body)).not.toMatch(/invite#/);
     const [row] = await t.db.select().from(admins).where(eq(admins.id, ops.id));
     expect(row).toMatchObject({ status: 'invited', passwordHash: null, totpEnabledAt: null });
     await request(t.http)
       .post('/v1/admin/auth/invite/check')
-      .send({ token: tokenOf(reset.body.inviteUrl) })
+      .send({ token: emailedToken(ops.email) })
       .expect(200);
 
     const audit = await request(t.http)
@@ -383,6 +399,48 @@ describe('admin', () => {
       .from(adminAudit)
       .where(and(eq(adminAudit.targetId, ops.id), eq(adminAudit.action, 'team.reset')));
     expect(entry?.adminId).toBe(owner.id);
+  });
+
+  it("emails invite and reset links only to the teammate, and keeps nothing when the email can't go", async () => {
+    const email = `${randomUUID()}@jiffoapp.com`;
+    const before = t.email.sent.length;
+    await request(t.http)
+      .post('/v1/admin/team')
+      .set(owner.headers)
+      .send({ email, name: 'Ada Teammate', role: 'support' })
+      .expect(201);
+    // One email, to the teammate; the owner who made the link gets nothing.
+    expect(t.email.sent.slice(before).map((m) => m.to)).toEqual([email]);
+    expect(t.email.lastTo(owner.email)).toBeUndefined();
+    const invite = t.email.lastTo(email)!;
+    expect(invite.subject).toBe('Your invite to Jiffo Admin');
+    expect(invite.text).toContain('Test Admin added you to the Jiffo admin team as Support.');
+
+    // The teammate is the only one who can use it: the link sets their password.
+    await request(t.http)
+      .post('/v1/admin/auth/invite/accept')
+      .send({ token: emailedToken(email), password: PASSWORD })
+      .expect(200);
+
+    // With no email provider set up, nothing is kept and the panel says what to do.
+    t.email.failNext = new ProviderNotConfigured('email');
+    const other = `${randomUUID()}@jiffoapp.com`;
+    const refused = await request(t.http)
+      .post('/v1/admin/team')
+      .set(owner.headers)
+      .send({ email: other, name: 'Not Sent', role: 'support' })
+      .expect(503);
+    expect(refused.body.error.code).toBe('email_not_configured');
+    expect(await t.db.select().from(admins).where(eq(admins.email, other))).toHaveLength(0);
+
+    // A reset whose email fails changes nothing either: the old password still works.
+    const [teammate] = await t.db.select().from(admins).where(eq(admins.email, email));
+    t.email.failNext = new Error('provider down');
+    const failed = await request(t.http).post(`/v1/admin/team/${teammate!.id}/reset`).set(owner.headers).expect(503);
+    expect(failed.body.error.code).toBe('email_failed');
+    const [still] = await t.db.select().from(admins).where(eq(admins.id, teammate!.id));
+    expect(still!.passwordHash).toBe(teammate!.passwordHash);
+    expect(still!.inviteTokenHash).toBe(teammate!.inviteTokenHash);
   });
 
   it('counts the day on the overview', async () => {

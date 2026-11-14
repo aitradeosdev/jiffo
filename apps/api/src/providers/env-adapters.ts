@@ -1,5 +1,6 @@
 import { CallsAdapter, FakeCallsAdapter, UnconfiguredCallsAdapter } from '../adapters/calls';
 import { FakeIdentityAdapter, IdentityAdapter, UnconfiguredIdentityAdapter } from '../adapters/identity';
+import { ConsoleEmailAdapter, MemoryEmailAdapter, type EmailAdapter } from '../adapters/email';
 import { FakeMapsAdapter, GoogleMapsAdapter, type MapsAdapter } from '../adapters/maps';
 import {
   ConsoleMessagingAdapter,
@@ -13,6 +14,7 @@ import { ConsolePushAdapter, FcmPushAdapter, MemoryPushAdapter, type PushAdapter
 import { MemoryStorageAdapter, S3StorageAdapter, type StorageAdapter } from '../adapters/storage';
 import type { AppConfig } from '../config/app-config';
 import {
+  NotConfiguredEmail,
   NotConfiguredMaps,
   NotConfiguredMessaging,
   NotConfiguredPayments,
@@ -28,6 +30,7 @@ export interface Adapters {
   push: PushAdapter;
   maps: MapsAdapter;
   storage: StorageAdapter;
+  email: EmailAdapter;
 }
 
 export const ENV_ADAPTERS = Symbol('ENV_ADAPTERS');
@@ -85,5 +88,11 @@ export function envAdapters(c: AppConfig): Adapters {
         : live
           ? new NotConfiguredStorage()
           : new MemoryStorageAdapter(c.PUBLIC_API_URL, c.JWT_SECRET),
+    // Email providers are set only in the panel; the environment picks the development stand-in.
+    email: live
+      ? new NotConfiguredEmail()
+      : c.EMAIL_PROVIDER === 'memory'
+        ? new MemoryEmailAdapter()
+        : new ConsoleEmailAdapter(),
   };
 }

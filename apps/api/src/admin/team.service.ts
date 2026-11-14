@@ -5,6 +5,7 @@ import { admins, type AdminRole } from '../db/schema';
 import { conflict, forbidden, notFound } from '../common/errors';
 import { AdminAuthService } from './admin-auth.service';
 import { AuditService } from './audit.service';
+import { StaffMail } from './staff-mail';
 import type { AdminContext } from './admin.types';
 
 /** The admin team: invites, roles, disabling and resetting access. Owners only. */
@@ -14,6 +15,7 @@ export class TeamService {
     @Inject(DB) private readonly db: Db,
     private readonly auth: AdminAuthService,
     private readonly audit: AuditService,
+    private readonly mail: StaffMail,
   ) {}
 
   async list() {
@@ -50,7 +52,16 @@ export class TeamService {
         targetId: id,
         data: { email, role: input.role },
       });
-      return { id, inviteUrl, expiresInHours };
+      // Last, inside the transaction: if the email can't go, the invite isn't kept and the panel says why.
+      await this.mail.invite({
+        to: email,
+        name: input.name.trim(),
+        role: input.role,
+        by: by.name,
+        url: inviteUrl,
+        hours: expiresInHours,
+      });
+      return { id, emailedTo: email, expiresInHours };
     });
   }
 
@@ -83,15 +94,25 @@ export class TeamService {
     });
   }
 
-  /** For a lost phone or password: clears both, ends their sessions and makes a new invite link. */
+  /**
+   * For a lost phone or password: clears both, ends their sessions and emails the teammate a new link. The
+   * owner who resets never sees it.
+   */
   async reset(by: AdminContext, id: string) {
     if (id === by.adminId) throw forbidden('own_account', "You can't reset your own access. Ask another owner.");
     return this.db.transaction(async (tx) => {
       const target = await this.lockTarget(tx, id);
       if (target.role === 'owner' && target.status === 'active') await this.assertAnotherOwner(tx, id);
-      const invite = await this.auth.resetAccess(tx, id);
+      const { inviteUrl, expiresInHours } = await this.auth.resetAccess(tx, id);
       await this.audit.record(tx, by, { action: 'team.reset', targetType: 'admin', targetId: id });
-      return invite;
+      await this.mail.reset({
+        to: target.email,
+        name: target.name,
+        by: by.name,
+        url: inviteUrl,
+        hours: expiresInHours,
+      });
+      return { id, emailedTo: target.email, expiresInHours };
     });
   }
 
