@@ -173,6 +173,7 @@ export class PayoutsService {
         bankName: bank.name,
         accountNumber,
         accountName,
+        accountLast4: accountNumber.slice(-4),
         recipientCode,
       });
     });

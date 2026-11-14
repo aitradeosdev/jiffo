@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, ilike, or, sql, type SQL, arrayContains } from 'drizzle-orm';
+import { searchIndex } from '../db/fields';
 import { DB, type Db } from '../db/database.module';
 import { admins, agentApplications, states, users } from '../db/schema';
 import { AgentApplicationService } from '../agents/application.service';
@@ -119,9 +120,11 @@ export class ApplicationsAdminService {
     const like = containing(text);
     const phone = phoneDigits(text);
     const id = idPrefix(text);
+    const words = searchIndex(text);
     return or(
       ilike(sql`coalesce(${users.firstName}, '') || ' ' || coalesce(${users.lastName}, '')`, like),
-      ilike(agentApplications.legalName, like),
+      // The legal name is encrypted: it is found by whole words, through its keyed index.
+      words.length ? arrayContains(agentApplications.legalNameIndex, words) : undefined,
       id ? ilike(sql`${users.id}::text`, id) : undefined,
       phone ? ilike(users.phone, `%${phone}%`) : undefined,
     );

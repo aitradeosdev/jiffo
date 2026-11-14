@@ -1,14 +1,15 @@
 import { Global, Inject, Injectable, Module, OnApplicationShutdown } from '@nestjs/common';
-import { drizzle, NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
+import { keyFor } from '../common/keys';
+import { useFieldKey } from './fields';
+import { FieldsBackfill } from './fields-backfill';
 import * as schema from './schema';
 
-export const DB = Symbol('DB');
-export const PG_POOL = Symbol('PG_POOL');
-export type Db = NodePgDatabase<typeof schema>;
-/** A database handle that may be the root connection or an open transaction. */
-export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0] | Db;
+import { DB, PG_POOL } from './tokens';
+
+export { DB, PG_POOL, type Db, type Tx } from './tokens';
 
 @Injectable()
 class PoolShutdown implements OnApplicationShutdown {
@@ -26,8 +27,17 @@ class PoolShutdown implements OnApplicationShutdown {
       inject: [APP_CONFIG],
       useFactory: (config: AppConfig) => new Pool({ connectionString: config.DATABASE_URL, max: 10 }),
     },
-    { provide: DB, inject: [PG_POOL], useFactory: (pool: Pool) => drizzle(pool, { schema }) },
+    {
+      provide: DB,
+      inject: [PG_POOL, APP_CONFIG],
+      useFactory: (pool: Pool, config: AppConfig) => {
+        // Personal details are encrypted at rest under their own key (see fields.ts).
+        useFieldKey(keyFor(config, 'fields'));
+        return drizzle(pool, { schema });
+      },
+    },
     PoolShutdown,
+    FieldsBackfill,
   ],
   exports: [DB, PG_POOL],
 })

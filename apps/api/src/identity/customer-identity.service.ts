@@ -5,6 +5,7 @@ import type { IdentityResult } from '../adapters/identity';
 import { conflict, forbidden, notFound } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
 import { DB, type Db, type Tx } from '../db/database.module';
+import { nameIndex } from '../db/fields';
 import { customerVerifications, users } from '../db/schema';
 import {
   ID_CHECK_LABELS,
@@ -115,6 +116,7 @@ export class CustomerIdentityService implements IdentityOwner {
       outcome: null,
       checks: [],
       legalName: null,
+      legalNameIndex: null,
       dateOfBirth: null,
       idFingerprint: null,
       pendingIdFingerprint: started.pendingFingerprint,
@@ -234,6 +236,7 @@ export class CustomerIdentityService implements IdentityOwner {
           idType: judged.idType,
           checks,
           legalName: judged.legalName,
+          legalNameIndex: nameIndex(judged.legalName),
           dateOfBirth: judged.dateOfBirth,
           // Held only once verified; otherwise it waits, so support's approval can claim it.
           idFingerprint: status === 'verified' ? claim : null,

@@ -1,6 +1,9 @@
 import { Global, Module } from '@nestjs/common';
 import { z } from 'zod';
 
+const hexKey = (name: string) =>
+  z.string().regex(/^[0-9a-f]{64}$/i, `${name} must be 32 bytes written as 64 hex characters`);
+
 const EnvSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -17,6 +20,17 @@ const EnvSchema = z
       .string()
       .regex(/^[0-9a-f]{64}$/i, 'SECRETS_KEY must be 32 bytes written as 64 hex characters')
       .optional(),
+    /**
+     * Each of these keys has one job (docs/security-plan.md, I5). Production requires each, all different;
+     * in development each is derived from PIN_KEY, so nothing extra has to be set up. Changing one makes what
+     * it protects unreadable: ID fingerprints stop matching, authenticators must be set up again, and
+     * encrypted personal details can't be read.
+     */
+    ID_FINGERPRINT_KEY: hexKey('ID_FINGERPRINT_KEY').optional(),
+    ADMIN_TOTP_KEY: hexKey('ADMIN_TOTP_KEY').optional(),
+    FIELD_KEY: hexKey('FIELD_KEY').optional(),
+    /** Signs admin sign-in steps, apart from the app's tokens (JWT_SECRET). */
+    ADMIN_TOKEN_SECRET: z.string().min(32, 'ADMIN_TOKEN_SECRET must be at least 32 characters').optional(),
     ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
     REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
     DEFAULT_COUNTRY: z.string().length(2).default('NG'),
@@ -121,6 +135,22 @@ const EnvSchema = z
       need(!!env.ADMIN_PANEL_SECRET, 'ADMIN_PANEL_SECRET', 'must be set in production');
       need(env.CORS_ORIGINS !== '*', 'CORS_ORIGINS', 'must list the allowed origins in production, not *');
       need(!!env.SECRETS_KEY, 'SECRETS_KEY', "must be set in production, to encrypt providers' keys");
+      for (const name of ['ID_FINGERPRINT_KEY', 'ADMIN_TOTP_KEY', 'FIELD_KEY', 'ADMIN_TOKEN_SECRET'] as const) {
+        need(!!env[name], name, 'must be set in production: each key has its own job');
+      }
+      const keys = [
+        env.JWT_SECRET,
+        env.OTP_SECRET,
+        env.PIN_KEY,
+        env.SECRETS_KEY,
+        env.ID_FINGERPRINT_KEY,
+        env.ADMIN_TOTP_KEY,
+        env.FIELD_KEY,
+        env.ADMIN_TOKEN_SECRET,
+      ]
+        .filter((k): k is string => !!k)
+        .map((k) => k.toLowerCase());
+      need(new Set(keys).size === keys.length, 'FIELD_KEY', 'and the other keys and secrets must all be different');
       need(!!env.ADMIN_URL, 'ADMIN_URL', 'must be set in production, or invite links point at localhost');
     }
   });

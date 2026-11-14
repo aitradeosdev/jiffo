@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { createHmac, hkdfSync, randomBytes, randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq, gt, lt, sql } from 'drizzle-orm';
 import { ID_TYPES, normaliseIdNumber, providerInfo, type CountrySettings, type IdType } from '@jiffo/shared';
 import {
@@ -16,6 +16,7 @@ import {
 import { IdentityPageError, IdentityProviderError } from '../adapters/identity-providers';
 import { SessionVerifier } from '../auth/auth.guard';
 import { safeEqual, sha256 } from '../common/crypto';
+import { keyFor } from '../common/keys';
 import { ApiError, badRequest, conflict, gone, tooMany, unavailable } from '../common/errors';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
@@ -107,7 +108,7 @@ export class IdentityChecksService {
   private readonly owners = new Map<string, IdentityOwner>();
   /** Checks whose page is being sent now, in this process. */
   private readonly submitting = new Set<string>();
-  /** Its own key, derived from PIN_KEY, used only to fingerprint IDs (named for the NIN, its first ID). */
+  /** Its own key, used only to fingerprint IDs (ID_FINGERPRINT_KEY). */
   private readonly idKey: Buffer;
 
   constructor(
@@ -116,9 +117,7 @@ export class IdentityChecksService {
     @Inject(DB) private readonly db: Db,
     @Inject(APP_CONFIG) config: AppConfig,
   ) {
-    this.idKey = Buffer.from(
-      hkdfSync('sha256', Buffer.from(config.PIN_KEY, 'hex'), Buffer.alloc(0), 'jiffo nin fingerprint', 32),
-    );
+    this.idKey = keyFor(config, 'idFingerprint');
   }
 
   register(role: IdentityRole, owner: IdentityOwner) {

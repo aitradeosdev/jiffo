@@ -264,7 +264,8 @@ export class MoneyAdminService {
         failureReason: payouts.failureReason,
         bankName: payoutAccounts.bankName,
         accountName: payoutAccounts.accountName,
-        accountLast4: sql<string>`right(${payoutAccounts.accountNumber}, 4)`,
+        // The full number is encrypted; its last four digits are kept readable for lists.
+        accountLast4: payoutAccounts.accountLast4,
         person: { id: users.id, firstName: users.firstName, lastName: users.lastName, phone: users.phone },
       })
       .from(payouts)

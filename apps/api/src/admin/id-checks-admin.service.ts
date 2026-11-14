@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, ilike, or, sql, type SQL, arrayContains } from 'drizzle-orm';
 import { ID_TYPES, providerInfo, type IdType } from '@jiffo/shared';
+import { searchIndex } from '../db/fields';
 import { DB, type Db } from '../db/database.module';
 import { admins, customerVerifications, users } from '../db/schema';
 import { CustomerIdentityService } from '../identity/customer-identity.service';
@@ -112,9 +113,11 @@ export class IdChecksAdminService {
     const like = containing(text);
     const phone = phoneDigits(text);
     const id = idPrefix(text);
+    const words = searchIndex(text);
     return or(
       ilike(sql`coalesce(${users.firstName}, '') || ' ' || coalesce(${users.lastName}, '')`, like),
-      ilike(customerVerifications.legalName, like),
+      // The legal name is encrypted: it is found by whole words, through its keyed index.
+      words.length ? arrayContains(customerVerifications.legalNameIndex, words) : undefined,
       id ? ilike(sql`${users.id}::text`, id) : undefined,
       phone ? ilike(users.phone, `%${phone}%`) : undefined,
     );

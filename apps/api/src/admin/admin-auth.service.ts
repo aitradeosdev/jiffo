@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, count, eq, gt, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import { jwtVerify, SignJWT } from 'jose';
-import { hkdfSync } from 'node:crypto';
+import { keyFor } from '../common/keys';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { admins, adminSessions, adminSignInAttempts, type AdminRole } from '../db/schema';
@@ -45,17 +45,16 @@ export const normaliseEmail = (email: string) => email.trim().toLowerCase();
 @Injectable()
 export class AdminAuthService {
   private readonly challengeKey: Uint8Array;
-  /** The authenticator secrets have their own key, derived from PIN_KEY, so each key has one job. */
+  /** The authenticator secrets have their own key (ADMIN_TOTP_KEY), so each key has one job. */
   private readonly totpKey: string;
 
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {
-    this.challengeKey = new TextEncoder().encode(config.JWT_SECRET);
-    this.totpKey = Buffer.from(
-      hkdfSync('sha256', Buffer.from(config.PIN_KEY, 'hex'), Buffer.alloc(0), 'jiffo admin totp', 32),
-    ).toString('hex');
+    // Admin sign-in steps are signed apart from the app's tokens; development falls back to JWT_SECRET.
+    this.challengeKey = new TextEncoder().encode(config.ADMIN_TOKEN_SECRET ?? config.JWT_SECRET);
+    this.totpKey = keyFor(config, 'adminTotp').toString('hex');
   }
 
   /* ---------- Invites ---------- */

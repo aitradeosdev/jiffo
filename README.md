@@ -181,6 +181,19 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
   - **Smile ID:** its callback signature covers only a timestamp. The verdict is re-read from Smile ID, and a signature is accepted with one body only, so it can't be replayed with another.
   - **Sandbox mode:** refused for identity providers in production.
   - **Approving an agent:** never takes an ID away from another account that proved it with its own checks.
+- **Keys and personal details:**
+  - **One key per job:**
+    - `ID_FINGERPRINT_KEY` fingerprints ID numbers.
+    - `ADMIN_TOTP_KEY` encrypts admin authenticator secrets.
+    - `FIELD_KEY` encrypts personal details.
+    - `ADMIN_TOKEN_SECRET` signs admin sign-in steps.
+    - Production requires each, all different from each other and from the other secrets. In development they are derived from `PIN_KEY`.
+  - **Encrypted at rest:**
+    - What's encrypted: legal names, dates of birth, agents' home addresses and emergency contacts, and payout accounts (number and name).
+    - The database holds only AES-256-GCM ciphertext, bound to its table and column. The API reads and writes plain text.
+    - Rows saved before this are encrypted in the background when a server starts.
+  - **Searching by legal name:** support finds people by any whole word of their legal name, through a keyed index. Partial words still match the name in the app.
+  - **Payout account numbers:** their last four digits are kept readable for lists.
 - **Protecting the hand-off:**
   - **At the drop-off:** marking an errand delivered and entering the PIN need the agent's fresh position within the set distance of the drop-off (default 200 m, Settings, Security).
   - **Wait before a photo:** a drop-off photo is accepted only after the agent has waited the set minutes there, and only while they are still there.
