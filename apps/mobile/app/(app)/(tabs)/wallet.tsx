@@ -38,6 +38,7 @@ interface CustomerWallet {
 /** An icon for each kind of movement, as in the prototype's list. */
 const KIND_ICON: Record<string, string> = {
   deposit: 'bank',
+  fixed_deposit: 'bank',
   fee_lock: 'lock',
   fee_adjust: 'lock',
   items_lock: 'lock',
@@ -167,7 +168,7 @@ function Wallet() {
           <Row
             icon="bank"
             title="Add money by bank transfer"
-            subtitle="To an account number made for you, from any bank app"
+            subtitle="To your own account number, or one made for a top-up, from any bank app"
             subtitleLines={3}
           />
           <Row
