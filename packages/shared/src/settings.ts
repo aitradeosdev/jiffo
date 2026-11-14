@@ -27,6 +27,9 @@ export const DEFAULT_SECURITY_SETTINGS = {
   handoffDistanceMeters: 200,
   offersPerMinute: 5,
   maxActiveErrandsPerAgent: 0,
+  positionFreshMinutes: 5,
+  boardNearKm: 5,
+  ownAccountTriesPerDay: 3,
 };
 
 /**
@@ -79,6 +82,8 @@ export const CountrySettingsSchema = z.object({
   }),
   limits: z.object({
     newCustomerItemLimitKobo: kobo,
+    /** Finished errands after which a customer no longer counts as new, for the item limit above. */
+    newCustomerErrands: z.number().int().min(0).max(100).default(3),
     newAgentItemLimitKobo: kobo,
     newAgentDailyWithdrawalKobo: kobo,
     strikeThreshold: z.number().int().positive(),
@@ -134,6 +139,15 @@ export const CountrySettingsSchema = z.object({
       offersPerMinute: z.number().int().min(1).max(60).default(5),
       /** Errands one agent may hold at once, from accepted until done. 0 means no limit. */
       maxActiveErrandsPerAgent: z.number().int().min(0).max(20).default(0),
+      /**
+       * How recent the agent's reported position must be, for the board and the drop-off checks. At most 30:
+       * positions not refreshed for 30 minutes are deleted.
+       */
+      positionFreshMinutes: minutes.max(30).default(5),
+      /** How far from their own position an agent may look at the board. */
+      boardNearKm: z.number().int().min(1).max(50).default(5),
+      /** Failed tries at an own account number (refused, or the bank unreachable) a customer gets in a day. */
+      ownAccountTriesPerDay: z.number().int().min(1).max(20).default(3),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
 });
@@ -170,6 +184,7 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
   },
   limits: {
     newCustomerItemLimitKobo: 5_000_000,
+    newCustomerErrands: 3,
     newAgentItemLimitKobo: 3_000_000,
     newAgentDailyWithdrawalKobo: 5_000_000,
     strikeThreshold: 3,

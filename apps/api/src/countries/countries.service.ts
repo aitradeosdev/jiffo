@@ -44,14 +44,20 @@ export class CountriesService {
   }
 
   async currentSettings(countryCode: string): Promise<VersionedSettings> {
+    const current = await this.currentSettingsIfAny(countryCode);
+    if (!current) throw notFound('settings_missing', `No settings saved for ${countryCode}`);
+    return current;
+  }
+
+  /** The current settings, or null for a country with none saved yet (so nothing runs there). */
+  async currentSettingsIfAny(countryCode: string): Promise<VersionedSettings | null> {
     const [row] = await this.db
       .select({ version: settingsVersions.version })
       .from(settingsVersions)
       .where(eq(settingsVersions.countryCode, countryCode))
       .orderBy(desc(settingsVersions.version))
       .limit(1);
-    if (!row) throw notFound('settings_missing', `No settings saved for ${countryCode}`);
-    return { version: row.version, settings: await this.settingsAt(countryCode, row.version) };
+    return row ? { version: row.version, settings: await this.settingsAt(countryCode, row.version) } : null;
   }
 
   /**
