@@ -214,14 +214,15 @@ function classify(body: { event?: string; data?: Record<string, unknown> }, rawB
 }
 
 /**
- * `otp` means transfer OTP is on in the dashboard: the transfer waits for a code nobody will send, so it is
- * failed and the agent paid back. Should someone finalise it by hand later, the approval URL refuses it.
+ * `otp` (transfer OTP is on in the dashboard) stays pending: the transfer can still be finalised by hand, so
+ * the agent isn't paid back; PayoutsService raises an alert for a person to finish or cancel it.
  */
-const TRANSFER_FAILED = new Set(['failed', 'reversed', 'abandoned', 'blocked', 'rejected', 'otp']);
+const TRANSFER_FAILED = new Set(['failed', 'reversed', 'abandoned', 'blocked', 'rejected']);
 
 /**
  * Paystack's transfer approval request, signed like its webhooks. Unverified against Paystack's docs (they
- * couldn't be reached): the recipient is read from `recipient_code` or `recipient.recipient_code`.
+ * couldn't be reached): the recipient is read from `recipient_code` or `recipient.recipient_code`, and may be
+ * missing; the reference and amount are what must match.
  */
 function approvalOf(secret: string, rawBody: Buffer, headers: Record<string, string | string[] | undefined>) {
   if (!signatureMatches(secret, rawBody, header(headers, 'x-paystack-signature'))) return null;

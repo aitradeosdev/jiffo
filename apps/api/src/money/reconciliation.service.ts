@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, count, eq, inArray, lt, sum, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, lt, sum, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { countries, deposits, payouts, reconciliationRuns } from '../db/schema';
 import { PAYMENTS, type PaymentsAdapter } from '../adapters/payments';
@@ -96,8 +96,17 @@ export class ReconciliationService {
       const differenceKobo = providerBalanceKobo - (ledgerCashKobo - inTransitKobo);
       const { settings } = await this.countries.currentSettings(country.code);
       const tolerance = settings.security.reconciliationToleranceKobo;
+      // What finance accepted at the latest cleared check: a gap explained then isn't counted again.
+      const [accepted] = await this.db
+        .select({ differenceKobo: reconciliationRuns.differenceKobo })
+        .from(reconciliationRuns)
+        .where(and(eq(reconciliationRuns.countryCode, country.code), isNotNull(reconciliationRuns.clearedAt)))
+        .orderBy(desc(reconciliationRuns.createdAt))
+        .limit(1);
+      const baselineKobo = accepted?.differenceKobo ?? 0;
+      const changeKobo = differenceKobo - baselineKobo;
       // Less at the provider than the ledger says Jiffo holds: money may be missing, so instant withdrawals wait.
-      const pausesInstant = differenceKobo < -tolerance;
+      const pausesInstant = changeKobo < -tolerance;
       const [run] = await this.db
         .insert(reconciliationRuns)
         .values({
@@ -109,17 +118,20 @@ export class ReconciliationService {
           differenceKobo,
           pendingDeposits: Number(pending?.n ?? 0),
           stuckPayouts: Number(stuck?.n ?? 0),
+          baselineKobo,
           pausesInstant,
         })
         .returning();
-      if (Math.abs(differenceKobo) > tolerance) {
+      if (Math.abs(changeKobo) > tolerance) {
+        const since = accepted ? ' since the last cleared check' : '';
         await this.alerts.raise({
           countryCode: country.code,
           kind: 'reconciliation_gap',
+          dedupeKey: run!.id,
           message: pausesInstant
-            ? `The provider holds ${formatNaira(-differenceKobo)} less than the ledger. Instant withdrawals are paused until finance clears the check.`
-            : `The provider holds ${formatNaira(differenceKobo)} more than the ledger.`,
-          data: { runId: run!.id, differenceKobo },
+            ? `The provider holds ${formatNaira(-changeKobo)} less than the ledger${since}. Instant withdrawals are paused until finance clears the check.`
+            : `The provider holds ${formatNaira(changeKobo)} more than the ledger${since}.`,
+          data: { runId: run!.id, differenceKobo, baselineKobo },
         });
       }
       results.push(run!);

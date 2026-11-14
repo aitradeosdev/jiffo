@@ -701,7 +701,12 @@ export const reconciliationRuns = pgTable('reconciliation_runs', {
   differenceKobo: kobo('difference_kobo').notNull(),
   pendingDeposits: integer('pending_deposits').notNull(),
   stuckPayouts: integer('stuck_payouts').notNull(),
-  /** A shortfall beyond the tolerance: instant withdrawals stop until finance clears it. */
+  /**
+   * The difference finance last accepted (at the latest cleared check), so a gap that was explained once
+   * isn't counted again: only the change since then is.
+   */
+  baselineKobo: kobo('baseline_kobo').notNull().default(0),
+  /** A shortfall since the baseline beyond the tolerance: instant withdrawals stop until finance clears it. */
   pausesInstant: boolean('pauses_instant').notNull().default(false),
   clearedAt: timestamp('cleared_at', { withTimezone: true }),
   clearedBy: uuid('cleared_by').references(() => admins.id),

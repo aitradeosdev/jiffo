@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS "alerts" (
 ALTER TABLE "payouts" ADD COLUMN "request_key" text;--> statement-breakpoint
 ALTER TABLE "payouts" ADD COLUMN "attempts" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "payouts" ADD COLUMN "sending_until" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "reconciliation_runs" ADD COLUMN "baseline_kobo" bigint DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "reconciliation_runs" ADD COLUMN "pauses_instant" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "reconciliation_runs" ADD COLUMN "cleared_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "reconciliation_runs" ADD COLUMN "cleared_by" uuid;--> statement-breakpoint

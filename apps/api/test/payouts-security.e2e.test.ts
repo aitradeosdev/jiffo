@@ -158,12 +158,13 @@ describe('withdrawals under abuse', () => {
       expect((await payoutOf(res.body.id)).status).toBe('processing');
     });
 
-    it('fails a transfer the provider holds for an OTP, and says so', async () => {
+    it('keeps a transfer the provider holds for an OTP, and says so', async () => {
       const agent = await agentWithMoney(t, 300_000);
-      vi.spyOn(t.payments, 'transfer').mockResolvedValueOnce({ status: 'failed', transferCode: null, reason: 'otp' });
+      vi.spyOn(t.payments, 'transfer').mockResolvedValueOnce({ status: 'pending', transferCode: null, reason: 'otp' });
       const res = await withdraw(agent, { amountKobo: 100_000, speed: 'instant' }).expect(201);
-      expect(res.body.status).toBe('failed');
-      expect(await available(agent)).toBe(300_000);
+      // It can still be finalised by hand, so nothing is given back while it waits.
+      expect(res.body.status).toBe('processing');
+      expect(await available(agent)).toBe(200_000);
       expect(await alerts('transfer_otp_on')).not.toHaveLength(0);
     });
   });
@@ -190,6 +191,9 @@ describe('withdrawals under abuse', () => {
       await approve({ ...ok, recipient_code: 'RCP_someone_else' }).expect(400);
       await approve({ ...ok, reference: `jp-${randomUUID()}` }).expect(400);
       await approve(ok, 'not-the-signature').expect(401);
+      // A request that names no recipient is matched by its reference and exact amount.
+      await approve({ reference: payout.reference, amount: payout.sendKobo }).expect(200);
+      await approve({ reference: payout.reference }).expect(400);
       expect(await alerts('payout_rejected')).not.toHaveLength(0);
     });
 
@@ -257,20 +261,29 @@ describe('withdrawals under abuse', () => {
     const reconcile = async () => (await t.app.get(ReconciliationService).run()).find((r) => r.countryCode === 'NG')!;
 
     it('pauses instant withdrawals after a shortfall, until finance clears it', async () => {
-      // Line the fake provider up with the run's ledger first, so only this test's gap counts.
-      const first = await reconcile();
-      t.payments.providerBalanceKobo -= first.differenceKobo;
+      // Whatever gap the run's other files leave is accepted first: only a change since then counts.
+      await reconcile();
       await clearReconciliationPauses(t);
-      expect((await reconcile()).differenceKobo).toBe(0);
+      expect((await reconcile()).pausesInstant).toBe(false);
 
       const agent = await agentWithMoney(t, 1_000_000);
+      const requestId = randomUUID();
+      const made = await withdraw(agent, { amountKobo: 50_000, speed: 'instant', requestId }).expect(201);
+      const madeBefore = { requestId, id: made.body.id as string };
       t.payments.providerBalanceKobo -= 5_000_000; // money missing at the provider
       const run = await reconcile();
-      expect(run.differenceKobo).toBe(-5_000_000);
+      // The ₦5,000 missing, and the provider's fee on the transfer made just before, not booked until it settles.
+      expect(run.differenceKobo - run.baselineKobo).toBe(-5_000_000 - t.payments.transferFeeKobo);
+      expect(run.pausesInstant).toBe(true);
       expect(await alerts('reconciliation_gap')).not.toHaveLength(0);
 
       const paused = await withdraw(agent, { amountKobo: 100_000, speed: 'instant' }).expect(409);
       expect(paused.body.error.code).toBe('instant_paused');
+      // A retry of a withdrawal made before the pause still gets that withdrawal, not an error.
+      expect(
+        (await withdraw(agent, { amountKobo: 50_000, speed: 'instant', requestId: madeBefore.requestId }).expect(201))
+          .body.id,
+      ).toBe(madeBefore.id);
       await withdraw(agent, { amountKobo: 100_000, speed: 'scheduled' }).expect(201);
 
       // Only finance can clear it, with a note.
@@ -288,6 +301,8 @@ describe('withdrawals under abuse', () => {
       const [cleared] = await t.db.select().from(reconciliationRuns).where(eq(reconciliationRuns.id, run.id));
       expect(cleared!.clearedAt).not.toBeNull();
       await withdraw(agent, { amountKobo: 100_000, speed: 'instant' }).expect(201);
+      // The gap finance explained isn't counted again the next night.
+      expect((await reconcile()).pausesInstant).toBe(false);
       t.payments.providerBalanceKobo += 5_000_000;
     });
 

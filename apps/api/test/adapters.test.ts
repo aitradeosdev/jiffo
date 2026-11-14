@@ -154,9 +154,9 @@ describe('Paystack payments', () => {
     );
     const adapter = new PaystackPaymentsAdapter('sk', 'https://api.example.test', impl);
     expect((await adapter.verifyTransfer('jp-1')).status).toBe('failed');
-    // Transfer OTP on in the dashboard: the transfer waits for a code nobody sends, so it counts as failed.
+    // Transfer OTP on in the dashboard: it can still be finalised by hand, so it is pending, never refunded.
     answer = 'otp';
-    expect((await adapter.verifyTransfer('jp-1')).status).toBe('failed');
+    expect((await adapter.verifyTransfer('jp-1')).status).toBe('pending');
     answer = 'success';
     expect((await adapter.verifyTransfer('jp-1')).status).toBe('success');
     await expect(

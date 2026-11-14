@@ -4,7 +4,12 @@ import { and, desc, eq, gte, inArray, isNull, lt, or, sql, sum } from 'drizzle-o
 import { formatNaira } from '@jiffo/shared';
 import { DB, type Db } from '../db/database.module';
 import { payoutAccounts, payouts, reconciliationRuns, users } from '../db/schema';
-import { PAYMENTS, PaymentsProviderError, type PaymentsAdapter } from '../adapters/payments';
+import {
+  PAYMENTS,
+  PaymentsProviderError,
+  type PaymentsAdapter,
+  type TransferApprovalRequest,
+} from '../adapters/payments';
 import { ProvidersService } from '../providers/providers.service';
 import { CountriesService } from '../countries/countries.service';
 import { PushService } from '../push/push.service';
@@ -26,16 +31,12 @@ const BANKS_TTL_MS = 24 * 3_600_000;
 const RETRY_AFTER_MS = 60_000;
 /** A transfer with no news for this long is checked with the provider. */
 const CHECK_AFTER_MS = 5 * 60_000;
-/** How long one run may hold a withdrawal while it hands it to the provider. */
-const SEND_LEASE_MS = 2 * 60_000;
+/**
+ * How long one run may hold a withdrawal while it hands it to the provider: longer than the slowest send
+ * (bank list, recipient, transfer and a check, each with a 20 s timeout).
+ */
+const SEND_LEASE_MS = 10 * 60_000;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
-
-/** What the provider's transfer approval request names, checked against the withdrawal it is for. */
-export interface TransferApproval {
-  reference: string;
-  amountKobo: number;
-  recipientCode: string | null;
-}
 
 const mask = (accountNumber: string) => `******${accountNumber.slice(-4)}`;
 /** A bank's name reduced for comparing lists from different providers: "GTBank Plc" and "gtbank" match. */
@@ -174,6 +175,10 @@ export class PayoutsService {
    * repeat with it returns the same withdrawal, and the key can't be used for another one.
    */
   async request(auth: AuthContext, amountKobo: number, speed: 'instant' | 'scheduled', requestKey: string) {
+    // A repeat of a request already made returns that withdrawal, whatever has changed since (a pause,
+    // a new minimum): the money already left the balance, and a failure here would invite a second try.
+    const earlier = await this.repeatOf(this.db, auth.userId, requestKey, amountKobo, speed);
+    if (earlier) return payoutView(earlier);
     const [{ settings }, { currency, timezone }, tier] = await Promise.all([
       this.countries.currentSettings(auth.countryCode),
       this.countries.basics(auth.countryCode),
@@ -197,16 +202,8 @@ export class PayoutsService {
     const { payout, repeat } = await this.db.transaction(async (tx) => {
       // One withdrawal request at a time per agent, so the daily limits can't be raced.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payout:' + auth.userId}))`);
-      const [same] = await tx
-        .select()
-        .from(payouts)
-        .where(and(eq(payouts.userId, auth.userId), eq(payouts.requestKey, requestKey)));
-      if (same) {
-        if (same.amountKobo !== amountKobo || same.speed !== speed) {
-          throw conflict('request_reused', 'This request was already used for another withdrawal');
-        }
-        return { payout: same, repeat: true };
-      }
+      const same = await this.repeatOf(tx, auth.userId, requestKey, amountKobo, speed);
+      if (same) return { payout: same, repeat: true };
       if (speed === 'scheduled') {
         const [queued] = await tx
           .select({ id: payouts.id })
@@ -215,18 +212,7 @@ export class PayoutsService {
         if (queued) throw conflict('scheduled_withdrawal_exists', 'You already have a withdrawal going out today');
       }
       if (tier === 'bronze') {
-        const startOfDay = sql`(date_trunc('day', now() at time zone ${timezone}) at time zone ${timezone})`;
-        const [today] = await tx
-          .select({ total: sum(payouts.amountKobo) })
-          .from(payouts)
-          .where(
-            and(
-              eq(payouts.userId, auth.userId),
-              gte(payouts.createdAt, startOfDay),
-              inArray(payouts.status, ['requested', 'processing', 'succeeded']),
-            ),
-          );
-        const used = Number(today?.total ?? 0);
+        const used = await this.todayTotal(tx, timezone, eq(payouts.userId, auth.userId));
         const limit = settings.limits.newAgentDailyWithdrawalKobo;
         if (used + amountKobo > limit) {
           throw unprocessable('daily_limit_reached', 'This is more than you can withdraw today', {
@@ -238,7 +224,7 @@ export class PayoutsService {
       if (speed === 'instant') {
         const { instantWithdrawalAgentDailyKobo: agentCap, instantWithdrawalPlatformDailyKobo: platformCap } =
           settings.security;
-        const mine = await this.instantToday(tx, timezone, eq(payouts.userId, auth.userId));
+        const mine = await this.todayTotal(tx, timezone, eq(payouts.userId, auth.userId), 'instant');
         if (mine + amountKobo > agentCap) {
           throw unprocessable('instant_limit_reached', 'This is more than you can withdraw instantly today', {
             remainingKobo: Math.max(0, agentCap - mine),
@@ -246,7 +232,7 @@ export class PayoutsService {
         }
         // Everyone's instant withdrawals in the country, one request at a time.
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payout-instant:' + auth.countryCode}))`);
-        const everyone = await this.instantToday(tx, timezone, eq(payouts.countryCode, auth.countryCode));
+        const everyone = await this.todayTotal(tx, timezone, eq(payouts.countryCode, auth.countryCode), 'instant');
         if (everyone + amountKobo > platformCap) {
           throw unprocessable(
             'instant_unavailable',
@@ -289,8 +275,21 @@ export class PayoutsService {
     return payoutView(payout);
   }
 
-  /** Instant withdrawals made today (local time), still standing, by an agent or in a country. */
-  private async instantToday(tx: Tx, timezone: string, who: ReturnType<typeof eq>) {
+  /** The withdrawal made with this request key, if any. The key used for another withdrawal is refused. */
+  private async repeatOf(db: Db | Tx, userId: string, requestKey: string, amountKobo: number, speed: string) {
+    const [same] = await db
+      .select()
+      .from(payouts)
+      .where(and(eq(payouts.userId, userId), eq(payouts.requestKey, requestKey)));
+    if (!same) return null;
+    if (same.amountKobo !== amountKobo || same.speed !== speed) {
+      throw conflict('request_reused', 'This request was already used for another withdrawal');
+    }
+    return same;
+  }
+
+  /** Withdrawals made today (local time) and still standing, by an agent or in a country; optionally one speed. */
+  private async todayTotal(tx: Tx, timezone: string, who: ReturnType<typeof eq>, speed?: 'instant') {
     const startOfDay = sql`(date_trunc('day', now() at time zone ${timezone}) at time zone ${timezone})`;
     const [row] = await tx
       .select({ total: sum(payouts.amountKobo) })
@@ -298,7 +297,7 @@ export class PayoutsService {
       .where(
         and(
           who,
-          eq(payouts.speed, 'instant'),
+          speed ? eq(payouts.speed, speed) : undefined,
           gte(payouts.createdAt, startOfDay),
           inArray(payouts.status, ['requested', 'processing', 'succeeded']),
         ),
@@ -338,9 +337,10 @@ export class PayoutsService {
    */
   async send(payoutId: string): Promise<PayoutRow | null> {
     const now = new Date();
+    const lease = new Date(now.getTime() + SEND_LEASE_MS);
     const [claimed] = await this.db
       .update(payouts)
-      .set({ sendingUntil: new Date(now.getTime() + SEND_LEASE_MS) })
+      .set({ sendingUntil: lease })
       .where(
         and(
           eq(payouts.id, payoutId),
@@ -353,7 +353,11 @@ export class PayoutsService {
     try {
       return await this.sendClaimed(claimed);
     } finally {
-      await this.db.update(payouts).set({ sendingUntil: null }).where(eq(payouts.id, payoutId));
+      // Only this run's claim is let go: a run that took over after it ran out keeps its own.
+      await this.db
+        .update(payouts)
+        .set({ sendingUntil: null })
+        .where(and(eq(payouts.id, payoutId), eq(payouts.sendingUntil, lease)));
     }
   }
 
@@ -382,6 +386,8 @@ export class PayoutsService {
       // Refused before it was ever handed over: nothing can have been paid, so the money goes back.
       const refused = error instanceof PaymentsProviderError && error.status >= 400 && error.status < 500;
       if (refused && payout.attempts === 0) return this.fail(payout.id, (error as Error).message);
+      // Refused after an earlier try was handed over: that try may have been paid, so a person decides.
+      if (refused) await this.unclear(payout, via.name, (error as Error).message);
       this.logger.warn(`Payout ${payout.id} not sent yet: ${(error as Error).message}`);
       return payout;
     }
@@ -414,38 +420,47 @@ export class PayoutsService {
       // back. After an earlier try, a refusal may only mean that try's transfer exists: never given back.
       if (!known && refused && attempt === 1) return this.fail(payout.id, (error as Error).message);
       if (!known) {
-        if (refused) {
-          await this.alerts.raise({
-            countryCode: payout.countryCode,
-            kind: 'payout_unclear',
-            dedupeKey: payout.id,
-            message: `Withdrawal ${payout.reference} was refused on a retry and ${via.name} doesn't show it yet. Check it at the provider before anything is given back.`,
-            data: { payoutId: payout.id, reference: payout.reference, reason: (error as Error).message },
-          });
-        }
+        if (refused) await this.unclear(payout, via.name, (error as Error).message);
         // Left as requested: it is tried again with the same reference, so the bank pays once.
         this.logger.warn(`Payout ${payout.id} not sent yet: ${(error as Error).message}`);
         return payout;
       }
       result = { status: known.status, transferCode: null, reason: known.reason, feeKobo: known.feeKobo };
     }
-    if (result.reason === 'otp') {
-      await this.alerts.raise({
-        countryCode: payout.countryCode,
-        kind: 'transfer_otp_on',
-        message: `${via.name} asked for an OTP on a transfer. Turn transfer OTP off in its dashboard, or withdrawals can't go out.`,
-        data: { reference: payout.reference },
-      });
-    }
+    if (result.reason === 'otp') await this.otpAsked(payout, via.name);
     const [sent] = await this.db
       .update(payouts)
       .set({ status: 'processing', sentAt: new Date(), providerTransferCode: result.transferCode })
       .where(and(eq(payouts.id, payout.id), eq(payouts.status, 'requested')))
       .returning();
     if (result.status === 'success') return this.succeed(payout.id, result.feeKobo ?? 0);
-    if (result.status === 'failed')
-      return this.fail(payout.id, result.reason === 'otp' ? 'Transfer OTP is on' : (result.reason ?? 'failed'));
+    if (result.status === 'failed') return this.fail(payout.id, result.reason ?? 'failed');
     return sent ?? payout;
+  }
+
+  /** A withdrawal that may or may not have been paid: a person checks at the provider before anything moves. */
+  private async unclear(payout: PayoutRow, provider: string, reason: string) {
+    await this.alerts.raise({
+      countryCode: payout.countryCode,
+      kind: 'payout_unclear',
+      dedupeKey: payout.id,
+      message: `Withdrawal ${payout.reference} was refused on a retry and ${provider} doesn't show it yet. Check it at the provider before anything is given back.`,
+      data: { payoutId: payout.id, reference: payout.reference, reason },
+    });
+  }
+
+  /**
+   * Transfer OTP is on at the provider: the transfer waits for a code. It isn't given back, as it can still
+   * be finalised by hand; a person finishes it in the dashboard or turns OTP off.
+   */
+  private async otpAsked(payout: PayoutRow, provider: string) {
+    await this.alerts.raise({
+      countryCode: payout.countryCode,
+      kind: 'transfer_otp_on',
+      dedupeKey: payout.id,
+      message: `${provider} is holding withdrawal ${payout.reference} for an OTP. Finalise it in the dashboard, and turn transfer OTP off so withdrawals go out.`,
+      data: { payoutId: payout.id, reference: payout.reference },
+    });
   }
 
   /**
@@ -453,7 +468,7 @@ export class PayoutsService {
    * approval URL). Approved only for a withdrawal being sent or in progress, for its exact amount and the
    * agent's checked recipient, while the agent is active. Database reads only: it must answer fast.
    */
-  async approve(provider: string, ask: TransferApproval) {
+  async approve(provider: string, ask: TransferApprovalRequest) {
     const [row] = await this.db
       .select({ payout: payouts, recipientCode: payoutAccounts.recipientCode, owner: users.status })
       .from(payouts)
@@ -474,7 +489,7 @@ export class PayoutsService {
 
   private async approvalProblem(
     provider: string,
-    ask: TransferApproval,
+    ask: TransferApprovalRequest,
     row: { payout: PayoutRow; recipientCode: string; owner: string } | undefined,
   ) {
     if (!row) return 'no such withdrawal';
@@ -484,8 +499,10 @@ export class PayoutsService {
     if (payout.status !== 'processing' && !sending) {
       return payout.status === 'requested' ? 'it is not being sent' : `it is ${payout.status}`;
     }
+    // The reference and amount identify the withdrawal; a recipient, when the request names one, must match.
+    if (!Number.isSafeInteger(ask.amountKobo)) return 'the request names no amount';
     if (payout.sendKobo !== ask.amountKobo) return `the amount is ${ask.amountKobo}, not ${payout.sendKobo}`;
-    if (!ask.recipientCode || ask.recipientCode !== row.recipientCode) return "the recipient isn't the agent's account";
+    if (ask.recipientCode && ask.recipientCode !== row.recipientCode) return "the recipient isn't the agent's account";
     if (row.owner !== 'active') return 'the agent is suspended';
     if (payout.speed === 'instant' && (await this.instantPaused(payout.countryCode))) {
       return 'instant withdrawals are paused';
@@ -535,6 +552,7 @@ export class PayoutsService {
     const via = this.providers.named('payments', payout.provider ?? this.payments.name);
     if (!via) throw new Error(`Payout ${reference} went through ${payout.provider}, which is no longer set up`);
     const { status, reason, feeKobo } = await via.verifyTransfer(reference, payout.providerTransferCode);
+    if (reason === 'otp') await this.otpAsked(payout, via.name);
     if (status === 'success') return this.succeed(payout.id, feeKobo ?? 0);
     if (status === 'failed') return this.fail(payout.id, reason ?? 'failed');
     return payout;

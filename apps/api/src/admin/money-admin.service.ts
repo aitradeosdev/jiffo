@@ -15,6 +15,7 @@ import {
 } from '../db/schema';
 import { conflict, notFound, unprocessable } from '../common/errors';
 import { AlertsService } from '../alerts/alerts.service';
+import { PayoutsService } from '../money/payouts.service';
 import { InsufficientFunds, LedgerService, transfer, type AccountRef } from '../money/ledger.service';
 import { AuditService } from './audit.service';
 import { requireCountry } from './countries';
@@ -57,6 +58,7 @@ export class MoneyAdminService {
     private readonly ledger: LedgerService,
     private readonly audit: AuditService,
     private readonly alertsService: AlertsService,
+    private readonly payoutsService: PayoutsService,
   ) {}
 
   /** Balances now, and where revenue and provider charges came from over the last `days` days. */
@@ -318,45 +320,37 @@ export class MoneyAdminService {
    * withdrawals start again once no check is left uncleared.
    */
   async clearReconciliation(admin: AdminContext, runId: string, note: string) {
-    return this.db.transaction(async (tx) => {
-      const [run] = await tx
+    const run = await this.db.transaction(async (tx) => {
+      const [cleared] = await tx
         .update(reconciliationRuns)
         .set({ clearedAt: new Date(), clearedBy: admin.adminId, clearNote: note })
         .where(and(eq(reconciliationRuns.id, runId), isNull(reconciliationRuns.clearedAt)))
         .returning();
-      if (!run) throw notFound('check_not_found', 'No uncleared check with that id');
+      if (!cleared) throw notFound('check_not_found', 'No uncleared check with that id');
       await this.audit.record(tx, admin, {
         action: 'money.reconciliation_clear',
         targetType: 'reconciliation_run',
-        targetId: run.id,
-        countryCode: run.countryCode,
-        data: { differenceKobo: run.differenceKobo, note },
+        targetId: cleared.id,
+        countryCode: cleared.countryCode,
+        data: { differenceKobo: cleared.differenceKobo, note },
       });
-      const [left] = await tx
-        .select({ id: reconciliationRuns.id })
-        .from(reconciliationRuns)
+      return cleared;
+    });
+    const instantPaused = await this.payoutsService.instantPaused(run.countryCode);
+    // Nothing left paused: the gap alerts are answered by this note.
+    if (!instantPaused) {
+      await this.db
+        .update(alerts)
+        .set({ resolvedAt: new Date(), resolvedBy: admin.adminId, resolveNote: note })
         .where(
           and(
-            eq(reconciliationRuns.countryCode, run.countryCode),
-            eq(reconciliationRuns.pausesInstant, true),
-            isNull(reconciliationRuns.clearedAt),
+            eq(alerts.countryCode, run.countryCode),
+            eq(alerts.kind, 'reconciliation_gap'),
+            isNull(alerts.resolvedAt),
           ),
-        )
-        .limit(1);
-      if (!left) {
-        await tx
-          .update(alerts)
-          .set({ resolvedAt: new Date(), resolvedBy: admin.adminId, resolveNote: note })
-          .where(
-            and(
-              eq(alerts.countryCode, run.countryCode),
-              eq(alerts.kind, 'reconciliation_gap'),
-              isNull(alerts.resolvedAt),
-            ),
-          );
-      }
-      return { cleared: true, instantPaused: !!left };
-    });
+        );
+    }
+    return { cleared: true, instantPaused };
   }
 
   /** Open alerts first, then the latest resolved ones. */
