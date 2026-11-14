@@ -3,6 +3,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { countries, errands, users } from '../src/db/schema';
 import {
+  boardRequest,
   act,
   createErrand,
   createTestApp,
@@ -248,10 +249,7 @@ describe('errands', () => {
 
       await get(abroad, errand.id, 404);
       await act(t, abroad, errand.id, 'accept', {}, 404);
-      const board = await request(t.http)
-        .get('/v1/errands/board?lat=6.4480&lng=3.4700')
-        .set(abroad.headers)
-        .expect(200);
+      const board = await boardRequest(t, abroad, 'lat=6.4480&lng=3.4700').expect(200);
       expect(board.body).toEqual({ errands: [], hiddenByPreferences: 0 });
     });
   });
@@ -293,10 +291,7 @@ describe('errands', () => {
           { kind: 'dropoff', address: 'Opebi Road, Ikeja, Lagos', lat: 6.5944, lng: 3.3637 },
         ],
       });
-      const near = await request(t.http)
-        .get('/v1/errands/board?lat=6.4480&lng=3.4700&radiusKm=5')
-        .set(agent.headers)
-        .expect(200);
+      const near = await boardRequest(t, agent, 'lat=6.4480&lng=3.4700&radiusKm=5').expect(200);
       const ids = near.body.errands.map((e: { id: string }) => e.id);
       expect(ids).toContain(lekki.id);
       expect(ids).not.toContain(ikeja.id);
@@ -304,14 +299,11 @@ describe('errands', () => {
       expect(mine).toMatchObject({ role: 'prospect', allowedEvents: ['accept'] });
       expect(mine.distanceMeters).toBeLessThan(500);
 
-      const wide = await request(t.http)
-        .get('/v1/errands/board?lat=6.4480&lng=3.4700&radiusKm=30')
-        .set(agent.headers)
-        .expect(200);
+      const wide = await boardRequest(t, agent, 'lat=6.4480&lng=3.4700&radiusKm=30').expect(200);
       const order = wide.body.errands.map((e: { id: string }) => e.id);
       expect(order.indexOf(lekki.id)).toBeLessThan(order.indexOf(ikeja.id));
 
-      await request(t.http).get('/v1/errands/board?lat=6.4&lng=3.4').set(customer.headers).expect(403);
+      await boardRequest(t, customer, 'lat=6.4&lng=3.4').expect(403);
     });
   });
 

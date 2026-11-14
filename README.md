@@ -148,6 +148,26 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
 - **What it costs:** every provider charge is booked to the ledger as it happens: the fee on each top-up (Jiffo pays it, not the customer), the fee on each transfer out, and the fee for issuing an own account number, which is entered on the provider in the panel because providers don't report it per account. The overview and Money pages show revenue, those costs, and net revenue, the difference.
 - **Escrow:** the fee and service fee are held when an agent accepts, adjusted when a new price is accepted, and returned if the agent leaves or the errand is cancelled. Item money is held separately when the customer locks the item amount.
 - **Hand-off:** item money goes to the agent untouched and withdrawable at once. The fee, less the commission for the agent's tier (set by admin), goes to the agent; Bronze earnings are held for 24 hours. The service fee and commission go to platform revenue.
+- **Access rules:**
+  - **Request bodies:** a field an endpoint doesn't take is refused at any depth, event data included, not quietly dropped. Provider callbacks opt out with `.passthrough()`.
+  - **Waiting errands:**
+    - Only approved agents see them.
+    - Until an agent accepts, each stop shows only its general area and a point rounded to about a kilometre: no street, house number or label.
+    - The event list never names the agents who took or left an errand.
+  - **The board:**
+    - It searches around the agent's own last position, reported within five minutes.
+    - The place the app asks about must be within 5 km of that position.
+    - Phones report their own position, so this limits what a scraper sees but can't prove where a phone is.
+  - **Agent's position:** the customer sees it only while the agent is on the way for them, up to the drop-off. An agent holding a second errand they haven't started isn't followed by that customer.
+  - **Live connections:**
+    - Rooms go through Redis, so sign-out and suspension drop sockets on every server at once.
+    - Each server also re-checks its own sockets every 30 seconds, as a safety net.
+    - CORS_ORIGINS must list the allowed origins in production. It is checked on every socket connection, WebSocket included, as well as on HTTP.
+  - **Provider details and logs:**
+    - The apps never get the provider's wording for a failure.
+    - Chat pushes never quote the message.
+    - Stored webhook bodies have account numbers, phone numbers, emails and names masked.
+    - Every log line passes through the same masking. Production logs are JSON.
 - **Protecting the hand-off:**
   - **At the drop-off:** marking an errand delivered and entering the PIN need the agent's fresh position within the set distance of the drop-off (default 200 m, Settings, Security).
   - **Wait before a photo:** a drop-off photo is accepted only after the agent has waited the set minutes there, and only while they are still there.

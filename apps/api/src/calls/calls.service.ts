@@ -36,7 +36,7 @@ export class CallsService {
    * A provider asking what to do now the caller answered (Africa's Talking calls this). The address carries
    * a token only Jiffo knows, and the call must be one it placed, on an errand still running.
    */
-  async answered(provider: string, token: string, body: Record<string, string | undefined>) {
+  async answered(provider: string, token: string, body: { isActive?: string; sessionId?: string }) {
     const adapter = this.providers.named('calls', provider);
     const expected = this.providers.callbackToken('calls', provider);
     if (!adapter?.connect || !expected || !safeEqual(token, expected)) throw notFound('not_found', 'Not found');

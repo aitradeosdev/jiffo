@@ -46,6 +46,17 @@ const bankKey = (name: string) =>
     .replace(/\b(plc|limited|ltd|bank|nigeria)\b/g, '')
     .replace(/[^a-z0-9]/g, '');
 
+/**
+ * What an agent is told when a withdrawal fails. The provider's own words stay with support; the agent
+ * hears only whether their bank details look like the cause, so they don't change a good account for
+ * nothing (docs/security-plan.md, R8).
+ */
+const ACCOUNT_PROBLEM = /\b(account|nuban|beneficiary|recipient|name)\b/i;
+const payoutFailure = (reason: string | null) =>
+  reason && ACCOUNT_PROBLEM.test(reason)
+    ? "The bank couldn't pay into your account. Check your bank account details, or contact support."
+    : "The transfer didn't go through. The money is back in your balance: try again later, or contact support.";
+
 export const payoutView = (p: PayoutRow) => ({
   id: p.id,
   speed: p.speed,
@@ -53,7 +64,7 @@ export const payoutView = (p: PayoutRow) => ({
   amountKobo: p.amountKobo,
   feeKobo: p.feeKobo,
   sendKobo: p.sendKobo,
-  failureReason: p.failureReason,
+  failureReason: p.status === 'failed' ? payoutFailure(p.failureReason) : null,
   createdAt: p.createdAt,
   sentAt: p.sentAt,
   completedAt: p.completedAt,
@@ -623,7 +634,9 @@ export class PayoutsService {
       this.realtime.toUser(done.userId, 'agent', 'wallet.updated', { reason: 'payout_failed', payoutId: done.id });
       await this.push.notifyUser(done.userId, 'agent', {
         title: 'Withdrawal failed',
-        body: `${formatNaira(done.amountKobo)} is back in your balance. Check your bank details and try again.`,
+        body: `${formatNaira(done.amountKobo)} is back in your balance. ${
+          ACCOUNT_PROBLEM.test(reason) ? 'Check your bank details and try again.' : 'Try again later.'
+        }`,
         data: { type: 'wallet.payout', payoutId: done.id },
       });
     }

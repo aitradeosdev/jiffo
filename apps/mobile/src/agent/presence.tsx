@@ -60,6 +60,14 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   /** Set once the agent switches; a slower first read must not undo it. */
   const switched = useRef(false);
 
+  const send = useCallback(
+    async (next: { online: boolean; lat?: number; lng?: number }) => {
+      markSent();
+      await api.put('/v1/agent/presence', next);
+    },
+    [api],
+  );
+
   // Where things stood when the app opened, and whenever one of the agent's errands changes.
   const refresh = useCallback(async () => {
     try {
@@ -88,10 +96,13 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
         return;
       }
       const here = { lat: position.coords.latitude, lng: position.coords.longitude };
+      // Report the position first: the board answers only around a recent one.
+      await send({ online: true, ...here }).catch(() => undefined);
+      if (switched.current) return;
       setCoords(here);
       setOnlineState(true);
     })();
-  }, [api, refresh]);
+  }, [api, refresh, send]);
   useRealtimeEvent('errand.updated', () => {
     void refresh();
   });
@@ -109,14 +120,6 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
     }
     return true;
   }, []);
-
-  const send = useCallback(
-    async (next: { online: boolean; lat?: number; lng?: number }) => {
-      markSent();
-      await api.put('/v1/agent/presence', next);
-    },
-    [api],
-  );
 
   const setOnline = useCallback(
     async (next: boolean) => {

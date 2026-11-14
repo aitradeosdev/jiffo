@@ -28,6 +28,7 @@ import { CountriesService } from '../countries/countries.service';
 import { ErrandsService } from '../errands/errands.service';
 import { PushService } from '../push/push.service';
 import { AuditService } from './audit.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { ApplicationsAdminService } from './applications-admin.service';
 import { IdChecksAdminService } from './id-checks-admin.service';
 import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
@@ -54,6 +55,7 @@ export class PeopleAdminService {
     private readonly countries: CountriesService,
     private readonly applications: ApplicationsAdminService,
     private readonly idChecks: IdChecksAdminService,
+    private readonly realtime: RealtimeGateway,
   ) {}
 
   /** What each tier means under the country's current settings: commission, and when earnings can be withdrawn. */
@@ -431,6 +433,8 @@ export class PeopleAdminService {
       });
       return { closed: closedResults };
     });
+    // Their live connections end at once, on every server, before anything is announced to them.
+    this.realtime.disconnectUser(id);
     // Boards drop the closed errands, and the customer hears they were cancelled.
     await this.errandsService.announce(closed);
     return { status: 'suspended' as const, closedErrands: closed.map((r) => r.after.id) };

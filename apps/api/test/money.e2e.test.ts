@@ -564,7 +564,11 @@ describe('money', () => {
         .set(earner.headers)
         .send({ requestId: randomUUID(), amountKobo: 25_000, speed: 'instant' })
         .expect(201);
-      expect(res.body).toMatchObject({ status: 'failed', failureReason: 'Transfer recipient is no longer valid' });
+      // The agent gets a general reason; the provider's words stay with support.
+      expect(res.body).toMatchObject({
+        status: 'failed',
+        failureReason: expect.stringContaining('bank account details'),
+      });
       expect((await balanceOf(t, earner)).availableKobo).toBe(start);
     });
 

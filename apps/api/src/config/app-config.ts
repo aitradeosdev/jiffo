@@ -119,6 +119,7 @@ const EnvSchema = z
         'must be set in production (load balancers in front)',
       );
       need(!!env.ADMIN_PANEL_SECRET, 'ADMIN_PANEL_SECRET', 'must be set in production');
+      need(env.CORS_ORIGINS !== '*', 'CORS_ORIGINS', 'must list the allowed origins in production, not *');
       need(!!env.SECRETS_KEY, 'SECRETS_KEY', "must be set in production, to encrypt providers' keys");
       need(!!env.ADMIN_URL, 'ADMIN_URL', 'must be set in production, or invite links point at localhost');
     }

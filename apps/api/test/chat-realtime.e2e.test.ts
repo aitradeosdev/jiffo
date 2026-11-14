@@ -77,9 +77,10 @@ describe('chat, realtime and push', () => {
     const retry = await send(customer, errand.id, 'Please call at the gate', clientId).expect(201);
     expect(retry.body.id).toBe(first.body.id);
     expect(pushesTo('agent-push-token-1')).toHaveLength(before + 1);
+    // The push names the sender but never quotes the message: it shows on a locked phone.
     expect(pushesTo('agent-push-token-1').at(-1)).toMatchObject({
       title: 'Ada',
-      body: 'Please call at the gate',
+      body: 'Sent you a message',
       data: { type: 'chat.message', errandId: errand.id },
     });
 

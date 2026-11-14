@@ -156,10 +156,12 @@ export class AuthService {
 
   /** Signs out every other phone, e.g. after the account owner reports a lost phone. */
   async logoutOthers(auth: AuthContext) {
-    await this.db
+    const ended = await this.db
       .update(sessions)
       .set({ revokedAt: new Date(), revokedReason: 'logout_others' })
-      .where(and(eq(sessions.userId, auth.userId), ne(sessions.id, auth.sessionId), isNull(sessions.revokedAt)));
+      .where(and(eq(sessions.userId, auth.userId), ne(sessions.id, auth.sessionId), isNull(sessions.revokedAt)))
+      .returning({ id: sessions.id });
+    return ended.map((s) => s.id);
   }
 
   private async issue(tx: Tx, auth: TokenClaims) {
