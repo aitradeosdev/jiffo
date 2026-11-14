@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS "fixed_accounts" (
 	"account_name" text,
 	"bank_name" text,
 	"failure_reason" text,
+	"requested_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"checking_until" timestamp with time zone,
 	"issue_fee_kobo" bigint DEFAULT 0 NOT NULL,
 	"activated_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,

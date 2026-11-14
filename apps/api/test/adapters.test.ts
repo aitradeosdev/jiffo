@@ -297,7 +297,7 @@ describe('Paystack payments', () => {
     expect(JSON.parse(String(test.calls[1]!.init.body)).preferred_bank).toBe('test-bank');
   });
 
-  it('says why identification failed, counting only the latest attempt', async () => {
+  it('says why identification failed, once every attempt has', async () => {
     const adapter = (customer: unknown) =>
       new PaystackPaymentsAdapter('sk_live_1', 'https://api.example.test', fakeFetch(() => ok(customer)).impl);
     expect(
@@ -317,6 +317,26 @@ describe('Paystack payments', () => {
         ],
       }).fixedAccountState('CUS_4'),
     ).toEqual({ status: 'pending', providerRef: 'CUS_4' });
+    // Without dates, in whatever order Paystack lists them, a retry being checked isn't failed.
+    for (const order of [
+      [{ status: 'failed', reason: 'Wrong BVN' }, { status: 'pending' }],
+      [{ status: 'pending' }, { status: 'failed', reason: 'Wrong BVN' }],
+    ]) {
+      expect(await adapter({ identified: false, identifications: order }).fixedAccountState('CUS_4')).toEqual({
+        status: 'pending',
+        providerRef: 'CUS_4',
+      });
+    }
+    // The latest reason is given when there are several.
+    expect(
+      await adapter({
+        identified: false,
+        identifications: [
+          { status: 'failed', reason: 'Wrong BVN', createdAt: '2026-11-13T10:00:00Z' },
+          { status: 'failed', reason: 'Name does not match', createdAt: '2026-11-13T12:00:00Z' },
+        ],
+      }).fixedAccountState('CUS_4'),
+    ).toMatchObject({ status: 'failed', reason: 'Name does not match' });
 
     const refused = fakeFetch(({ url, init }) =>
       url.endsWith('/identification')
@@ -328,6 +348,21 @@ describe('Paystack payments', () => {
     expect(
       await new PaystackPaymentsAdapter('sk_live_1', 'https://api.example.test', refused.impl).issueFixedAccount(owner),
     ).toEqual({ status: 'failed', providerRef: 'CUS_5', reason: 'Invalid BVN' });
+  });
+
+  it('reads the account again when assigning it is refused because it was just assigned', async () => {
+    const account = { account_number: '9930000003', account_name: 'JIFFO/ADA OKAFOR', bank: { name: 'Wema Bank' } };
+    let reads = 0;
+    const { impl } = fakeFetch(({ url }) => {
+      if (url.endsWith('/dedicated_account')) {
+        return Response.json({ status: false, message: 'Customer already has a dedicated account' }, { status: 400 });
+      }
+      reads += 1;
+      return ok(reads === 1 ? { identified: true } : { identified: true, dedicated_account: account });
+    });
+    expect(
+      await new PaystackPaymentsAdapter('sk_live_1', 'https://api.example.test', impl).fixedAccountState('CUS_9'),
+    ).toMatchObject({ status: 'active', accountNumber: '9930000003' });
   });
 
   it('tells transfers into a dedicated account, and account events, from one-time top-ups', async () => {
@@ -793,12 +828,18 @@ describe('Flutterwave payments', () => {
   it('credits a transfer into a permanent account by its transaction id, with whose account it was', async () => {
     const flw = make(fakeFetch(() => ok({})).impl);
     const body = Buffer.from(
-      JSON.stringify({ event: 'charge.completed', data: { id: 99, tx_ref: 'jva-u1', status: 'successful' } }),
+      JSON.stringify({
+        event: 'charge.completed',
+        data: { id: 99, tx_ref: 'jva-6f1c2e7a-1b2c-4d3e-8f90-a1b2c3d4e5f6-m1', status: 'successful' },
+      }),
     );
     expect(flw.parseWebhook(body, { 'verif-hash': 'hash-123' })).toMatchObject({
       kind: 'fixed_deposit',
       paymentRef: '99',
     });
+    // A tx_ref that only looks like ours is a one-time top-up's.
+    const lookalike = Buffer.from(JSON.stringify({ event: 'charge.completed', data: { id: 98, tx_ref: 'jva-x' } }));
+    expect(flw.parseWebhook(lookalike, { 'verif-hash': 'hash-123' })).toMatchObject({ kind: 'deposit' });
     const { impl, calls } = fakeFetch(() =>
       ok({
         status: 'successful',

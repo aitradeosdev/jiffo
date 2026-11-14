@@ -1,4 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { providerInfo, type FixedAccountNeeds } from '@jiffo/shared';
 import { unavailable } from '../common/errors';
 
 export interface TransferDeposit {
@@ -60,6 +61,20 @@ export type FixedAccountState =
   | { status: 'failed'; providerRef: string | null; reason: string };
 
 /** A transfer into a fixed account, as the provider confirms it, with whose account it went to. */
+/**
+ * Our reference for a customer's fixed account at a provider: jva-<user id>-<attempt>. Transfers into the
+ * account carry it at providers that key accounts by it (Flutterwave's tx_ref), so whose wallet a transfer
+ * is for is read from it, even for an account from an earlier attempt.
+ */
+export const FIXED_OWNER_PREFIX = 'jva-';
+export const fixedOwnerRef = (userId: string) => `${FIXED_OWNER_PREFIX}${userId}-${Date.now().toString(36)}`;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+/** The customer a fixed account reference belongs to, or null if it isn't one of ours. */
+export const ownerOfFixedRef = (ref: string | undefined) =>
+  ref?.startsWith(FIXED_OWNER_PREFIX) ? (UUID.exec(ref.slice(FIXED_OWNER_PREFIX.length))?.[0] ?? null) : null;
+/** What a provider in the catalogue needs from the customer for a fixed account. */
+const needsOf = (key: string): FixedAccountNeeds | undefined => providerInfo('payments', key)?.fixedAccounts;
+
 export interface FixedPayment extends DepositStatus {
   /** The provider's reference for the account (Paystack's customer), or ours (Flutterwave's tx_ref). */
   providerRef?: string;
@@ -118,7 +133,7 @@ export interface PaymentsAdapter {
    * Fixed accounts: each customer's own account number, which any transfer to lands in their wallet. Only
    * providers that issue them have these; `fixedAccountNeeds` says what the customer gives for one.
    */
-  readonly fixedAccountNeeds?: 'nothing' | 'bvn' | 'bvn_and_bank';
+  readonly fixedAccountNeeds?: FixedAccountNeeds;
   /** What the provider charges for each account it issues, as admin entered it; 0 when it charges nothing. */
   readonly fixedAccountFeeKobo?: number;
   issueFixedAccount?(owner: FixedAccountOwner): Promise<FixedAccountState>;
@@ -210,7 +225,7 @@ interface PaystackEnvelope<T> {
 /** Paystack: Pay with Transfer for deposits, Transfers for payouts, Resolve Account for name checks. */
 export class PaystackPaymentsAdapter implements PaymentsAdapter {
   readonly name = 'paystack';
-  readonly fixedAccountNeeds = 'bvn_and_bank' as const;
+  readonly fixedAccountNeeds = needsOf('paystack');
 
   constructor(
     private readonly secretKey: string,
@@ -273,17 +288,27 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
     }>('GET', `/customer/${encodeURIComponent(code)}`);
     if (customer.dedicated_account?.account_number) return activeAccount(code, customer.dedicated_account);
     if (customer.identified) {
-      const account = await this.call<PaystackDedicatedAccount>('POST', '/dedicated_account', {
-        customer: code,
-        preferred_bank: this.preferredBank,
-      });
-      return activeAccount(code, account);
+      try {
+        const account = await this.call<PaystackDedicatedAccount>('POST', '/dedicated_account', {
+          customer: code,
+          preferred_bank: this.preferredBank,
+        });
+        return activeAccount(code, account);
+      } catch (error) {
+        // Assigned by another request meanwhile, or by Paystack itself: the customer shows it now.
+        const again = await this.call<{ dedicated_account?: PaystackDedicatedAccount | null }>(
+          'GET',
+          `/customer/${encodeURIComponent(code)}`,
+        );
+        if (again.dedicated_account?.account_number) return activeAccount(code, again.dedicated_account);
+        throw error;
+      }
     }
-    // Only the latest attempt counts: one that failed before a retry doesn't fail the retry.
+    // Failed only once every attempt has: a retry still being checked isn't failed by an older attempt.
     const tries = [...(customer.identifications ?? [])];
-    const at = (i: (typeof tries)[number]) => Date.parse(i.createdAt ?? i.created_at ?? '') || 0;
-    const latest = tries.sort((a, b) => at(a) - at(b)).at(-1);
-    if (latest?.status === 'failed') {
+    if (tries.length > 0 && tries.every((i) => i.status === 'failed')) {
+      const at = (i: (typeof tries)[number]) => Date.parse(i.createdAt ?? i.created_at ?? '') || 0;
+      const latest = tries.sort((a, b) => at(b) - at(a))[0]!;
       return {
         status: 'failed',
         providerRef: code,
@@ -293,25 +318,9 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
     return { status: 'pending', providerRef: code };
   }
 
+  /** A transfer into a dedicated account: the same check as a one-time top-up, with whose account it was. */
   async verifyFixedPayment(reference: string): Promise<FixedPayment> {
-    const data = await this.call<{
-      status: string;
-      amount: number;
-      fees: number | null;
-      currency: string;
-      customer?: { customer_code?: string } | null;
-      authorization?: { sender_name?: string | null; sender_bank?: string | null } | null;
-    }>('GET', `/transaction/verify/${encodeURIComponent(reference)}`);
-    return {
-      status:
-        data.status === 'success' ? 'success' : ['failed', 'reversed'].includes(data.status) ? 'failed' : 'pending',
-      amountKobo: data.amount,
-      feesKobo: data.fees ?? 0,
-      currency: data.currency,
-      senderName: data.authorization?.sender_name ?? null,
-      senderBank: data.authorization?.sender_bank ?? null,
-      providerRef: data.customer?.customer_code,
-    };
+    return this.verifyCharge(reference);
   }
 
   private async call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
@@ -350,11 +359,17 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
   }
 
   async verifyDeposit(reference: string): Promise<DepositStatus> {
+    const { providerRef: _customer, ...status } = await this.verifyCharge(reference);
+    return status;
+  }
+
+  private async verifyCharge(reference: string): Promise<FixedPayment> {
     const data = await this.call<{
       status: string;
       amount: number;
       fees: number | null;
       currency: string;
+      customer?: { customer_code?: string } | null;
       authorization?: { sender_name?: string | null; sender_bank?: string | null } | null;
     }>('GET', `/transaction/verify/${encodeURIComponent(reference)}`);
     const status =
@@ -370,6 +385,7 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
       currency: data.currency,
       senderName: data.authorization?.sender_name ?? null,
       senderBank: data.authorization?.sender_bank ?? null,
+      providerRef: data.customer?.customer_code,
     };
   }
 
@@ -536,6 +552,8 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
       accountName: `Jiffo ${owner.firstName} ${owner.lastName}`,
       assigned: !this.fixedAccountsWait,
     };
+    // Issuing is charged to the balance it holds for Jiffo, as the fee set on a provider says.
+    if (!existing && account.assigned) this.providerBalanceKobo -= this.fixedAccountFeeKobo;
     this.fixedAccounts.set(owner.ownerRef, account);
     return this.fixedAccountState(`fake_${owner.ownerRef}`);
   }
@@ -552,6 +570,7 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
   assignFixed(ownerRef: string) {
     const account = this.fixedAccounts.get(ownerRef);
     if (!account) throw new Error(`No fixed account for ${ownerRef}`);
+    if (!account.assigned) this.providerBalanceKobo -= this.fixedAccountFeeKobo;
     account.assigned = true;
     return this.webhook('dedicatedaccount.assign.success', {
       id: Math.floor(Math.random() * 1e9),
@@ -749,7 +768,7 @@ const FLW_ACCOUNT_MINUTES = 60;
  */
 export class FlutterwavePaymentsAdapter implements PaymentsAdapter {
   readonly name = 'flutterwave';
-  readonly fixedAccountNeeds = 'bvn' as const;
+  readonly fixedAccountNeeds = needsOf('flutterwave');
 
   constructor(
     private readonly secretKey: string,
@@ -970,8 +989,8 @@ export class FlutterwavePaymentsAdapter implements PaymentsAdapter {
     const data = body.data ?? {};
     const raw = body as Record<string, unknown>;
     const eventKey = eventKeyOf(body.event, data.id ?? data.tx_ref ?? data.reference, rawBody);
-    // A transfer into a static account carries its tx_ref, our reference for the customer (jva-…).
-    if (body.event === 'charge.completed' && String(data.tx_ref ?? '').startsWith('jva-') && data.id) {
+    // A transfer into a static account carries its tx_ref, our reference for the customer.
+    if (body.event === 'charge.completed' && ownerOfFixedRef(String(data.tx_ref ?? '')) && data.id) {
       return { kind: 'fixed_deposit', eventKey, paymentRef: String(data.id), raw };
     }
     if (body.event === 'charge.completed' && data.tx_ref) {

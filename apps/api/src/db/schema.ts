@@ -552,7 +552,7 @@ export const fixedAccounts = pgTable(
       .notNull()
       .references(() => countries.code),
     provider: text('provider').notNull(),
-    /** Our reference for the customer at the provider: jva-<user id>. */
+    /** Our reference for this attempt at the provider: jva-<user id>-<attempt> (see fixedOwnerRef). */
     ownerRef: text('owner_ref').notNull(),
     /** The provider's own reference for the account (Paystack's customer code, Flutterwave's order_ref). */
     providerRef: text('provider_ref'),
@@ -562,6 +562,10 @@ export const fixedAccounts = pgTable(
     accountName: text('account_name'),
     bankName: text('bank_name'),
     failureReason: text('failure_reason'),
+    /** When this attempt was asked for: one the provider still hasn't settled after a week can be asked again. */
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Set while one request asks the provider about it, so two never do at once. */
+    checkingUntil: timestamp('checking_until', { withTimezone: true }),
     /** What the provider charged for issuing it, booked as a cost when it became active. */
     issueFeeKobo: kobo('issue_fee_kobo').notNull().default(0),
     activatedAt: timestamp('activated_at', { withTimezone: true }),

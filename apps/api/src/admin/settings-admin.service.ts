@@ -8,6 +8,7 @@ import {
   type CountrySettings,
 } from '@jiffo/shared';
 import { IdentityChecksService } from '../identity/identity-checks.service';
+import { ProvidersService } from '../providers/providers.service';
 import { sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { admins, categories, settingsVersions, states } from '../db/schema';
@@ -29,6 +30,7 @@ export class SettingsAdminService {
     @Inject(DB) private readonly db: Db,
     private readonly audit: AuditService,
     private readonly identity: IdentityChecksService,
+    private readonly providers: ProvidersService,
   ) {}
 
   private country(code: string) {
@@ -96,6 +98,19 @@ export class SettingsAdminService {
     const parsed = CountrySettingsSchema.safeParse(input.settings);
     if (!parsed.success) {
       throw badRequest('invalid_settings', 'Some settings are not valid', { issues: issuesOf(parsed.error) });
+    }
+    // Customers must keep a way to add money: own account numbers alone need a provider that issues them.
+    const payments = this.providers.current('payments');
+    if (!parsed.data.topUps.oneTimeAccount && !payments.issueFixedAccount) {
+      throw badRequest('invalid_settings', 'Some settings are not valid', {
+        issues: [
+          {
+            path: 'topUps.oneTimeAccount',
+            message:
+              "The payments provider in use doesn't issue customers their own account numbers. Keep one-time account numbers on, or nobody can add money.",
+          },
+        ],
+      });
     }
     // Each side must keep an ID the identity provider in use checks, or nobody on it could verify.
     for (const role of ['customer', 'agent'] as const) {

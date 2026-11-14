@@ -84,8 +84,8 @@ export class DepositsService {
   async create(auth: AuthContext, amountKobo: number) {
     // Money comes in only from verified customers.
     await this.customerIdentity.assertVerified(auth.userId);
-    const { settings } = await this.countries.currentSettings(auth.countryCode);
-    if (!settings.topUps.oneTimeAccount) {
+    const { settings, oneTime } = await this.fixedAccounts.offer(auth.countryCode);
+    if (!oneTime) {
       throw conflict('one_time_accounts_off', 'Add money by transfer to your own account number instead');
     }
     const { minDepositKobo, maxDepositKobo } = settings.limits;
