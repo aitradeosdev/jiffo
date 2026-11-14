@@ -35,10 +35,24 @@ export class PushService {
         .selectDistinct({ token: devices.pushToken })
         .from(devices)
         .where(and(inArray(devices.id, deviceIds), isNotNull(devices.pushToken)));
-      const tokens = rows.map((r) => r.token!);
-      if (tokens.length) await this.push.send(tokens, notification);
+      await this.sendAndPrune(
+        rows.map((r) => r.token!),
+        notification,
+      );
     } catch (error) {
       this.logger.warn(`Push to ${deviceIds.length} phone(s) failed: ${(error as Error).message}`);
+    }
+  }
+
+  /** Sends, and forgets the tokens the provider says are no longer valid. */
+  private async sendAndPrune(tokens: string[], notification: PushNotification) {
+    if (tokens.length === 0) return;
+    const { invalidTokens } = await this.push.send(tokens, notification);
+    if (invalidTokens.length > 0) {
+      await this.db
+        .update(devices)
+        .set({ pushToken: null, pushUpdatedAt: new Date() })
+        .where(inArray(devices.pushToken, invalidTokens));
     }
   }
 
@@ -58,15 +72,10 @@ export class PushService {
             gt(sessions.expiresAt, new Date()),
           ),
         );
-      const tokens = rows.map((r) => r.token!);
-      if (tokens.length === 0) return;
-      const { invalidTokens } = await this.push.send(tokens, notification);
-      if (invalidTokens.length > 0) {
-        await this.db
-          .update(devices)
-          .set({ pushToken: null, pushUpdatedAt: new Date() })
-          .where(inArray(devices.pushToken, invalidTokens));
-      }
+      await this.sendAndPrune(
+        rows.map((r) => r.token!),
+        notification,
+      );
     } catch (error) {
       this.logger.warn(`Push to ${userId} failed: ${(error as Error).message}`);
     }

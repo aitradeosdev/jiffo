@@ -50,7 +50,7 @@ export class AuthController {
       body.device,
     );
     this.realtime.disconnectSessions(replacedSessionIds);
-    await this.auth.tellSignedOut(signedOutDevices);
+    this.auth.tellSignedOut(signedOutDevices);
     return response;
   }
 

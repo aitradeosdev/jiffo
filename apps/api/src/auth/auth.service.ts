@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, isNull, ne } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, ne } from 'drizzle-orm';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { devices, refreshTokens, sessions, users, type AppName } from '../db/schema';
@@ -13,6 +13,8 @@ import { TokensService } from './tokens.service';
 import type { AuthContext, TokenClaims } from './auth.types';
 
 const DAY_MS = 86_400_000;
+/** A refresh sent again this soon after, with the token it was swapped for unused, is the app retrying. */
+const RETRY_GRACE_MS = 60_000;
 
 /** A refresh token used twice: every session it ended, for their sockets to be dropped too. */
 export class RefreshReused extends Error {
@@ -131,8 +133,9 @@ export class AuthService {
   }
 
   /** Tells the phones a new sign-in signed out, so a sign-in the owner didn't make doesn't go unnoticed. */
-  async tellSignedOut(deviceIds: string[]) {
-    await this.push.notifyDevices(deviceIds, {
+  tellSignedOut(deviceIds: string[]) {
+    // Not waited for: the new phone's sign-in shouldn't wait on the push provider.
+    void this.push.notifyDevices(deviceIds, {
       title: 'Signed in on another phone',
       body: "Your Jiffo account was just signed in on another phone, so this one was signed out. If that wasn't you, sign in again and contact support.",
       data: { type: 'auth.signed_out' },
@@ -153,8 +156,35 @@ export class AuthService {
       const { token, session } = row;
       if (session.revokedAt || session.expiresAt.getTime() <= Date.now()) return { error: 'invalid' as const };
       if (token.usedAt) {
-        // A used token again means it was copied: every session of the account ends, in both apps, since
-        // whoever copied it may hold others too (docs/security-plan.md, A8).
+        // The app sending it again just after, because the answer was lost on the way: the token it was
+        // swapped for (the next one issued in the session) was never used, so this is the same app asking
+        // again. It gets a new pair, and the unused one is let go.
+        const [child] = await tx
+          .select()
+          .from(refreshTokens)
+          .where(
+            and(
+              eq(refreshTokens.sessionId, session.id),
+              ne(refreshTokens.id, token.id),
+              gte(refreshTokens.createdAt, token.createdAt),
+            ),
+          )
+          .orderBy(asc(refreshTokens.createdAt))
+          .limit(1)
+          .for('update');
+        const retry = Date.now() - token.usedAt.getTime() <= RETRY_GRACE_MS && !!child && !child.usedAt;
+        if (retry) {
+          await tx.update(refreshTokens).set({ usedAt: new Date() }).where(eq(refreshTokens.id, child.id));
+          const auth: TokenClaims = {
+            userId: session.userId,
+            sessionId: session.id,
+            deviceId: session.deviceId,
+            app: session.app,
+          };
+          return { tokens: await this.issue(tx, auth) };
+        }
+        // Otherwise it was copied: every session of the account ends, in both apps, since whoever copied it
+        // may hold others too (docs/security-plan.md, A8).
         const ended = await tx
           .update(sessions)
           .set({ revokedAt: new Date(), revokedReason: 'refresh_reuse' })
@@ -166,8 +196,8 @@ export class AuthService {
 
       await tx.update(refreshTokens).set({ usedAt: new Date() }).where(eq(refreshTokens.id, token.id));
       // Moves forward, but never past the session's absolute end: then the person signs in again.
-      const absolute =
-        session.absoluteExpiresAt ?? new Date(session.createdAt.getTime() + this.config.SESSION_MAX_DAYS * DAY_MS);
+      // A session from before there was a limit gets its full length from now, rather than ending at once.
+      const absolute = session.absoluteExpiresAt ?? new Date(Date.now() + this.config.SESSION_MAX_DAYS * DAY_MS);
       if (absolute.getTime() <= Date.now()) return { error: 'invalid' as const };
       await tx
         .update(sessions)

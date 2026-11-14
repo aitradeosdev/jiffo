@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { otpChallenges, sessions } from '../src/db/schema';
+import { OtpService } from '../src/auth/otp.service';
+import { sha256 } from '../src/common/crypto';
+import { devices, otpChallenges, refreshTokens, sessions } from '../src/db/schema';
 import { adminAs, createTestApp, randomIp, randomPhone, signIn, type TestApp } from './helpers';
 
 const device = () => ({ key: randomUUID(), platform: 'ios' as const });
@@ -76,6 +78,24 @@ describe('phone sign-in', () => {
     expect((await requestCode(phone).expect(429)).body.error.code).toBe('otp_rate_limited');
   });
 
+  it('doesn’t lock the owner’s phone out when someone else asks for codes to their number', async () => {
+    const owner = await signIn(t, 'customer');
+    const [phone] = await t.db.select().from(devices).where(eq(devices.userId, owner.userId));
+    // A stranger uses up the number's limits for the day, from many addresses (signing in used one).
+    for (let i = 1; i < 10; i++) {
+      await ageCodes(owner.phone, 16 * 60);
+      await requestCode(owner.phone).expect(200);
+    }
+    await ageCodes(owner.phone, 16 * 60);
+    expect((await requestCode(owner.phone).expect(429)).body.error.code).toBe('otp_rate_limited');
+    // The owner's own phone, already signed in to the number, still gets a code.
+    await request(t.http)
+      .post('/v1/auth/otp/request')
+      .set('x-forwarded-for', randomIp())
+      .send({ phone: owner.phone, deviceKey: phone!.deviceKey })
+      .expect(200);
+  });
+
   it('limits codes per phone too, across numbers', async () => {
     const deviceKey = randomUUID();
     const ask = (phone: string) =>
@@ -87,8 +107,14 @@ describe('phone sign-in', () => {
   it('counts a burst from one address one at a time', async () => {
     const ip = randomIp();
     const burst = await Promise.all(Array.from({ length: 50 }, () => requestCode(randomPhone(), ip)));
-    expect(burst.filter((r) => r.status === 200)).toHaveLength(30);
+    // Never more than the limit; the rest are told to wait, at once rather than queued.
+    expect(burst.filter((r) => r.status === 200).length).toBeLessThanOrEqual(30);
     expect(burst.filter((r) => r.status !== 200).every((r) => r.status === 429)).toBe(true);
+    // Sent one after another, exactly the limit gets through.
+    const steady = randomIp();
+    let sent = 0;
+    for (let i = 0; i < 35; i += 1) if ((await requestCode(randomPhone(), steady)).status === 200) sent += 1;
+    expect(sent).toBe(30);
   });
 
   it('limits codes per IP address across numbers', async () => {
@@ -148,6 +174,11 @@ describe('phone sign-in', () => {
       .expect(200);
     expect(first.body.refreshToken).not.toBe(person.refreshToken);
     await request(t.http).get('/v1/me').set('Authorization', `Bearer ${first.body.accessToken}`).expect(200);
+    // The app used the token it got, so the old one coming back is a copy.
+    const second = await request(t.http)
+      .post('/v1/auth/refresh')
+      .send({ refreshToken: first.body.refreshToken })
+      .expect(200);
 
     const replay = await request(t.http)
       .post('/v1/auth/refresh')
@@ -155,7 +186,7 @@ describe('phone sign-in', () => {
       .expect(401);
     expect(replay.body.error.code).toBe('refresh_token_reused');
     // The whole session is gone: the newer tokens stop working too.
-    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: first.body.refreshToken }).expect(401);
+    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: second.body.refreshToken }).expect(401);
     const me = await request(t.http).get('/v1/me').set('Authorization', `Bearer ${first.body.accessToken}`).expect(401);
     expect(me.body.error.code).toBe('session_ended');
   });
@@ -164,11 +195,33 @@ describe('phone sign-in', () => {
     const customer = await signIn(t, 'customer');
     await ageCodes(customer.phone, 120);
     const agent = await signIn(t, 'agent', { phone: customer.phone });
-    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: customer.refreshToken }).expect(200);
+    const next = await request(t.http)
+      .post('/v1/auth/refresh')
+      .send({ refreshToken: customer.refreshToken })
+      .expect(200);
+    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: next.body.refreshToken }).expect(200);
     await request(t.http).post('/v1/auth/refresh').send({ refreshToken: customer.refreshToken }).expect(401);
     // The agent app's session, on the same account, ends too: whoever copied one may hold others.
     expect((await request(t.http).get('/v1/me').set(agent.headers)).status).toBe(401);
     await request(t.http).post('/v1/auth/refresh').send({ refreshToken: agent.refreshToken }).expect(401);
+  });
+
+  it('takes a refresh sent again just after, when the answer was lost, as the app retrying', async () => {
+    const person = await signIn(t, 'customer');
+    // The answer to this one never reaches the app.
+    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: person.refreshToken }).expect(200);
+    const again = await request(t.http)
+      .post('/v1/auth/refresh')
+      .send({ refreshToken: person.refreshToken })
+      .expect(200);
+    await request(t.http).get('/v1/me').set('Authorization', `Bearer ${again.body.accessToken}`).expect(200);
+    // A minute later, the same token is a copy.
+    await t.db
+      .update(refreshTokens)
+      .set({ usedAt: new Date(Date.now() - 2 * 60_000) })
+      .where(eq(refreshTokens.tokenHash, sha256(person.refreshToken)));
+    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: person.refreshToken }).expect(401);
+    await request(t.http).get('/v1/me').set('Authorization', `Bearer ${again.body.accessToken}`).expect(401);
   });
 
   it('ends a session at its absolute limit, however often it is refreshed', async () => {
@@ -238,9 +291,12 @@ describe('phone sign-in', () => {
     await save(1);
     try {
       await requestCode(randomPhone()).expect(200);
+      // The check runs every 10 minutes; here, at once. Twice raises it once.
+      await t.app.get(OtpService).checkSpend();
+      await t.app.get(OtpService).checkSpend();
       const { alerts } = (await request(t.http).get('/v1/admin/alerts?country=NG').set(owner.headers).expect(200))
         .body as { alerts: Array<{ kind: string; resolvedAt: string | null }> };
-      expect(alerts.some((a) => a.kind === 'sms_spend' && !a.resolvedAt)).toBe(true);
+      expect(alerts.filter((a) => a.kind === 'sms_spend' && !a.resolvedAt)).toHaveLength(1);
     } finally {
       await save(before);
     }

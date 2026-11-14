@@ -35,7 +35,7 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 6a. Identity checks: I1, I2 (links), findings 3, 9, 12, 19, 22, and the sandbox half of 10 | aitradeosdev/jiffo#44 | open |
 | 6b. Identity: separate keys and field encryption (I5, I6, finding 21) | aitradeosdev/jiffo#45 | open |
 | 6c. Identity: near name matches to review (I4) | aitradeosdev/jiffo#46 | open |
-| 7. Login: A1, A2 (SMS spend), A8, L9 | this branch, `sec/login` | open |
+| 7. Login: A1, A2 (SMS spend), A8, L9 | aitradeosdev/jiffo#47 | open |
 
 ## Summary
 
