@@ -3,6 +3,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, desc, eq, gte, inArray, isNull, lt, or, sql, sum } from 'drizzle-orm';
 import { formatNaira } from '@jiffo/shared';
 import { DB, type Db } from '../db/database.module';
+import { liveAccounts } from './payout-accounts';
 import { payoutAccounts, payouts, reconciliationRuns, users } from '../db/schema';
 import {
   PAYMENTS,
@@ -108,30 +109,11 @@ export class PayoutsService {
 
   /** The account withdrawals go to: the one in use and approved. */
   async currentAccount(userId: string) {
-    return this.accountIn(userId, 'approved');
-  }
-
-  /** A new account waiting for support, because the bank's name for it only nearly matched. */
-  async pendingAccount(userId: string) {
-    return this.accountIn(userId, 'pending');
-  }
-
-  private async accountIn(userId: string, status: 'approved' | 'pending') {
-    const [account] = await this.db
-      .select()
-      .from(payoutAccounts)
-      .where(
-        and(
-          eq(payoutAccounts.userId, userId),
-          isNull(payoutAccounts.replacedAt),
-          eq(payoutAccounts.reviewStatus, status),
-        ),
-      );
-    return account ?? null;
+    return (await liveAccounts(this.db, userId)).approved;
   }
 
   async getAccount(auth: AuthContext) {
-    const [account, pending] = await Promise.all([this.currentAccount(auth.userId), this.pendingAccount(auth.userId)]);
+    const { approved: account, pending } = await liveAccounts(this.db, auth.userId);
     const view = (a: typeof account) =>
       a
         ? {
@@ -245,6 +227,13 @@ export class PayoutsService {
    * audit entry. Gives the account and the agent it belongs to.
    */
   async decideAccount(tx: Tx, input: { id: string; decision: 'approve' | 'decline'; adminId: string; note: string }) {
+    const [owner] = await tx
+      .select({ userId: payoutAccounts.userId })
+      .from(payoutAccounts)
+      .where(eq(payoutAccounts.id, input.id));
+    if (!owner) throw conflict('not_in_review', 'This account is not waiting for a decision');
+    // The same lock as the agent changing their account, so a decision and a change never cross.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payout-account:' + owner.userId}))`);
     const [account] = await tx.select().from(payoutAccounts).where(eq(payoutAccounts.id, input.id)).for('update');
     if (!account || account.reviewStatus !== 'pending' || account.replacedAt) {
       throw conflict('not_in_review', 'This account is not waiting for a decision');
@@ -305,16 +294,15 @@ export class PayoutsService {
       this.countries.basics(auth.countryCode),
       this.agents.tier(auth.userId),
     ]);
-    const account = await this.currentAccount(auth.userId);
-    if (!account) {
-      if (await this.pendingAccount(auth.userId)) {
-        throw conflict(
-          'payout_account_in_review',
-          'Support is checking your bank account. You can withdraw once it is approved.',
-        );
-      }
-      throw conflict('payout_account_missing', 'Add your bank account first');
-    }
+    const noAccount = (live: Awaited<ReturnType<typeof liveAccounts>>) =>
+      live.pending
+        ? conflict(
+            'payout_account_in_review',
+            'Support is checking your bank account. You can withdraw once it is approved.',
+          )
+        : conflict('payout_account_missing', 'Add your bank account first');
+    const live = await liveAccounts(this.db, auth.userId);
+    if (!live.approved) throw noAccount(live);
     if (amountKobo < settings.limits.minWithdrawalKobo) {
       throw unprocessable('withdrawal_too_small', 'The amount is below the minimum withdrawal', {
         minWithdrawalKobo: settings.limits.minWithdrawalKobo,
@@ -331,8 +319,14 @@ export class PayoutsService {
     const { payout, repeat } = await this.db.transaction(async (tx) => {
       // One withdrawal request at a time per agent, so the daily limits can't be raced.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payout:' + auth.userId}))`);
+      // The account it goes to, read under the same lock as changing or deciding one, so a withdrawal never
+      // lands on an account replaced a moment before.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payout-account:' + auth.userId}))`);
       const same = await this.repeatOf(tx, auth.userId, requestKey, amountKobo, speed);
       if (same) return { payout: same, repeat: true };
+      const now = await liveAccounts(tx, auth.userId);
+      if (!now.approved) throw noAccount(now);
+      const account = now.approved;
       if (speed === 'scheduled') {
         const [queued] = await tx
           .select({ id: payouts.id })

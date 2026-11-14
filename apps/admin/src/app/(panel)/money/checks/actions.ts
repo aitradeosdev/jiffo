@@ -1,11 +1,8 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import type { NoteFormState as CheckState } from '@/components/note-form';
 import { api, messageOf } from '@/lib/api';
-
-export interface CheckState {
-  error?: string;
-}
 
 /** Finance clears a nightly check that paused instant withdrawals, saying what explained the gap. */
 export async function clearCheck(_: CheckState, form: FormData): Promise<CheckState> {

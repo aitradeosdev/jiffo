@@ -1,11 +1,8 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import type { NoteFormState as AccountDecisionState } from '@/components/note-form';
 import { api, messageOf } from '@/lib/api';
-
-export interface AccountDecisionState {
-  error?: string;
-}
 
 /** Finance approves or declines a payout account whose bank name only nearly matched the legal name. */
 export async function decideAccount(_: AccountDecisionState, form: FormData): Promise<AccountDecisionState> {

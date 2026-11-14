@@ -324,15 +324,19 @@ export class MoneyAdminService {
   }
 
   /**
-   * Finance clears a nightly check that paused instant withdrawals, saying what explained the gap. Instant
-   * withdrawals start again once no check is left uncleared.
-   */
-  /**
    * New payout accounts waiting for support, oldest first: the bank's name for each only nearly matched the
    * legal name on the agent's ID (docs/security-plan.md, I4). Withdrawals keep going to the agent's approved
    * account until one is decided.
    */
   async payoutAccountsToReview(country: string) {
+    // Only approved agents': an account saved during the application is decided with the application.
+    const waiting = and(
+      eq(payoutAccounts.reviewStatus, 'pending'),
+      isNull(payoutAccounts.replacedAt),
+      eq(users.countryCode, country),
+      eq(agentApplications.status, 'approved'),
+    );
+    const LIST_MAX = 100;
     const rows = await this.db
       .select({
         id: payoutAccounts.id,
@@ -346,21 +350,23 @@ export class MoneyAdminService {
       })
       .from(payoutAccounts)
       .innerJoin(users, eq(users.id, payoutAccounts.userId))
-      .leftJoin(agentApplications, eq(agentApplications.userId, payoutAccounts.userId))
-      .where(
-        and(
-          eq(payoutAccounts.reviewStatus, 'pending'),
-          isNull(payoutAccounts.replacedAt),
-          eq(users.countryCode, country),
-        ),
-      )
+      .innerJoin(agentApplications, eq(agentApplications.userId, payoutAccounts.userId))
+      .where(waiting)
       .orderBy(payoutAccounts.createdAt)
-      .limit(100);
+      .limit(LIST_MAX);
+    const [count] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(payoutAccounts)
+      .innerJoin(users, eq(users.id, payoutAccounts.userId))
+      .innerJoin(agentApplications, eq(agentApplications.userId, payoutAccounts.userId))
+      .where(waiting);
     return {
       accounts: rows.map(({ accountNumber, ...r }) => ({
         ...r,
         accountLast4: r.accountLast4 ?? accountNumber.slice(-4),
       })),
+      /** How many are waiting in all; the list shows the oldest first, up to its limit. */
+      total: count?.n ?? rows.length,
     };
   }
 
@@ -385,6 +391,10 @@ export class MoneyAdminService {
     return { decision };
   }
 
+  /**
+   * Finance clears a nightly check that paused instant withdrawals, saying what explained the gap. Instant
+   * withdrawals start again once no check is left uncleared.
+   */
   async clearReconciliation(admin: AdminContext, runId: string, note: string) {
     const run = await this.db.transaction(async (tx) => {
       const [cleared] = await tx

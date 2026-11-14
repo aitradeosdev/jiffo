@@ -5,7 +5,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { nameMatch } from '../src/common/names';
 import { nameIndex } from '../src/db/fields';
 import { agentApplications, payoutAccounts, payouts } from '../src/db/schema';
-import { adminAs, agentWithMoney, createTestApp, uniqueDigits, type Person, type TestApp } from './helpers';
+import {
+  adminAs,
+  agentWithMoney,
+  completeApplication,
+  createTestApp,
+  signIn,
+  uniqueDigits,
+  type Person,
+  type TestApp,
+} from './helpers';
 
 describe('payout account names', () => {
   it('match, nearly match or don’t, against the legal name', () => {
@@ -21,6 +30,9 @@ describe('payout account names', () => {
     expect(nameMatch('Ngozi Bakare', legal)).toBe('none');
     expect(nameMatch('Tunde Bakare Okafor', legal)).toBe('none');
     expect(nameMatch('Tinde Bekare', legal)).toBe('none');
+    // A relative sharing only the surname: each word of the ID is used once, so these don't pass.
+    expect(nameMatch('B Bakare', legal)).toBe('none');
+    expect(nameMatch('Bakare Bakari', legal)).toBe('none');
   });
 });
 
@@ -121,6 +133,42 @@ describe('changing a payout account', () => {
     await save(who, 'BAKARE TUNDE').expect(200);
     expect((await inUse(who)).id).not.toBe(before.id);
     expect(pushesTo(token).at(-1)).toMatchObject({ title: 'Payout account changed' });
+  });
+
+  it('saved during the application is decided with the application, once', async () => {
+    const who = await signIn(t, 'agent', { unapproved: true });
+    await request(t.http).patch('/v1/me').set(who.headers).send({ lastName: 'Bakare' }).expect(200);
+    await completeApplication(t, who);
+    // The fake provider's record is TUNDE BAKARE; the bank shortens the first name.
+    await save(who, 'T BAKARE').expect(200);
+    // Not in finance's list: the application is where it's decided.
+    expect((await toCheck()).some((a) => a.person.id === who.userId)).toBe(false);
+    await request(t.http).post('/v1/agent/application/submit').set(who.headers).expect(200);
+    const ops = await adminAs(t, 'operations');
+    const detail = (await request(t.http).get(`/v1/admin/people/${who.userId}`).set(ops.headers).expect(200)).body;
+    const bank = detail.agent.application.checks.find((c: { key: string }) => c.key === 'bank');
+    expect(bank).toMatchObject({ outcome: 'review', note: expect.stringContaining('Approving the application') });
+    await request(t.http)
+      .post(`/v1/admin/people/${who.userId}/application`)
+      .set(ops.headers)
+      .send({ decision: 'approve', note: 'The bank shortens the first name' })
+      .expect(200);
+    const account = await inUse(who);
+    expect(account).toMatchObject({ accountName: 'T BAKARE', reviewStatus: 'approved' });
+  });
+
+  it('waiting, is marked so on the agent’s page in the panel', async () => {
+    const { who } = await agent();
+    // Only a waiting account: the approved one is gone.
+    await t.db.update(payoutAccounts).set({ replacedAt: new Date() }).where(eq(payoutAccounts.userId, who.userId));
+    await save(who, 'T BAKARE').expect(200);
+    const detail = (await request(t.http).get(`/v1/admin/people/${who.userId}`).set(finance.headers).expect(200)).body;
+    expect(detail.agent.payoutAccount).toMatchObject({ accountName: 'T BAKARE', inReview: true });
+    const withdraw = await request(t.http)
+      .post('/v1/wallet/withdrawals')
+      .set(who.headers)
+      .send({ amountKobo: 100_000, speed: 'scheduled', requestId: randomUUID() });
+    expect(withdraw.body.error.code).toBe('payout_account_in_review');
   });
 
   it('to someone else’s is refused, as before', async () => {

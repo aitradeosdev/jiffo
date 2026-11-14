@@ -69,9 +69,9 @@ export default async function WithdrawalsPage({
     ...(q ? { q } : {}),
     ...(p.before ? { before: p.before } : {}),
   });
-  const [page, { accounts }, me] = await Promise.all([
+  const [page, { accounts, total }, me] = await Promise.all([
     api<{ payouts: Payout[]; next: string | null }>(`/admin/money/payouts?${query}`),
-    api<{ accounts: AccountToCheck[] }>(`/admin/money/payout-accounts?country=${country.code}`),
+    api<{ accounts: AccountToCheck[]; total: number }>(`/admin/money/payout-accounts?country=${country.code}`),
     getMe(),
   ]);
   const canDecide = me.permissions.includes('money');
@@ -89,10 +89,11 @@ export default async function WithdrawalsPage({
       ) : null}
       {accounts.length ? (
         <div className="mb-5">
-          <Card title={`New payout accounts to check (${accounts.length})`}>
+          <Card title={`New payout accounts to check (${total})`}>
             <p className="text-sm text-ink-2">
               The bank&apos;s name for each is close to the name on the agent&apos;s ID, but not the same. Withdrawals
               keep going to their approved account until you decide.
+              {total > accounts.length ? ` Showing the oldest ${accounts.length}.` : ''}
             </p>
             <ul className="mt-3 divide-y divide-line">
               {accounts.map((a) => (
