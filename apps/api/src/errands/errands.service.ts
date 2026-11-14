@@ -56,13 +56,6 @@ class PinLock {
   constructor(readonly attempts: number) {}
 }
 
-/** A position older than this doesn't show the agent is at the drop-off, or where they look at the board from. */
-const LOCATION_FRESH_MS = 5 * 60_000;
-/** How far from the agent's own position the board may be asked about. */
-const BOARD_NEAR_KM = 5;
-/** A customer with fewer finished errands than this is new, and the new-customer item limit applies. */
-const NEW_CUSTOMER_ERRANDS = 3;
-
 const HOUR_MS = 3_600_000;
 const MINUTE_MS = 60_000;
 
@@ -213,7 +206,13 @@ export class ErrandsService implements OnModuleInit {
 
   /** Open errands whose pickup is within the radius, nearest first. */
   async board(auth: AuthContext, q: { lat: number; lng: number; radiusKm: number; limit: number }) {
-    await this.applications.assertApproved(auth.userId);
+    const [, current] = await Promise.all([
+      this.applications.assertApproved(auth.userId),
+      this.countries.currentSettingsIfAny(auth.countryCode),
+    ]);
+    // A country with no settings saved yet has no errands to show.
+    if (!current) return { errands: [], hiddenByPreferences: 0 };
+    const live = current.settings;
     // Only around where the agent's phone last said they are, so the board can't be asked about any place:
     // the search is centred there, and the place the app asks about must be close to it.
     const { rows: positions } = await this.db.execute<{
@@ -226,10 +225,11 @@ export class ErrandsService implements OnModuleInit {
         ST_Distance(location, ST_SetSRID(ST_MakePoint(${q.lng}, ${q.lat}), 4326)::geography) / 1000 as km
       from agent_presence where user_id = ${auth.userId} and location is not null`);
     const at = positions[0];
-    if (!at?.at || at.lat === null || at.lng === null || Date.now() - new Date(at.at).getTime() > LOCATION_FRESH_MS) {
+    const freshMs = live.security.positionFreshMinutes * 60_000;
+    if (!at?.at || at.lat === null || at.lng === null || Date.now() - new Date(at.at).getTime() > freshMs) {
       throw conflict('location_needed', 'Turn on location to see errands near you');
     }
-    if (Number(at.km) > BOARD_NEAR_KM) {
+    if (Number(at.km) > live.security.boardNearKm) {
       throw unprocessable('not_here', 'The board shows errands near where you are');
     }
     // Only errands in the agent's chosen categories, and purchase errands only if they take them.
@@ -334,7 +334,7 @@ export class ErrandsService implements OnModuleInit {
 
   /**
    * The most item money this errand may hold: a new (Bronze) agent's limit, and a new customer's (fewer
-   * than NEW_CUSTOMER_ERRANDS finished errands), whichever is lower. Null when neither applies.
+   * than the set number of finished errands), whichever is lower. Null when neither applies.
    */
   private async itemLimit(tx: Tx, errand: ErrandRow, settings: CountrySettings) {
     const limits: number[] = [];
@@ -343,7 +343,7 @@ export class ErrandsService implements OnModuleInit {
       .select({ n: sql<number>`count(*)::int` })
       .from(errands)
       .where(and(eq(errands.customerId, errand.customerId), eq(errands.status, 'completed')));
-    if ((done?.n ?? 0) < NEW_CUSTOMER_ERRANDS) limits.push(settings.limits.newCustomerItemLimitKobo);
+    if ((done?.n ?? 0) < settings.limits.newCustomerErrands) limits.push(settings.limits.newCustomerItemLimitKobo);
     return limits.length ? Math.min(...limits) : null;
   }
 
@@ -358,7 +358,8 @@ export class ErrandsService implements OnModuleInit {
         and p.location is not null
       order by s.seq desc limit 1`);
     const at = rows[0];
-    const fresh = at?.locatedAt && Date.now() - new Date(at.locatedAt).getTime() < LOCATION_FRESH_MS;
+    const freshMs = settings.security.positionFreshMinutes * 60_000;
+    const fresh = at?.locatedAt && Date.now() - new Date(at.locatedAt).getTime() < freshMs;
     if (!at || !fresh) {
       throw unprocessable('location_needed', 'Turn on location: Jiffo checks you are at the drop-off');
     }

@@ -155,8 +155,8 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
     - Until an agent accepts, each stop shows only its general area and a point rounded to about a kilometre: no street, house number or label.
     - The event list never names the agents who took or left an errand.
   - **The board:**
-    - It searches around the agent's own last position, reported within five minutes.
-    - The place the app asks about must be within 5 km of that position.
+    - It searches around the agent's own last position, reported within the set minutes (default 5, Settings, Security).
+    - The place the app asks about must be within the set distance of that position (default 5 km, Settings, Security).
     - Phones report their own position, so this limits what a scraper sees but can't prove where a phone is.
   - **Agent's position:** the customer sees it only while the agent is on the way for them, up to the drop-off. An agent holding a second errand they haven't started isn't followed by that customer.
   - **Live connections:**

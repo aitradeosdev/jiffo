@@ -110,6 +110,11 @@ export const SECTIONS: Section[] = [
     about: 'Caps that protect new accounts and the payment flows.',
     fields: [
       { path: 'limits.newCustomerItemLimitKobo', label: 'New customer: items per errand, at most', kind: 'naira' },
+      {
+        path: 'limits.newCustomerErrands',
+        label: 'A customer is new until this many finished errands',
+        kind: 'count',
+      },
       { path: 'limits.newAgentItemLimitKobo', label: 'New agent: items per errand, at most', kind: 'naira' },
       { path: 'limits.newAgentDailyWithdrawalKobo', label: 'New agent: withdrawals per day, at most', kind: 'naira' },
       { path: 'limits.strikeThreshold', label: 'Strikes before review', kind: 'count' },
@@ -204,6 +209,24 @@ export const SECTIONS: Section[] = [
         label: 'Errands one agent may hold at once',
         kind: 'count',
         help: 'From accepted until done. 0 means no limit.',
+      },
+      {
+        path: 'security.positionFreshMinutes',
+        label: "Agent's position counts for",
+        kind: 'count',
+        help: 'In minutes. An older position is not used for the board or the drop-off checks.',
+      },
+      {
+        path: 'security.boardNearKm',
+        label: 'Board looks this far from the agent, at most',
+        kind: 'count',
+        help: 'In kilometres, from where the agent last reported being.',
+      },
+      {
+        path: 'security.ownAccountTriesPerDay',
+        label: 'Own account number: refused tries per day',
+        kind: 'count',
+        help: 'After this many, the customer waits a day or contacts support.',
       },
       {
         path: 'security.lowProviderBalanceKobo',

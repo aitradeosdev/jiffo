@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { decrypt } from '../src/common/crypto';
-import { errandEvents, errands } from '../src/db/schema';
+import { agentPresence, errandEvents, errands } from '../src/db/schema';
 import { WalletService } from '../src/money/wallet.service';
 import {
   act,
@@ -165,6 +165,34 @@ describe('the errand money path', () => {
   });
 
   describe('limits', () => {
+    it('reads the board’s distance and how recent a position must be from the settings', async () => {
+      const agent = await signIn(t, 'agent');
+      await request(t.http)
+        .put('/v1/agent/presence')
+        .set(agent.headers)
+        .send({ online: true, ...PICKUP })
+        .expect(200);
+      // About 2.2 km east of where the agent reported being.
+      const board = () =>
+        request(t.http)
+          .get(`/v1/errands/board?lat=${PICKUP.lat}&lng=${PICKUP.lng + 0.02}&radiusKm=5`)
+          .set(agent.headers);
+      expect((await board()).status).toBe(200);
+      await security({ boardNearKm: 1 });
+      expect((await board()).body.error.code).toBe('not_here');
+      await security({ boardNearKm: 5 });
+
+      // A position three minutes old counts under the default five, not under two.
+      await t.db
+        .update(agentPresence)
+        .set({ locatedAt: new Date(Date.now() - 3 * 60_000) })
+        .where(eq(agentPresence.userId, agent.userId));
+      expect((await board()).status).toBe(200);
+      await security({ positionFreshMinutes: 2 });
+      expect((await board()).body.error.code).toBe('location_needed');
+      await security({ positionFreshMinutes: 5 });
+    });
+
     it('holds no more item money than a new agent may carry', async () => {
       const { agent, errand } = await underway({ categoryKey: 'groceries' });
       const res = await event(agent, errand.id, 'send_item_amount', {

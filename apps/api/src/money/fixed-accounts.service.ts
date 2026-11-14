@@ -32,8 +32,7 @@ export interface IssueInput {
   accountNumber?: string;
 }
 
-/** Failed tries allowed in a day: each is a provider check, and unlimited tries would test BVNs against names. */
-const MAX_FAILURES = 3;
+/** Refused tries count towards the day's limit (Settings, Security) for this long. */
 const FAILURE_WINDOW_MS = 24 * 3_600_000;
 const UNREACHABLE = "We couldn't reach the bank. Try again.";
 /** What the customer is told when the provider refuses; its own words stay with support. */
@@ -135,7 +134,7 @@ export class FixedAccountsService {
     }
     if (
       mine &&
-      mine.failures >= MAX_FAILURES &&
+      mine.failures >= settings.security.ownAccountTriesPerDay &&
       mine.lastFailureAt &&
       Date.now() - mine.lastFailureAt.getTime() < FAILURE_WINDOW_MS
     ) {
