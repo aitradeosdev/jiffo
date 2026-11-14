@@ -14,6 +14,7 @@ import { AdminController } from './admin.controller';
 import { AdminGuard } from './admin.guard';
 import { AuditService } from './audit.service';
 import { OverviewService } from './overview.service';
+import { StaffMail } from './staff-mail';
 import { TeamService } from './team.service';
 
 /** Everything the admin panel calls, under /v1/admin. */
@@ -33,6 +34,7 @@ import { TeamService } from './team.service';
     ProvidersAdminService,
     SettingsAdminService,
     TeamService,
+    StaffMail,
   ],
   exports: [AdminAuthService, AdminGuard, AuditService],
 })

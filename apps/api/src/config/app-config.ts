@@ -64,6 +64,12 @@ const EnvSchema = z
     MAPS_PROVIDER: z.enum(['google', 'fake']).default('fake'),
     /** memory keeps files in the API process: development and tests only. */
     STORAGE_PROVIDER: z.enum(['s3', 'memory']).default('memory'),
+    /**
+     * Until a provider is switched on in the panel: console prints emails, links included, to the log (for
+     * your own machine); memory keeps them for tests; none sends nothing, for a shared server outside
+     * production such as staging. Production always sends nothing until a provider is set.
+     */
+    EMAIL_PROVIDER: z.enum(['console', 'memory', 'none']).default('console'),
     S3_BUCKET: z.string().optional(),
     S3_REGION: z.string().default('af-south-1'),
     /** For S3-compatible stores other than AWS. */

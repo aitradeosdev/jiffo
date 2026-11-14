@@ -189,8 +189,11 @@ export class AdminController {
   @Post('providers/:category/:provider/test')
   @HttpCode(200)
   @Needs('settings')
-  testProvider(@Param(new ZodBody(ProviderParams)) params: z.infer<typeof ProviderParams>) {
-    return this.providerSettings.test(params.category, params.provider);
+  testProvider(
+    @CurrentAdmin() admin: AdminContext,
+    @Param(new ZodBody(ProviderParams)) params: z.infer<typeof ProviderParams>,
+  ) {
+    return this.providerSettings.test(admin, params.category, params.provider);
   }
 
   @Post('providers/:category/:provider/callback')

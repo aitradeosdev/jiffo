@@ -26,6 +26,7 @@ export default async function setup() {
     PIN_KEY: randomBytes(32).toString('hex'),
     MESSAGING_PROVIDER: 'memory',
     PUSH_PROVIDER: 'memory',
+    EMAIL_PROVIDER: 'memory',
     TIMER_PROVIDER: 'memory',
     TRUST_PROXY_HOPS: '1',
     ADMIN_PANEL_SECRET: 'test-panel-secret-0123456789abcdef0123',

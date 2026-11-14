@@ -3,7 +3,7 @@
 Jiffo uses only a few vetted SDKs (docs/security-plan.md, MB6). This is the full list of what each app ships.
 A pull request that adds to it says why here. Test and build tools aren't listed; they don't ship.
 
-Providers (payments, SMS, identity, calls, maps, push) are reached with plain HTTPS calls from the API
+Providers (payments, SMS, identity, calls, maps, push, Resend and Postmark email) are reached with plain HTTPS calls from the API
 (`apps/api/src/adapters`), not through their SDKs. Their keys stay on the server, calls time out, redirects
 aren't followed, and only their own hosts are allowed.
 
@@ -46,6 +46,7 @@ aren't followed, and only their own hosts are allowed.
 | `zod` | Checking every request body |
 | `libphonenumber-js` | Reading and checking phone numbers |
 | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | Photo storage, with links that expire |
+| `@aws-sdk/client-sesv2` | Admin team emails through Amazon SES, when that's the email provider chosen in the panel |
 | `@jiffo/shared` | Jiffo's own shared rules and types |
 
 ## Scripts loaded from providers

@@ -278,7 +278,7 @@ Admins join by invite only. Make the first owner from the API's folder, with the
 pnpm admin invite --email you@jiffoapp.com --name "Your Name" --role owner
 ```
 
-Open the printed link to choose a password. The first sign-in sets up an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password), and every sign-in after that needs its code. Owners invite everyone else from the Team page. If the only owner loses their phone, `pnpm admin reset --email ...` prints a new link.
+Open the printed link to choose a password. The first sign-in sets up an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password), and every sign-in after that needs its code. Owners invite everyone else from the Team page. Invite and reset links are emailed only to the teammate, never shown to whoever made them, so set up an email provider (Resend, Postmark or Amazon SES) under Settings, Providers first. On your own machine they're printed in the API's log; on a shared server outside production, such as staging, set `EMAIL_PROVIDER=none` so links never reach a log. The provider's Test button sends you a test email. If the only owner loses their phone, `pnpm admin reset --email ...` prints a new link on the server.
 
 What's in it:
 

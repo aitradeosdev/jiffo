@@ -62,12 +62,13 @@ export class AdminAuthService {
   /** A new invite token for an admin row. Only its hash is stored; the link is shown once. */
   async issueInvite(tx: Tx, adminId: string) {
     const token = randomToken();
+    const tokenHash = sha256(token);
     await tx
       .update(admins)
-      .set({ inviteTokenHash: sha256(token), inviteExpiresAt: new Date(Date.now() + INVITE_MS), updatedAt: new Date() })
+      .set({ inviteTokenHash: tokenHash, inviteExpiresAt: new Date(Date.now() + INVITE_MS), updatedAt: new Date() })
       .where(eq(admins.id, adminId));
     const base = (this.config.ADMIN_URL ?? 'http://localhost:3001').replace(/\/+$/, '');
-    return { inviteUrl: `${base}/invite#${token}`, expiresInHours: INVITE_MS / HOUR_MS };
+    return { inviteUrl: `${base}/invite#${token}`, expiresInHours: INVITE_MS / HOUR_MS, tokenHash };
   }
 
   /** Adds a teammate and makes their invite link. Used by the panel and the command-line tool alike. */
@@ -78,8 +79,27 @@ export class AdminAuthService {
     const [admin] = await tx
       .insert(admins)
       .values({ email, name: input.name.trim(), role: input.role, invitedBy: input.invitedBy })
+      .returning({ id: admins.id, name: admins.name });
+    return { id: admin!.id, email, name: admin!.name, ...(await this.issueInvite(tx, admin!.id)) };
+  }
+
+  /**
+   * Takes back an invite whose email couldn't be sent, so it can simply be made again. Only while nobody has
+   * used it: still invited, no password, and the same link.
+   */
+  async withdrawInvite(tx: Tx, adminId: string, tokenHash: string) {
+    const gone = await tx
+      .delete(admins)
+      .where(
+        and(
+          eq(admins.id, adminId),
+          eq(admins.status, 'invited'),
+          isNull(admins.passwordHash),
+          eq(admins.inviteTokenHash, tokenHash),
+        ),
+      )
       .returning({ id: admins.id });
-    return { id: admin!.id, email, ...(await this.issueInvite(tx, admin!.id)) };
+    return gone.length > 0;
   }
 
   /**

@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import type { MemoryEmailAdapter } from '../src/adapters/email';
 import type { MemoryMessagingAdapter } from '../src/adapters/messaging';
 import type { MemoryPushAdapter } from '../src/adapters/push';
 import { DB, type Db } from '../src/db/database.module';
@@ -33,6 +34,7 @@ export interface TestApp {
   db: Db;
   messaging: MemoryMessagingAdapter;
   push: MemoryPushAdapter;
+  email: MemoryEmailAdapter;
   timers: MemoryErrandTimers;
   jobs: MemoryRecurringJobs;
   payments: FakePaymentsAdapter;
@@ -53,6 +55,7 @@ export async function createTestApp(): Promise<TestApp> {
     db: app.get(DB),
     messaging: env.sms as MemoryMessagingAdapter,
     push: env.push as MemoryPushAdapter,
+    email: env.email as MemoryEmailAdapter,
     timers: app.get(ERRAND_TIMERS),
     jobs: app.get(RECURRING_JOBS),
     payments: env.payments as FakePaymentsAdapter,

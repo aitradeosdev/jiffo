@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1168.0",
+    "@aws-sdk/client-sesv2": "^3.1168.0",
     "@aws-sdk/s3-request-presigner": "^3.1168.0",
     "@jiffo/shared": "workspace:*",
     "@nestjs/common": "^11.2.10",
