@@ -36,7 +36,7 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 6b. Identity: separate keys and field encryption (I5, I6, finding 21) | aitradeosdev/jiffo#45 | merged |
 | 6c. Identity: near name matches to review (I4) | aitradeosdev/jiffo#46 | merged |
 | 7. Login: A1, A2 (SMS spend), A8, L9 | aitradeosdev/jiffo#47 | merged |
-| 8a. Server hardening, the API: S3, S5, S9, P4, P11, findings 18, 20, 24 | this branch, `sec/server-hardening` | open |
+| 8a. Server hardening, the API: S3, S5, S9, P4, P11, findings 18, 20, 24 | aitradeosdev/jiffo#48 | open |
 
 ## Summary
 
