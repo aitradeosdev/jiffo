@@ -109,7 +109,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [loadUser]);
 
   const requestCode = useCallback(
-    (phone: string) => api.public<CodeSent>('POST', '/v1/auth/otp/request', { phone }),
+    // The phone's own key goes too, so codes are limited per phone as well as per number.
+    async (phone: string) =>
+      api.public<CodeSent>('POST', '/v1/auth/otp/request', { phone, deviceKey: await deviceKey() }),
     [api],
   );
 

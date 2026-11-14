@@ -1,15 +1,20 @@
 import { Body, Controller, HttpCode, Post, Req, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { APPS } from '../db/schema';
+import { unauthorized } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import { AuthService } from './auth.service';
+import { AuthService, RefreshReused } from './auth.service';
 import { AuthGuard, CurrentAuth } from './auth.guard';
 import type { AuthContext, AuthedRequest } from './auth.types';
 
 const Phone = z.string().trim().min(5).max(20);
 
-const RequestCodeBody = z.object({ phone: Phone });
+const RequestCodeBody = z.object({
+  phone: Phone,
+  /** The app's own key for this phone, so codes are limited per phone as well as per number. */
+  deviceKey: z.string().trim().min(8).max(100).optional(),
+});
 const VerifyCodeBody = z.object({
   phone: Phone,
   code: z.string().regex(/^\d{6}$/, 'The code is 6 digits'),
@@ -32,21 +37,34 @@ export class AuthController {
   @Post('otp/request')
   @HttpCode(200)
   request(@Body(new ZodBody(RequestCodeBody)) body: z.infer<typeof RequestCodeBody>, @Req() req: AuthedRequest) {
-    return this.auth.requestCode(body.phone, req.ip ?? null);
+    return this.auth.requestCode(body.phone, req.ip ?? null, body.deviceKey ?? null);
   }
 
   @Post('otp/verify')
   @HttpCode(200)
   async verify(@Body(new ZodBody(VerifyCodeBody)) body: z.infer<typeof VerifyCodeBody>) {
-    const { response, replacedSessionIds } = await this.auth.verifyCode(body.phone, body.code, body.app, body.device);
+    const { response, replacedSessionIds, signedOutDevices } = await this.auth.verifyCode(
+      body.phone,
+      body.code,
+      body.app,
+      body.device,
+    );
     this.realtime.disconnectSessions(replacedSessionIds);
+    await this.auth.tellSignedOut(signedOutDevices);
     return response;
   }
 
   @Post('refresh')
   @HttpCode(200)
-  refresh(@Body(new ZodBody(RefreshBody)) body: z.infer<typeof RefreshBody>) {
-    return this.auth.refresh(body.refreshToken);
+  async refresh(@Body(new ZodBody(RefreshBody)) body: z.infer<typeof RefreshBody>) {
+    try {
+      return (await this.auth.refresh(body.refreshToken)).tokens;
+    } catch (error) {
+      // A copied refresh token ended every session of the account: their live connections end too.
+      if (!(error instanceof RefreshReused)) throw error;
+      this.realtime.disconnectSessions(error.ended);
+      throw unauthorized('refresh_token_reused', 'This sign-in was used somewhere else. Sign in again.');
+    }
   }
 
   @Post('logout')

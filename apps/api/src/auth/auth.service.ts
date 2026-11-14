@@ -6,12 +6,20 @@ import { devices, refreshTokens, sessions, users, type AppName } from '../db/sch
 import { CountriesService } from '../countries/countries.service';
 import { sha256 } from '../common/crypto';
 import { forbidden, unauthorized } from '../common/errors';
+import { PushService } from '../push/push.service';
 import { normalisePhone } from './phone';
 import { OtpService } from './otp.service';
 import { TokensService } from './tokens.service';
 import type { AuthContext, TokenClaims } from './auth.types';
 
 const DAY_MS = 86_400_000;
+
+/** A refresh token used twice: every session it ended, for their sockets to be dropped too. */
+export class RefreshReused extends Error {
+  constructor(readonly ended: string[]) {
+    super('refresh_token_reused');
+  }
+}
 
 export interface DeviceInfo {
   key: string;
@@ -37,7 +45,13 @@ export class AuthService {
     private readonly countries: CountriesService,
     private readonly otp: OtpService,
     private readonly tokens: TokensService,
+    private readonly push: PushService,
   ) {}
+
+  /** How long a session lasts from now, never past its absolute end (SESSION_MAX_DAYS after sign-in). */
+  private sessionUntil(absolute: Date) {
+    return new Date(Math.min(Date.now() + this.config.REFRESH_TOKEN_TTL_DAYS * DAY_MS, absolute.getTime()));
+  }
 
   private async resolvePhone(input: string) {
     const { e164, country } = normalisePhone(input, this.config.DEFAULT_COUNTRY);
@@ -45,9 +59,9 @@ export class AuthService {
     return { phone: e164, country };
   }
 
-  async requestCode(phoneInput: string, ip: string | null) {
+  async requestCode(phoneInput: string, ip: string | null, deviceKey: string | null = null) {
     const { phone, country } = await this.resolvePhone(phoneInput);
-    return { phone, ...(await this.otp.request(phone, country, ip)) };
+    return { phone, ...(await this.otp.request(phone, country, ip, deviceKey)) };
   }
 
   /** Signs in with a code. The same phone number is one account across both apps. */
@@ -79,14 +93,30 @@ export class AuthService {
         .set({ revokedAt: new Date(), revokedReason: 'replaced' })
         .where(and(eq(sessions.deviceId, deviceRow!.id), isNull(sessions.revokedAt)))
         .returning({ id: sessions.id });
+      // Signing in on a new phone signs the others out of this app (docs/security-plan.md, A8): whoever took
+      // over the number shows up as the owner being signed out, and the owner signing back in ends theirs.
+      const elsewhere = await tx
+        .update(sessions)
+        .set({ revokedAt: new Date(), revokedReason: 'new_device' })
+        .where(
+          and(
+            eq(sessions.userId, user.id),
+            eq(sessions.app, app),
+            ne(sessions.deviceId, deviceRow!.id),
+            isNull(sessions.revokedAt),
+          ),
+        )
+        .returning({ id: sessions.id, deviceId: sessions.deviceId });
 
+      const absolute = new Date(Date.now() + this.config.SESSION_MAX_DAYS * DAY_MS);
       const [session] = await tx
         .insert(sessions)
         .values({
           userId: user.id,
           deviceId: deviceRow!.id,
           app,
-          expiresAt: new Date(Date.now() + this.config.REFRESH_TOKEN_TTL_DAYS * DAY_MS),
+          expiresAt: this.sessionUntil(absolute),
+          absoluteExpiresAt: absolute,
         })
         .returning();
 
@@ -94,8 +124,18 @@ export class AuthService {
       return {
         response: { ...(await this.issue(tx, auth)), user: publicUser(user), isNewUser: inserted.length > 0 },
         /** Sessions this sign-in ended; their open sockets must be dropped too. */
-        replacedSessionIds: replaced.map((r) => r.id),
+        replacedSessionIds: [...replaced, ...elsewhere].map((r) => r.id),
+        signedOutDevices: [...new Set(elsewhere.map((r) => r.deviceId))],
       };
+    });
+  }
+
+  /** Tells the phones a new sign-in signed out, so a sign-in the owner didn't make doesn't go unnoticed. */
+  async tellSignedOut(deviceIds: string[]) {
+    await this.push.notifyDevices(deviceIds, {
+      title: 'Signed in on another phone',
+      body: "Your Jiffo account was just signed in on another phone, so this one was signed out. If that wasn't you, sign in again and contact support.",
+      data: { type: 'auth.signed_out' },
     });
   }
 
@@ -113,18 +153,25 @@ export class AuthService {
       const { token, session } = row;
       if (session.revokedAt || session.expiresAt.getTime() <= Date.now()) return { error: 'invalid' as const };
       if (token.usedAt) {
-        await tx
+        // A used token again means it was copied: every session of the account ends, in both apps, since
+        // whoever copied it may hold others too (docs/security-plan.md, A8).
+        const ended = await tx
           .update(sessions)
           .set({ revokedAt: new Date(), revokedReason: 'refresh_reuse' })
-          .where(eq(sessions.id, session.id));
-        return { error: 'reused' as const };
+          .where(and(eq(sessions.userId, session.userId), isNull(sessions.revokedAt)))
+          .returning({ id: sessions.id });
+        return { error: 'reused' as const, ended: ended.map((e) => e.id) };
       }
       if (token.expiresAt.getTime() <= Date.now()) return { error: 'invalid' as const };
 
       await tx.update(refreshTokens).set({ usedAt: new Date() }).where(eq(refreshTokens.id, token.id));
+      // Moves forward, but never past the session's absolute end: then the person signs in again.
+      const absolute =
+        session.absoluteExpiresAt ?? new Date(session.createdAt.getTime() + this.config.SESSION_MAX_DAYS * DAY_MS);
+      if (absolute.getTime() <= Date.now()) return { error: 'invalid' as const };
       await tx
         .update(sessions)
-        .set({ expiresAt: new Date(Date.now() + this.config.REFRESH_TOKEN_TTL_DAYS * DAY_MS) })
+        .set({ expiresAt: this.sessionUntil(absolute), absoluteExpiresAt: absolute })
         .where(eq(sessions.id, session.id));
       await tx.update(devices).set({ lastSeenAt: new Date() }).where(eq(devices.id, session.deviceId));
       const auth: TokenClaims = {
@@ -136,9 +183,9 @@ export class AuthService {
       return { tokens: await this.issue(tx, auth) };
     });
 
-    if ('tokens' in result) return result.tokens;
+    if ('tokens' in result) return { tokens: result.tokens, ended: [] as string[] };
     if (result.error === 'reused') {
-      throw unauthorized('refresh_token_reused', 'This sign-in was used somewhere else. Sign in again.');
+      throw new RefreshReused(result.ended ?? []);
     }
     throw unauthorized('invalid_refresh_token', 'Sign in again');
   }

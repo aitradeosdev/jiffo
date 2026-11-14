@@ -155,7 +155,10 @@ export const sessions = pgTable(
       .notNull()
       .references(() => devices.id),
     app: text('app', { enum: APPS }).notNull(),
+    /** Moves forward with each refresh, but never past absoluteExpiresAt. */
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** However often it is refreshed, a session ends here (SESSION_MAX_DAYS after sign-in). */
+    absoluteExpiresAt: timestamp('absolute_expires_at', { withTimezone: true }),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     revokedReason: text('revoked_reason'),
     createdAt: createdAt(),
@@ -185,7 +188,10 @@ export const otpChallenges = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     phone: text('phone').notNull(),
     codeHash: text('code_hash').notNull(),
+    countryCode: char('country_code', { length: 2 }),
     requestedIp: text('requested_ip'),
+    /** The app's own key for the phone that asked, when it sent one: codes are limited per device too. */
+    deviceKey: text('device_key'),
     attempts: smallint('attempts').notNull().default(0),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     consumedAt: timestamp('consumed_at', { withTimezone: true }),
@@ -194,6 +200,8 @@ export const otpChallenges = pgTable(
   (t) => [
     index('otp_phone_created_idx').on(t.phone, t.createdAt),
     index('otp_ip_created_idx').on(t.requestedIp, t.createdAt),
+    index('otp_device_created_idx').on(t.deviceKey, t.createdAt),
+    index('otp_country_created_idx').on(t.countryCode, t.createdAt),
   ],
 );
 
