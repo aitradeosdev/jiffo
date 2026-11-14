@@ -23,6 +23,16 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       '@typescript-eslint/consistent-type-imports': 'off',
       'no-console': ['error', { allow: ['warn', 'error'] }],
+      // Raw HTML in React bypasses its escaping (docs/security-plan.md, R7). Nothing uses it: even the sign-in
+      // QR code is drawn as an image.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message:
+            'Raw HTML bypasses React escaping. Render text, or explain the exception with an eslint-disable comment.',
+        },
+      ],
     },
   },
   {

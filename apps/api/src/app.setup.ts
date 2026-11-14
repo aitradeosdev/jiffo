@@ -6,6 +6,11 @@ import { allowedOrigins } from './common/origins';
 import { securityHeaders } from './common/security-headers';
 import { ConfiguredIoAdapter } from './realtime/io-adapter';
 
+/** The only API version (docs/security-plan.md, S8): there are no older ones left running. */
+export const API_PREFIX = 'v1';
+/** Routes outside the version: the load balancer's check, and how to report a security problem. */
+export const UNPREFIXED = ['health', '.well-known/security.txt', 'security'] as const;
+
 /** Shared by main.ts and the tests, so the tests run the app exactly as production does. */
 export function configureApp(app: INestApplication) {
   const config = app.get<AppConfig>(APP_CONFIG);
@@ -17,7 +22,7 @@ export function configureApp(app: INestApplication) {
   if (config.STORAGE_PROVIDER === 'memory') {
     express.useBodyParser('raw', { type: ['image/*', 'application/octet-stream'], limit: '10mb' });
   }
-  app.setGlobalPrefix('v1', { exclude: ['health'] });
+  app.setGlobalPrefix(API_PREFIX, { exclude: [...UNPREFIXED] });
   app.useGlobalFilters(new ApiExceptionFilter());
   app.enableCors({ origin: allowedOrigins(config.CORS_ORIGINS) });
   app.useWebSocketAdapter(new ConfiguredIoAdapter(app, config));

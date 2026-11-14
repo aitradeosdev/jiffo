@@ -7,7 +7,7 @@ import { forbidden, unauthorized } from '../common/errors';
 import { TokensService } from './tokens.service';
 import type { AuthContext, AuthedRequest, TokenClaims } from './auth.types';
 
-const APPS_KEY = 'jiffo:apps';
+export const APPS_KEY = 'jiffo:apps';
 /** How many sessions one re-check reads at a time, well inside Postgres's limit on query parameters. */
 const CHECK_BATCH = 1000;
 

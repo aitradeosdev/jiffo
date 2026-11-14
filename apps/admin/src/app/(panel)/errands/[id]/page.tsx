@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
 import type { ErrandState } from '@jiffo/shared';
+import { ChatList, WHO, type ChatMessage } from '@/components/chat-list';
 import { Badge, Card, Notice } from '@/components/ui';
 import { api, ApiError, getCountry, getMe } from '@/lib/api';
 import { ACCOUNT, EVENT, getCategories, JOURNAL, nameOf, STATUS, type PersonRef } from '@/lib/errands';
@@ -41,14 +42,7 @@ interface Detail {
     data: Record<string, unknown>;
     createdAt: string;
   }>;
-  chat: Array<{
-    id: number;
-    senderRole: string;
-    kind: string;
-    body: string;
-    photoUrl: string | null;
-    createdAt: string;
-  }>;
+  chat: ChatMessage[];
   photos: Array<{ purpose: string; from: string | null; url: string; createdAt: string }>;
   money: {
     heldFeeKobo: number;
@@ -74,8 +68,6 @@ const PHOTO: Record<string, string> = {
   dropoff_photo: 'Drop-off',
   chat_photo: 'In chat',
 };
-const WHO: Record<string, string> = { customer: 'Customer', agent: 'Agent', system: 'Jiffo', admin: 'Support' };
-
 const DONE: Record<string, string> = {
   admin_cancel: 'Errand cancelled. The customer has been told.',
   admin_intervene: 'You stepped in. The errand is in dispute and its money stays held.',
@@ -181,37 +173,7 @@ export default async function ErrandPage({
           </Card>
 
           <Card title={`Chat (${d.chat.length})`}>
-            {d.chat.length === 0 ? (
-              <p className="text-sm text-ink-3">No messages.</p>
-            ) : (
-              <ol className="max-h-[520px] space-y-2 overflow-y-auto pr-1">
-                {d.chat.map((m) =>
-                  m.senderRole === 'system' ? (
-                    <li key={m.id} className="text-center text-[13px] text-ink-3">
-                      {m.body} · {time(m.createdAt)}
-                    </li>
-                  ) : (
-                    <li key={m.id} className={`flex ${m.senderRole === 'agent' ? 'justify-start' : 'justify-end'}`}>
-                      <div
-                        className={`max-w-[80%] rounded-2xl px-3.5 py-2 ${
-                          m.senderRole === 'agent' ? 'bg-surface-2' : 'bg-ink text-on-ink'
-                        }`}
-                      >
-                        <p className="text-[11px] font-bold tracking-wide uppercase opacity-70">{WHO[m.senderRole]}</p>
-                        {m.photoUrl ? (
-                          <a href={m.photoUrl} target="_blank" rel="noreferrer">
-                            <img src={m.photoUrl} alt="Photo sent in chat" className="mt-1 max-h-48 rounded-lg" />
-                          </a>
-                        ) : (
-                          <p className="text-[15px] whitespace-pre-wrap">{m.body}</p>
-                        )}
-                        <p className="mt-0.5 text-[11px] opacity-60">{time(m.createdAt)}</p>
-                      </div>
-                    </li>
-                  ),
-                )}
-              </ol>
-            )}
+            <ChatList chat={d.chat} time={time} />
           </Card>
 
           <Card title={`Photos (${d.photos.length})`}>

@@ -4,6 +4,13 @@ import { z } from 'zod';
 const hexKey = (name: string) =>
   z.string().regex(/^[0-9a-f]{64}$/i, `${name} must be 32 bytes written as 64 hex characters`);
 
+/** SECURITY_CONTACT's addresses, in order. */
+export const contactsOf = (value: string | undefined) =>
+  (value ?? '')
+    .split(',')
+    .map((c) => c.trim())
+    .filter(Boolean);
+
 const EnvSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -107,6 +114,17 @@ const EnvSchema = z
     /** Load balancers in front of the API, so the client IP is read from X-Forwarded-For correctly. */
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).optional(),
     CORS_ORIGINS: z.string().default('*'),
+    /**
+     * Where to report a security problem (docs/security-plan.md, S11), for security.txt and the reporting page:
+     * mailto: or https: addresses, comma-separated. Required in production.
+     */
+    SECURITY_CONTACT: z
+      .string()
+      .optional()
+      .refine(
+        (v) => !v || contactsOf(v).every((c) => /^(mailto:[^\s@,<>"]+@[^\s@,<>"]+|https:\/\/[^\s,<>"]+)$/.test(c)),
+        'SECURITY_CONTACT must be mailto: or https: addresses, separated by commas',
+      ),
     /** Where the admin panel runs, for invite links. Locally it defaults to http://localhost:3001. */
     ADMIN_URL: z.string().url().optional(),
     /**
@@ -169,6 +187,11 @@ const EnvSchema = z
         .map((k) => k.toLowerCase());
       need(new Set(keys).size === keys.length, 'FIELD_KEY', 'and the other keys and secrets must all be different');
       need(!!env.ADMIN_URL, 'ADMIN_URL', 'must be set in production, or invite links point at localhost');
+      need(
+        contactsOf(env.SECURITY_CONTACT).length > 0,
+        'SECURITY_CONTACT',
+        'must be set in production, for security.txt',
+      );
     }
   });
 

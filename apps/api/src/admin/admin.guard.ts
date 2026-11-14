@@ -8,7 +8,7 @@ import { AdminAuthService } from './admin-auth.service';
 import { can, type Permission } from './permissions';
 import type { AdminContext, AdminRequest, ClientInfo } from './admin.types';
 
-const PERMISSION_KEY = 'jiffo:admin-permission';
+export const PERMISSION_KEY = 'jiffo:admin-permission';
 /** The permission a route needs. Every admin route names one; 'read' is the least. */
 export const Needs = (permission: Permission) => SetMetadata(PERMISSION_KEY, permission);
 

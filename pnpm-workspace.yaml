@@ -5,3 +5,14 @@ packages:
 onlyBuiltDependencies:
   - '@swc/core'
   - esbuild
+
+# Advisories accepted for now, each with its reason in docs/security/dependencies.md. CI fails on any other
+# high or critical advisory in what the apps ship.
+auditConfig:
+  ignoreGhsas:
+    # drizzle-orm < 0.45.2: SQL identifiers built from input are escaped wrongly. Jiffo's come only from its
+    # own schema and constants. Upgrade planned.
+    - GHSA-gpj5-g38j-94v9
+    # zod < 4.6.6: oversized collections can exhaust memory. Request bodies are capped in size. zod 4 is a
+    # major upgrade, planned.
+    - GHSA-mrhx-c7xc-m3w5

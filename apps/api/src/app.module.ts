@@ -13,6 +13,7 @@ import { CountriesModule } from './countries/countries.module';
 import { DatabaseModule } from './db/database.module';
 import { ErrandsModule } from './errands/errands.module';
 import { HealthController } from './health/health.controller';
+import { SecurityContactController } from './health/security.controller';
 import { MoneyModule } from './money/money.module';
 import { AlertsModule } from './alerts/alerts.module';
 import { PlacesModule } from './places/places.module';
@@ -48,7 +49,7 @@ import { UsersModule } from './users/users.module';
     ErrandsModule,
     AdminModule,
   ],
-  controllers: [HealthController],
+  controllers: [HealthController, SecurityContactController],
   // Every route is rate limited (common/rate-limit.ts).
   providers: [{ provide: APP_GUARD, useClass: RateLimitGuard }],
 })

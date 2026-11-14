@@ -35,7 +35,7 @@
   "devDependencies": {
     "@types/react": "~19.3.0",
     "typescript": "~6.0.3",
-    "vitest": "^2.1.9"
+    "vitest": "^3.2.6"
   },
   "scripts": {
     "start": "expo start --clear",

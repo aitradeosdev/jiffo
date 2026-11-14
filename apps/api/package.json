@@ -9,6 +9,7 @@
     "dev": "nest start --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "openapi": "UPDATE_OPENAPI=1 vitest run test/api-inventory.e2e.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node dist/db/migrate-cli.js",
     "admin": "node dist/admin/admin-cli.js"
@@ -47,6 +48,6 @@
     "supertest": "^7.3.2",
     "typescript": "~5.7.3",
     "unplugin-swc": "^1.6.0",
-    "vitest": "^2.1.9"
+    "vitest": "^3.2.6"
   }
 }

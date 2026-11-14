@@ -37,6 +37,7 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 6c. Identity: near name matches to review (I4) | aitradeosdev/jiffo#46 | merged |
 | 7. Login: A1, A2 (SMS spend), A8, L9 | aitradeosdev/jiffo#47 | merged |
 | 8a. Server hardening, the API: S3, S5, S9, P4, P11, findings 18, 20, 24 | aitradeosdev/jiffo#48 | open |
+| 8b. Repository and panel: R7, R11, R14, S2, S8, S10, S11, MB6, C6, finding 25 | to open | open |
 
 ## Summary
 
