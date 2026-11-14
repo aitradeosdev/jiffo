@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, inArray, lt } from 'drizzle-orm';
+import { forbidden } from '../common/errors';
 import { DB, type Db, type Tx } from '../db/database.module';
-import { adminAudit, admins, errands, users } from '../db/schema';
+import { adminApprovals, adminAudit, admins, errands, users } from '../db/schema';
 import type { AdminContext } from './admin.types';
 
 export interface AuditEntry {
@@ -12,12 +13,17 @@ export interface AuditEntry {
   data?: Record<string, unknown>;
 }
 
-/** The record of what admins changed. Write it in the same transaction as the change. */
+/**
+ * The record of what admins changed. Write it in the same transaction as the change, before anything leaves
+ * the server: it is also where a change to the admin's own app account is refused (docs/security-plan.md,
+ * D3), which then undoes the whole transaction, whichever route made it.
+ */
 @Injectable()
 export class AuditService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
-  record(tx: Tx, admin: AdminContext, entry: AuditEntry) {
+  async record(tx: Tx, admin: AdminContext, entry: AuditEntry) {
+    await this.refuseOwnAccount(tx, admin, entry.targetType, entry.targetId);
     return tx.insert(adminAudit).values({
       adminId: admin.adminId,
       action: entry.action,
@@ -30,6 +36,63 @@ export class AuditService {
       ip: admin.ip,
       userAgent: admin.userAgent,
     });
+  }
+
+  /**
+   * The app accounts a change is about: the person, an errand's customer and agent, or, for a request waiting
+   * for approval, whoever its change is about.
+   */
+  private async peopleIn(
+    tx: Tx | Db,
+    targetType: string | null | undefined,
+    targetId: string | null | undefined,
+  ): Promise<string[]> {
+    if (!targetId) return [];
+    if (targetType === 'person') return [targetId];
+    if (targetType === 'errand') {
+      const [errand] = await tx
+        .select({ customerId: errands.customerId, agentId: errands.agentId })
+        .from(errands)
+        .where(eq(errands.id, targetId));
+      return errand ? [errand.customerId, errand.agentId].filter((id): id is string => !!id) : [];
+    }
+    if (targetType === 'approval') {
+      const [approval] = await tx
+        .select({ targetType: adminApprovals.targetType, targetId: adminApprovals.targetId })
+        .from(adminApprovals)
+        .where(eq(adminApprovals.id, targetId));
+      if (!approval || approval.targetType === 'approval') return [];
+      return this.peopleIn(tx, approval.targetType, approval.targetId);
+    }
+    return [];
+  }
+
+  /**
+   * A teammate never changes their own app account, or an errand it is part of: not suspending or crediting
+   * it, not settling its dispute, not asking for or approving such a change (D3). Their phone number is the
+   * link, so one is needed before they change anyone's account. Every change is checked here as it is
+   * recorded; deciding a request is also checked before anything runs.
+   */
+  async refuseOwnAccount(
+    tx: Tx | Db,
+    admin: AdminContext,
+    targetType: string | null | undefined,
+    targetId: string | null | undefined,
+  ) {
+    const people = await this.peopleIn(tx, targetType, targetId);
+    if (!people.length) return;
+    if (!admin.phone) {
+      throw forbidden(
+        'phone_needed',
+        "An owner must add your phone number on the Team page before you can change people's accounts",
+      );
+    }
+    const [own] = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(and(inArray(users.id, people), eq(users.phone, admin.phone)))
+      .limit(1);
+    if (own) throw forbidden('own_account', "You can't change your own Jiffo account. Ask a teammate.");
   }
 
   /**

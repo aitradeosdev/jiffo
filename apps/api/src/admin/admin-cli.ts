@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
+import { normalisePhone } from '../auth/phone';
 import { keyFor } from '../common/keys';
 import { loadConfig } from '../config/app-config';
 import { useFieldKey } from '../db/fields';
@@ -9,20 +10,26 @@ import * as schema from '../db/schema';
 import { ADMIN_ROLES, admins } from '../db/schema';
 import { isAdminRole } from '@jiffo/shared';
 import { AuditService } from './audit.service';
+import { maskPhone } from './masking';
 import { PasskeysService } from './passkeys.service';
 import { AdminAuthService, normaliseEmail } from './admin-auth.service';
 
 const USAGE = `Jiffo admin accounts, from the server.
 
-  invite --email <email> --name <name> --role <${ADMIN_ROLES.join('|')}> --reason <why>
+  invite --email <email> --name <name> --role <${ADMIN_ROLES.join('|')}> --phone <number> --reason <why>
       Adds a teammate and prints their invite link. Use it to make the first owner;
-      after that, owners invite people from the panel.
+      after that, owners invite people from the panel. The phone is their own number,
+      which links the Jiffo app account they hold, so they can't change it.
+
+  phone --email <email> --phone <number> --reason <why>
+      Sets or changes a teammate's own phone number: for a team made before numbers
+      were asked for, or an owner, since nobody changes their own in the panel.
 
   reset --email <email> --reason <why>
       Clears a teammate's password, authenticator app and passkeys and prints a new
       invite link. For when the only owner has lost their phone or password.
 
-  Both are recorded in the audit log as from the command line, with the reason.
+  Each is recorded in the audit log as from the command line, with the reason.
 
   derived-keys
       Prints the ID_FINGERPRINT_KEY, ADMIN_TOTP_KEY and FIELD_KEY a server without them derives from
@@ -37,6 +44,7 @@ async function main() {
       email: { type: 'string' },
       name: { type: 'string' },
       role: { type: 'string' },
+      phone: { type: 'string' },
       reason: { type: 'string' },
     },
   });
@@ -56,7 +64,7 @@ async function main() {
   const email = values.email ? normaliseEmail(values.email) : '';
   // Every change says why (docs/security-plan.md, D7), here as in the panel.
   const reason = values.reason?.trim() ?? '';
-  if ((command !== 'invite' && command !== 'reset') || !email.includes('@') || reason.length < 5) {
+  if (!['invite', 'reset', 'phone'].includes(command ?? '') || !email.includes('@') || reason.length < 5) {
     process.stdout.write(USAGE);
     process.exitCode = 1;
     return;
@@ -68,21 +76,27 @@ async function main() {
   const db = drizzle(pool, { schema });
   const auth = new AdminAuthService(db, config, new PasskeysService(db, config));
   const audit = new AuditService(db);
+  // Their own number (D3), as their app account has it.
+  const phoneOf = () => {
+    if (!values.phone?.trim()) return null;
+    return normalisePhone(values.phone, config.DEFAULT_COUNTRY).e164;
+  };
   try {
     if (command === 'invite') {
       const role = values.role ?? '';
-      if (!values.name?.trim() || !isAdminRole(role)) {
+      const phone = phoneOf();
+      if (!values.name?.trim() || !isAdminRole(role) || !phone) {
         process.stdout.write(USAGE);
         process.exitCode = 1;
         return;
       }
       const invite = await db.transaction(async (tx) => {
-        const made = await auth.addAdmin(tx, { email, name: values.name!, role, invitedBy: null });
+        const made = await auth.addAdmin(tx, { email, name: values.name!, role, phone, invitedBy: null });
         await audit.recordCli(tx, {
           action: 'team.invite',
           targetType: 'admin',
           targetId: made.id,
-          data: { email, role },
+          data: { email, role, phone: maskPhone(phone) },
           reason,
         });
         return made;
@@ -90,6 +104,26 @@ async function main() {
       process.stdout.write(
         `Invited ${email} as ${role}. Send them this link (it works for ${invite.expiresInHours} hours):\n${invite.inviteUrl}\n`,
       );
+    } else if (command === 'phone') {
+      const phone = phoneOf();
+      if (!phone) {
+        process.stdout.write(USAGE);
+        process.exitCode = 1;
+        return;
+      }
+      await db.transaction(async (tx) => {
+        const [admin] = await tx.select().from(admins).where(eq(admins.email, email)).for('update');
+        if (!admin) throw new Error(`${email} is not on the team`);
+        await tx.update(admins).set({ phone, updatedAt: new Date() }).where(eq(admins.id, admin.id));
+        await audit.recordCli(tx, {
+          action: 'team.update',
+          targetType: 'admin',
+          targetId: admin.id,
+          data: { from: { phone: maskPhone(admin.phone) }, to: { phone: maskPhone(phone) } },
+          reason,
+        });
+      });
+      process.stdout.write(`${email}'s phone number is now ${maskPhone(phone)}.\n`);
     } else {
       const invite = await db.transaction(async (tx) => {
         const [admin] = await tx.select({ id: admins.id }).from(admins).where(eq(admins.email, email));

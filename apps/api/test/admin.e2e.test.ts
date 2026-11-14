@@ -8,7 +8,7 @@ import { hashPassword, verifyPassword } from '../src/admin/passwords';
 import { base32Encode, matchTotp, totpCode, totpStep } from '../src/admin/totp';
 import { adminAudit, admins, adminSessions, adminSignInAttempts, type AdminRole } from '../src/db/schema';
 import { SoftPasskey } from './soft-passkey';
-import { createErrand, createTestApp, fund, randomIp, signIn, type TestApp } from './helpers';
+import { createErrand, createTestApp, fund, randomIp, signIn, type TestApp, staffPhone } from './helpers';
 
 const PANEL = 'test-panel-secret-0123456789abcdef0123';
 const PASSWORD = 'a long enough password';
@@ -82,7 +82,10 @@ describe('admin', () => {
 
   /** Adds a teammate the way the command-line tool does, and returns their invite token. */
   async function invite(role: AdminRole, email = newEmail()) {
-    const [row] = await t.db.insert(admins).values({ email, name: 'Test Admin', role }).returning({ id: admins.id });
+    const [row] = await t.db
+      .insert(admins)
+      .values({ email, name: 'Test Admin', role, phone: staffPhone() })
+      .returning({ id: admins.id });
     const { inviteUrl } = await auth().issueInvite(t.db, row!.id);
     return { id: row!.id, email, token: tokenOf(inviteUrl) };
   }
@@ -364,7 +367,7 @@ describe('admin', () => {
     const asked = await request(t.http)
       .post('/v1/admin/team')
       .set(owner.headers)
-      .send({ email: 'New.Person@JiffoApp.com', name: 'New Person', role: 'finance' })
+      .send({ email: 'New.Person@JiffoApp.com', name: 'New Person', role: 'finance', phone: staffPhone() })
       .expect(202);
     // Nothing is sent, and nobody is added, until another owner approves.
     expect(t.email.lastTo('new.person@jiffoapp.com')).toBeUndefined();
@@ -381,7 +384,7 @@ describe('admin', () => {
     const dup = await request(t.http)
       .post('/v1/admin/team')
       .set(owner.headers)
-      .send({ email: 'new.person@jiffoapp.com', name: 'Again', role: 'finance' });
+      .send({ email: 'new.person@jiffoapp.com', name: 'Again', role: 'finance', phone: staffPhone() });
     expect(dup.status).toBe(409);
 
     const list = await request(t.http).get('/v1/admin/team').set(owner.headers).expect(200);
@@ -451,7 +454,11 @@ describe('admin', () => {
     const email = `${randomUUID()}@jiffoapp.com`;
     const before = t.email.sent.length;
     const approver = await makeAdmin('owner');
-    const ask = (body: Record<string, unknown>) => request(t.http).post('/v1/admin/team').set(owner.headers).send(body);
+    const ask = (body: Record<string, unknown>) =>
+      request(t.http)
+        .post('/v1/admin/team')
+        .set(owner.headers)
+        .send({ phone: staffPhone(), ...body });
     expect((await decided(await ask({ email, name: 'Ada Teammate', role: 'support' }), approver)).status).toBe(200);
     // One email, to the teammate; the owner who made the link gets nothing.
     expect(t.email.sent.slice(before).map((m) => m.to)).toEqual([email]);

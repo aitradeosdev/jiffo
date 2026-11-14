@@ -41,7 +41,8 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 9a. Admin: invite and reset links emailed only to the teammate (D3, the reset half of finding 10) | aitradeosdev/jiffo#55 | merged |
 | 9b. Admin: roles and two-person approvals (D3, D4, E7, X7, X10) | aitradeosdev/jiffo#56 | merged |
 | 9c. Admin: passkeys, session limits and confirming before money actions (D2, D6, X6) | aitradeosdev/jiffo#57 | merged |
-| 9d. Admin: the audit log (reasons, browser, before and after, append-only, the command line) and masked personal details (D5, D7) | this pull request | open |
+| 9d. Admin: the audit log (reasons, browser, before and after, append-only, the command line) and masked personal details (D5, D7) | aitradeosdev/jiffo#58 | merged |
+| 9e. Admin: staff linked to their own app accounts (D3) and the admin API on its own port (D1) | this pull request | open |
 
 ## Summary
 

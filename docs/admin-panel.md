@@ -43,6 +43,12 @@ A session ends after 15 minutes without activity and 8 hours in all. Money actio
 
 Owners invite everyone else from the Team page. Invite and reset links are emailed only to the teammate, never shown to whoever made them, so set up an email provider (Resend, Postmark or Amazon SES) under Settings, Providers first. On your own machine they're printed in the API's log; on a shared server outside production, such as staging, set `EMAIL_PROVIDER=none` so links never reach a log. The provider's Test button sends you a test email. If the only owner loses their phone, `pnpm admin reset --email ... --reason ...` prints a new link on the server. Both commands are recorded in the audit log as from the command line, with their reason.
 
+## Staff and their own accounts
+
+Every teammate gives their own phone number when invited: the number of the Jiffo customer or agent account they hold, or would hold. Nobody can change their own account from the panel, or an errand it is part of: not crediting or adjusting it, suspending or reactivating it, deciding its application or ID check, revealing its details, settling its dispute, or asking for or approving any of those. Someone else on the team must. It holds for every route, since the check is made where each change is recorded.
+
+A teammate with no number yet can't change anyone's account until one is added; the Team page says who. An owner adds a number for a teammate at once, but changing one waits for a second owner, since a new number could unlink their account. Nobody changes their own: another owner does, or `pnpm admin phone --email ... --phone ... --reason ...` on the server, for a team made before numbers were asked for.
+
 ## Two-person approval
 
 These changes wait on the Approvals page until a second admin whose role allows them approves:
@@ -67,6 +73,10 @@ Every change needs a reason of a few words, which the panel asks for beside it; 
 ## Personal details
 
 Applications and ID checks show legal names, dates of birth, home addresses and emergency contacts masked, as `A••• O•••` and the year of birth. Anyone with the reveal permission (every role but support) can show one person's full details with a reason, which goes in the audit log, and can search those lists by legal name. Each staff member can reveal up to 20 people a day in each country; owners change that in Settings, Security. Payout accounts waiting for review show the legal name in full only to finance and owners, who compare it with the bank's. ID numbers and selfies aren't stored, so there is nothing of them to show.
+
+## Its own address
+
+In production the API answers admin routes only on `ADMIN_API_PORT`, and the apps' routes only on its public port, however a path is spelled. Put the admin port behind the team's access control (single sign-on, such as Cloudflare Access or Google IAP), not on the open internet, and point the panel's `API_URL` at it. The load balancer's `/health` check answers on both.
 
 ## In the browser
 

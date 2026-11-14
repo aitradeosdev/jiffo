@@ -3,10 +3,20 @@ import { and, asc, eq, ne } from 'drizzle-orm';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { admins, type AdminRole } from '../db/schema';
 import { conflict, forbidden, notFound, unavailable } from '../common/errors';
+import { normalisePhone } from '../auth/phone';
+import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { AdminAuthService } from './admin-auth.service';
 import { AuditService } from './audit.service';
+import { maskPhone } from './masking';
 import { StaffMail } from './staff-mail';
 import type { AdminContext } from './admin.types';
+
+/** A teammate's change: their role, access, or the phone number that links their own app account (D3). */
+export interface TeamChange {
+  role?: AdminRole;
+  status?: 'active' | 'disabled';
+  phone?: string;
+}
 
 /** The admin team: invites, roles, disabling and resetting access. Owners only. */
 @Injectable()
@@ -16,7 +26,13 @@ export class TeamService {
     private readonly auth: AdminAuthService,
     private readonly audit: AuditService,
     private readonly mail: StaffMail,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
+
+  /** A teammate's phone number as their app account has it (E.164), from what an owner typed. */
+  phoneOf(input: string) {
+    return normalisePhone(input, this.config.DEFAULT_COUNTRY).e164;
+  }
 
   async list() {
     const rows = await this.db
@@ -26,6 +42,7 @@ export class TeamService {
         name: admins.name,
         role: admins.role,
         status: admins.status,
+        phone: admins.phone,
         totpEnabledAt: admins.totpEnabledAt,
         inviteExpiresAt: admins.inviteExpiresAt,
         lastSignInAt: admins.lastSignInAt,
@@ -33,8 +50,10 @@ export class TeamService {
       })
       .from(admins)
       .orderBy(asc(admins.createdAt));
-    return rows.map(({ totpEnabledAt, inviteExpiresAt, ...a }) => ({
+    return rows.map(({ totpEnabledAt, inviteExpiresAt, phone, ...a }) => ({
       ...a,
+      // Enough to recognise; a teammate without one can't change people's accounts yet (D3).
+      phone: maskPhone(phone),
       twoStep: !!totpEnabledAt,
       inviteExpired: a.status === 'invited' && (!inviteExpiresAt || inviteExpiresAt.getTime() <= Date.now()),
     }));
@@ -44,15 +63,15 @@ export class TeamService {
    * Adds a teammate and emails them their link. The email goes after the save, so no locks are held while a
    * provider answers; if it can't go, the invite is taken back and can simply be made again.
    */
-  async invite(by: AdminContext, input: { email: string; name: string; role: AdminRole }) {
+  async invite(by: AdminContext, input: { email: string; name: string; role: AdminRole; phone: string }) {
     const email = this.mail.ready();
     const made = await this.db.transaction(async (tx) => {
-      const made = await this.auth.addAdmin(tx, { ...input, invitedBy: by.adminId });
+      const made = await this.auth.addAdmin(tx, { ...input, phone: this.phoneOf(input.phone), invitedBy: by.adminId });
       await this.audit.record(tx, by, {
         action: 'team.invite',
         targetType: 'admin',
         targetId: made.id,
-        data: { email: made.email, role: input.role },
+        data: { email: made.email, role: input.role, phone: maskPhone(this.phoneOf(input.phone)) },
       });
       return made;
     });
@@ -83,8 +102,8 @@ export class TeamService {
     return { id: made.id, emailedTo: made.email, expiresInHours: made.expiresInHours };
   }
 
-  /** Changes a teammate's role, or disables or re-enables them. Not for your own account. */
-  async update(by: AdminContext, id: string, change: { role?: AdminRole; status?: 'active' | 'disabled' }) {
+  /** Changes a teammate's role or phone number, or disables or re-enables them. Not for your own account. */
+  async update(by: AdminContext, id: string, change: TeamChange) {
     if (id === by.adminId) throw forbidden('own_account', "You can't change your own access. Ask another owner.");
     return this.db.transaction(async (tx) => {
       const target = await this.lockTarget(tx, id);
@@ -99,16 +118,20 @@ export class TeamService {
         target.role === 'owner' && target.status === 'active' && (role !== 'owner' || status !== 'active');
       if (losesOwner) await this.assertAnotherOwner(tx, id);
 
-      await tx.update(admins).set({ role, status, updatedAt: new Date() }).where(eq(admins.id, id));
+      const phone = change.phone ? this.phoneOf(change.phone) : target.phone;
+      await tx.update(admins).set({ role, status, phone, updatedAt: new Date() }).where(eq(admins.id, id));
       if (status === 'disabled' || role !== target.role)
         await this.auth.revokeAll(tx, id, status === 'disabled' ? 'disabled' : 'role_changed');
       await this.audit.record(tx, by, {
         action: 'team.update',
         targetType: 'admin',
         targetId: id,
-        data: { from: { role: target.role, status: target.status }, to: { role, status } },
+        data: {
+          from: { role: target.role, status: target.status, phone: maskPhone(target.phone) },
+          to: { role, status, phone: maskPhone(phone) },
+        },
       });
-      return { id, role, status };
+      return { id, role, status, phone: maskPhone(phone) };
     });
   }
 

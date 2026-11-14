@@ -7,7 +7,7 @@ import { api, reasonOf, ASKED, isPending, messageOf } from '@/lib/api';
 export interface TeamState {
   error?: string;
   /** What was typed, given back after a refusal so the form keeps it. */
-  typed?: { name: string; email: string; role: string };
+  typed?: { name: string; email: string; role: string; phone: string };
   /** Where the link went, only ever the teammate's own email, and for how long it works. */
   emailed?: { to: string; hours: number };
 }
@@ -17,6 +17,7 @@ export async function inviteTeammate(_: TeamState, form: FormData): Promise<Team
     name: String(form.get('name') ?? ''),
     email: String(form.get('email') ?? '').trim(),
     role: String(form.get('role') ?? ''),
+    phone: String(form.get('phone') ?? '').trim(),
   };
   let res: { emailedTo: string; expiresInHours: number };
   try {
@@ -37,19 +38,24 @@ export async function inviteTeammate(_: TeamState, form: FormData): Promise<Team
 export async function updateTeammate(_: TeamState, form: FormData): Promise<TeamState> {
   const role = form.get('role');
   const status = form.get('status');
+  const phone = String(form.get('phone') ?? '').trim();
   let pending = false;
   try {
     pending = isPending(
       await api(`/admin/team/${encodeURIComponent(String(form.get('id') ?? ''))}`, {
         reason: reasonOf(form),
         method: 'PATCH',
-        body: { ...(role ? { role: String(role) } : {}), ...(status ? { status: String(status) } : {}) },
+        body: {
+          ...(role ? { role: String(role) } : {}),
+          ...(status ? { status: String(status) } : {}),
+          ...(phone ? { phone } : {}),
+        },
       }),
     );
   } catch (error) {
     return { error: messageOf(error) };
   }
-  // A role change, or giving access back, waits for a second owner.
+  // A role change, giving access back, or changing a phone number waits for a second owner.
   if (pending) redirect(ASKED);
   revalidatePath('/team');
   return {};
