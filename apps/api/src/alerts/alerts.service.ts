@@ -38,8 +38,24 @@ export class AlertsService {
         where: sql`resolved_at is null`,
       })
       .returning();
-    if (row) this.logger.error(`Alert ${input.kind} in ${input.countryCode}: ${input.message}`);
-    return row ?? null;
+    if (row) {
+      this.logger.error(`Alert ${input.kind} in ${input.countryCode}: ${input.message}`);
+      return row;
+    }
+    // Already open: it shows the latest news, e.g. how far below zero revenue is now.
+    const [open] = await this.db
+      .update(alerts)
+      .set({ message: input.message, data: input.data ?? {} })
+      .where(
+        and(
+          eq(alerts.countryCode, input.countryCode),
+          eq(alerts.kind, input.kind),
+          eq(alerts.dedupeKey, input.dedupeKey ?? ''),
+          isNull(alerts.resolvedAt),
+        ),
+      )
+      .returning();
+    return open ?? null;
   }
 
   /** Closes the open alert of a kind once its cause has gone, e.g. the provider balance is back up. */

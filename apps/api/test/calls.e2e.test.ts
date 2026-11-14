@@ -66,12 +66,16 @@ describe('masked calls', () => {
   it('only connects the two people on the errand, while an agent is on it', async () => {
     const waiting = await createErrand(t, customer);
     expect((await call(customer, waiting.id)).body.error.code).toBe('call_not_available');
-    const { errand } = await accepted();
+    const { agent, errand } = await accepted();
     const stranger = await signIn(t, 'agent');
     expect((await call(stranger, errand.id)).status).toBe(404);
     const other = await signIn(t, 'customer');
     expect((await call(other, errand.id)).status).toBe(404);
-    await t.db.update(errands).set({ status: 'completed' }).where(eq(errands.id, errand.id));
+    // Finished the real way, so its money is settled.
+    await act(t, agent, errand.id, 'start');
+    await act(t, agent, errand.id, 'mark_delivered');
+    const pin = (await request(t.http).get(`/v1/errands/${errand.id}/pin`).set(customer.headers).expect(200)).body.pin;
+    await act(t, agent, errand.id, 'confirm_pin', { pin });
     expect((await call(customer, errand.id)).body.error.code).toBe('call_not_available');
   });
 
