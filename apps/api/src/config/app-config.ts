@@ -135,6 +135,12 @@ const EnvSchema = z
         (v) => !v || contactsOf(v).every((c) => /^(mailto:[^\s@,<>"]+@[^\s@,<>"]+|https:\/\/[^\s,<>"]+)$/.test(c)),
         'SECURITY_CONTACT must be mailto: or https: addresses, separated by commas',
       ),
+    /** Admin sessions end after this many minutes without activity (docs/security-plan.md, D6). */
+    ADMIN_IDLE_MINUTES: z.coerce.number().int().min(1).max(120).default(15),
+    /** And after this many hours in all, however active. */
+    ADMIN_SESSION_HOURS: z.coerce.number().int().min(1).max(24).default(8),
+    /** Money actions need the admin to have proved it's them within this many minutes. */
+    ADMIN_CONFIRM_MINUTES: z.coerce.number().int().min(1).max(60).default(5),
     /** Where the admin panel runs, for invite links. Locally it defaults to http://localhost:3001. */
     ADMIN_URL: z.string().url().optional(),
     /**

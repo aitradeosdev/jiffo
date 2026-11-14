@@ -27,12 +27,13 @@ import { ID_CHECK_STATUSES, IdChecksAdminService } from './id-checks-admin.servi
 import { adminErrandPermission, AGENT_TIERS, PROVIDER_CATEGORIES } from '@jiffo/shared';
 import { forbidden, notFound } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
-import { AdminGuard, CurrentAdmin, Needs } from './admin.guard';
+import { AdminGuard, Confirmed, CurrentAdmin, Needs } from './admin.guard';
 import { AuditService } from './audit.service';
 import { OverviewService } from './overview.service';
 import { TeamService } from './team.service';
 import { ApprovalRequests } from './approval-requests';
 import { ApprovalsService } from './approvals.service';
+import { AdminAuthService } from './admin-auth.service';
 import { can } from './permissions';
 import type { AdminRole } from '../db/schema';
 
@@ -189,6 +190,7 @@ export class AdminController {
     private readonly providerSettings: ProvidersAdminService,
     private readonly approvals: ApprovalsService,
     private readonly gated: ApprovalRequests,
+    private readonly adminAuth: AdminAuthService,
   ) {}
 
   /* ---------- Approvals: changes waiting for a second admin ---------- */
@@ -211,6 +213,7 @@ export class AdminController {
   @Post('approvals/:id/approve')
   @HttpCode(200)
   @Needs('read')
+  @Confirmed()
   approve(
     @CurrentAdmin() admin: AdminContext,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -247,6 +250,7 @@ export class AdminController {
 
   @Put('providers/:category/:provider')
   @Needs('settings')
+  @Confirmed()
   async saveProvider(
     @Res({ passthrough: true }) res: Response,
 
@@ -290,6 +294,7 @@ export class AdminController {
   @Post('providers/:category/active')
   @HttpCode(200)
   @Needs('settings')
+  @Confirmed()
   async activateProvider(
     @Res({ passthrough: true }) res: Response,
 
@@ -402,6 +407,7 @@ export class AdminController {
   @Post('money/payout-accounts/:id/decision')
   @HttpCode(200)
   @Needs('money')
+  @Confirmed()
   decidePayoutAccount(
     @CurrentAdmin() admin: AdminContext,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -414,6 +420,7 @@ export class AdminController {
   @Post('money/reconciliation/:id/clear')
   @HttpCode(200)
   @Needs('money')
+  @Confirmed()
   clearReconciliation(
     @CurrentAdmin() admin: AdminContext,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -443,6 +450,7 @@ export class AdminController {
   @Post('money/adjustments')
   @HttpCode(200)
   @Needs('money')
+  @Confirmed()
   async adjust(
     @Res({ passthrough: true }) res: Response,
     @CurrentAdmin() admin: AdminContext,
@@ -578,6 +586,10 @@ export class AdminController {
     // Stepping in needs errands; settling a dispute needs disputes.
     if (!can(admin.role as AdminRole, adminErrandPermission(body.event))) {
       throw forbidden('not_permitted', 'Your role does not allow this');
+    }
+    // Settling a dispute moves money: the admin confirms it's them first, as for other money actions (D6).
+    if (body.event.startsWith('resolve_') && !this.adminAuth.confirmedRecently(admin)) {
+      throw forbidden('confirm_identity', "Confirm it's you first, then try again");
     }
     return held(res, await this.gated.errandAction(admin, id, body));
   }

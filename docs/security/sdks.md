@@ -31,6 +31,7 @@ aren't followed, and only their own hosts are allowed.
 | --- | --- |
 | `next`, `react`, `react-dom`, `server-only` | The panel itself. Pages are drawn on the panel's server; the browser gets no API keys. |
 | `qrcode` | The QR code shown when an admin sets up their authenticator app. Drawn on the server. |
+| `@simplewebauthn/browser` | Asking the browser to make or use a passkey, for roles that sign in with one |
 | `@fontsource-variable/figtree` | The font, served from the panel itself |
 | `@jiffo/shared` | Jiffo's own shared rules and types |
 
@@ -43,6 +44,7 @@ aren't followed, and only their own hosts are allowed.
 | `pg`, `drizzle-orm` | The database |
 | `ioredis`, `bullmq` | Redis: rate limits, timers and background jobs |
 | `jose` | Signing and checking tokens |
+| `@simplewebauthn/server` | Checking admins' passkeys (WebAuthn) |
 | `zod` | Checking every request body |
 | `libphonenumber-js` | Reading and checking phone numbers |
 | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | Photo storage, with links that expire |

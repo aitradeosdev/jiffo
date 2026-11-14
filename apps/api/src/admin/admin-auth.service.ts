@@ -1,12 +1,15 @@
 import { Inject, Injectable } from '@nestjs/common';
+import type { AuthenticationResponseJSON } from '@simplewebauthn/server';
 import { and, count, eq, gt, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { needsPasskey } from '@jiffo/shared';
+import { PasskeysService } from './passkeys.service';
 import { jwtVerify, SignJWT } from 'jose';
 import { keyFor } from '../common/keys';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db, type Tx } from '../db/database.module';
-import { admins, adminSessions, adminSignInAttempts, type AdminRole } from '../db/schema';
+import { adminPasskeys, admins, adminSessions, adminSignInAttempts, type AdminRole } from '../db/schema';
 import { decrypt, encrypt, randomToken, sha256 } from '../common/crypto';
-import { badRequest, conflict, notFound, tooMany, unauthorized } from '../common/errors';
+import { badRequest, forbidden, conflict, notFound, tooMany, unauthorized } from '../common/errors';
 import { decoyHash, hashPassword, PASSWORD_MIN_LENGTH, verifyPassword } from './passwords';
 import { matchTotp, newTotpSecret, otpauthUrl } from './totp';
 import { permissionsFor } from './permissions';
@@ -16,8 +19,6 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 
 /** A session ends after this long without a request, and in any case this long after sign-in. */
-export const ADMIN_IDLE_MS = 30 * MINUTE_MS;
-export const ADMIN_SESSION_MS = 12 * HOUR_MS;
 /** How long an invite link works. */
 export const INVITE_MS = 72 * HOUR_MS;
 /** Between the password and the code. */
@@ -37,7 +38,7 @@ const LIMITS = {
 const SEEN_EVERY_MS = MINUTE_MS;
 
 const CHALLENGE_AUDIENCE = 'jiffo-admin-challenge';
-type Stage = 'code' | 'setup';
+type Stage = 'code' | 'setup' | 'passkey';
 
 export const normaliseEmail = (email: string) => email.trim().toLowerCase();
 
@@ -48,10 +49,19 @@ export class AdminAuthService {
   /** The authenticator secrets have their own key (ADMIN_TOTP_KEY), so each key has one job. */
   private readonly totpKey: string;
 
+  /** Sessions end when idle this long, and at this age however active (docs/security-plan.md, D6). */
+  private readonly idleMs: number;
+  private readonly sessionMs: number;
+  private readonly confirmMs: number;
+
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly passkeys: PasskeysService,
   ) {
+    this.idleMs = config.ADMIN_IDLE_MINUTES * MINUTE_MS;
+    this.sessionMs = config.ADMIN_SESSION_HOURS * HOUR_MS;
+    this.confirmMs = config.ADMIN_CONFIRM_MINUTES * MINUTE_MS;
     // Admin sign-in steps are signed apart from the app's tokens; development falls back to JWT_SECRET.
     this.challengeKey = new TextEncoder().encode(config.ADMIN_TOKEN_SECRET ?? config.JWT_SECRET);
     this.totpKey = keyFor(config, 'adminTotp').toString('hex');
@@ -122,6 +132,8 @@ export class AdminAuthService {
       })
       .where(eq(admins.id, adminId));
     await this.revokeAll(tx, adminId, 'reset');
+    // A lost or stolen device's passkey goes too: they set everything up again from the new link.
+    await tx.delete(adminPasskeys).where(eq(adminPasskeys.adminId, adminId));
     await tx
       .delete(adminSignInAttempts)
       .where(and(eq(adminSignInAttempts.email, target.email), eq(adminSignInAttempts.succeeded, false)));
@@ -182,7 +194,8 @@ export class AdminAuthService {
     });
     if (!admin) throw unauthorized('invalid_credentials', 'That email and password do not match');
 
-    const stage: Stage = admin.totpEnabledAt ? 'code' : 'setup';
+    // An admin with a passkey signs in with it, never with a code: a stolen password and code aren't enough.
+    const stage: Stage = (await this.passkeys.has(admin.id)) ? 'passkey' : admin.totpEnabledAt ? 'code' : 'setup';
     return { next: stage, challenge: await this.signChallenge(admin.id, stage) };
   }
 
@@ -206,40 +219,19 @@ export class AdminAuthService {
   /** Step two: the code from the authenticator app. A first sign-in also switches the app on here. */
   async verifyCode(challenge: string, code: string, client: ClientInfo) {
     const { admin, stage } = await this.readChallenge(challenge);
+    // Checked again now, not only when the sign-in began: a passkey added since closes the code step.
+    if (stage === 'passkey' || (await this.passkeys.has(admin.id))) {
+      throw unauthorized('use_passkey', 'Sign in with your passkey');
+    }
     if (!admin.totpCipher) throw badRequest('setup_not_started', 'Set up your authenticator app first');
     const secret = decrypt(this.totpKey, admin.totpCipher);
 
     const session = await this.limited(admin.email, client.ip, 'code', async (tx) => {
-      const step = matchTotp(secret, code.trim(), admin.totpLastStep);
-      if (step === null) return null;
-      // Marked as used in the same statement that checks it, so the same code can't sign in twice at once.
-      const [accepted] = await tx
-        .update(admins)
-        .set({
-          totpLastStep: step,
-          lastSignInAt: new Date(),
-          updatedAt: new Date(),
-          ...(stage === 'setup' ? { totpEnabledAt: new Date() } : {}),
-        })
-        .where(
-          and(
-            eq(admins.id, admin.id),
-            or(isNull(admins.totpLastStep), lt(admins.totpLastStep, step)),
-            eq(admins.status, 'active'),
-          ),
-        )
-        .returning({ id: admins.id });
-      if (!accepted) return null;
-      const token = randomToken();
-      const expiresAt = new Date(Date.now() + ADMIN_SESSION_MS);
-      await tx.insert(adminSessions).values({
-        adminId: admin.id,
-        tokenHash: sha256(token),
-        ip: client.ip,
-        userAgent: client.userAgent?.slice(0, 300) ?? null,
-        expiresAt,
+      const accepted = await this.acceptCode(tx, admin.id, secret, admin.totpLastStep, code, {
+        lastSignInAt: new Date(),
+        ...(stage === 'setup' ? { totpEnabledAt: new Date() } : {}),
       });
-      return { token, expiresAt: expiresAt.toISOString(), idleMinutes: ADMIN_IDLE_MS / MINUTE_MS };
+      return accepted ? this.openSession(tx, admin.id, client) : null;
     });
     if (!session) {
       throw unauthorized('wrong_code', 'That code is not right. Check the time on your phone and try the newest code.');
@@ -247,12 +239,129 @@ export class AdminAuthService {
     return session;
   }
 
+  /**
+   * Accepts an authenticator code once: marked as used in the same statement that checks it is newer than
+   * the last one used, so the same code can't count twice, even at the same moment. Active admins only.
+   */
+  private async acceptCode(
+    tx: Tx,
+    adminId: string,
+    secret: string,
+    lastStep: number | null,
+    code: string,
+    also: Partial<typeof admins.$inferInsert> = {},
+  ) {
+    const step = matchTotp(secret, code.trim(), lastStep);
+    if (step === null) return false;
+    const [accepted] = await tx
+      .update(admins)
+      .set({ totpLastStep: step, updatedAt: new Date(), ...also })
+      .where(
+        and(
+          eq(admins.id, adminId),
+          or(isNull(admins.totpLastStep), lt(admins.totpLastStep, step)),
+          eq(admins.status, 'active'),
+        ),
+      )
+      .returning({ id: admins.id });
+    return !!accepted;
+  }
+
+  /** Step two with a passkey: what the browser needs to ask for it. */
+  async passkeyOptions(challenge: string) {
+    const { admin } = await this.readChallenge(challenge, 'passkey');
+    return this.passkeys.authenticationOptions(admin.id, 'sign_in');
+  }
+
+  /** Step two with a passkey: the browser's answer. Wrong answers count towards the same pause as codes. */
+  async verifyPasskey(challenge: string, response: AuthenticationResponseJSON, client: ClientInfo) {
+    const { admin } = await this.readChallenge(challenge, 'passkey');
+    const session = await this.limited(admin.email, client.ip, 'code', async (tx) => {
+      if (!(await this.passkeys.verify(tx, admin.id, 'sign_in', response))) return null;
+      const [still] = await tx
+        .update(admins)
+        .set({ lastSignInAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(admins.id, admin.id), eq(admins.status, 'active')))
+        .returning({ id: admins.id });
+      return still ? this.openSession(tx, admin.id, client) : null;
+    });
+    if (!session) throw unauthorized('passkey_refused', "That passkey didn't work. Try again.");
+    return session;
+  }
+
+  private async openSession(tx: Tx, adminId: string, client: ClientInfo) {
+    const token = randomToken();
+    const expiresAt = new Date(Date.now() + this.sessionMs);
+    await tx.insert(adminSessions).values({
+      adminId,
+      tokenHash: sha256(token),
+      ip: client.ip,
+      userAgent: client.userAgent?.slice(0, 300) ?? null,
+      expiresAt,
+    });
+    return { token, expiresAt: expiresAt.toISOString(), idleMinutes: this.idleMs / MINUTE_MS };
+  }
+
+  /* ---------- Confirming it's them, before money actions ---------- */
+
+  /** How the admin confirms: with their passkey if they have one, else a code from their authenticator app. */
+  async confirmStart(auth: AdminContext) {
+    if (auth.hasPasskey) {
+      return {
+        method: 'passkey' as const,
+        options: await this.passkeys.authenticationOptions(auth.adminId, 'confirm'),
+      };
+    }
+    return { method: 'code' as const };
+  }
+
+  /** Confirms it's them; money actions then work for the next few minutes (docs/security-plan.md, D6). */
+  async confirm(
+    auth: AdminContext,
+    proof: { code?: string; response?: AuthenticationResponseJSON },
+    client: ClientInfo,
+  ) {
+    const hasPasskey = auth.hasPasskey;
+    // Counted apart from sign-in codes, so failed confirms can't pause the admin's sign-in.
+    const done = await this.limited(auth.email, client.ip, 'confirm', async (tx) => {
+      if (hasPasskey) {
+        if (!proof.response) return null;
+        if (!(await this.passkeys.verify(tx, auth.adminId, 'confirm', proof.response))) return null;
+      } else {
+        const [admin] = await tx.select().from(admins).where(eq(admins.id, auth.adminId));
+        if (!admin?.totpCipher || !proof.code) return null;
+        const secret = decrypt(this.totpKey, admin.totpCipher);
+        if (!(await this.acceptCode(tx, admin.id, secret, admin.totpLastStep, proof.code))) return null;
+      }
+      const confirmedAt = new Date();
+      await tx.update(adminSessions).set({ confirmedAt }).where(eq(adminSessions.id, auth.sessionId));
+      return { confirmedUntil: new Date(confirmedAt.getTime() + this.confirmMs).toISOString() };
+    });
+    // Refused with 403, not 401: the session itself is still good.
+    if (!done) {
+      throw forbidden(
+        'confirm_refused',
+        hasPasskey ? "That passkey didn't work. Try again." : 'That code is not right. Try the newest code.',
+      );
+    }
+    return done;
+  }
+
+  /** Whether the admin proved it was them recently enough for a money action. */
+  confirmedRecently(auth: AdminContext) {
+    return Date.now() - auth.confirmedAt.getTime() <= this.confirmMs;
+  }
+
   /* ---------- Sessions ---------- */
 
   /** The admin behind a session token, if the session is live; it ends here if it has been idle too long. */
   async authenticate(token: string, client: ClientInfo): Promise<AdminContext> {
     const [row] = await this.db
-      .select({ session: adminSessions, admin: admins })
+      .select({
+        session: adminSessions,
+        admin: admins,
+        hasPasskey: sql<boolean>`exists (select 1 from ${adminPasskeys} where ${adminPasskeys.adminId} = ${admins.id})`,
+      })
       .from(adminSessions)
       .innerJoin(admins, eq(admins.id, adminSessions.adminId))
       .where(eq(adminSessions.tokenHash, sha256(token)));
@@ -264,9 +373,12 @@ export class AdminAuthService {
       await this.revoke(row.session.id, 'admin_disabled');
       throw unauthorized('session_ended', 'Sign in again');
     }
-    if (now - row.session.lastSeenAt.getTime() > ADMIN_IDLE_MS) {
+    if (now - row.session.lastSeenAt.getTime() > this.idleMs) {
       await this.revoke(row.session.id, 'idle');
-      throw unauthorized('session_idle', 'You were signed out after 30 minutes without activity');
+      throw unauthorized(
+        'session_idle',
+        `You were signed out after ${this.idleMs / MINUTE_MS} minutes without activity`,
+      );
     }
     if (now - row.session.lastSeenAt.getTime() > SEEN_EVERY_MS) {
       await this.db
@@ -281,6 +393,10 @@ export class AdminAuthService {
       name: row.admin.name,
       role: row.admin.role,
       ip: client.ip,
+      confirmedAt: row.session.confirmedAt,
+      // A role that signs in with a passkey, without one yet: only adding one is open (D2).
+      passkeyMissing: needsPasskey(row.admin.role) && !row.hasPasskey,
+      hasPasskey: row.hasPasskey,
     };
   }
 
@@ -303,6 +419,10 @@ export class AdminAuthService {
       name: auth.name,
       role: auth.role,
       permissions: permissionsFor(auth.role as AdminRole),
+      needsPasskey: auth.passkeyMissing,
+      // How they confirm before money actions: their passkey, or a code from the app.
+      confirmWith: auth.hasPasskey ? 'passkey' : 'code',
+      confirmedUntil: new Date(auth.confirmedAt.getTime() + this.confirmMs).toISOString(),
     };
   }
 
@@ -324,7 +444,7 @@ export class AdminAuthService {
   private async limited<T>(
     email: string,
     ip: string | null,
-    stage: 'password' | 'code',
+    stage: 'password' | 'code' | 'confirm',
     check: (tx: Tx) => Promise<T | null>,
   ): Promise<T | null> {
     return this.db
@@ -346,7 +466,7 @@ export class AdminAuthService {
             );
           return row?.n ?? 0;
         };
-        const byEmail = (s: 'password' | 'code') =>
+        const byEmail = (s: 'password' | 'code' | 'confirm') =>
           and(eq(adminSignInAttempts.email, email), eq(adminSignInAttempts.stage, s));
         const sameIp = ip ? eq(adminSignInAttempts.ip, ip) : isNull(adminSignInAttempts.ip);
         const over = (n: number, rule: { limit: number }) => n >= rule.limit;
@@ -357,7 +477,7 @@ export class AdminAuthService {
                 await failures(and(byEmail('password'), sameIp), LIMITS.passwordPerEmailAndIp.windowMs),
                 LIMITS.passwordPerEmailAndIp,
               ) || over(await failures(byEmail('password'), LIMITS.passwordPerEmail.windowMs), LIMITS.passwordPerEmail)
-            : over(await failures(byEmail('code'), LIMITS.codePerEmail.windowMs), LIMITS.codePerEmail);
+            : over(await failures(byEmail(stage), LIMITS.codePerEmail.windowMs), LIMITS.codePerEmail);
         if (paused) return { paused: 'email' as const };
         if (ip && over(await failures(sameIp, LIMITS.perIp.windowMs), LIMITS.perIp)) return { paused: 'ip' as const };
 
@@ -401,7 +521,7 @@ export class AdminAuthService {
     } catch {
       // Falls through to the error below.
     }
-    if (!adminId || (stage !== 'code' && stage !== 'setup') || (want && stage !== want)) {
+    if (!adminId || (stage !== 'code' && stage !== 'setup' && stage !== 'passkey') || (want && stage !== want)) {
       throw unauthorized('challenge_expired', 'Sign in again');
     }
     const [admin] = await this.db.select().from(admins).where(eq(admins.id, adminId));

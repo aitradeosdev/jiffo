@@ -16,6 +16,7 @@ import { AuditService } from './audit.service';
 import { OverviewService } from './overview.service';
 import { ApprovalRequests } from './approval-requests';
 import { ApprovalsService } from './approvals.service';
+import { PasskeysService } from './passkeys.service';
 import { StaffMail } from './staff-mail';
 import { TeamService } from './team.service';
 
@@ -37,6 +38,7 @@ import { TeamService } from './team.service';
     SettingsAdminService,
     TeamService,
     StaffMail,
+    PasskeysService,
     ApprovalsService,
     ApprovalRequests,
   ],

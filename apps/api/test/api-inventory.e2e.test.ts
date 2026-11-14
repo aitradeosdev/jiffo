@@ -21,6 +21,8 @@ const PUBLIC = new Set([
   'POST /v1/auth/refresh',
   'POST /v1/admin/auth/sign-in',
   'POST /v1/admin/auth/code',
+  'POST /v1/admin/auth/passkey/options',
+  'POST /v1/admin/auth/passkey',
   'POST /v1/admin/auth/setup',
   'POST /v1/admin/auth/invite/check',
   'POST /v1/admin/auth/invite/accept',

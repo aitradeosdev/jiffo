@@ -169,6 +169,13 @@
       "when": 1794673557644,
       "tag": "0023_admin_approvals",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794676634921,
+      "tag": "0024_admin_passkeys",
+      "breakpoints": true
     }
   ]
 }

@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { adminRoleLabel } from '@jiffo/shared';
 import {
@@ -35,11 +36,10 @@ const SECTIONS: Array<NavItem & { needs: Permission }> = [
 
 /** Every signed-in page: the sections on the left (on top on small screens), the page on the right. */
 export default async function PanelLayout({ children }: { children: ReactNode }) {
-  const [me, country, approvals] = await Promise.all([
-    getMe(),
-    getCountry(),
-    api<{ waiting: number }>('/admin/approvals/waiting'),
-  ]);
+  const me = await getMe();
+  // A role that signs in with a passkey adds one before anything else.
+  if (me.needsPasskey) redirect('/passkey');
+  const [country, approvals] = await Promise.all([getCountry(), api<{ waiting: number }>('/admin/approvals/waiting')]);
   const items = SECTIONS.filter((s) => me.permissions.includes(s.needs)).map(({ needs: _, ...item }) =>
     item.href === '/approvals' ? { ...item, count: approvals.waiting } : item,
   );
