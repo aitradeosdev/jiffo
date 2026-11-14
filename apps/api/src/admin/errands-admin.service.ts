@@ -369,6 +369,32 @@ export class ErrandsAdminService {
     };
   }
 
+  /**
+   * What settling a dispute would pay the agent, for the second-admin check (docs/security-plan.md, D4, E7):
+   * a split's share to them, or for the standard way their share of the fee and the item money held.
+   * Cancelling the standard way pays them nothing, and other actions move no money.
+   */
+  async agentPayout(id: string, input: { event: AdminErrandEvent; split?: DisputeSplit }) {
+    const [errand] = await this.db.select().from(errands).where(eq(errands.id, id));
+    if (!errand) throw notFound('errand_not_found', 'Errand not found');
+    if (!input.event.startsWith('resolve_')) return { errand, toAgentKobo: 0 };
+    if (input.split) {
+      const s = input.split;
+      return { errand, toAgentKobo: s.agentKobo + s.itemsToAgentKobo + s.chargeCustomerKobo };
+    }
+    if (input.event !== 'resolve_complete') return { errand, toAgentKobo: 0 };
+    const [held, settings] = await Promise.all([
+      this.wallet.heldFor(id, errand.countryCode),
+      this.countries.settingsAt(errand.countryCode, errand.settingsVersion),
+    ]);
+    const standard = splitFeeEscrow({
+      feeKobo: errand.feeKobo,
+      serviceFeeKobo: errand.serviceFeeKobo,
+      commissionBps: commissionBpsFor(settings.fees, errand.agentTier ?? 'bronze'),
+    });
+    return { errand, toAgentKobo: standard.agentKobo + held.itemsKobo };
+  }
+
   /** Support's own action on an errand, recorded in the audit log in the same transaction. */
   act(
     admin: AdminContext,

@@ -60,6 +60,9 @@ jobs:
         run: pnpm audit --prod --audit-level=high
       - name: Build
         run: pnpm build
+      - name: Check the API build wires up
+        # An import cycle can leave a dependency undefined in the build while every test passes.
+        run: pnpm --filter @jiffo/api check:injection
       - name: Lint
         run: pnpm lint
       - name: Formatting

@@ -136,14 +136,24 @@ describe('admin approvals', () => {
     ).rejects.toThrow(/admin_approvals_second_person/);
   });
 
-  it('goes ahead alone only when nobody else could approve, and says so', async () => {
+  it('goes ahead alone only when nobody else ever could approve, and says so', async () => {
     const solo = await adminAs(t, 'finance');
-    // Everyone else who could approve money is away for this test.
-    const away = await t.db
+    // A team where nobody else who could approve money has ever signed in, as a new team is.
+    const others = await t.db
+      .select({ id: admins.id, lastSignInAt: admins.lastSignInAt })
+      .from(admins)
+      .where(
+        sql`${admins.id} <> ${solo.id} and ${admins.role} in ('finance', 'owner') and ${admins.lastSignInAt} is not null`,
+      );
+    await t.db
       .update(admins)
-      .set({ status: 'disabled' })
-      .where(sql`${admins.status} = 'active' and ${admins.id} <> ${solo.id} and ${admins.role} in ('finance', 'owner')`)
-      .returning({ id: admins.id });
+      .set({ lastSignInAt: null })
+      .where(
+        inArray(
+          admins.id,
+          others.map((o) => o.id),
+        ),
+      );
     try {
       const before = (await balanceOf(t, customer)).balanceKobo;
       const done = await credit(solo).expect(200);
@@ -152,6 +162,26 @@ describe('admin approvals', () => {
         approval: { status: 'approved', selfApproved: true, decidedBy: { id: solo.id } },
       });
       expect((await balanceOf(t, customer)).balanceKobo).toBe(before + 25_000);
+    } finally {
+      for (const o of others)
+        await t.db.update(admins).set({ lastSignInAt: o.lastSignInAt }).where(eq(admins.id, o.id));
+    }
+    // With someone else on the team, the same request waits again.
+    expect((await credit(solo)).status).toBe(202);
+  });
+
+  it("doesn't let an owner approve alone by disabling or resetting the other approvers", async () => {
+    const solo = await adminAs(t, 'finance');
+    // Everyone else who could approve money is disabled (or reset): they still count, so it waits.
+    const away = await t.db
+      .update(admins)
+      .set({ status: 'disabled' })
+      .where(sql`${admins.status} = 'active' and ${admins.id} <> ${solo.id} and ${admins.role} in ('finance', 'owner')`)
+      .returning({ id: admins.id });
+    try {
+      const asked = await credit(solo);
+      expect(asked.status).toBe(202);
+      expect(asked.body.approval.status).toBe('pending');
     } finally {
       await t.db
         .update(admins)
@@ -163,8 +193,19 @@ describe('admin approvals', () => {
           ),
         );
     }
-    // With someone else back, the same request waits again.
-    expect((await credit(solo)).status).toBe(202);
+  });
+
+  it('marks a request that stopped while running as failed, saying to check', async () => {
+    const asked = await credit(finance).expect(202);
+    await t.db
+      .update(adminApprovals)
+      .set({ status: 'running', decidedBy: financeTwo.id, decidedAt: new Date(Date.now() - 11 * 60_000) })
+      .where(eq(adminApprovals.id, asked.body.approval.id));
+    await request(t.http).get('/v1/admin/approvals?done=true').set(financeTwo.headers).expect(200);
+    expect(await rowOf(asked.body.approval.id)).toMatchObject({
+      status: 'failed',
+      error: expect.stringMatching(/Check the audit log/),
+    });
   });
 
   it('lets the asker take a request back, and another admin turn it down, with nothing moved', async () => {
@@ -270,6 +311,23 @@ describe('admin approvals', () => {
       const after = await balanceOf(t, agent);
       expect(after.heldKobo + after.availableKobo - before).toBe(150_000);
 
+      // Settling as complete the standard way pays the agent their share of the fee: above the amount, it waits.
+      const standard = await disputed();
+      const whole = await request(t.http)
+        .post(`/v1/admin/errands/${standard.id}/actions`)
+        .set(ops.headers)
+        .send({ event: 'resolve_complete', version: standard.version, note: 'The agent did deliver it' })
+        .expect(202);
+      expect(whole.body.approval.summary).toMatch(/as complete: .+ to the agent$/);
+      await approve(whole.body.approval.id, disputes).expect(200);
+      // Cancelling the standard way pays the agent nothing, so it runs at once.
+      const refunded = await disputed();
+      await request(t.http)
+        .post(`/v1/admin/errands/${refunded.id}/actions`)
+        .set(ops.headers)
+        .send({ event: 'resolve_cancel', version: refunded.version, note: 'The agent never went to the shop' })
+        .expect(200);
+
       // Stepping into an errand is operations' work, not disputes'.
       const other = await disputed();
       const cancel = await request(t.http)
@@ -352,6 +410,19 @@ describe('admin approvals', () => {
       await t.db.delete(providerSettings);
       await t.app.get(ProvidersService).reload();
     }
+  });
+
+  it('disables a teammate at once, even with a role change that waits', async () => {
+    const target = await adminAs(t, 'operations');
+    const res = await request(t.http)
+      .patch(`/v1/admin/team/${target.id}`)
+      .set(owner.headers)
+      .send({ role: 'owner', status: 'disabled' })
+      .expect(202);
+    expect(res.body.approval).toMatchObject({ kind: 'team_change', status: 'pending' });
+    const [row] = await t.db.select().from(admins).where(eq(admins.id, target.id));
+    expect(row).toMatchObject({ status: 'disabled', role: 'operations' });
+    await request(t.http).get('/v1/admin/me').set(target.headers).expect(401);
   });
 
   it('gives each role only its own work', async () => {

@@ -1,5 +1,5 @@
-import { HttpException, Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, inArray, lt, ne, or, sql } from 'drizzle-orm';
+import { HttpException, Inject, Injectable, Logger } from '@nestjs/common';
+import { and, count, desc, eq, gt, inArray, isNotNull, lt, ne, or, sql } from 'drizzle-orm';
 import {
   APPROVAL_KIND_INFO,
   DEFAULT_SECURITY_SETTINGS,
@@ -19,6 +19,8 @@ import { can } from './permissions';
 
 type Row = typeof adminApprovals.$inferSelect;
 const HOUR_MS = 3_600_000;
+/** How long a request may run before it is taken to have stopped part way (the server restarted, say). */
+const STUCK_MS = 10 * 60_000;
 
 /** One change to ask for: what it is, who it touches, why, and the request exactly as it will run. */
 export interface ApprovalRequest {
@@ -42,8 +44,11 @@ export async function securityOf(countries: CountriesService, countryCode: strin
   try {
     const current = await countries.currentSettingsIfAny(countryCode);
     return current?.settings.security ?? DEFAULT_SECURITY_SETTINGS;
-  } catch {
-    return DEFAULT_SECURITY_SETTINGS;
+  } catch (error) {
+    // Only a stored version that no longer reads; anything else (the database being down) is an error.
+    // Checked by name: the settings schema may come from another copy of zod (@jiffo/shared's build).
+    if (error instanceof Error && error.name === 'ZodError') return DEFAULT_SECURITY_SETTINGS;
+    throw error;
   }
 }
 
@@ -71,6 +76,7 @@ const plain = (value: unknown): Record<string, unknown> | null => {
  */
 @Injectable()
 export class ApprovalsService {
+  private readonly logger = new Logger(ApprovalsService.name);
   private readonly executors = new Map<ApprovalKind, Executor>();
 
   constructor(
@@ -204,11 +210,21 @@ export class ApprovalsService {
       return { approval: await this.view(id) };
     }
 
+    let result: unknown;
     try {
       const as = await this.requester(claimed, admin, how.self);
       const run = this.executors.get(claimed.kind);
       if (!run) throw conflict('approval_unknown', 'This kind of request can no longer run');
-      const result = await run(as, claimed.payload);
+      result = await run(as, claimed.payload);
+    } catch (error) {
+      await this.db
+        .update(adminApprovals)
+        .set({ status: 'failed', error: messageOf(error).slice(0, 500) })
+        .where(eq(adminApprovals.id, id));
+      throw error;
+    }
+    // The change has happened. If recording that fails, it is still marked approved, never failed.
+    try {
       await this.db.transaction(async (tx) => {
         await tx
           .update(adminApprovals)
@@ -222,14 +238,15 @@ export class ApprovalsService {
           data: { kind: claimed.kind, summary: claimed.summary, selfApproved: how.self },
         });
       });
-      return { ...(plain(result) ?? {}), approval: await this.view(id) };
     } catch (error) {
+      this.logger.error(`Approval ${id} ran, but recording it failed: ${messageOf(error)}`);
       await this.db
         .update(adminApprovals)
-        .set({ status: 'failed', error: messageOf(error).slice(0, 500) })
-        .where(eq(adminApprovals.id, id));
-      throw error;
+        .set({ status: 'approved' })
+        .where(eq(adminApprovals.id, id))
+        .catch(() => undefined);
     }
+    return { ...(plain(result) ?? {}), approval: await this.view(id) };
   }
 
   /** The person who asked, as they are now: still active, and still allowed to make this change. */
@@ -249,12 +266,19 @@ export class ApprovalsService {
     };
   }
 
-  /** Active admins other than the one asking whose role holds the permission. */
+  /**
+   * Teammates other than the one asking whose role holds the permission and who have ever signed in, whether
+   * active, disabled or reset since. Only a team that never had anyone else may go ahead alone: disabling or
+   * resetting the other owner doesn't make one owner the only approver. A team that loses its other approvers
+   * adds one with the server's command line (`pnpm admin invite`).
+   */
   private async otherApprovers(permission: AdminPermission, requesterId: string) {
     const [row] = await this.db
       .select({ n: count() })
       .from(admins)
-      .where(and(eq(admins.status, 'active'), ne(admins.id, requesterId), inArray(admins.role, rolesWith(permission))));
+      .where(
+        and(ne(admins.id, requesterId), inArray(admins.role, rolesWith(permission)), isNotNull(admins.lastSignInAt)),
+      );
     return row?.n ?? 0;
   }
 
@@ -263,12 +287,19 @@ export class ApprovalsService {
     return security.approvalExpiryHours;
   }
 
-  /** Requests nobody decided in time lapse. */
-  private expire() {
-    return this.db
+  /**
+   * Requests nobody decided in time lapse. One left running (the server stopped while it ran) is marked as
+   * failed after a while, saying to check whether it happened, so it never sits as running for ever.
+   */
+  private async expire() {
+    await this.db
       .update(adminApprovals)
       .set({ status: 'expired' })
       .where(and(eq(adminApprovals.status, 'pending'), lt(adminApprovals.expiresAt, new Date())));
+    await this.db
+      .update(adminApprovals)
+      .set({ status: 'failed', error: 'Stopped while running. Check the audit log to see whether it happened.' })
+      .where(and(eq(adminApprovals.status, 'running'), lt(adminApprovals.decidedAt, new Date(Date.now() - STUCK_MS))));
   }
 
   /**
@@ -286,12 +317,12 @@ export class ApprovalsService {
     );
     const status = query.done ? sql`${adminApprovals.status} <> 'pending'` : eq(adminApprovals.status, 'pending');
     const rows = await this.db
-      .select({ id: adminApprovals.id })
+      .select()
       .from(adminApprovals)
       .where(and(visible, status))
       .orderBy(desc(adminApprovals.createdAt))
       .limit(query.limit);
-    const views = await Promise.all(rows.map((r) => this.view(r.id)));
+    const views = await this.views(rows);
     return {
       approvals: views.map((v) => ({
         ...v,
@@ -303,7 +334,6 @@ export class ApprovalsService {
 
   /** How many wait for this admin's decision, for the panel's menu. */
   async waitingFor(admin: AdminContext) {
-    await this.expire();
     const kinds = Object.entries(APPROVAL_KIND_INFO)
       .filter(([, info]) => can(admin.role as AdminRole, info.permission))
       .map(([kind]) => kind as ApprovalKind);
@@ -314,6 +344,7 @@ export class ApprovalsService {
       .where(
         and(
           eq(adminApprovals.status, 'pending'),
+          gt(adminApprovals.expiresAt, new Date()),
           inArray(adminApprovals.kind, kinds),
           ne(adminApprovals.requestedBy, admin.adminId),
         ),
@@ -324,14 +355,22 @@ export class ApprovalsService {
   private async view(id: string, db: Pick<Db, 'select'> = this.db) {
     const [row] = await db.select().from(adminApprovals).where(eq(adminApprovals.id, id));
     if (!row) throw notFound('approval_not_found', 'No such request');
-    const ids = [row.requestedBy, row.decidedBy].filter((x): x is string => !!x);
-    const people = await db.select({ id: admins.id, name: admins.name }).from(admins).where(inArray(admins.id, ids));
+    return (await this.views([row], db))[0]!;
+  }
+
+  /** Requests as admins see them, with the names of who asked and who decided, read in one go. */
+  private async views(rows: Row[], db: Pick<Db, 'select'> = this.db) {
+    const ids = [...new Set(rows.flatMap((r) => [r.requestedBy, r.decidedBy]).filter((x): x is string => !!x))];
+    const people = ids.length
+      ? await db.select({ id: admins.id, name: admins.name }).from(admins).where(inArray(admins.id, ids))
+      : [];
     const name = (who: string | null) => (who ? (people.find((p) => p.id === who)?.name ?? null) : null);
-    return {
+    return rows.map((row) => ({
       id: row.id,
       kind: row.kind,
       label: APPROVAL_KIND_INFO[row.kind].label,
-      status: row.status,
+      // A request past its time reads as lapsed, even before anything marks it so.
+      status: row.status === 'pending' && row.expiresAt.getTime() <= Date.now() ? ('expired' as const) : row.status,
       summary: row.summary,
       note: row.note,
       countryCode: row.countryCode,
@@ -345,6 +384,6 @@ export class ApprovalsService {
       createdAt: row.createdAt,
       decidedAt: row.decidedAt,
       expiresAt: row.expiresAt,
-    };
+    }));
   }
 }

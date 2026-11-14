@@ -210,7 +210,7 @@ export class ProvidersAdminService {
   /** New settings for the provider in use, once a second admin approved them, if nothing changed since. */
   async applyPending(
     admin: AdminContext,
-    pending: { category: ProviderCategory; provider: string; sealed: string; basedOn: string },
+    pending: { category: ProviderCategory; provider: string; sealed: string; basedOn: string; changed: string[] },
   ) {
     const info = this.info(pending.category, pending.provider);
     return this.db
@@ -231,12 +231,8 @@ export class ProvidersAdminService {
         } catch (error) {
           throw buildError(error);
         }
-        const changed = [
-          ...new Set([
-            ...Object.keys({ ...config, ...before.config }).filter((k) => config[k] !== before.config[k]),
-            ...Object.keys(secrets),
-          ]),
-        ];
+        // What the person asking changed, as worked out when they saved it.
+        const changed = pending.changed;
         await this.write(tx, admin, {
           category: pending.category,
           provider: pending.provider,

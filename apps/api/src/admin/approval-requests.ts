@@ -73,7 +73,7 @@ export class ApprovalRequests implements OnModuleInit {
           )
         : this.providers.applyPending(
             as,
-            p as { category: ProviderCategory; provider: string; sealed: string; basedOn: string },
+            p as { category: ProviderCategory; provider: string; sealed: string; basedOn: string; changed: string[] },
           ),
     );
   }
@@ -97,18 +97,22 @@ export class ApprovalRequests implements OnModuleInit {
     });
   }
 
-  /** A dispute split paying the agent more than the set amount (D4, E7); anything smaller runs at once. */
+  /**
+   * Settling a dispute in a way that pays the agent more than the set amount (D4, E7), by a split or the
+   * standard way; anything smaller, and every other action, runs at once.
+   */
   async errandAction(admin: AdminContext, errandId: string, action: ErrandAction) {
-    if (action.split) {
-      const [errand] = await this.db.select().from(errands).where(eq(errands.id, errandId));
-      if (!errand) throw notFound('errand_not_found', 'Errand not found');
+    const { errand, toAgentKobo } = await this.errands.agentPayout(errandId, action);
+    if (action.event.startsWith('resolve_') && (action.split || toAgentKobo > 0)) {
       const limit = (await securityOf(this.countries, errand.countryCode)).disputeSplitApprovalKobo;
-      const toAgent = action.split.agentKobo + action.split.itemsToAgentKobo + action.split.chargeCustomerKobo;
-      if (limit === 0 || toAgent > limit) {
+      if (limit === 0 || toAgentKobo > limit) {
+        const how = action.split
+          ? `by splitting the money: ${formatNaira(toAgentKobo)} to the agent, ${formatNaira(action.split.jiffoKobo)} kept by Jiffo, the rest back to the customer`
+          : `as complete: ${formatNaira(toAgentKobo)} to the agent`;
         return this.approvals.submit(admin, {
           kind: 'dispute_split',
           payload: { errandId, action: { ...action } },
-          summary: `Settle errand ${ref(errandId)} by splitting the money: ${formatNaira(toAgent)} to the agent, ${formatNaira(action.split.jiffoKobo)} kept by Jiffo, the rest back to the customer`,
+          summary: `Settle errand ${ref(errandId)} ${how}`,
           note: action.note,
           countryCode: errand.countryCode,
           targetType: 'errand',
@@ -154,13 +158,22 @@ export class ApprovalRequests implements OnModuleInit {
    * A role change, or giving a disabled teammate their access back (D4). Disabling someone takes access
    * away, so it runs at once.
    */
-  async teamChange(admin: AdminContext, id: string, change: { role?: AdminRole; status?: 'active' | 'disabled' }) {
+  async teamChange(
+    admin: AdminContext,
+    id: string,
+    change: { role?: AdminRole; status?: 'active' | 'disabled' },
+  ): Promise<unknown> {
     if (id === admin.adminId) throw forbidden('own_account', "You can't change your own access. Ask another owner.");
     const [target] = await this.db.select().from(admins).where(eq(admins.id, id));
     if (!target) throw notFound('admin_not_found', 'Teammate not found');
     const newRole = change.role && change.role !== target.role ? change.role : null;
     const reEnabled = change.status === 'active' && target.status === 'disabled';
     if (!newRole && !reEnabled) return this.team.update(admin, id, change);
+    // Taking access away never waits: a disable sent with a role change happens now, the role change waits.
+    if (change.status === 'disabled') {
+      await this.team.update(admin, id, { status: 'disabled' });
+      return this.teamChange(admin, id, { role: change.role });
+    }
     const what = [
       newRole ? `make them ${ADMIN_ROLE_INFO[newRole].label}` : null,
       reEnabled ? 'give their access back' : null,
@@ -221,7 +234,7 @@ export class ApprovalRequests implements OnModuleInit {
     const fields = saved.changed.map((k) => info?.fields.find((f) => f.key === k)?.label ?? k);
     return this.approvals.submit(admin, {
       kind: 'provider_change',
-      payload: { action: 'save', category, provider, ...saved.approval },
+      payload: { action: 'save', category, provider, changed: saved.changed, ...saved.approval },
       summary: `Change ${info?.name ?? provider}'s settings while it's in use: ${fields.join(', ')}`,
       note: `Change ${info?.name ?? provider} settings`,
       targetType: 'provider',

@@ -310,7 +310,7 @@ What's in it:
 - suspending an agent with at least the set number of completed errands (Settings, Security)
 - switching a provider, or changing the keys of the one in use (an owner); the new keys wait sealed
 
-The person who asked can never approve their own request, and the database refuses it too. An approved change runs as the person who asked, and the audit log shows both. When nobody else holds the permission (a team with a single owner, say), the change goes ahead at once and is marked as approved by the person who asked. Requests lapse after the hours set in Settings, Security (default 72).
+The person who asked can never approve their own request, and the database refuses it too. An approved change runs as the person who asked, and the audit log shows both. When nobody else on the team has ever held the permission (a new team with a single owner, say), the change goes ahead at once and is marked as approved by the person who asked. Teammates who were disabled or reset still count, so nobody can go it alone by switching the others off; a team that has lost its other approvers adds one with `pnpm admin invite` on the server. Disabling a teammate always happens at once. Requests lapse after the hours set in Settings, Security (default 72).
 
 Support settles a dispute as complete or cancelled, the standard way or by splitting the money held: the fee between the agent, Jiffo and the customer, the item money between the agent and the customer, and, when the customer never locked the item amount, up to that amount from their wallet for the agent. Every action needs a reason, which stays in the timeline and the audit log and is never shown to the customer or agent.
 

@@ -24,7 +24,7 @@ import { SettingsAdminService } from './settings-admin.service';
 import { ProvidersAdminService } from './providers-admin.service';
 import { APPLICATION_STATUSES, ApplicationsAdminService } from './applications-admin.service';
 import { ID_CHECK_STATUSES, IdChecksAdminService } from './id-checks-admin.service';
-import { AGENT_TIERS, PROVIDER_CATEGORIES } from '@jiffo/shared';
+import { adminErrandPermission, AGENT_TIERS, PROVIDER_CATEGORIES } from '@jiffo/shared';
 import { forbidden, notFound } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
 import { AdminGuard, CurrentAdmin, Needs } from './admin.guard';
@@ -33,7 +33,7 @@ import { OverviewService } from './overview.service';
 import { TeamService } from './team.service';
 import { ApprovalRequests } from './approval-requests';
 import { ApprovalsService } from './approvals.service';
-import { can, ERRAND_EVENT_PERMISSION } from './permissions';
+import { can } from './permissions';
 import type { AdminRole } from '../db/schema';
 
 /** A change waiting for a second admin answers 202, with the request; one that ran answers as before. */
@@ -576,7 +576,7 @@ export class AdminController {
     @Body(new ZodBody(ActBody)) body: z.infer<typeof ActBody>,
   ) {
     // Stepping in needs errands; settling a dispute needs disputes.
-    if (!can(admin.role as AdminRole, ERRAND_EVENT_PERMISSION[body.event])) {
+    if (!can(admin.role as AdminRole, adminErrandPermission(body.event))) {
       throw forbidden('not_permitted', 'Your role does not allow this');
     }
     return held(res, await this.gated.errandAction(admin, id, body));

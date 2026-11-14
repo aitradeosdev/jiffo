@@ -241,6 +241,8 @@ export async function adminAs(t: TestApp, role: AdminRole) {
       role,
       status: 'active',
       totpEnabledAt: new Date(),
+      // A teammate who has signed in counts as someone who can approve (admin/approvals.service.ts).
+      lastSignInAt: new Date(),
     })
     .returning({ id: admins.id, name: admins.name });
   const token = randomUUID();
