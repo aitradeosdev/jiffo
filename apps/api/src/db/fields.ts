@@ -1,45 +1,40 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 import { customType } from 'drizzle-orm/pg-core';
 import { subKey } from '../common/keys';
+import { nameWords } from '../common/names';
+import { SecretBox } from '../providers/secret-box';
 
 /**
  * Personal details encrypted at rest (docs/security-plan.md, I6): legal names, dates of birth, home
- * addresses, emergency contacts and payout accounts. The database holds only AES-256-GCM ciphertext, bound
- * to its table and column so one value can't be moved into another; the API reads and writes them as plain
- * text. A value saved before encryption (no prefix) still reads as it was, and is encrypted on its next
- * write or by the backfill at startup (FieldsBackfill).
+ * addresses, emergency contacts and payout accounts. The database holds only AES-256-GCM ciphertext (a
+ * SecretBox under FIELD_KEY), bound to its table and column so one value can't be moved into another; the
+ * API reads and writes them as plain text. A value saved before encryption (no prefix) still reads as it
+ * was, and is encrypted on its next write or by the backfill at startup (FieldsBackfill).
  */
-const PREFIX = 'enc1:';
-let fieldKey: Buffer | null = null;
+const PREFIX = 'enc:';
+let box: SecretBox | null = null;
+let current: string | null = null;
 let indexKey: Buffer | null = null;
 
-/** Sets the key (FIELD_KEY) once, when the database module starts. */
+/** Sets the key (FIELD_KEY) when the database starts. One key per process: a second, different one is refused. */
 export function useFieldKey(key: Buffer) {
-  fieldKey = key;
+  const hex = key.toString('hex');
+  if (current === hex) return;
+  if (current) throw new Error('A different field key is already in use in this process');
+  current = hex;
+  box = new SecretBox(hex, 'jiffo personal fields v1');
   indexKey = subKey(key, 'jiffo field index');
 }
 
-function keyOrThrow() {
-  if (!fieldKey) throw new Error('The field key is not set: personal details cannot be read or written');
-  return fieldKey;
+function boxOrThrow() {
+  if (!box) throw new Error('The field key is not set: personal details cannot be read or written');
+  return box;
 }
 
-export function sealField(where: string, value: string): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', keyOrThrow(), iv);
-  cipher.setAAD(Buffer.from(where));
-  const body = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
-  return PREFIX + Buffer.concat([iv, cipher.getAuthTag(), body]).toString('base64url');
-}
+export const sealField = (where: string, value: string) => PREFIX + boxOrThrow().seal(value, where);
 
-export function openField(where: string, stored: string): string {
-  if (!stored.startsWith(PREFIX)) return stored;
-  const raw = Buffer.from(stored.slice(PREFIX.length), 'base64url');
-  const decipher = createDecipheriv('aes-256-gcm', keyOrThrow(), raw.subarray(0, 12));
-  decipher.setAAD(Buffer.from(where));
-  decipher.setAuthTag(raw.subarray(12, 28));
-  return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8');
-}
+export const openField = (where: string, stored: string) =>
+  stored.startsWith(PREFIX) ? boxOrThrow().open(stored.slice(PREFIX.length), where) : stored;
 
 export const isSealed = (stored: string | null) => !!stored && stored.startsWith(PREFIX);
 
@@ -51,22 +46,17 @@ export const encrypted = (table: string, column: string) =>
     fromDriver: (value) => openField(`${table}.${column}`, value),
   })(column);
 
-/** The words of a name, as the search index keeps them: upper case, letters only. */
-const nameWords = (name: string) =>
-  name
-    .toUpperCase()
-    .split(/[^A-Z]+/)
-    .filter((w) => w.length > 1);
-
 /**
- * A keyed hash of each word of a name, so support can still find someone by any whole word of their
- * legal name without the name being stored readable. Null for no name.
+ * A keyed hash of each word of a name (lower case, accents removed, as names are compared elsewhere), so
+ * support can still find someone by any whole word of their legal name without it being stored readable.
+ * Null for no name; an empty list for a name with no word to search by.
  */
 export function nameIndex(name: string | null | undefined): string[] | null {
-  if (!name) return null;
-  if (!indexKey) keyOrThrow();
-  const words = [...new Set(nameWords(name))];
-  return words.length ? words.map((w) => createHmac('sha256', indexKey!).update(w).digest('hex').slice(0, 32)) : null;
+  if (name === null || name === undefined) return null;
+  boxOrThrow();
+  return [...nameWords(name)]
+    .filter((w) => w.length > 1)
+    .map((w) => createHmac('sha256', indexKey!).update(w).digest('hex').slice(0, 32));
 }
 
 /** The index entries a search must all match: one per whole word typed. */

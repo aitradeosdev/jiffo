@@ -9,11 +9,12 @@ import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:cr
 export class SecretBox {
   private readonly key: Buffer;
 
-  constructor(masterKeyHex: string) {
+  /** `purpose` names what the box is for, so one master key never gives two boxes the same key. */
+  constructor(masterKeyHex: string, purpose = 'jiffo provider secrets v1') {
     const master = Buffer.from(masterKeyHex, 'hex');
     if (master.length !== 32) throw new Error('The secrets key must be 32 bytes, written as 64 hex characters');
     // Its own key for this purpose, so the master key could serve other uses without overlap.
-    this.key = Buffer.from(hkdfSync('sha256', master, Buffer.alloc(0), 'jiffo provider secrets v1', 32));
+    this.key = Buffer.from(hkdfSync('sha256', master, Buffer.alloc(0), purpose, 32));
   }
 
   seal(plaintext: string, binding: string): string {

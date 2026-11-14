@@ -264,8 +264,10 @@ export class MoneyAdminService {
         failureReason: payouts.failureReason,
         bankName: payoutAccounts.bankName,
         accountName: payoutAccounts.accountName,
-        // The full number is encrypted; its last four digits are kept readable for lists.
+        // The full number is encrypted; its last four digits are kept readable for lists, and worked out
+        // from the number for an account the backfill hasn't reached yet.
         accountLast4: payoutAccounts.accountLast4,
+        accountNumber: payoutAccounts.accountNumber,
         person: { id: users.id, firstName: users.firstName, lastName: users.lastName, phone: users.phone },
       })
       .from(payouts)
@@ -284,7 +286,11 @@ export class MoneyAdminService {
       )
       .orderBy(desc(payouts.createdAt), desc(payouts.id))
       .limit(query.limit + 1);
-    return this.page(rows, query.limit, 'payouts');
+    return this.page(
+      rows.map(({ accountNumber, ...r }) => ({ ...r, accountLast4: r.accountLast4 ?? accountNumber.slice(-4) })),
+      query.limit,
+      'payouts',
+    );
   }
 
   private personOrReference(text: string, reference: typeof deposits.reference | typeof payouts.reference) {

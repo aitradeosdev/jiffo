@@ -188,8 +188,9 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
     - `FIELD_KEY` encrypts personal details.
     - `ADMIN_TOKEN_SECRET` signs admin sign-in steps.
     - Production requires each, all different from each other and from the other secrets. In development they are derived from `PIN_KEY`.
+    - A deployment that already has data sets the first three to what `pnpm admin derived-keys` prints, so its fingerprints, authenticators and personal details stay readable. A new deployment generates fresh ones.
   - **Encrypted at rest:**
-    - What's encrypted: legal names, dates of birth, agents' home addresses and emergency contacts, and payout accounts (number and name).
+    - What's encrypted: legal names, dates of birth, agents' home addresses and emergency contacts, and payout accounts (number, name and the provider's recipient code, which can carry the number).
     - The database holds only AES-256-GCM ciphertext, bound to its table and column. The API reads and writes plain text.
     - Rows saved before this are encrypted in the background when a server starts.
   - **Searching by legal name:** support finds people by any whole word of their legal name, through a keyed index. Partial words still match the name in the app.

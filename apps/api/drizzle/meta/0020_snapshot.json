@@ -1,5 +1,5 @@
 {
-  "id": "de419e7c-9f82-408e-a8d4-d2143e63f360",
+  "id": "fd2d4924-d09f-4bab-bfee-897be973fc7c",
   "prevId": "209e196a-ea62-45ce-8d08-5097908c388b",
   "version": "7",
   "dialect": "postgresql",
@@ -714,6 +714,21 @@
           "isUnique": false,
           "concurrently": false,
           "method": "btree",
+          "with": {}
+        },
+        "agent_applications_legal_name_ix": {
+          "name": "agent_applications_legal_name_ix",
+          "columns": [
+            {
+              "expression": "legal_name_index",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
           "with": {}
         }
       },
@@ -1540,6 +1555,21 @@
           "isUnique": false,
           "concurrently": false,
           "method": "btree",
+          "with": {}
+        },
+        "customer_verifications_legal_name_ix": {
+          "name": "customer_verifications_legal_name_ix",
+          "columns": [
+            {
+              "expression": "legal_name_index",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
           "with": {}
         }
       },

@@ -607,7 +607,8 @@ export const payoutAccounts = pgTable(
     accountName: encrypted('payout_accounts', 'account_name').notNull(),
     /** The account number's last four digits, readable, for lists and support. */
     accountLast4: text('account_last4'),
-    recipientCode: text('recipient_code').notNull(),
+    /** Some providers' recipient codes carry the account number (Flutterwave's), so it is encrypted too. */
+    recipientCode: encrypted('payout_accounts', 'recipient_code').notNull(),
     createdAt: createdAt(),
     replacedAt: timestamp('replaced_at', { withTimezone: true }),
   },
@@ -915,6 +916,7 @@ export const agentApplications = pgTable(
       .on(t.idFingerprint)
       .where(sql`${t.idFingerprint} is not null`),
     index('agent_applications_status_idx').on(t.countryCode, t.status),
+    index('agent_applications_legal_name_ix').using('gin', t.legalNameIndex),
   ],
 );
 
@@ -963,6 +965,7 @@ export const customerVerifications = pgTable(
       .where(sql`${t.idFingerprint} is not null`),
     uniqueIndex('customer_verifications_reference_uq').on(t.provider, t.reference),
     index('customer_verifications_status_idx').on(t.status),
+    index('customer_verifications_legal_name_ix').using('gin', t.legalNameIndex),
   ],
 );
 

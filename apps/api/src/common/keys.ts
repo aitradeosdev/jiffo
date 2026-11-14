@@ -19,7 +19,7 @@ const derive = (key: Buffer, label: string) => Buffer.from(hkdfSync('sha256', ke
  * derived from PIN_KEY for that job alone.
  */
 export function keyFor(
-  config: Pick<AppConfig, 'PIN_KEY' | 'ID_FINGERPRINT_KEY' | 'ADMIN_TOTP_KEY' | 'FIELD_KEY'>,
+  config: Pick<AppConfig, 'PIN_KEY'> & Partial<Pick<AppConfig, 'ID_FINGERPRINT_KEY' | 'ADMIN_TOTP_KEY' | 'FIELD_KEY'>>,
   job: KeyJob,
 ): Buffer {
   const own = config[SETTING[job]];
