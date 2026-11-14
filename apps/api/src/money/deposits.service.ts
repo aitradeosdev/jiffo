@@ -10,11 +10,12 @@ import { CountriesService } from '../countries/countries.service';
 import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { AuthContext } from '../auth/auth.types';
-import { notFound, tooMany, unprocessable } from '../common/errors';
+import { conflict, notFound, tooMany, unprocessable } from '../common/errors';
 import { nameWords, plainName } from '../common/names';
 import { ENV_ADAPTERS, type Adapters } from '../providers/env-adapters';
 import { ProvidersService } from '../providers/providers.service';
 import { CustomerIdentityService } from '../identity/customer-identity.service';
+import { FixedAccountsService } from './fixed-accounts.service';
 import { LedgerService } from './ledger.service';
 
 const MINUTE_MS = 60_000;
@@ -29,7 +30,9 @@ export const depositView = (d: DepositRow) => ({
   id: d.id,
   status: d.status,
   /** The account number has closed. A transfer that still arrives is credited all the same. */
-  expired: d.status === 'pending' && d.expiresAt.getTime() < Date.now(),
+  expired: d.status === 'pending' && !!d.expiresAt && d.expiresAt.getTime() < Date.now(),
+  /** one_time: to an account number issued for this top-up. fixed: into the customer's own account. */
+  method: d.method,
   amountKobo: d.amountKobo,
   paidKobo: d.paidKobo,
   accountNumber: d.accountNumber,
@@ -47,7 +50,10 @@ function senderMatches(sender: string, firstName: string | null, lastName: strin
   return names.length > 0 && names.some((n) => words.has(n));
 }
 
-/** Top-ups by bank transfer to a one-time account number. The wallet is credited only after the provider confirms. */
+/**
+ * Top-ups by bank transfer: to a one-time account number issued for the amount, or to the customer's own
+ * fixed account number. The wallet is credited only after the provider confirms.
+ */
 @Injectable()
 export class DepositsService {
   private readonly logger = new Logger(DepositsService.name);
@@ -63,6 +69,7 @@ export class DepositsService {
     @Inject(ENV_ADAPTERS) env: Adapters,
     private readonly providers: ProvidersService,
     private readonly customerIdentity: CustomerIdentityService,
+    private readonly fixedAccounts: FixedAccountsService,
   ) {
     // The fake bank of development settles top-ups by itself; it then tells this service, as a webhook would.
     if (env.payments instanceof FakePaymentsAdapter) {
@@ -78,6 +85,9 @@ export class DepositsService {
     // Money comes in only from verified customers.
     await this.customerIdentity.assertVerified(auth.userId);
     const { settings } = await this.countries.currentSettings(auth.countryCode);
+    if (!settings.topUps.oneTimeAccount) {
+      throw conflict('one_time_accounts_off', 'Add money by transfer to your own account number instead');
+    }
     const { minDepositKobo, maxDepositKobo } = settings.limits;
     if (amountKobo < minDepositKobo || (maxDepositKobo !== null && amountKobo > maxDepositKobo)) {
       throw unprocessable('deposit_amount_out_of_range', 'Choose a different amount', {
@@ -166,12 +176,7 @@ export class DepositsService {
     if (status.currency !== currency)
       throw new Error(`Deposit ${reference} arrived in ${status.currency}, expected ${currency}`);
 
-    const [customer] = await this.db
-      .select({ firstName: users.firstName, lastName: users.lastName })
-      .from(users)
-      .where(eq(users.id, deposit.userId));
-    const mismatch =
-      !!status.senderName && !senderMatches(status.senderName, customer?.firstName ?? null, customer?.lastName ?? null);
+    const mismatch = await this.senderMismatch(deposit.userId, status.senderName);
 
     const credited = await this.db.transaction(async (tx) => {
       const [locked] = await tx.select().from(deposits).where(eq(deposits.id, deposit.id)).for('update');
@@ -208,13 +213,102 @@ export class DepositsService {
     });
     if (!credited) return (await this.db.select().from(deposits).where(eq(deposits.id, deposit.id)))[0] ?? null;
 
-    this.realtime.toUser(deposit.userId, 'customer', 'wallet.updated', { reason: 'deposit', depositId: deposit.id });
-    await this.push.notifyUser(deposit.userId, 'customer', {
-      title: 'Top-up received',
-      body: `${formatNaira(status.amountKobo)} is in your Jiffo wallet.`,
-      data: { type: 'wallet.deposit', depositId: deposit.id },
-    });
+    await this.tell(deposit.userId, deposit.id, status.amountKobo);
     return credited;
+  }
+
+  /**
+   * A transfer into a customer's fixed account, as a provider's webhook tells of it. Re-read from the
+   * provider, credited once, whatever the amount: the money has already arrived. Throws while the provider
+   * doesn't show it as paid, so the webhook is delivered again.
+   */
+  async recordFixedPayment(provider: string, paymentRef: string): Promise<DepositRow | null> {
+    const reference = `${provider}:${paymentRef}`;
+    const [seen] = await this.db.select().from(deposits).where(eq(deposits.reference, reference));
+    if (seen) return seen;
+
+    const payments = this.providers.named('payments', provider);
+    if (!payments?.verifyFixedPayment) throw new Error(`${provider} can't confirm fixed account payments`);
+    const status = await payments.verifyFixedPayment(paymentRef);
+    if (status.status === 'pending') throw new Error(`Payment ${reference} not visible as paid yet`);
+    if (status.status !== 'success') {
+      this.logger.warn(`Fixed account payment ${reference} is ${status.status}; nothing credited`);
+      return null;
+    }
+    const account = await this.fixedAccounts.findForPayment(provider, status);
+    // Kept as not done: money arrived for an account we don't know, which someone must look at.
+    if (!account) throw new Error(`Payment ${reference} is for an unknown fixed account`);
+    const { currency } = await this.countries.basics(account.countryCode);
+    if (status.currency !== currency) {
+      throw new Error(`Payment ${reference} arrived in ${status.currency}, expected ${currency}`);
+    }
+    const mismatch = await this.senderMismatch(account.userId, status.senderName);
+    const now = new Date();
+
+    const credited = await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(deposits)
+        .values({
+          userId: account.userId,
+          countryCode: account.countryCode,
+          provider,
+          reference,
+          method: 'fixed',
+          fixedAccountId: account.id,
+          status: 'succeeded',
+          amountKobo: status.amountKobo,
+          paidKobo: status.amountKobo,
+          feesKobo: status.feesKobo,
+          accountNumber: account.accountNumber ?? '',
+          accountName: account.accountName ?? '',
+          bankName: account.bankName ?? '',
+          expiresAt: null,
+          senderName: status.senderName,
+          senderBank: status.senderBank,
+          senderMismatch: mismatch,
+          completedAt: now,
+        })
+        .onConflictDoNothing({ target: deposits.reference })
+        .returning();
+      if (!row) return null;
+      await this.ledger.post(tx, {
+        key: `deposit:${row.id}`,
+        kind: 'fixed_deposit',
+        countryCode: account.countryCode,
+        currency,
+        data: { reference, provider, fixedAccountId: account.id },
+        movements: [
+          {
+            debit: { type: 'provider_cash' },
+            credit: { type: 'customer_wallet', ownerId: account.userId },
+            amountKobo: status.amountKobo,
+          },
+          { debit: { type: 'provider_fees' }, credit: { type: 'provider_cash' }, amountKobo: status.feesKobo },
+        ],
+      });
+      return row;
+    });
+    if (!credited) return (await this.db.select().from(deposits).where(eq(deposits.reference, reference)))[0] ?? null;
+    await this.tell(account.userId, credited.id, status.amountKobo);
+    return credited;
+  }
+
+  private async senderMismatch(userId: string, senderName: string | null) {
+    if (!senderName) return false;
+    const [customer] = await this.db
+      .select({ firstName: users.firstName, lastName: users.lastName })
+      .from(users)
+      .where(eq(users.id, userId));
+    return !senderMatches(senderName, customer?.firstName ?? null, customer?.lastName ?? null);
+  }
+
+  private async tell(userId: string, depositId: string, amountKobo: number) {
+    this.realtime.toUser(userId, 'customer', 'wallet.updated', { reason: 'deposit', depositId });
+    await this.push.notifyUser(userId, 'customer', {
+      title: 'Top-up received',
+      body: `${formatNaira(amountKobo)} is in your Jiffo wallet.`,
+      data: { type: 'wallet.deposit', depositId },
+    });
   }
 
   /** For reconciliation: pending deposits whose account number has expired are checked again. */

@@ -10,12 +10,32 @@ export const metadata: Metadata = { title: 'Money' };
 interface Summary {
   days: number;
   held: { customerWalletsKobo: number; agentAvailableKobo: number; agentHeldKobo: number; escrowKobo: number };
-  platform: { providerCashKobo: number; revenueKobo: number; providerFeesKobo: number; inTransitKobo: number };
+  platform: {
+    providerCashKobo: number;
+    revenueKobo: number;
+    providerFeesKobo: number;
+    inTransitKobo: number;
+    netRevenueKobo: number;
+  };
+  earnings: { revenueKobo: number; providerChargesKobo: number; netRevenueKobo: number };
   revenue: Array<{ kind: string; label: string; kobo: number }>;
   providerCharges: Array<{ kind: string; label: string; kobo: number }>;
-  topUps: { count: number; kobo: number; feesKobo: number; senderMismatch: number };
+  topUps: {
+    count: number;
+    kobo: number;
+    feesKobo: number;
+    senderMismatch: number;
+    oneTime: TopUpMethod;
+    fixed: TopUpMethod;
+  };
+  fixedAccounts: { issued: number; issueCostKobo: number; active: number; pending: number; failed: number };
   withdrawals: { count: number; kobo: number; failed: number; pending: number };
-  daily: Array<{ day: string; revenueKobo: number; chargesKobo: number }>;
+  daily: Array<{ day: string; revenueKobo: number; chargesKobo: number; netKobo: number }>;
+}
+interface TopUpMethod {
+  count: number;
+  kobo: number;
+  feesKobo: number;
 }
 
 const PERIODS = [7, 30, 90];
@@ -26,7 +46,6 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   const country = await getCountry();
   const s = await api<Summary>(`/admin/money/summary?country=${country.code}&days=${days}`);
   const naira = (kobo: number) => money(kobo, country.currency);
-  const sum = (list: Array<{ kobo: number }>) => list.reduce((t, r) => t + r.kobo, 0);
   const owed = s.held.customerWalletsKobo + s.held.agentAvailableKobo + s.held.agentHeldKobo + s.held.escrowKobo;
 
   return (
@@ -49,6 +68,12 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
             <Stat label="Revenue" value={naira(s.platform.revenueKobo)} />
             <Stat label="Paid to the payment provider" value={naira(s.platform.providerFeesKobo)} />
             <Stat label="Withdrawals on the way" value={naira(s.platform.inTransitKobo)} />
+            <Stat
+              label="Net revenue"
+              value={naira(s.platform.netRevenueKobo)}
+              tone={s.platform.netRevenueKobo < 0 ? 'danger' : undefined}
+              hint="Revenue less what the provider was paid"
+            />
           </div>
         </Card>
       </div>
@@ -68,6 +93,23 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
         ))}
       </div>
 
+      <Card title={`What Jiffo made, last ${days} days`}>
+        <div className="grid grid-cols-2 gap-5 sm:grid-cols-3">
+          <Stat label="Revenue" value={naira(s.earnings.revenueKobo)} hint="Fees and commission earned" />
+          <Stat
+            label="Payment provider costs"
+            value={naira(s.earnings.providerChargesKobo)}
+            hint="Top-up and transfer fees, account numbers issued"
+          />
+          <Stat
+            label="Net revenue"
+            value={naira(s.earnings.netRevenueKobo)}
+            tone={s.earnings.netRevenueKobo < 0 ? 'danger' : undefined}
+            hint="Revenue less those costs"
+          />
+        </div>
+      </Card>
+
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title={`Revenue, last ${days} days`}>
           <ul className="num space-y-2 text-[15px]">
@@ -80,7 +122,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
             ))}
             <li className="flex justify-between gap-3 border-t border-line pt-2 font-bold">
               <span>Total</span>
-              <span>{naira(sum(s.revenue))}</span>
+              <span>{naira(s.earnings.revenueKobo)}</span>
             </li>
           </ul>
         </Card>
@@ -95,17 +137,18 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
             ))}
             <li className="flex justify-between gap-3 border-t border-line pt-2 font-bold">
               <span>Total</span>
-              <span>{naira(sum(s.providerCharges))}</span>
+              <span>{naira(s.earnings.providerChargesKobo)}</span>
             </li>
           </ul>
         </Card>
       </div>
 
-      <Card title={`Revenue by day, last ${days} days`}>
+      <Card title={`Net revenue by day, last ${days} days`}>
+        {/* A day that cost more than it earned has no column; its tooltip shows the loss. */}
         <ColumnChart
-          title={`Revenue by day, last ${days} days`}
-          empty="No revenue in this period"
-          columns={s.daily.map((d) => ({ label: shortDay(d.day), value: d.revenueKobo, shown: naira(d.revenueKobo) }))}
+          title={`Net revenue by day, last ${days} days`}
+          empty="Nothing earned after costs in this period"
+          columns={s.daily.map((d) => ({ label: shortDay(d.day), value: d.netKobo, shown: naira(d.netKobo) }))}
         />
       </Card>
 
@@ -124,6 +167,16 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
               label="Fees Jiffo paid"
               value={naira(s.topUps.feesKobo)}
               hint="The provider's charge, not passed on"
+            />
+            <Stat
+              label="To one-time account numbers"
+              value={naira(s.topUps.oneTime.kobo)}
+              hint={`${count(s.topUps.oneTime.count)} top-ups, ${naira(s.topUps.oneTime.feesKobo)} in fees`}
+            />
+            <Stat
+              label="To own account numbers"
+              value={naira(s.topUps.fixed.kobo)}
+              hint={`${count(s.topUps.fixed.count)} transfers, ${naira(s.topUps.fixed.feesKobo)} in fees`}
             />
             <Stat
               label="Sender name differed"
@@ -152,6 +205,28 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
           </div>
         </Card>
       </div>
+
+      <Card title="Customers' own account numbers">
+        <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
+          <Stat
+            label="In use"
+            value={count(s.fixedAccounts.active)}
+            hint={`${count(s.fixedAccounts.pending)} being issued`}
+          />
+          <Stat label={`Issued, last ${days} days`} value={count(s.fixedAccounts.issued)} />
+          <Stat
+            label={`Cost to issue, last ${days} days`}
+            value={naira(s.fixedAccounts.issueCostKobo)}
+            hint="The fee set on the provider, per account"
+          />
+          <Stat
+            label={`Couldn't be issued, last ${days} days`}
+            value={count(s.fixedAccounts.failed)}
+            tone={s.fixedAccounts.failed ? 'warn' : undefined}
+            hint="Usually a BVN that didn't match"
+          />
+        </div>
+      </Card>
     </div>
   );
 }

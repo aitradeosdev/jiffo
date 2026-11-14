@@ -7,6 +7,7 @@ import { providerEvents } from '../db/schema';
 import { badRequest, notFound, unauthorized } from '../common/errors';
 import { ProvidersService } from '../providers/providers.service';
 import { DepositsService } from './deposits.service';
+import { FixedAccountsService } from './fixed-accounts.service';
 import { PayoutsService } from './payouts.service';
 
 /**
@@ -23,6 +24,7 @@ export class WebhooksController {
     private readonly providers: ProvidersService,
     private readonly deposits: DepositsService,
     private readonly payouts: PayoutsService,
+    private readonly fixedAccounts: FixedAccountsService,
   ) {}
 
   /**
@@ -56,6 +58,9 @@ export class WebhooksController {
         // provider delivers the webhook again later instead of it being kept as handled.
         if (deposit?.status === 'pending') throw new Error(`Deposit ${event.reference} not visible as paid yet`);
       }
+      // A transfer into a customer's own account number; recordFixedPayment throws while it isn't confirmed.
+      if (event.kind === 'fixed_deposit') await this.deposits.recordFixedPayment(provider, event.paymentRef);
+      if (event.kind === 'fixed_account') await this.fixedAccounts.refreshByProviderRef(provider, event.providerRef);
       if (event.kind === 'transfer') await this.payouts.sync(event.reference);
     } catch (error) {
       const message = (error as Error).message;

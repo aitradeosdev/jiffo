@@ -60,6 +60,8 @@ export class OverviewService {
             where country_code = ${countryCode} and status = 'completed' and completed_at >= ${today}) as fees,
           (select coalesce(-sum(p.amount), 0) from postings p join ledger_accounts a on a.id = p.account_id
             where a.type = 'platform_revenue' and a.country_code = ${countryCode} and p.created_at >= ${today}) as revenue,
+          (select coalesce(sum(p.amount), 0) from postings p join ledger_accounts a on a.id = p.account_id
+            where a.type = 'provider_fees' and a.country_code = ${countryCode} and p.created_at >= ${today}) as costs,
           (select count(*) from deposits
             where country_code = ${countryCode} and status = 'succeeded' and completed_at >= ${today}) as top_up_count,
           (select coalesce(sum(paid_kobo), 0) from deposits
@@ -100,7 +102,11 @@ export class OverviewService {
           (select coalesce(-sum(p.amount), 0) from postings p join ledger_accounts a on a.id = p.account_id
             where a.type = 'platform_revenue' and a.country_code = ${countryCode}
             and p.created_at >= (d.day at time zone ${tz})
-            and p.created_at < ((d.day + interval '1 day') at time zone ${tz})) as revenue
+            and p.created_at < ((d.day + interval '1 day') at time zone ${tz})) as revenue,
+          (select coalesce(sum(p.amount), 0) from postings p join ledger_accounts a on a.id = p.account_id
+            where a.type = 'provider_fees' and a.country_code = ${countryCode}
+            and p.created_at >= (d.day at time zone ${tz})
+            and p.created_at < ((d.day + interval '1 day') at time zone ${tz})) as costs
         from days d order by d.day`),
       this.db
         .select()
@@ -126,6 +132,10 @@ export class OverviewService {
       today: {
         errandFeesKobo: num(money.fees),
         revenueKobo: num(money.revenue),
+        /** Everything payment providers charged today: top-up and transfer fees, own account numbers issued. */
+        providerCostsKobo: num(money.costs),
+        /** Revenue less those costs: what Jiffo actually made today. */
+        netRevenueKobo: num(money.revenue) - num(money.costs),
         topUps: num(money.top_up_count),
         topUpsKobo: num(money.top_ups),
         /** What the payment provider charged on top-ups, which Jiffo pays instead of the customer. */
@@ -148,7 +158,13 @@ export class OverviewService {
         /** Customers' ID checks the provider sent to support. */
         idChecks: num(attention.id_checks),
       },
-      week: week.rows.map((r) => ({ day: String(r.day), completed: num(r.completed), revenueKobo: num(r.revenue) })),
+      week: week.rows.map((r) => ({
+        day: String(r.day),
+        completed: num(r.completed),
+        revenueKobo: num(r.revenue),
+        costsKobo: num(r.costs),
+        netRevenueKobo: num(r.revenue) - num(r.costs),
+      })),
       reconciliation: run
         ? {
             at: run.createdAt,

@@ -13,6 +13,14 @@ import {
   type ProviderState,
 } from './actions';
 
+const FIXED_ACCOUNTS = {
+  nothing: 'Issues one to each customer who asks.',
+  bvn: 'Issues one to each customer who asks, once they give their BVN.',
+  bvn_and_bank:
+    'Issues one once the customer gives their BVN and a bank account in their name, which it checks first (usually within minutes).',
+  unsupported: "Doesn't issue them, so customers top up with one-time account numbers only.",
+} as const;
+
 export interface ProviderView {
   key: string;
   name: string;
@@ -22,6 +30,8 @@ export interface ProviderView {
   idTypes: string[] | null;
   bvnAlongside: boolean | null;
   idChosenOnPage: boolean | null;
+  /** Payments providers: whether it issues customers their own account number, and what the customer gives. */
+  fixedAccounts: 'nothing' | 'bvn' | 'bvn_and_bank' | 'unsupported' | null;
   webhookUrl: string | null;
   webhookHint: string | null;
   /** Its callback address carries a secret token, which can be replaced. */
@@ -93,6 +103,12 @@ export function ProviderCard({
             ? "An agent's BVN can be checked alongside their ID."
             : "Can't check a BVN alongside another ID, so when agents must give their BVN, it is their ID."}
           {p.idChosenOnPage ? ' People pick their ID on its page, from those set up in its dashboard.' : ''}
+        </p>
+      ) : null}
+      {p.fixedAccounts ? (
+        <p className="mt-2 text-[13px] text-ink-2">
+          <span className="font-semibold">Own account numbers: </span>
+          {FIXED_ACCOUNTS[p.fixedAccounts]}
         </p>
       ) : null}
       {updated ? (

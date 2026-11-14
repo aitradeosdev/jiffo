@@ -88,6 +88,24 @@ export const SECTIONS: Section[] = [
     ],
   },
   {
+    title: 'Adding money',
+    about: 'How customers top up their wallet by bank transfer. Keep at least one on.',
+    fields: [
+      {
+        path: 'topUps.oneTimeAccount',
+        label: 'One-time account numbers',
+        kind: 'bool',
+        help: 'The customer chooses an amount and gets an account number for that transfer, open for the time set under Timers.',
+      },
+      {
+        path: 'topUps.fixedAccount',
+        label: 'Own account number for each customer',
+        kind: 'bool',
+        help: 'Issued once by the payments provider, after the customer gives their BVN; any transfer to it lands in their wallet. Only offered when the provider in use issues them (see Providers). What issuing costs is counted under Money.',
+      },
+    ],
+  },
+  {
     title: 'Limits',
     about: 'Caps that protect new accounts and the payment flows.',
     fields: [

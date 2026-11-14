@@ -504,11 +504,20 @@ export const deposits = pgTable(
     status: text('status', { enum: ['pending', 'succeeded', 'failed'] })
       .notNull()
       .default('pending'),
+    /**
+     * one_time: to an account number issued for this top-up, for its amount. fixed: a transfer into the
+     * customer's own fixed account, recorded when it arrives.
+     */
+    method: text('method', { enum: ['one_time', 'fixed'] })
+      .notNull()
+      .default('one_time'),
+    fixedAccountId: uuid('fixed_account_id').references(() => fixedAccounts.id),
     amountKobo: kobo('amount_kobo').notNull(),
     accountNumber: text('account_number').notNull(),
     accountName: text('account_name').notNull(),
     bankName: text('bank_name').notNull(),
-    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** When a one-time account number stops taking money; none for a fixed account. */
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
     /** What the provider says arrived, which is what the wallet is credited with. */
     paidKobo: kobo('paid_kobo'),
     feesKobo: kobo('fees_kobo'),
@@ -524,6 +533,45 @@ export const deposits = pgTable(
     index('deposits_user_idx').on(t.userId, t.createdAt),
     // The admin list: a country's top-ups, newest first.
     index('deposits_country_created_idx').on(t.countryCode, t.createdAt, t.id),
+  ],
+);
+
+/**
+ * A customer's own fixed account number at a payments provider: any transfer to it lands in their wallet.
+ * One per provider; the customer's BVN and bank account, which providers ask for to issue one, are passed
+ * on and never kept.
+ */
+export const fixedAccounts = pgTable(
+  'fixed_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    countryCode: char('country_code', { length: 2 })
+      .notNull()
+      .references(() => countries.code),
+    provider: text('provider').notNull(),
+    /** Our reference for the customer at the provider: jva-<user id>. */
+    ownerRef: text('owner_ref').notNull(),
+    /** The provider's own reference for the account (Paystack's customer code, Flutterwave's order_ref). */
+    providerRef: text('provider_ref'),
+    /** pending: the provider is still issuing it (identifying the customer). failed: it couldn't; they can try again. */
+    status: text('status', { enum: ['pending', 'active', 'failed'] }).notNull(),
+    accountNumber: text('account_number'),
+    accountName: text('account_name'),
+    bankName: text('bank_name'),
+    failureReason: text('failure_reason'),
+    /** What the provider charged for issuing it, booked as a cost when it became active. */
+    issueFeeKobo: kobo('issue_fee_kobo').notNull().default(0),
+    activatedAt: timestamp('activated_at', { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('fixed_accounts_user_provider_uq').on(t.userId, t.provider),
+    index('fixed_accounts_provider_ref_idx').on(t.provider, t.providerRef),
+    index('fixed_accounts_country_activated_idx').on(t.countryCode, t.activatedAt),
   ],
 );
 

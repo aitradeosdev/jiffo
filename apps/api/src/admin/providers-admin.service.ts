@@ -79,6 +79,8 @@ export class ProvidersAdminService {
             idTypes: p.idTypes ? p.idTypes.map((t) => ID_TYPES[t].name) : null,
             bvnAlongside: p.bvnAlongside ?? null,
             idChosenOnPage: p.idChosenOnPage ?? null,
+            /** Payments providers: whether it issues customers their own account number, and what it needs for one. */
+            fixedAccounts: category === 'payments' ? (p.fixedAccounts ?? 'unsupported') : null,
             // A callback address with a token exists once the settings are saved.
             webhookUrl:
               p.webhookPath && (!p.webhookPath.includes('{token}') || row?.callbackToken)

@@ -55,15 +55,26 @@ export interface ProviderInfo {
   bvnAlongside?: boolean;
   /** Identity providers: the person picks their ID on the provider's own page, set up in its dashboard. */
   idChosenOnPage?: boolean;
+  /**
+   * Payments providers that can give each customer their own fixed account number, and what the customer
+   * gives for it (passed to the provider, never kept).
+   */
+  fixedAccounts?: FixedAccountNeeds;
 }
+
+/** What a customer gives to get their own fixed account number: their BVN, and a bank account in their name. */
+export type FixedAccountNeeds = 'nothing' | 'bvn' | 'bvn_and_bank';
 
 export const PROVIDERS: ProviderInfo[] = [
   {
     key: 'paystack',
     category: 'payments',
     name: 'Paystack',
-    about: 'Dedicated bank-transfer accounts for top-ups, and transfers for payouts.',
+    about:
+      "One-time bank-transfer account numbers for top-ups, each customer's own dedicated account number, and transfers for payouts.",
     webhookPath: '/v1/webhooks/paystack',
+    // Paystack identifies the customer (BVN and a bank account in their name) before a dedicated account.
+    fixedAccounts: 'bvn_and_bank',
     fields: [
       {
         key: 'secretKey',
@@ -73,14 +84,33 @@ export const PROVIDERS: ProviderInfo[] = [
         placeholder: 'sk_live_…',
         hint: 'Settings, API keys and webhooks, in the Paystack dashboard.',
       },
+      {
+        key: 'dedicatedBank',
+        label: 'Bank for dedicated accounts',
+        secret: false,
+        required: false,
+        placeholder: 'wema-bank',
+        hint: "The bank's slug Paystack issues dedicated accounts from (Dedicated accounts, in the dashboard). Test keys always use Paystack's test bank.",
+      },
+      {
+        key: 'fixedAccountFee',
+        label: 'Fee per fixed account issued (₦)',
+        secret: false,
+        required: false,
+        placeholder: '0',
+        hint: "Only if the provider charges for each customer's own account number. Counted as a cost when one is issued.",
+      },
     ],
   },
   {
     key: 'flutterwave',
     category: 'payments',
     name: 'Flutterwave',
-    about: 'One-time bank-transfer account numbers for top-ups, and transfers for payouts.',
+    about:
+      "One-time bank-transfer account numbers for top-ups, each customer's own static account number, and transfers for payouts.",
     webhookPath: '/v1/webhooks/flutterwave',
+    // A static account needs the customer's BVN.
+    fixedAccounts: 'bvn',
     webhookHint:
       'Set it as the webhook URL in Settings, Webhooks, in the Flutterwave dashboard, with the same secret hash as below.',
     fields: [
@@ -106,6 +136,14 @@ export const PROVIDERS: ProviderInfo[] = [
         required: true,
         placeholder: 'Jiffo',
         hint: 'What customers see as the account name when they transfer.',
+      },
+      {
+        key: 'fixedAccountFee',
+        label: 'Fee per fixed account issued (₦)',
+        secret: false,
+        required: false,
+        placeholder: '0',
+        hint: "Only if the provider charges for each customer's own account number. Counted as a cost when one is issued.",
       },
     ],
   },
