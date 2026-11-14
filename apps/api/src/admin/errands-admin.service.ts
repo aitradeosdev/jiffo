@@ -312,7 +312,7 @@ export class ErrandsAdminService {
       entries.set(j.id, entry);
     }
 
-    const { pinCipher: _pin, ...fields } = errand;
+    const { pinCipher: _pin, pinHmac: _pinCheck, ...fields } = errand;
     return {
       errand: fields,
       customer: byId.get(errand.customerId) ?? null,

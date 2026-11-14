@@ -45,8 +45,8 @@ export function decrypt(keyHex: string, sealed: string): string {
 }
 
 /**
- * A hand-off PIN's own key, derived from the master key and the errand: one errand's key opens no other,
- * and the master key alone opens no PIN.
+ * A hand-off PIN's own key, derived from the master key and the errand. One errand's key opens no other
+ * errand's PIN; the master key, with the errand's id, still opens them all, so it stays the secret to keep.
  */
 export const errandPinKey = (masterHex: string, errandId: string) =>
   Buffer.from(

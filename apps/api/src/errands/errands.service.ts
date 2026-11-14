@@ -667,6 +667,7 @@ export class ErrandsService implements OnModuleInit {
       await this.uploads.assertUploaded([photo], { ownerId: auth.userId, errandId, purposes: ['dropoff_photo'] });
     }
 
+    const { settings: live } = await this.countries.currentSettings(auth.countryCode);
     const outcome = await this.db.transaction(async (tx) => {
       const [errand] = await tx.select().from(errands).where(eq(errands.id, errandId)).for('update');
       const role = errand ? this.roleFor(errand, auth) : null;
@@ -679,15 +680,16 @@ export class ErrandsService implements OnModuleInit {
       const actor = role === 'customer' ? 'customer' : 'agent';
       const to = nextState(errand.status, input.event, transitionContext(errand, actor));
       const event = input.event as ErrandEvent;
-      const effect = await this.effectOf(tx, event, errand, auth, input.data, settings, money.tier);
+      const effect = await this.effectOf(tx, event, errand, auth, input.data, settings, money.tier, live);
       if (effect instanceof PinLock) {
         // Frozen for support: both escrows stay held until support decides.
+        const record = { attempts: effect.attempts };
         const frozen = await this.write(
           tx,
           errand,
           'pin_locked',
-          'disputed',
-          { patch: { pinAttempts: effect.attempts }, record: { attempts: effect.attempts } },
+          nextState(errand.status, 'pin_locked', transitionContext(errand, 'system')),
+          { patch: { pinAttempts: effect.attempts }, record },
           'system',
           null,
         );
@@ -699,7 +701,7 @@ export class ErrandsService implements OnModuleInit {
             before: errand,
             after: frozen,
             event: 'pin_locked',
-            record: {},
+            record,
             settings,
           } satisfies TransitionResult,
         };
@@ -828,6 +830,27 @@ export class ErrandsService implements OnModuleInit {
     }
   }
 
+  /** One line on an errand's record. Only write() changes the errand itself. */
+  private async logEvent(
+    tx: Tx,
+    errand: ErrandRow,
+    event: string,
+    to: ErrandState,
+    actorRole: 'customer' | 'agent' | 'system' | 'admin',
+    actorId: string | null,
+    data: Record<string, unknown>,
+  ) {
+    await tx.insert(errandEvents).values({
+      errandId: errand.id,
+      event,
+      fromStatus: errand.status,
+      toStatus: to,
+      actorRole,
+      actorId,
+      data,
+    });
+  }
+
   private async write(
     tx: Tx,
     errand: ErrandRow,
@@ -848,20 +871,12 @@ export class ErrandsService implements OnModuleInit {
         ...(to === 'completed' ? { completedAt: now } : {}),
         ...(to === 'cancelled' ? { cancelledAt: now } : {}),
         // Once the errand is over, nobody needs its PIN again.
-        ...(TERMINAL_STATES.has(to) ? { pinCipher: null } : {}),
+        ...(TERMINAL_STATES.has(to) ? { pinCipher: null, pinHmac: null } : {}),
       })
       .where(and(eq(errands.id, errand.id), eq(errands.version, errand.version)))
       .returning();
     if (!after) throw conflict('errand_changed', 'This errand changed. Refresh and try again.');
-    await tx.insert(errandEvents).values({
-      errandId: errand.id,
-      event,
-      fromStatus: errand.status,
-      toStatus: to,
-      actorRole,
-      actorId,
-      data: effect.record,
-    });
+    await this.logEvent(tx, errand, event, to, actorRole, actorId, effect.record);
     return after;
   }
 
@@ -887,6 +902,8 @@ export class ErrandsService implements OnModuleInit {
     data: Record<string, unknown>,
     settings: CountrySettings,
     tier: AgentTier,
+    /** The country's settings now: the security limits apply as admin sets them, also to errands already made. */
+    live: CountrySettings,
   ): Promise<EventEffect | ApiError | PinLock> {
     const now = new Date();
     const releaseAgent: Patch = {
@@ -910,15 +927,16 @@ export class ErrandsService implements OnModuleInit {
         if (agent?.status !== 'active')
           throw forbidden('account_suspended', 'This account is suspended. Contact support.');
         if (!agent.firstName) throw conflict('profile_incomplete', 'Add your name before accepting errands');
-        // One accept at a time per agent, so the cap on errands held at once can't be raced.
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'agent-accept:' + auth.userId}))`);
-        const [held] = await tx
-          .select({ n: sql<number>`count(*)::int` })
-          .from(errands)
-          .where(and(eq(errands.agentId, auth.userId), inArray(errands.status, [...AGENT_OUT_STATES])));
-        const cap = settings.security.maxActiveErrandsPerAgent;
-        if (cap > 0 && (held?.n ?? 0) >= cap) {
-          throw conflict('too_many_errands', 'Finish an errand you have before taking another');
+        const cap = live.security.maxActiveErrandsPerAgent;
+        if (cap > 0) {
+          // One accept at a time per agent, so the cap on errands held at once can't be raced.
+          await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'agent-accept:' + auth.userId}))`);
+          const [held] = await tx
+            .select({ n: sql<number>`count(*)::int` })
+            .from(errands)
+            .where(and(eq(errands.agentId, auth.userId), inArray(errands.status, [...AGENT_OUT_STATES])));
+          if ((held?.n ?? 0) >= cap)
+            throw conflict('too_many_errands', 'Finish an errand you have before taking another');
         }
         const pin = numericCode(4);
         const key = errandPinKey(this.config.PIN_KEY, errand.id);
@@ -951,7 +969,7 @@ export class ErrandsService implements OnModuleInit {
               gt(errandEvents.createdAt, new Date(now.getTime() - MINUTE_MS)),
             ),
           );
-        if ((recent?.n ?? 0) >= settings.security.offersPerMinute) {
+        if ((recent?.n ?? 0) >= live.security.offersPerMinute) {
           throw tooMany('too_many_offers', 'Wait a minute before sending another price');
         }
         if (amountKobo === errand.feeKobo)
@@ -990,7 +1008,7 @@ export class ErrandsService implements OnModuleInit {
         return { patch: { startedAt: now }, record: {} };
       case 'send_item_amount': {
         const { amountKobo, photos } = this.parse('send_item_amount', data);
-        const limit = await this.itemLimit(tx, errand, settings);
+        const limit = await this.itemLimit(tx, errand, live);
         if (limit !== null && amountKobo > limit) {
           throw unprocessable(
             'item_limit',
@@ -1003,32 +1021,29 @@ export class ErrandsService implements OnModuleInit {
         return { patch: { itemAmountKobo: amountKobo }, record: { amountKobo, photos } };
       }
       case 'mark_delivered':
-        await this.assertAtDropoff(tx, errand, settings);
+        await this.assertAtDropoff(tx, errand, live);
         return { patch: { deliveredAt: now }, record: {} };
       case 'confirm_pin': {
         const { pin } = this.parse('confirm_pin', data);
-        await this.assertAtDropoff(tx, errand, settings);
         const limit = settings.limits.pinAttempts;
+        // Locked before this check existed: frozen now rather than opened again.
+        if (errand.pinAttempts >= limit) return new PinLock(errand.pinAttempts);
+        await this.assertAtDropoff(tx, errand, live);
         if (!this.pinMatches(errand, pin)) {
           const attempts = errand.pinAttempts + 1;
           if (attempts >= limit) return new PinLock(attempts);
           await tx.update(errands).set({ pinAttempts: attempts }).where(eq(errands.id, errand.id));
           // On the errand's record, for support and the customer: never the digits tried.
-          await tx.insert(errandEvents).values({
-            errandId: errand.id,
-            event: 'pin_wrong',
-            fromStatus: errand.status,
-            toStatus: errand.status,
-            actorRole: 'agent',
-            actorId: auth.userId,
-            data: { attemptsLeft: limit - attempts },
+          await this.logEvent(tx, errand, 'pin_wrong', errand.status, 'agent', auth.userId, {
+            attemptsLeft: limit - attempts,
           });
           return unprocessable('wrong_pin', 'That PIN is not right', { attemptsLeft: limit - attempts });
         }
         return { patch: {}, record: { method: 'pin' } };
       }
       case 'send_dropoff_photo': {
-        // The photo is for a customer who isn't there: the agent waits at the drop-off first.
+        // The photo is for a customer who isn't there: the agent waits at the drop-off first, and is still there.
+        await this.assertAtDropoff(tx, errand, live);
         const waitMs = settings.timers.dropoffWaitMinutes * MINUTE_MS;
         const waited = errand.deliveredAt ? now.getTime() - errand.deliveredAt.getTime() : 0;
         if (waited < waitMs) {

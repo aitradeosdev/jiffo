@@ -174,7 +174,7 @@ export async function act(
   data: Record<string, unknown> = {},
   status = 200,
 ) {
-  if (event === 'mark_delivered' || event === 'confirm_pin') await atDropoff(t, person, errandId);
+  if (['mark_delivered', 'confirm_pin', 'send_dropoff_photo'].includes(event)) await atDropoff(t, person, errandId);
   if (event === 'send_dropoff_photo') await waitedAtDropoff(t, errandId);
   const res = await request(t.http).post(`/v1/errands/${errandId}/events`).set(person.headers).send({ event, data });
   if (res.status !== status) {

@@ -96,6 +96,16 @@ describe('the errand money path', () => {
       expect(await trialBalance()).toBe(0);
     });
 
+    it('freezes an errand locked before this rule, rather than opening it again', async () => {
+      const { customer, agent, errand } = await underway();
+      await act(t, agent, errand.id, 'mark_delivered');
+      const pin = (await request(t.http).get(`/v1/errands/${errand.id}/pin`).set(customer.headers).expect(200)).body
+        .pin;
+      await t.db.update(errands).set({ pinAttempts: 5 }).where(eq(errands.id, errand.id));
+      expect((await event(agent, errand.id, 'confirm_pin', { pin })).status).toBe(423);
+      expect((await errandRow(errand.id)).status).toBe('disputed');
+    });
+
     it('takes the PIN, and marks delivered, only at the drop-off', async () => {
       const { customer, agent, errand } = await underway();
       await atDropoff(t, agent, errand.id, PICKUP);
@@ -129,7 +139,9 @@ describe('the errand money path', () => {
       const pin = (await request(t.http).get(`/v1/errands/${errand.id}/pin`).set(customer.headers).expect(200)).body
         .pin;
       await act(t, agent, errand.id, 'confirm_pin', { pin });
-      expect((await errandRow(errand.id)).pinCipher).toBeNull();
+      const after = await errandRow(errand.id);
+      expect(after.pinCipher).toBeNull();
+      expect(after.pinHmac).toBeNull();
     });
   });
 
@@ -142,6 +154,12 @@ describe('the errand money path', () => {
       expect(early.status).toBe(409);
       expect(early.body.error.code).toBe('dropoff_wait');
       await waitedAtDropoff(t, errand.id);
+      // Waiting doesn't count from somewhere else: the agent must still be at the drop-off.
+      await atDropoff(t, agent, errand.id, PICKUP);
+      expect((await event(agent, errand.id, 'send_dropoff_photo', { photo: shot })).body.error.code).toBe(
+        'not_at_dropoff',
+      );
+      await atDropoff(t, agent, errand.id);
       expect((await event(agent, errand.id, 'send_dropoff_photo', { photo: shot })).status).toBe(200);
     });
   });
@@ -157,13 +175,15 @@ describe('the errand money path', () => {
       expect(res.body.error).toMatchObject({ code: 'item_limit', limitKobo: 3_000_000 });
     });
 
-    it('lets an agent hold only so many errands at once', async () => {
-      await security({ maxActiveErrandsPerAgent: 2 });
+    it('lets an agent hold only so many errands at once, as admin sets it now', async () => {
       const customer = await signIn(t, 'customer');
       await fund(t, customer, 5_000_000);
       const agent = await signIn(t, 'agent');
-      for (let i = 0; i < 2; i++) await act(t, agent, (await createErrand(t, customer)).id, 'accept');
-      const third = await event(agent, (await createErrand(t, customer)).id, 'accept');
+      const waiting = await Promise.all([0, 1, 2].map(() => createErrand(t, customer)));
+      // Set after the errands were made: it still applies to them.
+      await security({ maxActiveErrandsPerAgent: 2 });
+      for (const e of waiting.slice(0, 2)) await act(t, agent, e.id, 'accept');
+      const third = await event(agent, waiting[2]!.id, 'accept');
       expect(third.status).toBe(409);
       expect(third.body.error.code).toBe('too_many_errands');
       await security({ maxActiveErrandsPerAgent: 0 });
