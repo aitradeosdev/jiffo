@@ -402,8 +402,12 @@ export class AdminController {
   /** New payout accounts whose bank name only nearly matched the agent's legal name, for finance to decide. */
   @Get('money/payout-accounts')
   @Needs('read')
-  payoutAccountsToReview(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
-    return this.money.payoutAccountsToReview(query.country);
+  payoutAccountsToReview(
+    @CurrentAdmin() admin: AdminContext,
+    @Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>,
+  ) {
+    // Comparing the bank's name with the legal name is the decision: those who decide see both (D5).
+    return this.money.payoutAccountsToReview(query.country, can(admin.role as AdminRole, 'money'));
   }
 
   /** Finance and owners only: approves or declines a payout account waiting for support, saying why. */
@@ -464,8 +468,11 @@ export class AdminController {
 
   @Get('applications')
   @Needs('read')
-  listApplications(@Query(new ZodBody(ApplicationsQuery)) query: z.infer<typeof ApplicationsQuery>) {
-    return this.applications.list(query);
+  listApplications(
+    @CurrentAdmin() admin: AdminContext,
+    @Query(new ZodBody(ApplicationsQuery)) query: z.infer<typeof ApplicationsQuery>,
+  ) {
+    return this.applications.list(query, can(admin.role as AdminRole, 'reveal'));
   }
 
   @Get('applications/counts')
@@ -488,8 +495,11 @@ export class AdminController {
 
   @Get('id-checks')
   @Needs('read')
-  listIdChecks(@Query(new ZodBody(IdChecksQuery)) query: z.infer<typeof IdChecksQuery>) {
-    return this.idChecks.list(query);
+  listIdChecks(
+    @CurrentAdmin() admin: AdminContext,
+    @Query(new ZodBody(IdChecksQuery)) query: z.infer<typeof IdChecksQuery>,
+  ) {
+    return this.idChecks.list(query, can(admin.role as AdminRole, 'reveal'));
   }
 
   @Get('id-checks/counts')

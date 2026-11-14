@@ -126,7 +126,7 @@ export function ProviderCard({
       ) : null}
 
       <form action={save} className="mt-4 space-y-3">
-        <ReasonInput />
+        <ReasonInput after={saveState} />
         <Hidden category={category} provider={p.key} />
         <fieldset disabled={!canEdit} className="grid gap-3 sm:grid-cols-2">
           {p.fields.map((f) => {
@@ -197,7 +197,7 @@ export function ProviderCard({
           </form>
           {!p.active ? (
             <form action={switchOn}>
-              <ReasonInput />
+              <ReasonInput after={onState} />
               <Hidden category={category} provider={p.key} />
               <button type="submit" className={buttonClass('primary', true)} disabled={!canSwitchOn}>
                 Switch on
@@ -206,7 +206,7 @@ export function ProviderCard({
           ) : null}
           {p.hasCallbackToken ? (
             <form action={renew}>
-              <ReasonInput />
+              <ReasonInput after={renewState} />
               <Hidden category={category} provider={p.key} />
               <SubmitButton small kind="secondary" pendingLabel="Renewing…">
                 New callback address
@@ -216,7 +216,7 @@ export function ProviderCard({
           {!p.active ? (
             removing ? (
               <form action={remove} className="flex gap-2">
-                <ReasonInput />
+                <ReasonInput after={removeState} />
                 <Hidden category={category} provider={p.key} />
                 <SubmitButton small kind="danger" pendingLabel="Removing…">
                   Yes, remove the keys
@@ -253,7 +253,7 @@ export function SwitchOff({ category, fallback }: { category: string; fallback: 
   const [state, action] = useActionState<ProviderState, FormData>(activateProvider, {});
   return (
     <form action={action} className="flex flex-wrap items-center gap-2">
-      <ReasonInput />
+      <ReasonInput after={state} />
       <Hidden category={category} provider="" />
       <SubmitButton small kind="secondary" pendingLabel="Switching…">
         Switch off

@@ -401,6 +401,13 @@ export class PeopleAdminService {
   async reveal(admin: AdminContext, id: string) {
     const [person] = await this.db.select({ countryCode: users.countryCode }).from(users).where(eq(users.id, id));
     if (!person) throw notFound('person_not_found', 'Person not found');
+    const [application, identity] = await Promise.all([
+      this.applications.detail(id, true),
+      this.idChecks.detail(id, true),
+    ]);
+    // Nothing masked to show: no reveal to count or log.
+    if (!application && !identity) throw notFound('nothing_to_reveal', 'This person has no application or ID check');
+    // The cap and the count are both the person's country's: each country sets its own (X10).
     const cap = (await securityOf(this.countries, person.countryCode)).dailyIdReveals;
     await this.db.transaction(async (tx) => {
       // One reveal at a time per admin, so a burst can't pass the cap before any is counted.
@@ -412,11 +419,15 @@ export class PeopleAdminService {
           and(
             eq(adminAudit.adminId, admin.adminId),
             eq(adminAudit.action, 'person.reveal'),
+            eq(adminAudit.countryCode, person.countryCode),
             gt(adminAudit.createdAt, new Date(Date.now() - 24 * 3_600_000)),
           ),
         );
       if ((today?.n ?? 0) >= cap) {
-        throw tooMany('reveal_limit', `You've revealed ${cap} people's details in the last day, the most allowed`);
+        throw tooMany(
+          'reveal_limit',
+          `You've revealed ${cap} people's details in this country in the last day, the most allowed`,
+        );
       }
       await this.audit.record(tx, admin, {
         action: 'person.reveal',
@@ -425,10 +436,6 @@ export class PeopleAdminService {
         countryCode: person.countryCode,
       });
     });
-    const [application, identity] = await Promise.all([
-      this.applications.detail(id, true),
-      this.idChecks.detail(id, true),
-    ]);
     return {
       application: application
         ? {

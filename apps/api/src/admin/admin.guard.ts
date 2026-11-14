@@ -24,19 +24,36 @@ const NO_REASON_KEY = 'jiffo:admin-no-reason';
  * provider's test, and deciding a request (whose reason is the request's).
  */
 export const NoReason = () => SetMetadata(NO_REASON_KEY, true);
-/** The header the panel sends a change's reason in, for changes without a note of their own. */
+/**
+ * The header the panel sends a change's reason in, for changes without a note of their own. URI-encoded, since
+ * a header carries only Latin-1 and a reason may say ₦ or use a curly apostrophe.
+ */
 export const REASON_HEADER = 'x-jiffo-reason';
+/** The longest reason, the same as every route's note. */
+const REASON_MAX = 1000;
 const CHANGES = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/** A header's value, decoded; as sent when it isn't URI-encoded (a lone "%", say). */
+function decoded(value: string | undefined) {
+  if (value === undefined) return undefined;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
 
 /**
  * A change's reason (docs/security-plan.md, D7): the request's own note first, else the reason sent with it.
- * Between 5 and 500 characters, or none.
+ * Between 5 and 1000 characters, or none.
  */
 export function reasonOf(req: AdminRequest): string | undefined {
   const body = (req.body ?? {}) as { note?: unknown; reason?: unknown };
-  const given = [body.note, body.reason, req.header(REASON_HEADER)].find((v) => typeof v === 'string' && v.trim());
+  const given = [body.note, body.reason, decoded(req.header(REASON_HEADER))].find(
+    (v) => typeof v === 'string' && v.trim(),
+  );
   const text = typeof given === 'string' ? given.trim() : '';
-  return text.length >= 5 && text.length <= 500 ? text : undefined;
+  return text.length >= 5 && text.length <= REASON_MAX ? text : undefined;
 }
 /**
  * The permission a route needs: every admin route names at least one, and 'read' is the least. With several,

@@ -89,6 +89,13 @@ describe('personal details', () => {
     expect(await find('okonkwo')).toContain(who.userId);
     expect(await find('Chioma Okonkwo')).toContain(who.userId);
     expect(await find('Okonkwo Bello')).not.toContain(who.userId);
+    // Support can't reveal the name, so can't confirm a guess at it either (D5).
+    const support = await adminAs(t, 'support');
+    const bySupport = await request(t.http)
+      .get(`/v1/admin/id-checks?country=NG&status=review&q=okonkwo`)
+      .set(support.headers)
+      .expect(200);
+    expect(bySupport.body.checks.map((c: { id: string }) => c.id)).not.toContain(who.userId);
     // Accents don't matter, as when names are compared elsewhere.
     await t.db
       .update(customerVerifications)

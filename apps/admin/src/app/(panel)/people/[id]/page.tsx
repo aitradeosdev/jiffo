@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { agentTierLabel, yearsOld } from '@jiffo/shared';
+import { agentTierLabel } from '@jiffo/shared';
+import { birth } from './birth';
 import { RevealCard } from './reveal';
 import { notFound } from 'next/navigation';
 import type { ErrandState } from '@jiffo/shared';
@@ -103,6 +104,8 @@ interface CustomerIdentity {
   createdAt: string;
   /** The provider gave the ID's number, so a second account on it can be caught; needed to verify. */
   hasIdNumber: boolean;
+  /** The name and date of birth are masked until revealed (D5). */
+  masked: boolean;
 }
 
 /** The agent's application: the provider's results and what the agent typed, never their documents. */
@@ -117,6 +120,8 @@ interface Application {
   addressOutcome: string | null;
   address: string | null;
   emergency: { name: string; phone: string | null; relationship: string | null } | null;
+  /** The name, date of birth, address and emergency contact are masked until revealed (D5). */
+  masked: boolean;
   termsAcceptedAt: string | null;
   checks: Check[];
   submittedAt: string | null;
@@ -145,10 +150,6 @@ const HISTORY: Record<string, string> = {
   hold_release: 'Earnings now available',
   settle: 'Errand paid out',
 };
-
-/** A date of birth, masked to the year until revealed (D5): then the year is all that is shown. */
-const birth = (date: string | null) =>
-  !date ? '—' : date.includes('•') ? `Born ${date.slice(0, 4)}` : `${date} · ${yearsOld(date)} years old`;
 
 export default async function PersonPage({
   params,
@@ -468,7 +469,7 @@ function ApplicationCard({
   const status = statusOf(app.status);
   const rows: Array<[string, ReactNode]> = [
     ['Name on the ID', app.legalName ?? '—'],
-    ['Date of birth', birth(app.dateOfBirth)],
+    ['Date of birth', birth(app.dateOfBirth, app.masked)],
     ['Works in', app.stateName ? `${app.area ?? ''}${app.area ? ', ' : ''}${app.stateName}` : '—'],
     ['Home address', app.address ?? '—'],
     [
@@ -569,7 +570,7 @@ function IdentityCard({
   const rows: Array<[string, ReactNode]> = [
     ['ID', identity.idName],
     ['Name on the ID', identity.legalName ?? '—'],
-    ['Date of birth', birth(identity.dateOfBirth)],
+    ['Date of birth', birth(identity.dateOfBirth, identity.masked)],
     ['Checked by', identity.provider],
   ];
   return (

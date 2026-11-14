@@ -26,6 +26,12 @@ export const maskAddress = (address: string | null) => {
   return parts.length > 1 ? `…, ${parts.at(-1)}` : '…';
 };
 
-/** "+2348034471902" → "+234•••••••902". */
-export const maskPhone = (phone: string | null) =>
-  phone ? `${phone.slice(0, 4)}${'•'.repeat(Math.max(0, phone.length - 7))}${phone.slice(-3)}` : null;
+/**
+ * "+2348034471902" → "+234•••••••902". A number under 10 characters keeps only its last two (none under 5), so
+ * the start and end shown never meet.
+ */
+export const maskPhone = (phone: string | null) => {
+  if (!phone) return null;
+  const [head, tail] = phone.length >= 10 ? [4, 3] : [0, phone.length >= 5 ? 2 : 0];
+  return `${phone.slice(0, head)}${'•'.repeat(phone.length - head - tail)}${tail ? phone.slice(-tail) : ''}`;
+};

@@ -70,7 +70,8 @@ export async function api<T>(path: string, options: CallOptions = {}): Promise<T
     headers: {
       ...(await clientHeaders()),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.reason ? { 'x-jiffo-reason': options.reason } : {}),
+      // Encoded: a header carries only Latin-1, and a reason may say ₦ or use a curly apostrophe.
+      ...(options.reason ? { 'x-jiffo-reason': encodeURIComponent(options.reason) } : {}),
       ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     },
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,

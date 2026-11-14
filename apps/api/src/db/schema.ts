@@ -1181,6 +1181,8 @@ export const adminApprovals = pgTable(
       .notNull()
       .references(() => admins.id),
     requestedIp: text('requested_ip'),
+    /** The asker's browser, for the audit entry of the change when it runs. */
+    requestedUserAgent: text('requested_user_agent'),
     /** Why, from the person asking. */
     note: text('note').notNull(),
     status: text('status', { enum: APPROVAL_STATUSES }).notNull().default('pending'),

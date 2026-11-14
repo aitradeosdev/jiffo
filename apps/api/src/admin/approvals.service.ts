@@ -100,6 +100,8 @@ export class ApprovalsService {
     if (!can(admin.role as AdminRole, permission)) throw forbidden('not_permitted', 'Your role does not allow this');
     const others = await this.otherApprovers(permission, admin.adminId);
     const hours = await this.expiryHours(request.countryCode ?? null);
+    // Why, as the admin typed it (D7); the request's own note only for a change made without one.
+    const note = admin.reason ?? request.note;
     const [row] = await this.db.transaction(async (tx) => {
       const rows = await tx
         .insert(adminApprovals)
@@ -113,7 +115,8 @@ export class ApprovalsService {
           payload: request.payload,
           requestedBy: admin.adminId,
           requestedIp: admin.ip,
-          note: request.note,
+          requestedUserAgent: admin.userAgent,
+          note,
           expiresAt: new Date(Date.now() + hours * HOUR_MS),
         })
         .returning();
@@ -122,7 +125,7 @@ export class ApprovalsService {
         targetType: 'approval',
         targetId: rows[0]!.id,
         countryCode: request.countryCode ?? undefined,
-        data: { kind: request.kind, summary: request.summary, note: request.note },
+        data: { kind: request.kind, summary: request.summary, note },
       });
       return rows;
     });
@@ -261,8 +264,9 @@ export class ApprovalsService {
       email: who.email,
       name: who.name,
       role: who.role,
+      // The asker's network and browser: the approver's are in the approval's own entry.
       ip: row.requestedIp,
-      userAgent: decider.userAgent,
+      userAgent: row.requestedUserAgent,
       // The change runs for the reason the person who asked gave.
       reason: row.note,
       // Runs on the approver's confirmed session: the change itself was confirmed when it was approved.

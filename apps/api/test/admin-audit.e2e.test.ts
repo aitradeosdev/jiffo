@@ -56,6 +56,55 @@ describe('admin audit log and personal details', () => {
     await request(t.http).delete(`/v1/admin/categories/${made.body.id}`).set(owner.headers).expect(200);
   });
 
+  it('takes a reason as long as a note may be, and one with characters a header carries only encoded', async () => {
+    const safety = await adminAs(t, 'safety');
+    const customer = await signIn(t, 'customer');
+    const long = `Threatened an agent in chat. ${'They sent more messages after a warning. '.repeat(20)}`.slice(0, 900);
+    await request(t.http)
+      .post(`/v1/admin/people/${customer.userId}/suspend`)
+      .set(safety.headers)
+      .send({ note: long })
+      .expect(200);
+    expect(await entry('person.suspend', customer.userId)).toMatchObject({ reason: long.trim() });
+
+    const owner = await adminAs(t, 'owner');
+    const key = `naira${Date.now() % 1_000_000}`;
+    const { 'x-jiffo-reason': _, ...noReason } = owner.headers;
+    const said = 'Customers can’t find ₦500 errands';
+    const made = await request(t.http)
+      .post('/v1/admin/categories')
+      .set({ ...noReason, 'x-jiffo-reason': encodeURIComponent(said) })
+      .send({ country: 'NG', key, name: 'Naira test', icon: 'bag' })
+      .expect(201);
+    expect(await entry('category.create', made.body.id)).toMatchObject({ reason: said });
+    await request(t.http).delete(`/v1/admin/categories/${made.body.id}`).set(owner.headers).expect(200);
+  });
+
+  it('runs an approved change with the reason typed and the browser of the person who asked', async () => {
+    const asker = await adminAs(t, 'owner');
+    const approver = await adminAs(t, 'owner');
+    const email = `audit-${randomUUID().slice(0, 8)}@jiffoapp.com`;
+    const asked = await request(t.http)
+      .post('/v1/admin/team')
+      .set({ ...asker.headers, 'x-jiffo-reason': 'Hiring for the Abuja launch', 'user-agent': 'AskerBrowser/1.0' })
+      .send({ email, name: 'Abuja Hire', role: 'support' })
+      .expect(202);
+    await request(t.http)
+      .post(`/v1/admin/approvals/${asked.body.approval.id}/approve`)
+      .set({ ...approver.headers, 'user-agent': 'ApproverBrowser/2.0' })
+      .send({})
+      .expect(200);
+    const [invited] = await t.db
+      .select()
+      .from(adminAudit)
+      .where(and(eq(adminAudit.action, 'team.invite'), sql`${adminAudit.data}->>'email' = ${email}`));
+    expect(invited).toMatchObject({
+      adminId: asker.id,
+      reason: 'Hiring for the Abuja launch',
+      userAgent: 'AskerBrowser/1.0',
+    });
+  });
+
   it('keeps the log append-only: no change, deletion or emptying, whoever asks', async () => {
     const [row] = await t.db.select({ id: adminAudit.id }).from(adminAudit).limit(1);
     await expect(t.db.execute(sql`update admin_audit set reason = 'rewritten' where id = ${row!.id}`)).rejects.toThrow(
@@ -149,6 +198,14 @@ describe('admin audit log and personal details', () => {
       const third = await reveal();
       expect(third.status).toBe(429);
       expect(third.body.error.code).toBe('reveal_limit');
+      // Someone with nothing masked to show uses no reveal.
+      const agent = await signIn(t, 'agent', { unapproved: true });
+      const none = await request(t.http)
+        .post(`/v1/admin/people/${agent.userId}/reveal`)
+        .set(verification.headers)
+        .send({ note: 'Checking the ID against the selfie' });
+      expect(none.status).toBe(404);
+      expect(none.body.error.code).toBe('nothing_to_reveal');
     } finally {
       const latest = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
       const back = structuredClone(latest.settings);

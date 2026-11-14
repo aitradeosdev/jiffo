@@ -257,7 +257,7 @@ export const SECTIONS: Section[] = [
         path: 'security.dailyIdReveals',
         label: "People's details one staff member may reveal in a day",
         kind: 'count',
-        help: 'Legal names, dates of birth, addresses and emergency contacts are hidden until revealed with a reason. 0 means nobody can.',
+        help: 'Legal names, dates of birth, addresses and emergency contacts are hidden until revealed with a reason. Counted per country. 0 means nobody can.',
       },
       {
         path: 'security.smsCodesDailyAlert',

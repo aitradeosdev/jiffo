@@ -60,7 +60,10 @@ export class ApplicationsAdminService {
    * Applications in one state. Those waiting for someone (in review, or being checked) come oldest first, so
    * the longest wait is seen first; the rest newest first.
    */
-  async list(query: { country: string; status: ApplicationStatus; q?: string; before?: string; limit: number }) {
+  async list(
+    query: { country: string; status: ApplicationStatus; q?: string; before?: string; limit: number },
+    byLegalName = false,
+  ) {
     await requireCountry(this.db, query.country);
     const cursor = parseCursor(query.before);
     const oldestFirst = query.status === 'review' || query.status === 'checking';
@@ -91,7 +94,7 @@ export class ApplicationsAdminService {
         and(
           eq(agentApplications.countryCode, query.country),
           eq(agentApplications.status, query.status),
-          query.q ? this.search(query.q) : undefined,
+          query.q ? this.search(query.q, byLegalName) : undefined,
           cursor
             ? oldestFirst
               ? sql`(${since}, ${agentApplications.userId}) > (${cursor.at}::timestamptz, ${cursor.id}::uuid)`
@@ -119,7 +122,11 @@ export class ApplicationsAdminService {
     };
   }
 
-  private search(text: string): SQL | undefined {
+  /**
+   * By the name in the app, phone or ID; by legal name only for those who may reveal it, since a match would
+   * otherwise confirm a masked name (D5).
+   */
+  private search(text: string, byLegalName: boolean): SQL | undefined {
     const like = containing(text);
     const phone = phoneDigits(text);
     const id = idPrefix(text);
@@ -127,7 +134,7 @@ export class ApplicationsAdminService {
     return or(
       ilike(sql`coalesce(${users.firstName}, '') || ' ' || coalesce(${users.lastName}, '')`, like),
       // The legal name is encrypted: it is found by whole words, through its keyed index.
-      words.length ? arrayContains(agentApplications.legalNameIndex, words) : undefined,
+      byLegalName && words.length ? arrayContains(agentApplications.legalNameIndex, words) : undefined,
       id ? ilike(sql`${users.id}::text`, id) : undefined,
       phone ? ilike(users.phone, `%${phone}%`) : undefined,
     );

@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { yearsOld } from '@jiffo/shared';
 import { SubmitButton } from '@/components/submit-button';
 import { Card, inputClass, Notice } from '@/components/ui';
 import { revealPerson, type Revealed } from './actions';
+import { birth } from './birth';
 
 const row = (label: string, value: ReactNode) => (
   <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 py-1.5 text-sm">
@@ -12,7 +12,6 @@ const row = (label: string, value: ReactNode) => (
     <dd className="font-semibold">{value}</dd>
   </div>
 );
-const born = (date: string | null) => (date ? `${date} · ${yearsOld(date)} years old` : '—');
 
 /**
  * Personal details are masked (docs/security-plan.md, D5). Revealing them takes a reason, goes in the audit
@@ -27,9 +26,9 @@ export function RevealCard({ id }: { id: string }) {
       {shown ? (
         <dl className="divide-y divide-line">
           {shown.identity ? row('Name on their ID', shown.identity.legalName ?? '—') : null}
-          {shown.identity ? row('Date of birth (ID check)', born(shown.identity.dateOfBirth)) : null}
+          {shown.identity ? row('Date of birth (ID check)', birth(shown.identity.dateOfBirth)) : null}
           {shown.application ? row('Name on their ID (application)', shown.application.legalName ?? '—') : null}
-          {shown.application ? row('Date of birth', born(shown.application.dateOfBirth)) : null}
+          {shown.application ? row('Date of birth', birth(shown.application.dateOfBirth)) : null}
           {shown.application ? row('Home address', shown.application.address ?? '—') : null}
           {shown.application?.emergency
             ? row(

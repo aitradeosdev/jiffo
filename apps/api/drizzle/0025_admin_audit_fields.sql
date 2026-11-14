@@ -1,4 +1,5 @@
 ALTER TABLE "admin_audit" ALTER COLUMN "admin_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "admin_approvals" ADD COLUMN "requested_user_agent" text;--> statement-breakpoint
 ALTER TABLE "admin_audit" ADD COLUMN "via" text DEFAULT 'panel' NOT NULL;--> statement-breakpoint
 ALTER TABLE "admin_audit" ADD COLUMN "reason" text;--> statement-breakpoint
 ALTER TABLE "admin_audit" ADD COLUMN "user_agent" text;--> statement-breakpoint
