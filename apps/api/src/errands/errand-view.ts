@@ -23,17 +23,28 @@ export function eventsFor(errand: ErrandRow, role: ViewerRole): ErrandEvent[] {
   return role === 'prospect' ? events.filter((e) => e === 'accept') : events;
 }
 
+const AREA_FALLBACK = { pickup: 'Pickup area', stop: 'Stop area', dropoff: 'Drop-off area' } as const;
+
 /**
- * Where a drop-off is, as an agent sees it before accepting: the area (the last parts of the address) and a
- * point rounded to about a kilometre, so waiting errands can't be mined for customers' exact addresses.
+ * Where a stop is, as an agent sees it before accepting: the general area and a point rounded to about a
+ * kilometre, never the address or its label, so waiting errands can't be mined for where customers live
+ * (docs/security-plan.md, R4). The first part of an address is the street or building, and any part with a
+ * number in it may be a house, flat or plot, so neither is shown.
  */
-function dropoffArea(s: StopRow) {
-  const parts = s.address
+export function stopArea(s: Pick<StopRow, 'kind' | 'address' | 'lat' | 'lng'>) {
+  const general = s.address
     .split(',')
     .map((p) => p.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .slice(1)
+    .filter((p) => !/\d/.test(p));
   const round = (n: number) => Math.round(n * 100) / 100;
-  return { address: parts.slice(-2).join(', ') || 'Drop-off area', lat: round(s.lat), lng: round(s.lng) };
+  return {
+    label: null,
+    address: general.slice(0, 2).join(', ') || AREA_FALLBACK[s.kind],
+    lat: round(s.lat),
+    lng: round(s.lng),
+  };
 }
 
 export function errandView(
@@ -70,7 +81,7 @@ export function errandView(
         address: s.address,
         lat: s.lat,
         lng: s.lng,
-        ...(role === 'prospect' && s.kind === 'dropoff' ? dropoffArea(s) : {}),
+        ...(role === 'prospect' ? stopArea(s) : {}),
       })),
     customer: people.customer,
     agent: people.agent,

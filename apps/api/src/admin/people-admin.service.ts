@@ -433,10 +433,10 @@ export class PeopleAdminService {
       });
       return { closed: closedResults };
     });
+    // Their live connections end at once, on every server, before anything is announced to them.
+    this.realtime.disconnectUser(id);
     // Boards drop the closed errands, and the customer hears they were cancelled.
     await this.errandsService.announce(closed);
-    // Their live connections end now on this server; the sweep ends them on the others.
-    this.realtime.disconnectWhere((auth) => auth.userId === id);
     return { status: 'suspended' as const, closedErrands: closed.map((r) => r.after.id) };
   }
 

@@ -22,6 +22,7 @@ import { CountriesService } from '../countries/countries.service';
 import type { AuthContext } from '../auth/auth.types';
 import { decrypt, encrypt, errandPinKey, numericCode, pinDigest, safeEqual } from '../common/crypto';
 import { ApiError, badRequest, conflict, forbidden, locked, notFound, tooMany, unprocessable } from '../common/errors';
+import { refuseUnknownFields } from '../common/zod-body';
 import { ERRAND_TIMERS, type ErrandTimerJob, type ErrandTimers } from '../timers/errand-timers';
 import { CustomerFundsLow, WalletService, type DisputeSplit } from '../money/wallet.service';
 import { AgentsService } from '../agents/agents.service';
@@ -213,13 +214,19 @@ export class ErrandsService implements OnModuleInit {
   /** Open errands whose pickup is within the radius, nearest first. */
   async board(auth: AuthContext, q: { lat: number; lng: number; radiusKm: number; limit: number }) {
     await this.applications.assertApproved(auth.userId);
-    // Only around where the agent's phone says they are, so the board can't be asked about any place.
-    const { rows: positions } = await this.db.execute<{ at: Date | string | null; km: number | string | null }>(sql`
-      select located_at as at,
+    // Only around where the agent's phone last said they are, so the board can't be asked about any place:
+    // the search is centred there, and the place the app asks about must be close to it.
+    const { rows: positions } = await this.db.execute<{
+      at: Date | string | null;
+      lat: number | null;
+      lng: number | null;
+      km: number | string | null;
+    }>(sql`
+      select located_at as at, lat, lng,
         ST_Distance(location, ST_SetSRID(ST_MakePoint(${q.lng}, ${q.lat}), 4326)::geography) / 1000 as km
       from agent_presence where user_id = ${auth.userId} and location is not null`);
     const at = positions[0];
-    if (!at?.at || Date.now() - new Date(at.at).getTime() > LOCATION_FRESH_MS) {
+    if (!at?.at || at.lat === null || at.lng === null || Date.now() - new Date(at.at).getTime() > LOCATION_FRESH_MS) {
       throw conflict('location_needed', 'Turn on location to see errands near you');
     }
     if (Number(at.km) > BOARD_NEAR_KM) {
@@ -227,7 +234,7 @@ export class ErrandsService implements OnModuleInit {
     }
     // Only errands in the agent's chosen categories, and purchase errands only if they take them.
     const [prefs, tier] = await Promise.all([this.agents.profile(auth.userId), this.agents.tier(auth.userId)]);
-    const here = sql`ST_SetSRID(ST_MakePoint(${q.lng}, ${q.lat}), 4326)::geography`;
+    const here = sql`ST_SetSRID(ST_MakePoint(${at.lng}, ${at.lat}), 4326)::geography`;
     const distance = sql<number>`ST_Distance(${errandStops.location}, ${here})`;
     const open = and(
       eq(errands.status, 'requested'),
@@ -285,16 +292,21 @@ export class ErrandsService implements OnModuleInit {
       .from(errandEvents)
       .where(eq(errandEvents.errandId, errandId))
       .orderBy(errandEvents.id);
-    return rows.map((e) => ({
-      id: e.id,
-      event: e.event,
-      fromStatus: e.fromStatus,
-      toStatus: e.toStatus,
-      actorRole: e.actorRole,
-      // Support's notes and splits are internal; the apps only learn that support acted.
-      data: e.actorRole === 'admin' ? { by: 'support' } : e.data,
-      createdAt: e.createdAt,
-    }));
+    return rows.map((e) => {
+      // Who took or left the errand is support's to know: a customer or a later agent never gets another
+      // agent's ID from it (docs/security-plan.md, R4).
+      const { agentId: _agent, ...data } = (e.data ?? {}) as Record<string, unknown>;
+      return {
+        id: e.id,
+        event: e.event,
+        fromStatus: e.fromStatus,
+        toStatus: e.toStatus,
+        actorRole: e.actorRole,
+        // Support's notes and splits are internal; the apps only learn that support acted.
+        data: e.actorRole === 'admin' ? { by: 'support' } : data,
+        createdAt: e.createdAt,
+      };
+    });
   }
 
   /** The customer's hand-off PIN. Shown only once the agent has marked the errand delivered. */
@@ -508,7 +520,7 @@ export class ErrandsService implements OnModuleInit {
     const mayHoldMoney = errand.status !== 'requested' && !TERMINAL_STATES.has(errand.status);
     const offer = errand.pendingOfferKobo;
     const pickup = view!.stops[0]!;
-    // The customer sees the agent's position while the agent is on the way for them (SHARE_STATES).
+    // The customer sees the agent's position while the agent is on the way for them (sharedWith).
     const travelling = SHARE_STATES.includes(errand.status);
     const [photoEvents, [rating], [tip], held, offerSettings, [ending], agentLocation, nearby, earns, settled] =
       await Promise.all([
@@ -549,7 +561,7 @@ export class ErrandsService implements OnModuleInit {
           : Promise.resolve([]),
         // The customer follows their agent on the map while the errand runs.
         role === 'customer' && travelling && errand.agentId
-          ? this.presence.locationOf(errand.agentId)
+          ? this.presence.locationFor(errand.id, errand.agentId)
           : Promise.resolve(null),
         // While matching, the customer sees how many agents are online near the pickup, never who or where.
         role === 'customer' && errand.status === 'requested'
@@ -648,6 +660,14 @@ export class ErrandsService implements OnModuleInit {
   }
 
   private async runTransition(errandId: string, auth: AuthContext, input: ErrandEventInput) {
+    // An event's data holds only the fields that event takes, and an event that takes none holds none.
+    if (Object.prototype.hasOwnProperty.call(EVENT_DATA, input.event)) {
+      refuseUnknownFields(EVENT_DATA[input.event as keyof typeof EVENT_DATA], input.data, ['data']);
+    } else if (Object.keys(input.data).length) {
+      throw badRequest('invalid_request', 'The request is not valid', {
+        issues: Object.keys(input.data).map((k) => ({ path: `data.${k}`, message: 'Not a field this request takes' })),
+      });
+    }
     if (input.event === 'accept' && auth.app === 'agent') await this.applications.assertApproved(auth.userId);
     const money = await this.settingsOf(
       errandId,

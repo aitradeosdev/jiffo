@@ -1,6 +1,6 @@
 import { CanActivate, createParamDecorator, ExecutionContext, Inject, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { sessions, users, type AppName } from '../db/schema';
 import { forbidden, unauthorized } from '../common/errors';
@@ -8,6 +8,12 @@ import { TokensService } from './tokens.service';
 import type { AuthContext, AuthedRequest } from './auth.types';
 
 const APPS_KEY = 'jiffo:apps';
+/** How many sessions one re-check reads at a time, well inside Postgres's limit on query parameters. */
+const CHECK_BATCH = 1000;
+
+/** A session still counts while it isn't revoked or expired. */
+const sessionLive = (s: { revokedAt: Date | null; expiresAt: Date }) =>
+  !s.revokedAt && s.expiresAt.getTime() > Date.now();
 /** Limits a route to sessions from these apps, e.g. @Apps('agent') for the job board. */
 export const Apps = (...apps: AppName[]) => SetMetadata(APPS_KEY, apps);
 
@@ -31,11 +37,23 @@ export class SessionVerifier {
       .from(sessions)
       .innerJoin(users, eq(users.id, sessions.userId))
       .where(eq(sessions.id, auth.sessionId));
-    if (!row || row.revokedAt || row.expiresAt.getTime() <= Date.now()) {
-      throw unauthorized('session_ended', 'Sign in again');
-    }
+    if (!row || !sessionLive(row)) throw unauthorized('session_ended', 'Sign in again');
     if (row.status !== 'active') throw forbidden('account_suspended', 'This account is suspended. Contact support.');
     return { ...auth, countryCode: row.countryCode };
+  }
+
+  /** Which of these sessions would still pass verify(): for re-checking connections opened earlier. */
+  async liveSessions(ids: string[]): Promise<Set<string>> {
+    const live = new Set<string>();
+    for (let i = 0; i < ids.length; i += CHECK_BATCH) {
+      const rows = await this.db
+        .select({ id: sessions.id, revokedAt: sessions.revokedAt, expiresAt: sessions.expiresAt, status: users.status })
+        .from(sessions)
+        .innerJoin(users, eq(users.id, sessions.userId))
+        .where(inArray(sessions.id, ids.slice(i, i + CHECK_BATCH)));
+      for (const row of rows) if (sessionLive(row) && row.status === 'active') live.add(row.id);
+    }
+    return live;
   }
 }
 

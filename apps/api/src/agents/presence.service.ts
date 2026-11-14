@@ -16,6 +16,20 @@ export const TRAVEL_STATES = AGENT_OUT_STATES;
 export const SHARE_STATES: readonly string[] = AGENT_OUT_STATES.filter(
   (s) => s !== 'photo_pending' && s !== 'unreachable',
 );
+/** The errand is under way (not just accepted): the agent is out doing it right now. */
+const UNDER_WAY: readonly string[] = SHARE_STATES.filter((s) => s !== 'accepted');
+
+/**
+ * Which of an agent's running errands get the agent's position: the ones in SHARE_STATES, but while one is
+ * under way, only those under way. An agent holding a second errand they haven't started isn't followed by
+ * that customer while they carry out the first (docs/security-plan.md, G2).
+ */
+export function sharedWith<T extends { status: string }>(running: T[]): T[] {
+  const shown = running.filter((r) => SHARE_STATES.includes(r.status));
+  const underWay = shown.filter((r) => UNDER_WAY.includes(r.status));
+  return underWay.length ? underWay : shown;
+}
+
 /** A position not refreshed for this long is deleted, whatever the agent's app last said. */
 const KEEP_FOR_MS = 30 * 60_000;
 
@@ -84,7 +98,7 @@ export class PresenceService {
     // forget the position again rather than keep it.
     if (!body.online && sharing) await this.forgetIfIdle(auth.userId);
     if (located) {
-      for (const e of running.filter((r) => SHARE_STATES.includes(r.status))) {
+      for (const e of sharedWith(running)) {
         this.realtime.toUser(e.customerId, 'customer', 'agent.location', {
           errandId: e.id,
           lat: body.lat,
@@ -141,8 +155,17 @@ export class PresenceService {
     return { online: !!row?.online && fresh, onErrand: !!busy };
   }
 
+  /** The agent's position for this errand's customer, if the errand gets it now (sharedWith) and it's recent. */
+  async locationFor(errandId: string, agentId: string) {
+    const running = await this.db
+      .select({ id: errands.id, status: errands.status })
+      .from(errands)
+      .where(and(eq(errands.agentId, agentId), inArray(errands.status, [...TRAVEL_STATES])));
+    return sharedWith(running).some((e) => e.id === errandId) ? this.locationOf(agentId) : null;
+  }
+
   /** The agent's last position, if recent enough to show the customer. */
-  async locationOf(agentId: string) {
+  private async locationOf(agentId: string) {
     const [row] = await this.db
       .select({ lat: agentPresence.lat, lng: agentPresence.lng, at: agentPresence.locatedAt })
       .from(agentPresence)

@@ -106,7 +106,8 @@ export class ChatService {
       const recipient = role === 'customer' ? conversation.agentId : conversation.customerId;
       await this.push.notifyUser(recipient, role === 'customer' ? 'agent' : 'customer', {
         title: sender?.firstName ?? (role === 'customer' ? 'Customer' : 'Your agent'),
-        body: input.photo && !text ? 'Sent a photo' : text.length > 120 ? `${text.slice(0, 117)}...` : text,
+        // Never the message itself: a push shows on a locked phone (docs/security-plan.md, R4).
+        body: input.photo && !text ? 'Sent a photo' : 'Sent you a message',
         data: { type: 'chat.message', errandId },
       });
     }
