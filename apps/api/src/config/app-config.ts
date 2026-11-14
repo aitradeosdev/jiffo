@@ -33,6 +33,8 @@ const EnvSchema = z
     ADMIN_TOKEN_SECRET: z.string().min(32, 'ADMIN_TOKEN_SECRET must be at least 32 characters').optional(),
     ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
     REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
+    /** However often it is refreshed, a session ends this many days after sign-in, and the person signs in again. */
+    SESSION_MAX_DAYS: z.coerce.number().int().positive().default(90),
     DEFAULT_COUNTRY: z.string().length(2).default('NG'),
     MESSAGING_PROVIDER: z.enum(['console', 'memory', 'termii']).default('console'),
     TERMII_API_KEY: z.string().optional(),
@@ -87,6 +89,11 @@ const EnvSchema = z
     REDIS_URL: z.string().url().default('redis://localhost:6379'),
     /** Code requests allowed from one IP address per hour, across all phone numbers. */
     OTP_PER_IP_PER_HOUR: z.coerce.number().int().positive().default(30),
+    /**
+     * Sign-in codes one network address may ask for in a day. Higher than a number's limit: mobile networks
+     * put many customers behind one shared address.
+     */
+    OTP_PER_IP_PER_DAY: z.coerce.number().int().positive().default(300),
     /** Load balancers in front of the API, so the client IP is read from X-Forwarded-For correctly. */
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).optional(),
     CORS_ORIGINS: z.string().default('*'),

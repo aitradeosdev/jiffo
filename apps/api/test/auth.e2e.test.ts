@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { otpChallenges } from '../src/db/schema';
-import { createTestApp, randomIp, randomPhone, signIn, type TestApp } from './helpers';
+import { OtpService } from '../src/auth/otp.service';
+import { sha256 } from '../src/common/crypto';
+import { devices, otpChallenges, refreshTokens, sessions } from '../src/db/schema';
+import { adminAs, createTestApp, randomIp, randomPhone, signIn, type TestApp } from './helpers';
 
 const device = () => ({ key: randomUUID(), platform: 'ios' as const });
 
@@ -55,18 +57,64 @@ describe('phone sign-in', () => {
     expect((await requestCode('+233241234567').expect(404)).body.error.code).toBe('country_not_available');
   });
 
-  it('makes people wait before resending, then limits codes per hour', async () => {
+  it('makes people wait before resending, then allows 3 codes in 15 minutes and 10 in a day', async () => {
     const phone = randomPhone();
     await requestCode(phone).expect(200);
     const wait = await requestCode(phone).expect(429);
     expect(wait.body.error).toMatchObject({ code: 'otp_resend_wait', retryAfterSeconds: expect.any(Number) });
 
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 2; i++) {
       await ageCodes(phone, 120);
       await requestCode(phone).expect(200);
     }
     await ageCodes(phone, 120);
     expect((await requestCode(phone).expect(429)).body.error.code).toBe('otp_rate_limited');
+    // After 15 minutes, more, up to 10 in the day.
+    for (let i = 3; i < 10; i++) {
+      await ageCodes(phone, 16 * 60);
+      await requestCode(phone).expect(200);
+    }
+    await ageCodes(phone, 16 * 60);
+    expect((await requestCode(phone).expect(429)).body.error.code).toBe('otp_rate_limited');
+  });
+
+  it('doesn’t lock the owner’s phone out when someone else asks for codes to their number', async () => {
+    const owner = await signIn(t, 'customer');
+    const [phone] = await t.db.select().from(devices).where(eq(devices.userId, owner.userId));
+    // A stranger uses up the number's limits for the day, from many addresses (signing in used one).
+    for (let i = 1; i < 10; i++) {
+      await ageCodes(owner.phone, 16 * 60);
+      await requestCode(owner.phone).expect(200);
+    }
+    await ageCodes(owner.phone, 16 * 60);
+    expect((await requestCode(owner.phone).expect(429)).body.error.code).toBe('otp_rate_limited');
+    // The owner's own phone, already signed in to the number, still gets a code.
+    await request(t.http)
+      .post('/v1/auth/otp/request')
+      .set('x-forwarded-for', randomIp())
+      .send({ phone: owner.phone, deviceKey: phone!.deviceKey })
+      .expect(200);
+  });
+
+  it('limits codes per phone too, across numbers', async () => {
+    const deviceKey = randomUUID();
+    const ask = (phone: string) =>
+      request(t.http).post('/v1/auth/otp/request').set('x-forwarded-for', randomIp()).send({ phone, deviceKey });
+    for (let i = 0; i < 3; i++) await ask(randomPhone()).expect(200);
+    expect((await ask(randomPhone()).expect(429)).body.error.code).toBe('otp_rate_limited');
+  });
+
+  it('counts a burst from one address one at a time', async () => {
+    const ip = randomIp();
+    const burst = await Promise.all(Array.from({ length: 50 }, () => requestCode(randomPhone(), ip)));
+    // Never more than the limit; the rest are told to wait, at once rather than queued.
+    expect(burst.filter((r) => r.status === 200).length).toBeLessThanOrEqual(30);
+    expect(burst.filter((r) => r.status !== 200).every((r) => r.status === 429)).toBe(true);
+    // Sent one after another, exactly the limit gets through.
+    const steady = randomIp();
+    let sent = 0;
+    for (let i = 0; i < 35; i += 1) if ((await requestCode(randomPhone(), steady)).status === 200) sent += 1;
+    expect(sent).toBe(30);
   });
 
   it('limits codes per IP address across numbers', async () => {
@@ -126,6 +174,11 @@ describe('phone sign-in', () => {
       .expect(200);
     expect(first.body.refreshToken).not.toBe(person.refreshToken);
     await request(t.http).get('/v1/me').set('Authorization', `Bearer ${first.body.accessToken}`).expect(200);
+    // The app used the token it got, so the old one coming back is a copy.
+    const second = await request(t.http)
+      .post('/v1/auth/refresh')
+      .send({ refreshToken: first.body.refreshToken })
+      .expect(200);
 
     const replay = await request(t.http)
       .post('/v1/auth/refresh')
@@ -133,9 +186,77 @@ describe('phone sign-in', () => {
       .expect(401);
     expect(replay.body.error.code).toBe('refresh_token_reused');
     // The whole session is gone: the newer tokens stop working too.
-    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: first.body.refreshToken }).expect(401);
+    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: second.body.refreshToken }).expect(401);
     const me = await request(t.http).get('/v1/me').set('Authorization', `Bearer ${first.body.accessToken}`).expect(401);
     expect(me.body.error.code).toBe('session_ended');
+  });
+
+  it('ends every session of the account, in both apps, when a refresh token is used twice', async () => {
+    const customer = await signIn(t, 'customer');
+    await ageCodes(customer.phone, 120);
+    const agent = await signIn(t, 'agent', { phone: customer.phone });
+    const next = await request(t.http)
+      .post('/v1/auth/refresh')
+      .send({ refreshToken: customer.refreshToken })
+      .expect(200);
+    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: next.body.refreshToken }).expect(200);
+    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: customer.refreshToken }).expect(401);
+    // The agent app's session, on the same account, ends too: whoever copied one may hold others.
+    expect((await request(t.http).get('/v1/me').set(agent.headers)).status).toBe(401);
+    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: agent.refreshToken }).expect(401);
+  });
+
+  it('takes a refresh sent again just after, when the answer was lost, as the app retrying', async () => {
+    const person = await signIn(t, 'customer');
+    // The answer to this one never reaches the app.
+    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: person.refreshToken }).expect(200);
+    const again = await request(t.http)
+      .post('/v1/auth/refresh')
+      .send({ refreshToken: person.refreshToken })
+      .expect(200);
+    await request(t.http).get('/v1/me').set('Authorization', `Bearer ${again.body.accessToken}`).expect(200);
+    // A minute later, the same token is a copy.
+    await t.db
+      .update(refreshTokens)
+      .set({ usedAt: new Date(Date.now() - 2 * 60_000) })
+      .where(eq(refreshTokens.tokenHash, sha256(person.refreshToken)));
+    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: person.refreshToken }).expect(401);
+    await request(t.http).get('/v1/me').set('Authorization', `Bearer ${again.body.accessToken}`).expect(401);
+  });
+
+  it('ends a session at its absolute limit, however often it is refreshed', async () => {
+    const person = await signIn(t, 'customer');
+    const fresh = await request(t.http)
+      .post('/v1/auth/refresh')
+      .send({ refreshToken: person.refreshToken })
+      .expect(200);
+    const [session] = await t.db.select().from(sessions).where(eq(sessions.userId, person.userId));
+    // Never set past its absolute end, which is SESSION_MAX_DAYS after sign-in.
+    expect(session!.absoluteExpiresAt!.getTime()).toBeGreaterThan(Date.now() + 89 * 86_400_000);
+    expect(session!.expiresAt.getTime()).toBeLessThanOrEqual(session!.absoluteExpiresAt!.getTime());
+    await t.db
+      .update(sessions)
+      .set({ absoluteExpiresAt: new Date(Date.now() - 1000) })
+      .where(eq(sessions.id, session!.id));
+    await request(t.http).post('/v1/auth/refresh').send({ refreshToken: fresh.body.refreshToken }).expect(401);
+  });
+
+  it('signs the other phones out of the app when a new phone signs in, and tells them', async () => {
+    const first = await signIn(t, 'agent');
+    const token = `old-phone-${randomUUID()}`;
+    await request(t.http).put('/v1/devices/current/push-token').set(first.headers).send({ token }).expect(204);
+    await ageCodes(first.phone, 120);
+    const customer = await signIn(t, 'customer', { phone: first.phone });
+    // Another app on the same account: the agent phone stays signed in.
+    await request(t.http).get('/v1/me').set(first.headers).expect(200);
+    await ageCodes(first.phone, 120);
+    const second = await signIn(t, 'agent', { phone: first.phone });
+    expect((await request(t.http).get('/v1/me').set(first.headers)).body.error.code).toBe('session_ended');
+    await request(t.http).get('/v1/me').set(second.headers).expect(200);
+    await request(t.http).get('/v1/me').set(customer.headers).expect(200);
+    expect(t.push.sent.filter((p) => p.token === token).at(-1)).toMatchObject({
+      title: 'Signed in on another phone',
+    });
   });
 
   it('signs out, and can sign out every other phone', async () => {
@@ -150,6 +271,35 @@ describe('phone sign-in', () => {
     await request(t.http).post('/v1/auth/logout').set(phoneB.headers).expect(204);
     await request(t.http).get('/v1/me').set(phoneB.headers).expect(401);
     await request(t.http).post('/v1/auth/refresh').send({ refreshToken: phoneB.refreshToken }).expect(401);
+  });
+
+  it('tells finance when sign-in codes sent in a day pass the alert level', async () => {
+    const owner = await adminAs(t, 'owner');
+    const read = async () =>
+      (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
+    const save = async (smsCodesDailyAlert: number) => {
+      const now = await read();
+      const settings = structuredClone(now.settings);
+      settings.security.smsCodesDailyAlert = smsCodesDailyAlert;
+      await request(t.http)
+        .post('/v1/admin/settings?country=NG')
+        .set(owner.headers)
+        .send({ basedOn: now.version, settings, note: 'SMS alert level for a test' })
+        .expect(200);
+    };
+    const before = (await read()).settings.security.smsCodesDailyAlert as number;
+    await save(1);
+    try {
+      await requestCode(randomPhone()).expect(200);
+      // The check runs every 10 minutes; here, at once. Twice raises it once.
+      await t.app.get(OtpService).checkSpend();
+      await t.app.get(OtpService).checkSpend();
+      const { alerts } = (await request(t.http).get('/v1/admin/alerts?country=NG').set(owner.headers).expect(200))
+        .body as { alerts: Array<{ kind: string; resolvedAt: string | null }> };
+      expect(alerts.filter((a) => a.kind === 'sms_spend' && !a.resolvedAt)).toHaveLength(1);
+    } finally {
+      await save(before);
+    }
   });
 
   it('rejects missing and forged tokens', async () => {

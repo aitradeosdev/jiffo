@@ -39,6 +39,7 @@ const ALERT_KINDS: Record<string, string> = {
   transfer_otp_on: 'Transfer OTP is on',
   revenue_negative: 'Revenue below zero',
   deposit_unknown: 'Payment for an unknown top-up',
+  sms_spend: 'Many sign-in codes sent',
 };
 
 const DONE: Record<string, string> = {

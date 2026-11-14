@@ -168,6 +168,16 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
     - Chat pushes never quote the message.
     - Stored webhook bodies have account numbers, phone numbers, emails and names masked.
     - Every log line passes through the same masking. Production logs are JSON.
+- **Signing in:**
+  - **Codes:** each number and each phone may ask for 3 codes in 15 minutes and 10 in a day (Settings, Limits). A phone already signed in to the number isn't held to the number's limits, so a stranger asking for codes to it can't lock the owner out.
+  - **Network addresses:** limited too (`OTP_PER_IP_PER_HOUR`, `OTP_PER_IP_PER_DAY`), but higher, since mobile networks put many customers behind one address.
+  - **Bursts:** each request is counted one at a time, so a burst can't slip past. One that arrives while another for the same number, phone or address is being counted is told to try again at once, not queued.
+  - **SMS spend:** every 10 minutes, finance gets an alert if a country has sent more codes in the last day than the set level (Settings, Security), since each is a paid SMS. It fires once per day.
+  - **A new phone:** signing in on one signs the others out of that app, and they get a push saying so.
+  - **Copied refresh tokens:**
+    - A refresh token used twice ends every session of the account, in both apps.
+    - The one exception is the app sending it again within a minute while the token it got back is unused, which means the answer was lost on the way.
+  - **Session length:** however often it is refreshed, a session ends `SESSION_MAX_DAYS` (default 90) after sign-in.
 - **Identity checks:**
   - **The name on an ID:**
     - Kept only for a check that didn't fail, so a failed selfie can't turn a check into a way to look up whose ID a number is.

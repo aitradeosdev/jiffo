@@ -30,6 +30,7 @@ export const DEFAULT_SECURITY_SETTINGS = {
   positionFreshMinutes: 5,
   boardNearKm: 5,
   ownAccountTriesPerDay: 3,
+  smsCodesDailyAlert: 5_000,
 };
 
 /**
@@ -89,7 +90,11 @@ export const CountrySettingsSchema = z.object({
     strikeThreshold: z.number().int().positive(),
     pinAttempts: z.number().int().positive(),
     otpAttempts: z.number().int().positive(),
+    /** No longer used: sign-in codes are limited per 15 minutes and per day (below). Kept for older versions. */
     otpPerHour: z.number().int().positive(),
+    /** Sign-in codes one number, or one phone, may ask for in 15 minutes, and in a day. */
+    otpPerQuarterHour: z.number().int().min(1).max(20).default(3),
+    otpPerDay: z.number().int().min(1).max(100).default(10),
     otpResendSeconds: z.number().int().positive(),
     otpTtlSeconds: z.number().int().positive(),
     minDepositKobo: kobo.default(10_000),
@@ -150,6 +155,8 @@ export const CountrySettingsSchema = z.object({
       boardNearKm: z.number().int().min(1).max(50).default(5),
       /** Failed tries at an own account number (refused, or the bank unreachable) a customer gets in a day. */
       ownAccountTriesPerDay: z.number().int().min(1).max(20).default(3),
+      /** Sign-in codes sent in the country in a day above which finance hears of it: each is a paid SMS. */
+      smsCodesDailyAlert: z.number().int().min(1).max(1_000_000).default(5_000),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
 });
@@ -193,6 +200,8 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
     pinAttempts: 5,
     otpAttempts: 5,
     otpPerHour: 5,
+    otpPerQuarterHour: 3,
+    otpPerDay: 10,
     otpResendSeconds: 60,
     otpTtlSeconds: 300,
     minDepositKobo: 10_000,

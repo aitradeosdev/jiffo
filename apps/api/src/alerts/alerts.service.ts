@@ -59,6 +59,25 @@ export class AlertsService {
   }
 
   /** Closes the open alert of a kind once its cause has gone, e.g. the provider balance is back up. */
+  /**
+   * Raises an alert only if none of its kind and key was ever raised, open or resolved: for a daily alert,
+   * resolving it doesn't bring it straight back the same day.
+   */
+  async raiseOnce(input: AlertInput) {
+    const [seen] = await this.db
+      .select({ id: alerts.id })
+      .from(alerts)
+      .where(
+        and(
+          eq(alerts.countryCode, input.countryCode),
+          eq(alerts.kind, input.kind),
+          eq(alerts.dedupeKey, input.dedupeKey ?? ''),
+        ),
+      )
+      .limit(1);
+    if (!seen) await this.raise(input);
+  }
+
   async settle(countryCode: string, kind: string, dedupeKey = '', note = 'Resolved by itself') {
     await this.db
       .update(alerts)

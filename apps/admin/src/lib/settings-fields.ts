@@ -120,7 +120,8 @@ export const SECTIONS: Section[] = [
       { path: 'limits.strikeThreshold', label: 'Strikes before review', kind: 'count' },
       { path: 'limits.pinAttempts', label: 'Wrong hand-off PINs allowed', kind: 'count' },
       { path: 'limits.otpAttempts', label: 'Wrong sign-in codes allowed', kind: 'count' },
-      { path: 'limits.otpPerHour', label: 'Sign-in codes per number per hour', kind: 'count' },
+      { path: 'limits.otpPerQuarterHour', label: 'Sign-in codes per number or phone, in 15 minutes', kind: 'count' },
+      { path: 'limits.otpPerDay', label: 'Sign-in codes per number or phone, in a day', kind: 'count' },
       { path: 'limits.otpResendSeconds', label: 'Wait before resending a code', kind: 'seconds' },
       { path: 'limits.otpTtlSeconds', label: 'Sign-in code works for', kind: 'seconds' },
       { path: 'limits.minDepositKobo', label: 'Smallest top-up', kind: 'naira' },
@@ -233,6 +234,12 @@ export const SECTIONS: Section[] = [
         label: 'Own account number: failed tries per day',
         kind: 'count',
         help: 'Refusals and times the bank could not be reached both count. After this many, the customer waits a day or contacts support.',
+      },
+      {
+        path: 'security.smsCodesDailyAlert',
+        label: 'Alert when sign-in codes sent in a day pass',
+        kind: 'count',
+        help: 'Each code is a paid SMS. A sudden rise can mean someone is sending codes to numbers they found.',
       },
       {
         path: 'security.lowProviderBalanceKobo',
