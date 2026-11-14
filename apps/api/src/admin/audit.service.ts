@@ -24,7 +24,8 @@ export class AuditService {
       targetType: entry.targetType ?? null,
       targetId: entry.targetId ?? null,
       countryCode: entry.countryCode ?? null,
-      data: entry.data ?? {},
+      // A change that waited for approval says which request it was and who approved it.
+      data: admin.approval ? { ...(entry.data ?? {}), approval: admin.approval } : (entry.data ?? {}),
       ip: admin.ip,
     });
   }

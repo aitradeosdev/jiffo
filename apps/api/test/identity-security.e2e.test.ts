@@ -99,7 +99,7 @@ describe('identity checks', () => {
 
   describe('approving an agent', () => {
     it('never takes an ID from another account that proved it with its own checks', async () => {
-      const ops = await adminAs(t, 'operations');
+      const ops = await adminAs(t, 'verification');
       const nin = uniqueNin();
       const agent = async () => {
         const who = await signIn(t, 'agent', { unapproved: true });

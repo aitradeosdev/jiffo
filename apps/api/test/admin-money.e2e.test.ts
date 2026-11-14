@@ -44,11 +44,18 @@ describe('admin money', () => {
   afterAll(() => t.close());
 
   const get = (path: string, who: Admin = support) => request(t.http).get(`/v1/admin/money/${path}`).set(who.headers);
-  const adjust = (body: Record<string, unknown>, who: Admin = finance) =>
-    request(t.http)
+  /** An adjustment as finance makes it: one admin asks, and someone else with money access approves. */
+  const adjust = async (body: Record<string, unknown>, who: Admin = finance) => {
+    const asked = await request(t.http)
       .post('/v1/admin/money/adjustments')
       .set(who.headers)
       .send({ requestId: randomUUID(), note: 'Goodwill for a late delivery', ...body });
+    if (asked.status !== 202) return asked;
+    return request(t.http)
+      .post(`/v1/admin/approvals/${asked.body.approval.id}/approve`)
+      .set((who === owner ? finance : owner).headers)
+      .send({});
+  };
   const trialBalance = () => t.app.get(WalletService).trialBalance();
 
   it('sums what Jiffo holds and earns, and where it came from', async () => {
@@ -98,9 +105,9 @@ describe('admin money', () => {
       amountKobo: 50_000,
       requestId,
     };
-    expect((await adjust(body)).body).toEqual({ posted: true });
+    expect((await adjust(body)).body).toMatchObject({ posted: true });
     // The same form submitted twice moves the money once.
-    expect((await adjust(body)).body).toEqual({ posted: false });
+    expect((await adjust(body)).body).toMatchObject({ posted: false });
     expect((await balanceOf(t, customer)).balanceKobo).toBe(before + 50_000);
     const history = await request(t.http).get('/v1/wallet/transactions').set(customer.headers).expect(200);
     const latest = history.body.transactions?.[0] ?? history.body[0];
@@ -153,7 +160,7 @@ describe('admin money', () => {
         note: 'Reversing the goodwill credit',
       },
       owner,
-    ).expect(200);
+    ).then((r) => expect(r.status).toBe(200));
     expect((await balanceOf(t, customer)).balanceKobo).toBe(before);
 
     const audit = await request(t.http)
@@ -197,7 +204,7 @@ describe('admin money', () => {
       direction: 'credit',
       amountKobo: 200_000,
       note: 'Bonus for the launch week',
-    }).expect(200);
+    }).then((r) => expect(r.status).toBe(200));
     t.payments.accounts.set('058:0123456789', 'TUNDE BAKARE');
     await request(t.http)
       .put('/v1/payout-account')

@@ -18,6 +18,7 @@ import {
   waitedAtDropoff,
   type Person,
   type TestApp,
+  approved,
 } from './helpers';
 
 /** Fee 250,000 kobo; service fee 10% = 25,000. */
@@ -51,11 +52,16 @@ describe('the errand money path', () => {
     const now = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
     const settings = structuredClone(now.settings);
     Object.assign(settings.security, changes);
-    await request(t.http)
-      .post('/v1/admin/settings?country=NG')
-      .set(owner.headers)
-      .send({ basedOn: now.version, settings, note: 'Security limits for a test' })
-      .expect(200);
+    expect(
+      (
+        await approved(t, 'owner', (h) =>
+          request(t.http)
+            .post('/v1/admin/settings?country=NG')
+            .set(h)
+            .send({ basedOn: now.version, settings, note: 'Security limits for a test' }),
+        )
+      ).status,
+    ).toBe(200);
   }
   async function underway(overrides: Record<string, unknown> = {}) {
     const customer = await signIn(t, 'customer');

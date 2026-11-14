@@ -16,6 +16,7 @@ import {
   signIn,
   type Person,
   type TestApp,
+  approved,
 } from './helpers';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -67,11 +68,16 @@ describe('withdrawals under abuse', () => {
     const now = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
     const settings = structuredClone(now.settings);
     Object.assign(settings.security, changes);
-    await request(t.http)
-      .post('/v1/admin/settings?country=NG')
-      .set(owner.headers)
-      .send({ basedOn: now.version, settings, note: 'Security limits for a test' })
-      .expect(200);
+    expect(
+      (
+        await approved(t, 'owner', (h) =>
+          request(t.http)
+            .post('/v1/admin/settings?country=NG')
+            .set(h)
+            .send({ basedOn: now.version, settings, note: 'Security limits for a test' }),
+        )
+      ).status,
+    ).toBe(200);
   }
 
   describe('repeats', () => {
@@ -337,10 +343,12 @@ describe('withdrawals under abuse', () => {
         requestId,
       };
       const post = (b: Record<string, unknown>) =>
-        request(t.http).post('/v1/admin/money/adjustments').set(finance.headers).send(b);
-      expect((await post(body).expect(200)).body).toEqual({ posted: true });
-      expect((await post(body).expect(200)).body).toEqual({ posted: false });
-      expect((await post({ ...body, amountKobo: 5_000_000 }).expect(409)).body.error.code).toBe('request_reused');
+        approved(t, 'finance', (h) => request(t.http).post('/v1/admin/money/adjustments').set(h).send(b));
+      expect((await post(body)).body).toMatchObject({ posted: true });
+      expect((await post(body)).body).toMatchObject({ posted: false });
+      const reused = await post({ ...body, amountKobo: 5_000_000 });
+      expect(reused.status).toBe(409);
+      expect(reused.body.error.code).toBe('request_reused');
     });
   });
 });

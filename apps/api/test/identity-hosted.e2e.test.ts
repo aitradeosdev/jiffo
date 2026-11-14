@@ -10,7 +10,7 @@ import {
 } from '../src/adapters/identity-providers';
 import { agentApplications, providerSettings } from '../src/db/schema';
 import { ProvidersService } from '../src/providers/providers.service';
-import { adminAs, createTestApp, signIn, uniqueNin, type Person, type TestApp } from './helpers';
+import { adminAs, createTestApp, signIn, uniqueNin, type Person, type TestApp, switchProvider } from './helpers';
 
 describe("identity checks on the provider's own page", () => {
   let t: TestApp;
@@ -48,7 +48,7 @@ describe("identity checks on the provider's own page", () => {
       .expect(200);
     vi.spyOn(SmileIdIdentityAdapter.prototype, 'check').mockResolvedValue('Connected');
     await panel('post', '/identity/smileid/test').expect(200);
-    await panel('post', '/identity/active').send({ provider: 'smileid' }).expect(200);
+    await switchProvider(t, 'identity', 'smileid');
 
     const agent = await newAgent();
     const view = await request(t.http).get('/v1/agent/application').set(agent.headers).expect(200);
@@ -162,7 +162,7 @@ describe("identity checks on the provider's own page", () => {
       .expect(200);
     const [after] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, second.userId));
     expect(after!.identityOutcome).toBeNull();
-    await panel('post', '/identity/active').send({ provider: null }).expect(200);
+    await switchProvider(t, 'identity', null);
   });
 
   it("serves Dojah's widget page only for a link the API signed", async () => {
@@ -174,7 +174,7 @@ describe("identity checks on the provider's own page", () => {
       .expect(200);
     vi.spyOn(DojahIdentityAdapter.prototype, 'check').mockResolvedValue('Connected');
     await panel('post', '/identity/dojah/test').expect(200);
-    await panel('post', '/identity/active').send({ provider: 'dojah' }).expect(200);
+    await switchProvider(t, 'identity', 'dojah');
 
     const agent = await newAgent();
     const started = await request(t.http)
@@ -197,7 +197,7 @@ describe("identity checks on the provider's own page", () => {
       .get('/v1/identity/done')
       .expect(200)
       .expect(/jiffo-agent:\/\/identity-done/);
-    await panel('post', '/identity/active').send({ provider: null }).expect(200);
+    await switchProvider(t, 'identity', null);
   });
 
   it("runs Youverify's page: the NIN and liveness session it sends settle the check", async () => {
@@ -206,7 +206,7 @@ describe("identity checks on the provider's own page", () => {
       .expect(200);
     vi.spyOn(YouverifyIdentityAdapter.prototype, 'check').mockResolvedValue('Connected');
     await panel('post', '/identity/youverify/test').expect(200);
-    await panel('post', '/identity/active').send({ provider: 'youverify' }).expect(200);
+    await switchProvider(t, 'identity', 'youverify');
 
     const agent = await newAgent();
     const started = await request(t.http)
@@ -362,6 +362,6 @@ describe("identity checks on the provider's own page", () => {
       .get(signedOut.pathname + signedOut.search)
       .expect(410);
     expect(gone.text).toContain('This check is finished');
-    await panel('post', '/identity/active').send({ provider: null }).expect(200);
+    await switchProvider(t, 'identity', null);
   });
 });

@@ -14,6 +14,11 @@ export interface AdminContext {
   name: string;
   role: string;
   ip: string | null;
+  /**
+   * Set when this runs a change a second admin approved: the audit log then shows both people
+   * (docs/security-plan.md, D4, D7).
+   */
+  approval?: { id: string; approvedBy: string; selfApproved: boolean };
 }
 
 export type AdminRequest = Request & { admin?: AdminContext };

@@ -20,7 +20,7 @@ describe('admin: agent applications', () => {
 
   beforeAll(async () => {
     t = await createTestApp();
-    ops = await adminAs(t, 'operations');
+    ops = await adminAs(t, 'verification');
     support = await adminAs(t, 'support');
   });
   afterAll(() => t.close());
@@ -111,7 +111,7 @@ describe('admin: agent applications', () => {
     const page = await request(t.http).get(`/v1/admin/people/${agent.userId}`).set(support.headers).expect(200);
     expect(page.body.agent.application).toMatchObject({
       status: 'rejected',
-      decidedBy: 'Test operations',
+      decidedBy: 'Test verification',
       decisionNote: 'The selfie is of a different person',
     });
   });

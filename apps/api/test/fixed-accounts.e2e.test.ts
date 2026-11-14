@@ -14,6 +14,7 @@ import {
   type Person,
   type TestApp,
   clearReconciliationPauses,
+  approved,
 } from './helpers';
 
 const BVN = '22212345678';
@@ -43,15 +44,18 @@ describe('adding money: own account numbers', () => {
   });
 
   /** Saves how customers add money, as admin does in the panel. */
-  async function topUps(oneTimeAccount: boolean, fixedAccount: boolean, expect = 200) {
+  async function topUps(oneTimeAccount: boolean, fixedAccount: boolean, status = 200) {
     const now = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
     const settings = structuredClone(now.settings);
     settings.topUps = { oneTimeAccount, fixedAccount };
-    return request(t.http)
-      .post('/v1/admin/settings?country=NG')
-      .set(owner.headers)
-      .send({ basedOn: now.version, settings, note: 'Ways to add money for a test' })
-      .expect(expect);
+    const saved = await approved(t, 'owner', (h) =>
+      request(t.http)
+        .post('/v1/admin/settings?country=NG')
+        .set(h)
+        .send({ basedOn: now.version, settings, note: 'Ways to add money for a test' }),
+    );
+    expect(saved.status).toBe(status);
+    return saved;
   }
 
   const options = (who: Person) => request(t.http).get('/v1/wallet/top-up').set(who.headers);

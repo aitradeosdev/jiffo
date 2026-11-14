@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { adminRoleLabel } from '@jiffo/shared';
 import {
   ApplicationsIcon,
+  ApprovalsIcon,
   IdChecksIcon,
   AuditIcon,
   DisputesIcon,
@@ -14,7 +15,7 @@ import {
   TeamIcon,
 } from '@/components/icons';
 import { Wordmark } from '@/components/wordmark';
-import { getCountry, getMe, type Permission } from '@/lib/api';
+import { api, getCountry, getMe, type Permission } from '@/lib/api';
 import { chooseCountry, signOut } from './actions';
 import { CountrySelect, Nav, type NavItem } from './nav';
 
@@ -26,6 +27,7 @@ const SECTIONS: Array<NavItem & { needs: Permission }> = [
   { href: '/applications', label: 'Applications', icon: <ApplicationsIcon />, needs: 'read' },
   { href: '/id-checks', label: 'ID checks', icon: <IdChecksIcon />, needs: 'read' },
   { href: '/money', label: 'Money', icon: <MoneyIcon />, needs: 'read' },
+  { href: '/approvals', label: 'Approvals', icon: <ApprovalsIcon />, needs: 'read' },
   { href: '/settings', label: 'Settings', icon: <SettingsIcon />, needs: 'read' },
   { href: '/team', label: 'Team', icon: <TeamIcon />, needs: 'team' },
   { href: '/audit', label: 'Audit log', icon: <AuditIcon />, needs: 'team' },
@@ -33,8 +35,14 @@ const SECTIONS: Array<NavItem & { needs: Permission }> = [
 
 /** Every signed-in page: the sections on the left (on top on small screens), the page on the right. */
 export default async function PanelLayout({ children }: { children: ReactNode }) {
-  const [me, country] = await Promise.all([getMe(), getCountry()]);
-  const items = SECTIONS.filter((s) => me.permissions.includes(s.needs)).map(({ needs: _, ...item }) => item);
+  const [me, country, approvals] = await Promise.all([
+    getMe(),
+    getCountry(),
+    api<{ waiting: number }>('/admin/approvals/waiting'),
+  ]);
+  const items = SECTIONS.filter((s) => me.permissions.includes(s.needs)).map(({ needs: _, ...item }) =>
+    item.href === '/approvals' ? { ...item, count: approvals.waiting } : item,
+  );
 
   return (
     <div className="lg:flex">

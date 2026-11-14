@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "openapi": "UPDATE_OPENAPI=1 vitest run test/api-inventory.e2e.test.ts",
+    "check:injection": "node scripts/check-injection.cjs dist",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node dist/db/migrate-cli.js",
     "admin": "node dist/admin/admin-cli.js"

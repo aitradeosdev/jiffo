@@ -165,7 +165,7 @@ export default async function PersonPage({
   const country = me.countries.find((c) => c.code === d.person.countryCode) ?? chosen;
   const naira = (kobo: number) => money(kobo, country.currency);
   const time = (iso: string) => dateTime(iso, country.timezone);
-  const canOperate = me.permissions.includes('operate');
+  const can = (p: (typeof me.permissions)[number]) => me.permissions.includes(p);
   const p = d.person;
   const stats = (s: Stats) => (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -219,7 +219,7 @@ export default async function PersonPage({
             <IdentityCard
               id={p.id}
               identity={d.customer.identity}
-              canDecide={canOperate}
+              canDecide={can('verify')}
               time={time}
               timeZone={country.timezone}
             />
@@ -228,7 +228,7 @@ export default async function PersonPage({
             <ApplicationCard
               id={p.id}
               app={d.agent.application}
-              canDecide={canOperate}
+              canDecide={can('verify')}
               time={time}
               timeZone={country.timezone}
             />
@@ -338,7 +338,7 @@ export default async function PersonPage({
                   ? `Set ${time(d.agent.tierSetAt)}${d.agent.tierSetBy ? ` by ${d.agent.tierSetBy}` : ''}`
                   : 'Bronze since joining'}
               </p>
-              {canOperate ? (
+              {can('tiers') ? (
                 <TierForm key={d.agent.tier} id={p.id} tier={d.agent.tier} tiers={d.agent.tiers} />
               ) : (
                 <p className="font-bold">{agentTierLabel(d.agent.tier)}</p>
@@ -423,7 +423,7 @@ export default async function PersonPage({
             </Card>
           ) : null}
 
-          {canOperate ? (
+          {can('suspend') ? (
             <Card title="Access">
               {d.liveErrands.length && p.status === 'active' ? (
                 <p className="mb-3 text-[13px] text-ink-3">
