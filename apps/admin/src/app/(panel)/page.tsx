@@ -38,6 +38,8 @@ interface Overview {
     senderMismatch7d: number;
     applications: number;
     idChecks: number;
+    alerts: number;
+    instantPaused: boolean;
   };
   week: Array<{ day: string; completed: number; revenueKobo: number; costsKobo: number; netRevenueKobo: number }>;
   reconciliation: { at: string; differenceKobo: number; pendingDeposits: number; stuckPayouts: number } | null;
@@ -73,6 +75,18 @@ export default async function OverviewPage() {
     attention.push(
       <Link href="/id-checks" className="underline">
         {plural(o.attention.idChecks, "customer's ID check", "customers' ID checks")} waiting for review
+      </Link>,
+    );
+  if (o.attention.instantPaused)
+    attention.push(
+      <Link href="/money/checks" className="underline">
+        Instant withdrawals are paused until finance clears the nightly check
+      </Link>,
+    );
+  if (o.attention.alerts)
+    attention.push(
+      <Link href="/money/checks" className="underline">
+        {plural(o.attention.alerts, 'money alert')} to look at
       </Link>,
     );
   if (o.attention.failedPayouts7d)

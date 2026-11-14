@@ -14,7 +14,12 @@ import { WalletService } from './wallet.service';
 
 const Kobo = z.number().int().positive().max(100_000_000_000);
 const DepositBody = z.object({ amountKobo: Kobo });
-const WithdrawalBody = z.object({ amountKobo: Kobo, speed: z.enum(['instant', 'scheduled']) });
+const WithdrawalBody = z.object({
+  amountKobo: Kobo,
+  speed: z.enum(['instant', 'scheduled']),
+  /** The app's key for this request: a repeat with it makes no second withdrawal. */
+  requestId: z.string().uuid(),
+});
 const PayoutAccountBody = z.object({
   bankCode: z.string().min(2).max(10),
   accountNumber: z.string().regex(/^\d{10}$/, 'Account numbers are 10 digits'),
@@ -97,7 +102,7 @@ export class MoneyController {
   @Post('wallet/withdrawals')
   @Apps('agent')
   withdraw(@CurrentAuth() auth: AuthContext, @Body(new ZodBody(WithdrawalBody)) body: z.infer<typeof WithdrawalBody>) {
-    return this.payouts.request(auth, body.amountKobo, body.speed);
+    return this.payouts.request(auth, body.amountKobo, body.speed, body.requestId);
   }
 
   @Get('wallet/withdrawals')

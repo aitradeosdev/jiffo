@@ -154,8 +154,9 @@ describe('Paystack payments', () => {
     );
     const adapter = new PaystackPaymentsAdapter('sk', 'https://api.example.test', impl);
     expect((await adapter.verifyTransfer('jp-1')).status).toBe('failed');
+    // Transfer OTP on in the dashboard: the transfer waits for a code nobody sends, so it counts as failed.
     answer = 'otp';
-    expect((await adapter.verifyTransfer('jp-1')).status).toBe('pending');
+    expect((await adapter.verifyTransfer('jp-1')).status).toBe('failed');
     answer = 'success';
     expect((await adapter.verifyTransfer('jp-1')).status).toBe('success');
     await expect(

@@ -18,6 +18,14 @@ export const AGENT_TIER_LABELS: Record<AgentTier, string> = {
 /** A tier's name for people, or the raw value for one this version doesn't know. */
 export const agentTierLabel = (tier: string) => AGENT_TIER_LABELS[tier as AgentTier] ?? tier;
 
+/** The Security group's starting values, also used for versions saved before the group existed. */
+export const DEFAULT_SECURITY_SETTINGS = {
+  instantWithdrawalAgentDailyKobo: 20_000_000,
+  instantWithdrawalPlatformDailyKobo: 1_000_000_000,
+  reconciliationToleranceKobo: 50_000,
+  lowProviderBalanceKobo: 50_000_000,
+};
+
 /**
  * Everything admin can change for a country. Each saved change becomes a new version,
  * so an errand can always be explained by the settings that applied when it ran.
@@ -106,6 +114,19 @@ export const CountrySettingsSchema = z.object({
   profiles: z.object({
     showCustomerPhotoBeforeAccept: z.boolean(),
   }),
+  /** Limits that protect the money (docs/security-plan.md, X10). */
+  security: z
+    .object({
+      /** Instant withdrawals one agent may take a day, fee included. */
+      instantWithdrawalAgentDailyKobo: kobo,
+      /** Instant withdrawals all agents in the country may take a day. */
+      instantWithdrawalPlatformDailyKobo: kobo,
+      /** A nightly-check shortfall larger than this pauses instant withdrawals until finance clears it. */
+      reconciliationToleranceKobo: kobo,
+      /** Below this, the money held at the payments provider raises an alert. */
+      lowProviderBalanceKobo: kobo,
+    })
+    .default(DEFAULT_SECURITY_SETTINGS),
 });
 
 export type CountrySettings = z.infer<typeof CountrySettingsSchema>;
@@ -162,6 +183,7 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
   },
   topUps: { oneTimeAccount: true, fixedAccount: false },
   profiles: { showCustomerPhotoBeforeAccept: false },
+  security: DEFAULT_SECURITY_SETTINGS,
 };
 
 /** The part of the settings the apps may read. Limits and identity provider details stay on the server. */

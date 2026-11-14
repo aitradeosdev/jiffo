@@ -28,6 +28,24 @@ export class WebhooksController {
   ) {}
 
   /**
+   * Paystack's transfer approval URL: asked before every transfer, it answers 200 only for a withdrawal
+   * Jiffo is sending, for its amount and recipient (PayoutsService.approve), and 400 otherwise. The owner
+   * registers this address in the Paystack dashboard.
+   */
+  @Post(':provider/transfer-approval')
+  @HttpCode(200)
+  async approveTransfer(@Param('provider') provider: string, @Req() req: RawBodyRequest<Request>) {
+    const payments = this.providers.named('payments', provider);
+    if (!payments?.parseTransferApproval) throw notFound('not_found', 'Not found');
+    if (!req.rawBody) throw badRequest('invalid_request', 'Missing body');
+    const ask = payments.parseTransferApproval(req.rawBody, req.headers);
+    if (!ask) throw unauthorized('invalid_signature', 'Signature does not match');
+    const decision = await this.payouts.approve(provider, ask);
+    if (!decision.approved) throw badRequest('transfer_not_approved', 'Transfer not approved');
+    return { approved: true };
+  }
+
+  /**
    * One address per payments provider (/webhooks/paystack and so on). A provider that admin switched away
    * from still delivers here for what it started, as long as its keys are kept.
    */

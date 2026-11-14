@@ -632,12 +632,19 @@ export const payouts = pgTable(
     provider: text('provider'),
     providerTransferCode: text('provider_transfer_code'),
     failureReason: text('failure_reason'),
+    /** The app's key for the request, so a repeated tap or retry makes one withdrawal. */
+    requestKey: text('request_key'),
+    /** Times it was handed to the provider. Only a first try that is refused outright is given back. */
+    attempts: integer('attempts').notNull().default(0),
+    /** Set while one run is sending it, so two never send it at once. */
+    sendingUntil: timestamp('sending_until', { withTimezone: true }),
     createdAt: createdAt(),
     sentAt: timestamp('sent_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
   (t) => [
     uniqueIndex('payouts_reference_uq').on(t.reference),
+    uniqueIndex('payouts_request_key_uq').on(t.userId, t.requestKey),
     index('payouts_user_idx').on(t.userId, t.createdAt),
     index('payouts_status_idx').on(t.status),
     index('payouts_country_created_idx').on(t.countryCode, t.createdAt, t.id),
@@ -694,8 +701,40 @@ export const reconciliationRuns = pgTable('reconciliation_runs', {
   differenceKobo: kobo('difference_kobo').notNull(),
   pendingDeposits: integer('pending_deposits').notNull(),
   stuckPayouts: integer('stuck_payouts').notNull(),
+  /** A shortfall beyond the tolerance: instant withdrawals stop until finance clears it. */
+  pausesInstant: boolean('pauses_instant').notNull().default(false),
+  clearedAt: timestamp('cleared_at', { withTimezone: true }),
+  clearedBy: uuid('cleared_by').references(() => admins.id),
+  clearNote: text('clear_note'),
   createdAt: createdAt(),
 });
+
+/**
+ * Things finance or the team must look at: a nightly-check gap, a low provider balance, a withdrawal the
+ * approval URL refused, an unclear transfer. One stays open per kind, country and key until someone resolves it.
+ */
+export const alerts = pgTable(
+  'alerts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    countryCode: char('country_code', { length: 2 }).references(() => countries.code),
+    kind: text('kind').notNull(),
+    /** Tells apart open alerts of one kind, e.g. the payout an unclear transfer is about. */
+    dedupeKey: text('dedupe_key').notNull().default(''),
+    message: text('message').notNull(),
+    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolvedBy: uuid('resolved_by').references(() => admins.id),
+    resolveNote: text('resolve_note'),
+  },
+  (t) => [
+    uniqueIndex('alerts_open_uq')
+      .on(t.kind, t.countryCode, t.dedupeKey)
+      .where(sql`resolved_at is null`),
+    index('alerts_country_created_idx').on(t.countryCode, t.createdAt),
+  ],
+);
 
 /* ---------- Files ---------- */
 

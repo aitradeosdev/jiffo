@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, desc, eq, gte, inArray, isNull, lt, sql, sum } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, or, sql, sum } from 'drizzle-orm';
 import { formatNaira } from '@jiffo/shared';
 import { DB, type Db } from '../db/database.module';
-import { payoutAccounts, payouts, users } from '../db/schema';
+import { payoutAccounts, payouts, reconciliationRuns, users } from '../db/schema';
 import { PAYMENTS, PaymentsProviderError, type PaymentsAdapter } from '../adapters/payments';
 import { ProvidersService } from '../providers/providers.service';
 import { CountriesService } from '../countries/countries.service';
@@ -11,6 +11,8 @@ import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { AuthContext } from '../auth/auth.types';
 import { conflict, unprocessable } from '../common/errors';
+import { AlertsService } from '../alerts/alerts.service';
+import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { nameWords, plainName } from '../common/names';
 import { LedgerService, transfer } from './ledger.service';
 import { WalletService } from './wallet.service';
@@ -24,6 +26,16 @@ const BANKS_TTL_MS = 24 * 3_600_000;
 const RETRY_AFTER_MS = 60_000;
 /** A transfer with no news for this long is checked with the provider. */
 const CHECK_AFTER_MS = 5 * 60_000;
+/** How long one run may hold a withdrawal while it hands it to the provider. */
+const SEND_LEASE_MS = 2 * 60_000;
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+/** What the provider's transfer approval request names, checked against the withdrawal it is for. */
+export interface TransferApproval {
+  reference: string;
+  amountKobo: number;
+  recipientCode: string | null;
+}
 
 const mask = (accountNumber: string) => `******${accountNumber.slice(-4)}`;
 /** A bank's name reduced for comparing lists from different providers: "GTBank Plc" and "gtbank" match. */
@@ -64,6 +76,8 @@ export class PayoutsService {
     private readonly push: PushService,
     private readonly realtime: RealtimeGateway,
     private readonly providers: ProvidersService,
+    private readonly alerts: AlertsService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   async listBanks() {
@@ -155,7 +169,11 @@ export class PayoutsService {
 
   /* ---------- Withdrawals ---------- */
 
-  async request(auth: AuthContext, amountKobo: number, speed: 'instant' | 'scheduled') {
+  /**
+   * A withdrawal from the agent's available balance. `requestKey` is the app's key for this request: a
+   * repeat with it returns the same withdrawal, and the key can't be used for another one.
+   */
+  async request(auth: AuthContext, amountKobo: number, speed: 'instant' | 'scheduled', requestKey: string) {
     const [{ settings }, { currency, timezone }, tier] = await Promise.all([
       this.countries.currentSettings(auth.countryCode),
       this.countries.basics(auth.countryCode),
@@ -171,11 +189,24 @@ export class PayoutsService {
     const feeKobo = speed === 'instant' ? settings.fees.instantWithdrawalFeeKobo : 0;
     if (amountKobo <= feeKobo)
       throw unprocessable('withdrawal_too_small', 'The amount must be more than the fee', { feeKobo });
+    if (speed === 'instant' && (await this.instantPaused(auth.countryCode))) {
+      throw conflict('instant_paused', 'Instant withdrawals are paused for a check. Choose the daily withdrawal.');
+    }
     await this.wallet.releaseDue(auth.userId);
 
-    const payout = await this.db.transaction(async (tx) => {
-      // One withdrawal request at a time per agent, so the daily limit can't be raced.
+    const { payout, repeat } = await this.db.transaction(async (tx) => {
+      // One withdrawal request at a time per agent, so the daily limits can't be raced.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payout:' + auth.userId}))`);
+      const [same] = await tx
+        .select()
+        .from(payouts)
+        .where(and(eq(payouts.userId, auth.userId), eq(payouts.requestKey, requestKey)));
+      if (same) {
+        if (same.amountKobo !== amountKobo || same.speed !== speed) {
+          throw conflict('request_reused', 'This request was already used for another withdrawal');
+        }
+        return { payout: same, repeat: true };
+      }
       if (speed === 'scheduled') {
         const [queued] = await tx
           .select({ id: payouts.id })
@@ -204,6 +235,26 @@ export class PayoutsService {
         }
       }
 
+      if (speed === 'instant') {
+        const { instantWithdrawalAgentDailyKobo: agentCap, instantWithdrawalPlatformDailyKobo: platformCap } =
+          settings.security;
+        const mine = await this.instantToday(tx, timezone, eq(payouts.userId, auth.userId));
+        if (mine + amountKobo > agentCap) {
+          throw unprocessable('instant_limit_reached', 'This is more than you can withdraw instantly today', {
+            remainingKobo: Math.max(0, agentCap - mine),
+          });
+        }
+        // Everyone's instant withdrawals in the country, one request at a time.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payout-instant:' + auth.countryCode}))`);
+        const everyone = await this.instantToday(tx, timezone, eq(payouts.countryCode, auth.countryCode));
+        if (everyone + amountKobo > platformCap) {
+          throw unprocessable(
+            'instant_unavailable',
+            "Instant withdrawals have reached today's limit. Choose the daily withdrawal.",
+          );
+        }
+      }
+
       const [row] = await tx
         .insert(payouts)
         .values({
@@ -211,6 +262,7 @@ export class PayoutsService {
           countryCode: auth.countryCode,
           payoutAccountId: account.id,
           reference: `jp-${randomUUID()}`,
+          requestKey,
           speed,
           amountKobo,
           feeKobo,
@@ -228,12 +280,46 @@ export class PayoutsService {
           transfer({ type: 'agent_available', ownerId: auth.userId }, { type: 'platform_revenue' }, feeKobo),
         ],
       });
-      return row!;
+      return { payout: row!, repeat: false };
     });
 
+    if (repeat) return payoutView(payout);
     this.realtime.toUser(auth.userId, 'agent', 'wallet.updated', { reason: 'payout', payoutId: payout.id });
     if (speed === 'instant') return payoutView((await this.send(payout.id)) ?? payout);
     return payoutView(payout);
+  }
+
+  /** Instant withdrawals made today (local time), still standing, by an agent or in a country. */
+  private async instantToday(tx: Tx, timezone: string, who: ReturnType<typeof eq>) {
+    const startOfDay = sql`(date_trunc('day', now() at time zone ${timezone}) at time zone ${timezone})`;
+    const [row] = await tx
+      .select({ total: sum(payouts.amountKobo) })
+      .from(payouts)
+      .where(
+        and(
+          who,
+          eq(payouts.speed, 'instant'),
+          gte(payouts.createdAt, startOfDay),
+          inArray(payouts.status, ['requested', 'processing', 'succeeded']),
+        ),
+      );
+    return Number(row?.total ?? 0);
+  }
+
+  /** A nightly-check shortfall that finance hasn't cleared stops instant withdrawals in the country. */
+  async instantPaused(countryCode: string) {
+    const [run] = await this.db
+      .select({ id: reconciliationRuns.id })
+      .from(reconciliationRuns)
+      .where(
+        and(
+          eq(reconciliationRuns.countryCode, countryCode),
+          eq(reconciliationRuns.pausesInstant, true),
+          isNull(reconciliationRuns.clearedAt),
+        ),
+      )
+      .limit(1);
+    return !!run;
   }
 
   async list(auth: AuthContext, limit: number) {
@@ -246,10 +332,39 @@ export class PayoutsService {
     return rows.map(payoutView);
   }
 
-  /** Hands a requested payout to the provider. The reference makes a retry safe: the bank pays once. */
+  /**
+   * Hands a requested payout to the provider. It is claimed first, so two runs never send it at once; the
+   * reference makes a retry safe, so the bank pays once.
+   */
   async send(payoutId: string): Promise<PayoutRow | null> {
-    const [payout] = await this.db.select().from(payouts).where(eq(payouts.id, payoutId));
-    if (!payout || payout.status !== 'requested') return payout ?? null;
+    const now = new Date();
+    const [claimed] = await this.db
+      .update(payouts)
+      .set({ sendingUntil: new Date(now.getTime() + SEND_LEASE_MS) })
+      .where(
+        and(
+          eq(payouts.id, payoutId),
+          eq(payouts.status, 'requested'),
+          or(isNull(payouts.sendingUntil), lt(payouts.sendingUntil, now)),
+        ),
+      )
+      .returning();
+    if (!claimed) return (await this.db.select().from(payouts).where(eq(payouts.id, payoutId)))[0] ?? null;
+    try {
+      return await this.sendClaimed(claimed);
+    } finally {
+      await this.db.update(payouts).set({ sendingUntil: null }).where(eq(payouts.id, payoutId));
+    }
+  }
+
+  private async sendClaimed(payout: PayoutRow): Promise<PayoutRow | null> {
+    // A suspended agent's withdrawals wait: they go out if support reactivates them.
+    const [owner] = await this.db.select({ status: users.status }).from(users).where(eq(users.id, payout.userId));
+    if (owner?.status !== 'active') {
+      this.logger.warn(`Payout ${payout.id} waits: its agent is suspended`);
+      return payout;
+    }
+    if (payout.speed === 'instant' && (await this.instantPaused(payout.countryCode))) return payout;
     // A payout tried before keeps the provider it was first sent to: asking another about it means nothing.
     const via = payout.provider
       ? this.providers.named('payments', payout.provider)
@@ -264,15 +379,21 @@ export class PayoutsService {
     try {
       account = await this.recipientWith(via, payout.payoutAccountId);
     } catch (error) {
-      if (error instanceof PaymentsProviderError && error.status >= 400 && error.status < 500) {
-        return this.fail(payout.id, error.message);
-      }
+      // Refused before it was ever handed over: nothing can have been paid, so the money goes back.
+      const refused = error instanceof PaymentsProviderError && error.status >= 400 && error.status < 500;
+      if (refused && payout.attempts === 0) return this.fail(payout.id, (error as Error).message);
       this.logger.warn(`Payout ${payout.id} not sent yet: ${(error as Error).message}`);
       return payout;
     }
     if (!payout.provider) {
       await this.db.update(payouts).set({ provider: via.name }).where(eq(payouts.id, payout.id));
     }
+    const [counted] = await this.db
+      .update(payouts)
+      .set({ attempts: sql`${payouts.attempts} + 1` })
+      .where(eq(payouts.id, payout.id))
+      .returning({ attempts: payouts.attempts });
+    const attempt = counted?.attempts ?? 1;
 
     let result: Awaited<ReturnType<PaymentsAdapter['transfer']>>;
     try {
@@ -288,16 +409,33 @@ export class PayoutsService {
       // The provider may have taken the transfer and only the answer was lost. A retry would then be
       // refused as a duplicate reference, so ask about this reference before giving up.
       const known = await via.verifyTransfer(payout.reference).catch(() => null);
-      // The provider never took it and said why (bad recipient, no balance, transfers off): give the money back.
-      if (!known && error instanceof PaymentsProviderError && error.status >= 400 && error.status < 500) {
-        return this.fail(payout.id, error.message);
-      }
+      const refused = error instanceof PaymentsProviderError && error.status >= 400 && error.status < 500;
+      // Refused outright on the first try, and unknown to the provider: it never took it, so the money goes
+      // back. After an earlier try, a refusal may only mean that try's transfer exists: never given back.
+      if (!known && refused && attempt === 1) return this.fail(payout.id, (error as Error).message);
       if (!known) {
-        // Left as requested: the daily run tries again with the same reference, so the bank pays once.
+        if (refused) {
+          await this.alerts.raise({
+            countryCode: payout.countryCode,
+            kind: 'payout_unclear',
+            dedupeKey: payout.id,
+            message: `Withdrawal ${payout.reference} was refused on a retry and ${via.name} doesn't show it yet. Check it at the provider before anything is given back.`,
+            data: { payoutId: payout.id, reference: payout.reference, reason: (error as Error).message },
+          });
+        }
+        // Left as requested: it is tried again with the same reference, so the bank pays once.
         this.logger.warn(`Payout ${payout.id} not sent yet: ${(error as Error).message}`);
         return payout;
       }
       result = { status: known.status, transferCode: null, reason: known.reason, feeKobo: known.feeKobo };
+    }
+    if (result.reason === 'otp') {
+      await this.alerts.raise({
+        countryCode: payout.countryCode,
+        kind: 'transfer_otp_on',
+        message: `${via.name} asked for an OTP on a transfer. Turn transfer OTP off in its dashboard, or withdrawals can't go out.`,
+        data: { reference: payout.reference },
+      });
     }
     const [sent] = await this.db
       .update(payouts)
@@ -305,8 +443,54 @@ export class PayoutsService {
       .where(and(eq(payouts.id, payout.id), eq(payouts.status, 'requested')))
       .returning();
     if (result.status === 'success') return this.succeed(payout.id, result.feeKobo ?? 0);
-    if (result.status === 'failed') return this.fail(payout.id, result.reason ?? 'failed');
+    if (result.status === 'failed')
+      return this.fail(payout.id, result.reason === 'otp' ? 'Transfer OTP is on' : (result.reason ?? 'failed'));
     return sent ?? payout;
+  }
+
+  /**
+   * The provider asks, before it moves money, whether a transfer is one of ours (Paystack's transfer
+   * approval URL). Approved only for a withdrawal being sent or in progress, for its exact amount and the
+   * agent's checked recipient, while the agent is active. Database reads only: it must answer fast.
+   */
+  async approve(provider: string, ask: TransferApproval) {
+    const [row] = await this.db
+      .select({ payout: payouts, recipientCode: payoutAccounts.recipientCode, owner: users.status })
+      .from(payouts)
+      .innerJoin(payoutAccounts, eq(payoutAccounts.id, payouts.payoutAccountId))
+      .innerJoin(users, eq(users.id, payouts.userId))
+      .where(eq(payouts.reference, ask.reference));
+    const reason = await this.approvalProblem(provider, ask, row);
+    if (!reason) return { approved: true as const };
+    await this.alerts.raise({
+      countryCode: row?.payout.countryCode ?? this.config.DEFAULT_COUNTRY,
+      kind: 'payout_rejected',
+      dedupeKey: ask.reference,
+      message: `${provider} asked to approve transfer ${ask.reference}, and it was refused: ${reason}.`,
+      data: { ...ask, reason },
+    });
+    return { approved: false as const, reason };
+  }
+
+  private async approvalProblem(
+    provider: string,
+    ask: TransferApproval,
+    row: { payout: PayoutRow; recipientCode: string; owner: string } | undefined,
+  ) {
+    if (!row) return 'no such withdrawal';
+    const { payout } = row;
+    if (payout.provider !== provider) return `it goes through ${payout.provider ?? 'no provider'}`;
+    const sending = payout.status === 'requested' && !!payout.sendingUntil && payout.sendingUntil > new Date();
+    if (payout.status !== 'processing' && !sending) {
+      return payout.status === 'requested' ? 'it is not being sent' : `it is ${payout.status}`;
+    }
+    if (payout.sendKobo !== ask.amountKobo) return `the amount is ${ask.amountKobo}, not ${payout.sendKobo}`;
+    if (!ask.recipientCode || ask.recipientCode !== row.recipientCode) return "the recipient isn't the agent's account";
+    if (row.owner !== 'active') return 'the agent is suspended';
+    if (payout.speed === 'instant' && (await this.instantPaused(payout.countryCode))) {
+      return 'instant withdrawals are paused';
+    }
+    return null;
   }
 
   /**

@@ -1,17 +1,20 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import {
+  alerts,
   countries,
   deposits,
   devices,
   errands,
+  journalEntries,
   payoutAccounts,
   payouts,
   reconciliationRuns,
   users,
 } from '../db/schema';
 import { conflict, notFound, unprocessable } from '../common/errors';
+import { AlertsService } from '../alerts/alerts.service';
 import { InsufficientFunds, LedgerService, transfer, type AccountRef } from '../money/ledger.service';
 import { AuditService } from './audit.service';
 import { requireCountry } from './countries';
@@ -53,6 +56,7 @@ export class MoneyAdminService {
     @Inject(DB) private readonly db: Db,
     private readonly ledger: LedgerService,
     private readonly audit: AuditService,
+    private readonly alertsService: AlertsService,
   ) {}
 
   /** Balances now, and where revenue and provider charges came from over the last `days` days. */
@@ -310,6 +314,87 @@ export class MoneyAdminService {
   }
 
   /**
+   * Finance clears a nightly check that paused instant withdrawals, saying what explained the gap. Instant
+   * withdrawals start again once no check is left uncleared.
+   */
+  async clearReconciliation(admin: AdminContext, runId: string, note: string) {
+    return this.db.transaction(async (tx) => {
+      const [run] = await tx
+        .update(reconciliationRuns)
+        .set({ clearedAt: new Date(), clearedBy: admin.adminId, clearNote: note })
+        .where(and(eq(reconciliationRuns.id, runId), isNull(reconciliationRuns.clearedAt)))
+        .returning();
+      if (!run) throw notFound('check_not_found', 'No uncleared check with that id');
+      await this.audit.record(tx, admin, {
+        action: 'money.reconciliation_clear',
+        targetType: 'reconciliation_run',
+        targetId: run.id,
+        countryCode: run.countryCode,
+        data: { differenceKobo: run.differenceKobo, note },
+      });
+      const [left] = await tx
+        .select({ id: reconciliationRuns.id })
+        .from(reconciliationRuns)
+        .where(
+          and(
+            eq(reconciliationRuns.countryCode, run.countryCode),
+            eq(reconciliationRuns.pausesInstant, true),
+            isNull(reconciliationRuns.clearedAt),
+          ),
+        )
+        .limit(1);
+      if (!left) {
+        await tx
+          .update(alerts)
+          .set({ resolvedAt: new Date(), resolvedBy: admin.adminId, resolveNote: note })
+          .where(
+            and(
+              eq(alerts.countryCode, run.countryCode),
+              eq(alerts.kind, 'reconciliation_gap'),
+              isNull(alerts.resolvedAt),
+            ),
+          );
+      }
+      return { cleared: true, instantPaused: !!left };
+    });
+  }
+
+  /** Open alerts first, then the latest resolved ones. */
+  async alerts(country: string) {
+    const rows = await this.alertsService.list(country);
+    return {
+      alerts: rows.map((a) => ({
+        id: a.id,
+        kind: a.kind,
+        message: a.message,
+        data: a.data,
+        createdAt: a.createdAt,
+        resolvedAt: a.resolvedAt,
+        resolveNote: a.resolveNote,
+      })),
+    };
+  }
+
+  async resolveAlert(admin: AdminContext, id: string, note: string) {
+    return this.db.transaction(async (tx) => {
+      const [alert] = await tx
+        .update(alerts)
+        .set({ resolvedAt: new Date(), resolvedBy: admin.adminId, resolveNote: note })
+        .where(and(eq(alerts.id, id), isNull(alerts.resolvedAt)))
+        .returning();
+      if (!alert) throw notFound('alert_not_found', 'No open alert with that id');
+      await this.audit.record(tx, admin, {
+        action: 'alert.resolve',
+        targetType: 'alert',
+        targetId: alert.id,
+        countryCode: alert.countryCode ?? undefined,
+        data: { kind: alert.kind, note },
+      });
+      return { resolved: true };
+    });
+  }
+
+  /**
    * Finance corrects a balance by hand: a credit is paid by Jiffo out of revenue (a goodwill credit or a
    * refund after the fact); a debit takes money back into revenue (recovering an overpayment). A debit
    * can't take more than the account holds. Every adjustment needs a reason and is audited; a repeated
@@ -354,14 +439,35 @@ export class MoneyAdminService {
           currency,
           errandId: input.errandId ?? null,
           memo: input.note,
-          data: { adminId: admin.adminId, direction: input.direction, note: input.note },
+          data: {
+            adminId: admin.adminId,
+            personId: person.id,
+            account: input.account,
+            direction: input.direction,
+            amountKobo: input.amountKobo,
+            note: input.note,
+          },
           movements: [
             input.direction === 'credit'
               ? transfer(revenue, account, input.amountKobo)
               : transfer(account, revenue, input.amountKobo),
           ],
         });
-        if (!posted) return { posted: false };
+        if (!posted) {
+          // The same request again posts nothing; the key used for a different adjustment is refused.
+          const [first] = await tx
+            .select({ data: journalEntries.data })
+            .from(journalEntries)
+            .where(eq(journalEntries.key, `adjustment:${input.requestId}`));
+          const was = (first?.data ?? {}) as Record<string, unknown>;
+          const same =
+            was.personId === person.id &&
+            was.account === input.account &&
+            was.direction === input.direction &&
+            was.amountKobo === input.amountKobo;
+          if (!same) throw conflict('request_reused', 'This request was already used for another adjustment');
+          return { posted: false };
+        }
       } catch (error) {
         if (error instanceof InsufficientFunds) {
           throw conflict('balance_too_low', "That's more than the account holds");

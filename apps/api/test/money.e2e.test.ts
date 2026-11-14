@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -15,6 +16,7 @@ import {
   signIn,
   type Person,
   type TestApp,
+  clearReconciliationPauses,
 } from './helpers';
 
 /** Fee 250,000 kobo; service fee 10% = 25,000; Bronze commission 15% = 37,500. */
@@ -137,6 +139,7 @@ describe('money', () => {
         .where(eq(deposits.id, res.body.id));
       t.payments.pay(reference);
       await t.jobs.run('reconcile.daily');
+      await clearReconciliationPauses(t);
       expect((await balanceOf(t, person)).balanceKobo).toBe(300_000);
     });
 
@@ -471,7 +474,7 @@ describe('money', () => {
       await request(t.http)
         .post('/v1/wallet/withdrawals')
         .set(earner.headers)
-        .send({ amountKobo: 100_000, speed: 'instant' })
+        .send({ requestId: randomUUID(), amountKobo: 100_000, speed: 'instant' })
         .expect(409);
 
       const wrong = await request(t.http)
@@ -512,7 +515,7 @@ describe('money', () => {
       const res = await request(t.http)
         .post('/v1/wallet/withdrawals')
         .set(earner.headers)
-        .send({ amountKobo: 100_000, speed: 'instant' })
+        .send({ requestId: randomUUID(), amountKobo: 100_000, speed: 'instant' })
         .expect(201);
       expect(res.body).toMatchObject({ status: 'processing', amountKobo: 100_000, feeKobo: 10_000, sendKobo: 90_000 });
       expect((await balanceOf(t, earner)).availableKobo).toBe(start - 100_000);
@@ -543,7 +546,7 @@ describe('money', () => {
         const res = await request(t.http)
           .post('/v1/wallet/withdrawals')
           .set(earner.headers)
-          .send({ amountKobo: 30_000, speed: 'instant' })
+          .send({ requestId: randomUUID(), amountKobo: 30_000, speed: 'instant' })
           .expect(201);
         expect(res.body.status).toBe('processing');
       } finally {
@@ -559,7 +562,7 @@ describe('money', () => {
       const res = await request(t.http)
         .post('/v1/wallet/withdrawals')
         .set(earner.headers)
-        .send({ amountKobo: 25_000, speed: 'instant' })
+        .send({ requestId: randomUUID(), amountKobo: 25_000, speed: 'instant' })
         .expect(201);
       expect(res.body).toMatchObject({ status: 'failed', failureReason: 'Transfer recipient is no longer valid' });
       expect((await balanceOf(t, earner)).availableKobo).toBe(start);
@@ -575,7 +578,7 @@ describe('money', () => {
         const res = await request(t.http)
           .post('/v1/wallet/withdrawals')
           .set(earner.headers)
-          .send({ amountKobo: 20_000, speed: 'instant' })
+          .send({ requestId: randomUUID(), amountKobo: 20_000, speed: 'instant' })
           .expect(201);
         expect(res.body.status).toBe('requested');
         id = res.body.id;
@@ -596,7 +599,7 @@ describe('money', () => {
       const res = await request(t.http)
         .post('/v1/wallet/withdrawals')
         .set(earner.headers)
-        .send({ amountKobo: 50_000, speed: 'instant' })
+        .send({ requestId: randomUUID(), amountKobo: 50_000, speed: 'instant' })
         .expect(201);
       const [row] = await t.db.select().from(payouts).where(eq(payouts.id, res.body.id));
       await deliverWebhook(t, t.payments.settleTransfer(row!.reference, 'failed')).expect(200);
@@ -609,13 +612,13 @@ describe('money', () => {
       const res = await request(t.http)
         .post('/v1/wallet/withdrawals')
         .set(earner.headers)
-        .send({ amountKobo: 40_000, speed: 'scheduled' })
+        .send({ requestId: randomUUID(), amountKobo: 40_000, speed: 'scheduled' })
         .expect(201);
       expect(res.body).toMatchObject({ status: 'requested', feeKobo: 0, sendKobo: 40_000 });
       const again = await request(t.http)
         .post('/v1/wallet/withdrawals')
         .set(earner.headers)
-        .send({ amountKobo: 10_000, speed: 'scheduled' })
+        .send({ requestId: randomUUID(), amountKobo: 10_000, speed: 'scheduled' })
         .expect(409);
       expect(again.body.error.code).toBe('scheduled_withdrawal_exists');
 
@@ -629,19 +632,19 @@ describe('money', () => {
       const poor = await request(t.http)
         .post('/v1/wallet/withdrawals')
         .set(earner.headers)
-        .send({ amountKobo: 4_900_000, speed: 'instant' })
+        .send({ requestId: randomUUID(), amountKobo: 4_900_000, speed: 'instant' })
         .expect(422);
       expect(poor.body.error.code).toBe('daily_limit_reached');
       const tooMuch = await request(t.http)
         .post('/v1/wallet/withdrawals')
         .set(earner.headers)
-        .send({ amountKobo: 1_000_000, speed: 'instant' })
+        .send({ requestId: randomUUID(), amountKobo: 1_000_000, speed: 'instant' })
         .expect(409);
       expect(tooMuch.body.error.code).toBe('insufficient_funds');
       const tiny = await request(t.http)
         .post('/v1/wallet/withdrawals')
         .set(earner.headers)
-        .send({ amountKobo: 5_000, speed: 'scheduled' })
+        .send({ requestId: randomUUID(), amountKobo: 5_000, speed: 'scheduled' })
         .expect(422);
       expect(tiny.body.error.code).toBe('withdrawal_too_small');
     });
@@ -649,8 +652,11 @@ describe('money', () => {
 
   describe('reconciliation', () => {
     it('finds no new gap when the ledger and the provider agree, payouts included', async () => {
-      const run = async () =>
-        ((await t.jobs.run('reconcile.daily')) as Array<{ differenceKobo: number }>)[0]!.differenceKobo;
+      const run = async () => {
+        const runs = (await t.jobs.run('reconcile.daily')) as Array<{ differenceKobo: number }>;
+        await clearReconciliationPauses(t);
+        return runs[0]!.differenceKobo;
+      };
       const first = await run();
       const buyer = await signIn(t, 'customer');
       await fund(t, buyer, 750_000);
@@ -677,7 +683,7 @@ describe('money', () => {
       const out = await request(t.http)
         .post('/v1/wallet/withdrawals')
         .set(payee.headers)
-        .send({ amountKobo: 100_000, speed: 'instant' })
+        .send({ requestId: randomUUID(), amountKobo: 100_000, speed: 'instant' })
         .expect(201);
       const [row] = await t.db.select().from(payouts).where(eq(payouts.id, out.body.id));
       await deliverWebhook(t, t.payments.settleTransfer(row!.reference, 'success')).expect(200);

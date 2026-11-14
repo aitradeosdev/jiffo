@@ -87,7 +87,10 @@ export class OverviewService {
           (select count(*) from agent_applications where country_code = ${countryCode}
             and status = 'review') as applications,
           (select count(*) from customer_verifications v join users u on u.id = v.user_id
-            where u.country_code = ${countryCode} and v.status = 'review') as id_checks`),
+            where u.country_code = ${countryCode} and v.status = 'review') as id_checks,
+          (select count(*) from alerts where country_code = ${countryCode} and resolved_at is null) as alerts,
+          exists (select 1 from reconciliation_runs where country_code = ${countryCode}
+            and pauses_instant and cleared_at is null) as instant_paused`),
       this.db.execute(sql`
         with days as (
           select generate_series(
@@ -157,6 +160,10 @@ export class OverviewService {
         applications: num(attention.applications),
         /** Customers' ID checks the provider sent to support. */
         idChecks: num(attention.id_checks),
+        /** Money alerts nobody has resolved: a check gap, a low provider balance, a refused transfer. */
+        alerts: num(attention.alerts),
+        /** A nightly-check shortfall has paused instant withdrawals until finance clears it. */
+        instantPaused: attention.instant_paused === true,
       },
       week: week.rows.map((r) => ({
         day: String(r.day),

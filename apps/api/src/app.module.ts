@@ -11,6 +11,7 @@ import { DatabaseModule } from './db/database.module';
 import { ErrandsModule } from './errands/errands.module';
 import { HealthController } from './health/health.controller';
 import { MoneyModule } from './money/money.module';
+import { AlertsModule } from './alerts/alerts.module';
 import { PlacesModule } from './places/places.module';
 import { FilesModule } from './files/files.module';
 import { IdentityModule } from './identity/identity.module';
@@ -35,6 +36,7 @@ import { UsersModule } from './users/users.module';
     RealtimeModule,
     ChatModule,
     CallsModule,
+    AlertsModule,
     MoneyModule,
     PlacesModule,
     FilesModule,

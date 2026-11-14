@@ -149,6 +149,15 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
 - **Escrow:** the fee and service fee are held when an agent accepts, adjusted when a new price is accepted, and returned if the agent leaves or the errand is cancelled. Item money is held separately when the customer locks the item amount.
 - **Hand-off:** item money goes to the agent untouched and withdrawable at once. The fee, less the commission for the agent's tier (set by admin), goes to the agent; Bronze earnings are held for 24 hours. The service fee and commission go to platform revenue.
 - **Withdrawals:** agents only, to an account in their own name. One free scheduled withdrawal a day, or instant for a fee. A bounced transfer puts the full amount back.
+  - **Repeats:** each request carries the app's key, so a repeated tap or a retry makes one withdrawal.
+  - **Sending:** one run at a time claims a withdrawal before sending it. Only a first try that the provider refuses outright gives the money back. An unclear answer after that raises an alert instead.
+  - **Suspension:** a suspended agent's withdrawals wait until they are reactivated.
+  - **Daily caps (Settings, Security):** instant withdrawals are capped per agent and for all agents together.
+  - **Paystack's transfer approval URL:** `POST /v1/webhooks/paystack/transfer-approval`, registered in the Paystack dashboard. It approves only a withdrawal Jiffo is sending, for its exact amount and the agent's recipient.
+- **Nightly check:**
+  - **Shortfalls:** if the provider holds less than the ledger beyond the tolerance in Settings, Security, instant withdrawals pause until finance clears the check, with a note, under Money, Nightly checks.
+  - **Low balance:** checked every 15 minutes.
+  - **Alerts:** gaps, a low balance, refused or unclear transfers and Paystack's transfer OTP show there and on the overview.
 - **Reconciliation:** every night the ledger's cash is compared with the Paystack balance and the result is saved for finance.
 
 ## Running the admin panel

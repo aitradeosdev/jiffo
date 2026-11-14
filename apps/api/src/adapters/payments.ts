@@ -21,6 +21,13 @@ export interface DepositStatus {
 
 export type TransferStatus = 'pending' | 'success' | 'failed';
 
+/** A provider asking whether to go ahead with a transfer (Paystack's transfer approval URL). */
+export interface TransferApprovalRequest {
+  reference: string;
+  amountKobo: number;
+  recipientCode: string | null;
+}
+
 export interface TransferResult {
   status: TransferStatus;
   transferCode: string | null;
@@ -130,6 +137,14 @@ export interface PaymentsAdapter {
   /** Checks the signature and returns the event, or null when the signature is wrong. */
   parseWebhook(rawBody: Buffer, headers: Record<string, string | string[] | undefined>): PaymentWebhook | null;
   /**
+   * Providers that ask before each transfer (Paystack's transfer approval URL): the request, read only once
+   * its signature checks out, else null.
+   */
+  parseTransferApproval?(
+    rawBody: Buffer,
+    headers: Record<string, string | string[] | undefined>,
+  ): TransferApprovalRequest | null;
+  /**
    * Fixed accounts: each customer's own account number, which any transfer to lands in their wallet. Only
    * providers that issue them have these; `fixedAccountNeeds` says what the customer gives for one.
    */
@@ -198,7 +213,33 @@ function classify(body: { event?: string; data?: Record<string, unknown> }, rawB
   return { kind: 'ignored', eventKey, event: body.event ?? 'unknown', raw };
 }
 
-const TRANSFER_FAILED = new Set(['failed', 'reversed', 'abandoned', 'blocked', 'rejected']);
+/**
+ * `otp` means transfer OTP is on in the dashboard: the transfer waits for a code nobody will send, so it is
+ * failed and the agent paid back. Should someone finalise it by hand later, the approval URL refuses it.
+ */
+const TRANSFER_FAILED = new Set(['failed', 'reversed', 'abandoned', 'blocked', 'rejected', 'otp']);
+
+/**
+ * Paystack's transfer approval request, signed like its webhooks. Unverified against Paystack's docs (they
+ * couldn't be reached): the recipient is read from `recipient_code` or `recipient.recipient_code`.
+ */
+function approvalOf(secret: string, rawBody: Buffer, headers: Record<string, string | string[] | undefined>) {
+  if (!signatureMatches(secret, rawBody, header(headers, 'x-paystack-signature'))) return null;
+  let body: Record<string, unknown>;
+  try {
+    body = JSON.parse(rawBody.toString('utf8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const data = (body.data && typeof body.data === 'object' ? body.data : body) as Record<string, unknown>;
+  const recipient = data.recipient as { recipient_code?: unknown } | string | undefined;
+  const code = data.recipient_code ?? (typeof recipient === 'object' ? recipient?.recipient_code : recipient);
+  return {
+    reference: String(data.reference ?? ''),
+    amountKobo: Number(data.amount),
+    recipientCode: typeof code === 'string' ? code : null,
+  };
+}
 const mapTransfer = (status: string): TransferStatus =>
   status === 'success' ? 'success' : TRANSFER_FAILED.has(status) ? 'failed' : 'pending';
 
@@ -459,6 +500,10 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
     if (!signatureMatches(this.secretKey, rawBody, header(headers, 'x-paystack-signature'))) return null;
     return classify(JSON.parse(rawBody.toString('utf8')), rawBody);
   }
+
+  parseTransferApproval(rawBody: Buffer, headers: Record<string, string | string[] | undefined>) {
+    return approvalOf(this.secretKey, rawBody, headers);
+  }
 }
 
 /** A payments provider refused or failed a request, with the HTTP status it answered. */
@@ -662,7 +707,7 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
     return { recipientCode: `RCP_${input.bankCode}_${input.accountNumber}` };
   }
 
-  async transfer(input: { reference: string; amountKobo: number; recipientCode: string }) {
+  async transfer(input: { reference: string; amountKobo: number; recipientCode: string }): Promise<TransferResult> {
     const existing = this.transfers.get(input.reference);
     if (existing) throw new PaystackError(400, 'Duplicate Transaction Reference');
     if (this.rejectNextTransfer) {
@@ -711,6 +756,16 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
   parseWebhook(rawBody: Buffer, headers: Record<string, string | string[] | undefined>) {
     if (!signatureMatches(this.webhookSecret, rawBody, header(headers, 'x-paystack-signature'))) return null;
     return classify(JSON.parse(rawBody.toString('utf8')), rawBody);
+  }
+
+  parseTransferApproval(rawBody: Buffer, headers: Record<string, string | string[] | undefined>) {
+    return approvalOf(this.webhookSecret, rawBody, headers);
+  }
+
+  /** A transfer approval request as Paystack sends one, signed. For tests. */
+  approvalRequest(data: Record<string, unknown>) {
+    const body = Buffer.from(JSON.stringify(data));
+    return { body, signature: createHmac('sha512', this.webhookSecret).update(body).digest('hex') };
   }
 }
 

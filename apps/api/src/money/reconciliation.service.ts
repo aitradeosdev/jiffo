@@ -7,13 +7,17 @@ import { LedgerService } from './ledger.service';
 import { ProvidersService } from '../providers/providers.service';
 import { DepositsService } from './deposits.service';
 import { FixedAccountsService } from './fixed-accounts.service';
+import { AlertsService } from '../alerts/alerts.service';
+import { CountriesService } from '../countries/countries.service';
+import { formatNaira } from '@jiffo/shared';
 
 const DAY_MS = 86_400_000;
 
 /**
  * The daily check that the ledger's cash matches what the payment provider holds. Payouts the provider
  * has already taken from its balance, but not yet confirmed, are allowed for. Any difference is saved
- * for finance to look at in admin; nothing is corrected automatically.
+ * for finance to look at in admin and raises an alert; nothing is corrected automatically. A shortfall
+ * beyond the tolerance in settings pauses instant withdrawals until finance clears it.
  */
 @Injectable()
 export class ReconciliationService {
@@ -26,6 +30,8 @@ export class ReconciliationService {
     private readonly deposits: DepositsService,
     private readonly providers: ProvidersService,
     private readonly fixedAccounts: FixedAccountsService,
+    private readonly alerts: AlertsService,
+    private readonly countries: CountriesService,
   ) {}
 
   /**
@@ -88,6 +94,10 @@ export class ReconciliationService {
       ]);
       const inTransitKobo = Number(transit?.total ?? 0);
       const differenceKobo = providerBalanceKobo - (ledgerCashKobo - inTransitKobo);
+      const { settings } = await this.countries.currentSettings(country.code);
+      const tolerance = settings.security.reconciliationToleranceKobo;
+      // Less at the provider than the ledger says Jiffo holds: money may be missing, so instant withdrawals wait.
+      const pausesInstant = differenceKobo < -tolerance;
       const [run] = await this.db
         .insert(reconciliationRuns)
         .values({
@@ -99,11 +109,50 @@ export class ReconciliationService {
           differenceKobo,
           pendingDeposits: Number(pending?.n ?? 0),
           stuckPayouts: Number(stuck?.n ?? 0),
+          pausesInstant,
         })
         .returning();
-      if (differenceKobo !== 0) this.logger.warn(`Reconciliation gap in ${country.code}: ${differenceKobo} kobo`);
+      if (Math.abs(differenceKobo) > tolerance) {
+        await this.alerts.raise({
+          countryCode: country.code,
+          kind: 'reconciliation_gap',
+          message: pausesInstant
+            ? `The provider holds ${formatNaira(-differenceKobo)} less than the ledger. Instant withdrawals are paused until finance clears the check.`
+            : `The provider holds ${formatNaira(differenceKobo)} more than the ledger.`,
+          data: { runId: run!.id, differenceKobo },
+        });
+      }
       results.push(run!);
     }
     return results;
+  }
+
+  /** Every few minutes: the money held at the providers, against the low-balance alert in settings. */
+  async checkBalances() {
+    const live = await this.db.select().from(countries).where(eq(countries.enabled, true));
+    for (const country of live) {
+      const { settings } = await this.countries.currentSettings(country.code);
+      const floor = settings.security.lowProviderBalanceKobo;
+      try {
+        const { providerBalanceKobo } = await this.balances(country.code, country.currency);
+        if (floor > 0 && providerBalanceKobo < floor) {
+          await this.alerts.raise({
+            countryCode: country.code,
+            kind: 'low_provider_balance',
+            message: `The payments provider holds ${formatNaira(providerBalanceKobo)}, below the ${formatNaira(floor)} alert level. Withdrawals may be refused until it is topped up.`,
+            data: { providerBalanceKobo, floorKobo: floor },
+          });
+        } else {
+          await this.alerts.settle(
+            country.code,
+            'low_provider_balance',
+            '',
+            'The balance is back above the alert level',
+          );
+        }
+      } catch (error) {
+        this.logger.warn(`Could not check the provider balance in ${country.code}: ${(error as Error).message}`);
+      }
+    }
   }
 }

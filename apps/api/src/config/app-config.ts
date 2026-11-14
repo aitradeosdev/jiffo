@@ -66,6 +66,8 @@ const EnvSchema = z
     RECONCILE_CRON: z.string().default('30 23 * * *'),
     /** Releases due earnings, retries instant withdrawals and checks quiet transfers. */
     PAYOUT_RETRY_CRON: z.string().default('*/5 * * * *'),
+    /** How often the money held at the payments provider is checked against the low-balance alert. */
+    BALANCE_CHECK_CRON: z.string().default('*/15 * * * *'),
     /** Errand timers (item lock, auto-release, unreachable, urgent expiry). memory is for tests only. */
     TIMER_PROVIDER: z.enum(['bullmq', 'memory']).default('bullmq'),
     REDIS_URL: z.string().url().default('redis://localhost:6379'),

@@ -5,7 +5,16 @@ import { deposits, fixedAccounts, providerEvents, settingsVersions } from '../sr
 import { LedgerService } from '../src/money/ledger.service';
 import { ReconciliationService } from '../src/money/reconciliation.service';
 import { WalletService } from '../src/money/wallet.service';
-import { adminAs, balanceOf, createTestApp, deliverWebhook, signIn, type Person, type TestApp } from './helpers';
+import {
+  adminAs,
+  balanceOf,
+  createTestApp,
+  deliverWebhook,
+  signIn,
+  type Person,
+  type TestApp,
+  clearReconciliationPauses,
+} from './helpers';
 
 const BVN = '22212345678';
 
@@ -219,6 +228,7 @@ describe('adding money: own account numbers', () => {
       .set({ updatedAt: new Date(Date.now() - 60_000) })
       .where(eq(fixedAccounts.userId, who.userId));
     await t.app.get(ReconciliationService).run();
+    await clearReconciliationPauses(t);
     const [row] = await t.db.select().from(fixedAccounts).where(eq(fixedAccounts.userId, who.userId));
     expect(row!.status).toBe('active');
   });

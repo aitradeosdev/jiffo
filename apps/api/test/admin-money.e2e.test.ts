@@ -14,6 +14,7 @@ import {
   signIn,
   type Person,
   type TestApp,
+  clearReconciliationPauses,
 } from './helpers';
 
 type Admin = Awaited<ReturnType<typeof adminAs>>;
@@ -51,6 +52,8 @@ describe('admin money', () => {
   const trialBalance = () => t.app.get(WalletService).trialBalance();
 
   it('sums what Jiffo holds and earns, and where it came from', async () => {
+    // Other files in the run move revenue too (adjustments come out of it), so this one's change is compared.
+    const before = (await get('summary?country=NG&days=7').expect(200)).body;
     const errand = await createErrand(t, customer);
     await act(t, agent, errand.id, 'accept');
     await act(t, agent, errand.id, 'start');
@@ -63,7 +66,7 @@ describe('admin money', () => {
     expect(res.body.daily).toHaveLength(7);
     expect(res.body.held.customerWalletsKobo).toBeGreaterThan(0);
     expect(res.body.held.agentHeldKobo).toBeGreaterThan(0);
-    expect(res.body.platform.revenueKobo).toBeGreaterThan(0);
+    expect(res.body.platform.revenueKobo).toBeGreaterThan(before.platform.revenueKobo);
     // Other tests in the run add their own sources; this run's errand shows as service fees and commission.
     expect(res.body.revenue).toContainEqual(
       expect.objectContaining({ kind: 'settle', label: 'Service fees and commission' }),
@@ -204,7 +207,7 @@ describe('admin money', () => {
     const sent = await request(t.http)
       .post('/v1/wallet/withdrawals')
       .set(agent.headers)
-      .send({ amountKobo: 100_000, speed: 'instant' })
+      .send({ requestId: randomUUID(), amountKobo: 100_000, speed: 'instant' })
       .expect(201);
     const payouts = await get('payouts?country=NG&filter=pending').expect(200);
     expect(payouts.body.payouts.find((p: { id: string }) => p.id === sent.body.id)).toMatchObject({
@@ -219,6 +222,7 @@ describe('admin money', () => {
 
   it('shows the nightly checks', async () => {
     await t.jobs.run('reconcile.daily');
+    await clearReconciliationPauses(t);
     const runs = await get('reconciliation?country=NG').expect(200);
     expect(runs.body[0]).toMatchObject({ countryCode: 'NG', provider: expect.any(String) });
   });
