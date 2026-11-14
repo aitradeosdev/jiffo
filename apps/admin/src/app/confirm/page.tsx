@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { AuthFrame } from '@/components/auth-frame';
-import { api } from '@/lib/api';
+import { getMe } from '@/lib/api';
 import { samePath } from '@/lib/same-path';
 import { ConfirmCode, ConfirmPasskey } from './forms';
 
@@ -13,7 +13,8 @@ export const metadata: Metadata = { title: "Confirm it's you" };
  */
 export default async function ConfirmPage({ searchParams }: { searchParams: Promise<{ back?: string }> }) {
   const back = samePath((await searchParams).back ?? '/');
-  const { method } = await api<{ method: 'passkey' | 'code' }>('/admin/auth/confirm/start', { method: 'POST' });
+  // How they confirm, read without asking for a passkey yet: the button asks, fresh, when pressed.
+  const method = (await getMe()).confirmWith;
   return (
     <AuthFrame>
       <h1 className="text-2xl font-extrabold tracking-tight">Confirm it&apos;s you</h1>

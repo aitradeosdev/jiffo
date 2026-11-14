@@ -265,6 +265,7 @@ export class ApprovalsService {
       // Runs on the approver's confirmed session: the change itself was confirmed when it was approved.
       confirmedAt: decider.confirmedAt,
       passkeyMissing: false,
+      hasPasskey: decider.hasPasskey,
       approval: { id: row.id, approvedBy: decider.adminId, selfApproved: self },
     };
   }

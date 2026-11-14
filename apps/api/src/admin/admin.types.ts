@@ -18,6 +18,8 @@ export interface AdminContext {
   confirmedAt: Date;
   /** Their role signs in with a passkey and they have none yet. */
   passkeyMissing: boolean;
+  /** They have a passkey, so they confirm with it. */
+  hasPasskey: boolean;
   /**
    * Set when this runs a change a second admin approved: the audit log then shows both people
    * (docs/security-plan.md, D4, D7).

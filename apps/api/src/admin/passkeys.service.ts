@@ -7,7 +7,7 @@ import {
   type AuthenticationResponseJSON,
   type RegistrationResponseJSON,
 } from '@simplewebauthn/server';
-import { and, asc, count, eq, gt, isNull } from 'drizzle-orm';
+import { and, asc, count, eq, gt, isNull, lt } from 'drizzle-orm';
 import { needsPasskey } from '@jiffo/shared';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { badRequest, conflict, notFound, unauthorized } from '../common/errors';
@@ -200,6 +200,10 @@ export class PasskeysService {
     await this.db
       .insert(adminPasskeyChallenges)
       .values({ adminId, purpose, challenge, expiresAt: new Date(Date.now() + CHALLENGE_MS) });
+    // Requests from more than a day ago, used or not, are of no further use.
+    await this.db
+      .delete(adminPasskeyChallenges)
+      .where(lt(adminPasskeyChallenges.expiresAt, new Date(Date.now() - 24 * 3_600_000)));
   }
 
   /** Whether this challenge was given to this admin for this purpose, and is still waiting to be used. */

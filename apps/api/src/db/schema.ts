@@ -1114,7 +1114,7 @@ export const adminSignInAttempts = pgTable(
     id: bigserial('id', { mode: 'number' }).primaryKey(),
     email: text('email').notNull(),
     ip: text('ip'),
-    stage: text('stage', { enum: ['password', 'code'] }).notNull(),
+    stage: text('stage', { enum: ['password', 'code', 'confirm'] }).notNull(),
     succeeded: boolean('succeeded').notNull(),
     createdAt: createdAt(),
   },

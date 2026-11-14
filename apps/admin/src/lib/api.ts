@@ -42,22 +42,24 @@ interface CallOptions {
   token?: string;
 }
 
-/**
- * Calls the API from the panel's server. A missing or ended session sends the admin to sign in, so pages
- * never render half-signed-in.
- */
 /** The page the admin was on, from the request that brought them here; the overview otherwise. */
 async function backPath() {
   const all = await headers();
   const referer = all.get('referer');
+  // The address the browser used: behind a load balancer, the one it passes on.
+  const host = all.get('x-forwarded-host')?.split(',')[0]?.trim() || all.get('host');
   try {
     const url = new URL(referer ?? '');
-    return url.host === all.get('host') ? samePath(`${url.pathname}${url.search}`) : '/';
+    return url.host === host ? samePath(`${url.pathname}${url.search}`) : '/';
   } catch {
     return '/';
   }
 }
 
+/**
+ * Calls the API from the panel's server. A missing or ended session sends the admin to sign in, so pages
+ * never render half-signed-in.
+ */
 export async function api<T>(path: string, options: CallOptions = {}): Promise<T> {
   const token = options.anonymous ? null : (options.token ?? (await cookies()).get(SESSION_COOKIE)?.value);
   if (!options.anonymous && !token) redirect('/sign-in');
@@ -107,6 +109,8 @@ export interface Me {
   countries: Country[];
   /** Their role signs in with a passkey and they have none yet. */
   needsPasskey: boolean;
+  /** How they confirm it's them before money actions. */
+  confirmWith: 'passkey' | 'code';
   /** Until when money actions work without confirming again. */
   confirmedUntil: string;
 }

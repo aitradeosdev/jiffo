@@ -121,6 +121,9 @@ export class AdminAuthController {
   @UseGuards(AdminGuard)
   @Needs('read')
   @OpenWithoutPasskey()
+  // A new passkey is a new way in: only after confirming, as for money actions, so a stolen session
+  // can't add its own. Just after signing in counts as confirmed.
+  @Confirmed()
   passkeyRegistrationOptions(@CurrentAdmin() admin: AdminContext) {
     return this.passkeyService.registrationOptions(admin.adminId);
   }
@@ -129,6 +132,7 @@ export class AdminAuthController {
   @UseGuards(AdminGuard)
   @Needs('read')
   @OpenWithoutPasskey()
+  @Confirmed()
   addPasskey(
     @CurrentAdmin() admin: AdminContext,
     @Body(new ZodBody(AddPasskeyBody)) body: z.infer<typeof AddPasskeyBody>,
@@ -150,6 +154,7 @@ export class AdminAuthController {
   @HttpCode(200)
   @UseGuards(AdminGuard)
   @Needs('read')
+  @OpenWithoutPasskey()
   confirmStart(@CurrentAdmin() admin: AdminContext) {
     return this.auth.confirmStart(admin);
   }
@@ -158,6 +163,7 @@ export class AdminAuthController {
   @HttpCode(200)
   @UseGuards(AdminGuard)
   @Needs('read')
+  @OpenWithoutPasskey()
   confirm(
     @CurrentAdmin() admin: AdminContext,
     @Req() req: AdminRequest,

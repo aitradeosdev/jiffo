@@ -24,7 +24,7 @@ describe('admin sessions and passkeys', () => {
   afterAll(() => t.close());
 
   /** A teammate signed in for the first time, with password and authenticator code, as the panel does it. */
-  async function firstSignIn(role: 'finance' | 'disputes' | 'verification') {
+  async function firstSignIn(role: 'finance' | 'safety' | 'verification' | 'disputes') {
     const email = `${randomUUID()}@jiffoapp.com`;
     const [row] = await t.db
       .insert(admins)
@@ -102,9 +102,11 @@ describe('admin sessions and passkeys', () => {
     await request(t.http).get('/v1/admin/overview?country=NG').set(finance.headers).expect(200);
     expect((await request(t.http).get('/v1/admin/me').set(finance.headers).expect(200)).body.needsPasskey).toBe(false);
 
-    // Roles that don't move money or see ID data need only the authenticator app.
+    // Settling disputes refunds customers, so that role needs one too; safety needs only the app.
     const disputes = await firstSignIn('disputes');
-    await request(t.http).get('/v1/admin/overview?country=NG').set(disputes.headers).expect(200);
+    expect((await request(t.http).get('/v1/admin/overview?country=NG').set(disputes.headers)).status).toBe(403);
+    const safety = await firstSignIn('safety');
+    await request(t.http).get('/v1/admin/overview?country=NG').set(safety.headers).expect(200);
   });
 
   it('signs in with the passkey once there is one, never with a code', async () => {
@@ -175,7 +177,7 @@ describe('admin sessions and passkeys', () => {
   });
 
   it('ends a session after 15 idle minutes', async () => {
-    const disputes = await firstSignIn('disputes');
+    const disputes = await firstSignIn('safety');
     await t.db
       .update(adminSessions)
       .set({ lastSeenAt: new Date(Date.now() - 16 * 60_000) })
@@ -226,7 +228,7 @@ describe('admin sessions and passkeys', () => {
     expect((await adjust()).status).toBe(202);
 
     // Someone without a passkey confirms with a fresh code before approving.
-    const disputes = await firstSignIn('disputes');
+    const disputes = await firstSignIn('safety');
     await t.db
       .update(adminSessions)
       .set({ confirmedAt: new Date(Date.now() - 6 * 60_000) })
@@ -256,6 +258,102 @@ describe('admin sessions and passkeys', () => {
     expect(
       (await request(t.http).post(`/v1/admin/approvals/${randomUUID()}/approve`).set(disputes.headers).send({})).status,
     ).toBe(404);
+  });
+
+  it('asks for a confirm before adding a passkey, so a stolen session cannot add its own', async () => {
+    const safety = await firstSignIn('safety');
+    await t.db
+      .update(adminSessions)
+      .set({ confirmedAt: new Date(Date.now() - 6 * 60_000) })
+      .where(eq(adminSessions.adminId, safety.id));
+    const options = await request(t.http).post('/v1/admin/auth/passkeys/options').set(safety.headers);
+    expect(options.status).toBe(403);
+    expect(options.body.error.code).toBe('confirm_identity');
+    await request(t.http)
+      .post('/v1/admin/auth/confirm')
+      .set(safety.headers)
+      .send({ code: totpCode(safety.secret, safety.step + 1) })
+      .expect(200);
+    expect((await addPasskey(safety.headers)).added.status).toBe(201);
+  });
+
+  it("doesn't let failed confirms pause the admin's sign-in", async () => {
+    const safety = await firstSignIn('safety');
+    for (let i = 0; i < 6; i++) {
+      await request(t.http).post('/v1/admin/auth/confirm').set(safety.headers).send({ code: '000000' });
+    }
+    expect(
+      (await request(t.http).post('/v1/admin/auth/confirm').set(safety.headers).send({ code: '000000' })).status,
+    ).toBe(429);
+    // Signing in still works.
+    const first = await request(t.http)
+      .post('/v1/admin/auth/sign-in')
+      .set(fromIp())
+      .send({ email: safety.email, password: PASSWORD })
+      .expect(200);
+    await request(t.http)
+      .post('/v1/admin/auth/code')
+      .set(fromIp())
+      .send({ challenge: first.body.challenge, code: totpCode(safety.secret, safety.step + 1) })
+      .expect(200);
+  });
+
+  it('closes a code sign-in started before a passkey was added', async () => {
+    const finance = await firstSignIn('finance');
+    // A second sign-in reaches the code step, then a passkey is added from the first session.
+    const first = await request(t.http)
+      .post('/v1/admin/auth/sign-in')
+      .set(fromIp())
+      .send({ email: finance.email, password: PASSWORD })
+      .expect(200);
+    expect(first.body.next).toBe('code');
+    await addPasskey(finance.headers);
+    const code = await request(t.http)
+      .post('/v1/admin/auth/code')
+      .set(fromIp())
+      .send({ challenge: first.body.challenge, code: totpCode(finance.secret, finance.step + 1) });
+    expect(code.status).toBe(401);
+    expect(code.body.error.code).toBe('use_passkey');
+  });
+
+  it('removes passkeys with a reset, so someone who lost their device can sign in again', async () => {
+    const finance = await firstSignIn('finance');
+    await addPasskey(finance.headers);
+    const owner = await adminAs(t, 'owner');
+    await request(t.http).post(`/v1/admin/team/${finance.id}/reset`).set(owner.headers).expect(201);
+    const token = /invite#(\S+)/.exec(t.email.lastTo(finance.email)!.text)![1]!;
+    await request(t.http).post('/v1/admin/auth/invite/accept').send({ token, password: PASSWORD }).expect(200);
+    const first = await request(t.http)
+      .post('/v1/admin/auth/sign-in')
+      .set(fromIp())
+      .send({ email: finance.email, password: PASSWORD })
+      .expect(200);
+    // Set up again from the start: the authenticator app, then a new passkey.
+    expect(first.body.next).toBe('setup');
+  });
+
+  it('asks for a confirm before settling a dispute or changing a provider', async () => {
+    const owner = await adminAs(t, 'owner');
+    await t.db
+      .update(adminSessions)
+      .set({ confirmedAt: new Date(Date.now() - 6 * 60_000) })
+      .where(eq(adminSessions.adminId, owner.id));
+    const settle = await request(t.http)
+      .post(`/v1/admin/errands/${randomUUID()}/actions`)
+      .set(owner.headers)
+      .send({ event: 'resolve_cancel', version: 0, note: 'Settling a dispute' });
+    expect(settle.body.error.code).toBe('confirm_identity');
+    const provider = await request(t.http)
+      .put('/v1/admin/providers/sms/termii')
+      .set(owner.headers)
+      .send({ config: { senderId: 'Jiffo' } });
+    expect(provider.body.error.code).toBe('confirm_identity');
+    // Stepping in without moving money doesn't need it.
+    const step = await request(t.http)
+      .post(`/v1/admin/errands/${randomUUID()}/actions`)
+      .set(owner.headers)
+      .send({ event: 'admin_intervene', version: 0, note: 'Checking the address' });
+    expect(step.body.error.code).not.toBe('confirm_identity');
   });
 
   it('keeps at least one passkey for a role that signs in with one', async () => {
