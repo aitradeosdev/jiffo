@@ -213,8 +213,8 @@ export const SECTIONS: Section[] = [
       {
         path: 'security.positionFreshMinutes',
         label: "Agent's position counts for",
-        kind: 'count',
-        help: 'In minutes. An older position is not used for the board or the drop-off checks.',
+        kind: 'minutes',
+        help: 'An older position is not used for the board or the drop-off checks. At most 30.',
       },
       {
         path: 'security.boardNearKm',
@@ -224,9 +224,9 @@ export const SECTIONS: Section[] = [
       },
       {
         path: 'security.ownAccountTriesPerDay',
-        label: 'Own account number: refused tries per day',
+        label: 'Own account number: failed tries per day',
         kind: 'count',
-        help: 'After this many, the customer waits a day or contacts support.',
+        help: 'Refusals and times the bank could not be reached both count. After this many, the customer waits a day or contacts support.',
       },
       {
         path: 'security.lowProviderBalanceKobo',

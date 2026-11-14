@@ -178,19 +178,24 @@ describe('the errand money path', () => {
           .get(`/v1/errands/board?lat=${PICKUP.lat}&lng=${PICKUP.lng + 0.02}&radiusKm=5`)
           .set(agent.headers);
       expect((await board()).status).toBe(200);
-      await security({ boardNearKm: 1 });
-      expect((await board()).body.error.code).toBe('not_here');
-      await security({ boardNearKm: 5 });
+      const before = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body
+        .settings.security;
+      try {
+        await security({ boardNearKm: 1 });
+        expect((await board()).body.error.code).toBe('not_here');
+        await security({ boardNearKm: before.boardNearKm });
 
-      // A position three minutes old counts under the default five, not under two.
-      await t.db
-        .update(agentPresence)
-        .set({ locatedAt: new Date(Date.now() - 3 * 60_000) })
-        .where(eq(agentPresence.userId, agent.userId));
-      expect((await board()).status).toBe(200);
-      await security({ positionFreshMinutes: 2 });
-      expect((await board()).body.error.code).toBe('location_needed');
-      await security({ positionFreshMinutes: 5 });
+        // A position three minutes old counts under the default five, not under two.
+        await t.db
+          .update(agentPresence)
+          .set({ locatedAt: new Date(Date.now() - 3 * 60_000) })
+          .where(eq(agentPresence.userId, agent.userId));
+        expect((await board()).status).toBe(200);
+        await security({ positionFreshMinutes: 2 });
+        expect((await board()).body.error.code).toBe('location_needed');
+      } finally {
+        await security({ boardNearKm: before.boardNearKm, positionFreshMinutes: before.positionFreshMinutes });
+      }
     });
 
     it('holds no more item money than a new agent may carry', async () => {

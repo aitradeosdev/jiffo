@@ -13,6 +13,7 @@ import {
   type CountrySettings,
   type ErrandEvent,
   type ErrandState,
+  DEFAULT_SECURITY_SETTINGS,
 } from '@jiffo/shared';
 import type { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
@@ -58,6 +59,10 @@ class PinLock {
 
 const HOUR_MS = 3_600_000;
 const MINUTE_MS = 60_000;
+
+/** Whether a reported position is recent enough to count (Settings, Security: position counts for). */
+const freshWithin = (at: Date | string | null | undefined, minutes: number) =>
+  !!at && Date.now() - new Date(at).getTime() <= minutes * MINUTE_MS;
 
 export interface Settlement {
   agentKobo: number;
@@ -206,30 +211,25 @@ export class ErrandsService implements OnModuleInit {
 
   /** Open errands whose pickup is within the radius, nearest first. */
   async board(auth: AuthContext, q: { lat: number; lng: number; radiusKm: number; limit: number }) {
-    const [, current] = await Promise.all([
-      this.applications.assertApproved(auth.userId),
-      this.countries.currentSettingsIfAny(auth.countryCode),
-    ]);
-    // A country with no settings saved yet has no errands to show.
-    if (!current) return { errands: [], hiddenByPreferences: 0 };
-    const live = current.settings;
     // Only around where the agent's phone last said they are, so the board can't be asked about any place:
     // the search is centred there, and the place the app asks about must be close to it.
-    const { rows: positions } = await this.db.execute<{
-      at: Date | string | null;
-      lat: number | null;
-      lng: number | null;
-      km: number | string | null;
-    }>(sql`
-      select located_at as at, lat, lng,
-        ST_Distance(location, ST_SetSRID(ST_MakePoint(${q.lng}, ${q.lat}), 4326)::geography) / 1000 as km
-      from agent_presence where user_id = ${auth.userId} and location is not null`);
+    const [, current, { rows: positions }] = await Promise.all([
+      this.applications.assertApproved(auth.userId),
+      this.countries.currentSettingsIfAny(auth.countryCode),
+      this.db.execute<{ at: Date | string | null; lat: number | null; lng: number | null; km: number | string | null }>(
+        sql`
+          select located_at as at, lat, lng,
+            ST_Distance(location, ST_SetSRID(ST_MakePoint(${q.lng}, ${q.lat}), 4326)::geography) / 1000 as km
+          from agent_presence where user_id = ${auth.userId} and location is not null`,
+      ),
+    ]);
+    // A country with no settings saved yet keeps the starting rules (and has no errands to show).
+    const security = current?.settings.security ?? DEFAULT_SECURITY_SETTINGS;
     const at = positions[0];
-    const freshMs = live.security.positionFreshMinutes * 60_000;
-    if (!at?.at || at.lat === null || at.lng === null || Date.now() - new Date(at.at).getTime() > freshMs) {
+    if (!at || at.lat === null || at.lng === null || !freshWithin(at.at, security.positionFreshMinutes)) {
       throw conflict('location_needed', 'Turn on location to see errands near you');
     }
-    if (Number(at.km) > live.security.boardNearKm) {
+    if (Number(at.km) > security.boardNearKm) {
       throw unprocessable('not_here', 'The board shows errands near where you are');
     }
     // Only errands in the agent's chosen categories, and purchase errands only if they take them.
@@ -358,9 +358,7 @@ export class ErrandsService implements OnModuleInit {
         and p.location is not null
       order by s.seq desc limit 1`);
     const at = rows[0];
-    const freshMs = settings.security.positionFreshMinutes * 60_000;
-    const fresh = at?.locatedAt && Date.now() - new Date(at.locatedAt).getTime() < freshMs;
-    if (!at || !fresh) {
+    if (!at || !freshWithin(at.locatedAt, settings.security.positionFreshMinutes)) {
       throw unprocessable('location_needed', 'Turn on location: Jiffo checks you are at the drop-off');
     }
     const distance = Number(at.distance);

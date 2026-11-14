@@ -139,11 +139,14 @@ export const CountrySettingsSchema = z.object({
       offersPerMinute: z.number().int().min(1).max(60).default(5),
       /** Errands one agent may hold at once, from accepted until done. 0 means no limit. */
       maxActiveErrandsPerAgent: z.number().int().min(0).max(20).default(0),
-      /** How recent the agent's reported position must be, for the board and the drop-off checks. */
-      positionFreshMinutes: z.number().int().min(1).max(60).default(5),
+      /**
+       * How recent the agent's reported position must be, for the board and the drop-off checks. At most 30:
+       * positions not refreshed for 30 minutes are deleted.
+       */
+      positionFreshMinutes: minutes.max(30).default(5),
       /** How far from their own position an agent may look at the board. */
       boardNearKm: z.number().int().min(1).max(50).default(5),
-      /** Refused tries at an own account number a customer gets in a day, before waiting until tomorrow. */
+      /** Failed tries at an own account number (refused, or the bank unreachable) a customer gets in a day. */
       ownAccountTriesPerDay: z.number().int().min(1).max(20).default(3),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
