@@ -1,5 +1,6 @@
 'use client';
 
+import { ReasonInput } from '@/components/reason';
 import { useActionState } from 'react';
 import { Notice } from '@/components/ui';
 import { updateState } from '../actions';
@@ -17,6 +18,7 @@ export function StateRow({ state: s, canEdit }: { state: State; canEdit: boolean
   const [result, action] = useActionState(updateState, {});
   return (
     <form action={action} className="flex flex-wrap items-center gap-x-6 gap-y-2 py-3">
+      <ReasonInput />
       <input type="hidden" name="id" value={s.id} />
       <span className="w-40 font-semibold">
         {s.name} <span className="num text-[13px] font-normal text-ink-3">{s.code}</span>

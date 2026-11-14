@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { agentTierLabel, yearsOld } from '@jiffo/shared';
+import { RevealCard } from './reveal';
 import { notFound } from 'next/navigation';
 import type { ErrandState } from '@jiffo/shared';
 import { Badge, Card, Notice, Stat } from '@/components/ui';
@@ -145,6 +146,10 @@ const HISTORY: Record<string, string> = {
   settle: 'Errand paid out',
 };
 
+/** A date of birth, masked to the year until revealed (D5): then the year is all that is shown. */
+const birth = (date: string | null) =>
+  !date ? '—' : date.includes('•') ? `Born ${date.slice(0, 4)}` : `${date} · ${yearsOld(date)} years old`;
+
 export default async function PersonPage({
   params,
   searchParams,
@@ -233,6 +238,7 @@ export default async function PersonPage({
               timeZone={country.timezone}
             />
           ) : null}
+          {can('reveal') && (d.customer.identity || d.agent?.application) ? <RevealCard id={p.id} /> : null}
           {d.agent ? (
             <Card title="As an agent">
               {stats(d.agent.stats)}
@@ -462,7 +468,7 @@ function ApplicationCard({
   const status = statusOf(app.status);
   const rows: Array<[string, ReactNode]> = [
     ['Name on the ID', app.legalName ?? '—'],
-    ['Date of birth', app.dateOfBirth ? `${app.dateOfBirth} · ${yearsOld(app.dateOfBirth)} years old` : '—'],
+    ['Date of birth', birth(app.dateOfBirth)],
     ['Works in', app.stateName ? `${app.area ?? ''}${app.area ? ', ' : ''}${app.stateName}` : '—'],
     ['Home address', app.address ?? '—'],
     [
@@ -471,11 +477,7 @@ function ApplicationCard({
         <>
           {app.emergency.name}
           {app.emergency.relationship ? ` (${app.emergency.relationship.toLowerCase()})` : ''}
-          {app.emergency.phone ? (
-            <a href={`tel:${app.emergency.phone}`} className="num ml-2 underline">
-              {app.emergency.phone}
-            </a>
-          ) : null}
+          {app.emergency.phone ? <span className="num ml-2">{app.emergency.phone}</span> : null}
         </>
       ) : (
         '—'
@@ -567,10 +569,7 @@ function IdentityCard({
   const rows: Array<[string, ReactNode]> = [
     ['ID', identity.idName],
     ['Name on the ID', identity.legalName ?? '—'],
-    [
-      'Date of birth',
-      identity.dateOfBirth ? `${identity.dateOfBirth} · ${yearsOld(identity.dateOfBirth)} years old` : '—',
-    ],
+    ['Date of birth', birth(identity.dateOfBirth)],
     ['Checked by', identity.provider],
   ];
   return (

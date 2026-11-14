@@ -11,6 +11,7 @@ import { SUPPORT_CHECK_LABELS, type Check } from './check-labels';
 import { requireCountry } from './countries';
 import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
+import { maskDate, maskName } from './masking';
 
 export const ID_CHECK_STATUSES = ['review', 'checking', 'failed', 'verified', 'declined'] as const;
 export type IdCheckStatus = (typeof ID_CHECK_STATUSES)[number];
@@ -97,8 +98,10 @@ export class IdChecksAdminService {
     const page = rows.slice(0, query.limit);
     const last = page.at(-1);
     return {
-      checks: page.map(({ cursorAt: _, checks, idType, provider, ...r }) => ({
+      checks: page.map(({ cursorAt: _, checks, idType, provider, legalName, ...r }) => ({
         ...r,
+        // Masked: revealed one person at a time, with a reason (D5).
+        legalName: maskName(legalName),
         idType,
         provider: providerName(provider),
         idName: idName(idType),
@@ -123,8 +126,11 @@ export class IdChecksAdminService {
     );
   }
 
-  /** A customer's check for their page in the panel, or null if they haven't checked their ID. */
-  async detail(userId: string) {
+  /**
+   * A customer's check for their page in the panel, or null if they haven't checked their ID. The name and
+   * date of birth on their ID are masked unless `full` (a reveal, with a reason; D5).
+   */
+  async detail(userId: string, full = false) {
     const [row] = await this.db
       .select({
         status: customerVerifications.status,
@@ -149,6 +155,9 @@ export class IdChecksAdminService {
     const { held, pending, ...rest } = row;
     return {
       ...rest,
+      legalName: full ? rest.legalName : maskName(rest.legalName),
+      dateOfBirth: full ? rest.dateOfBirth : maskDate(rest.dateOfBirth),
+      masked: !full,
       provider: providerName(row.provider),
       idName: idName(row.idType),
       checks: labelled(row.checks),

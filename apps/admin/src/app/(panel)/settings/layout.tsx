@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { ReasonBox, ReasonProvider } from '@/components/reason';
 import { PageHeader } from '@/components/ui';
 import { getCountry, getMe } from '@/lib/api';
 import { SettingsTabs } from './tabs';
@@ -16,7 +17,15 @@ export default async function SettingsLayout({ children }: { children: ReactNode
         }
       />
       <SettingsTabs />
-      {children}
+      {/* Categories, states and providers have no note of their own: one reason box for the page (D7). */}
+      <ReasonProvider>
+        {me.permissions.includes('settings') ? (
+          <div className="mb-6 max-w-xl">
+            <ReasonBox />
+          </div>
+        ) : null}
+        {children}
+      </ReasonProvider>
     </>
   );
 }

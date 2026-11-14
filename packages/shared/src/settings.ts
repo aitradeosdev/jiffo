@@ -34,6 +34,7 @@ export const DEFAULT_SECURITY_SETTINGS = {
   disputeSplitApprovalKobo: 2_000_000,
   busyAgentErrands: 50,
   approvalExpiryHours: 72,
+  dailyIdReveals: 20,
 };
 
 /**
@@ -174,6 +175,8 @@ export const CountrySettingsSchema = z.object({
         .min(1)
         .max(24 * 14)
         .default(72),
+      /** How many people's personal details one staff member may reveal in a day (D5). */
+      dailyIdReveals: z.number().int().min(0).max(500).default(20),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
 });

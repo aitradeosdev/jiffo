@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, ilike, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, gt, ilike, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import {
   AGENT_TIERS,
   agentTierLabel,
@@ -11,6 +11,7 @@ import {
 import { liveAccounts } from '../money/payout-accounts';
 import { DB, type Db, type Tx } from '../db/database.module';
 import {
+  adminAudit,
   admins,
   agentPresence,
   agentProfiles,
@@ -23,11 +24,12 @@ import {
   sessions,
   users,
 } from '../db/schema';
-import { conflict, notFound } from '../common/errors';
+import { conflict, notFound, tooMany } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
 import { ErrandsService } from '../errands/errands.service';
 import { PushService } from '../push/push.service';
 import { AuditService } from './audit.service';
+import { securityOf } from './approvals.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { ApplicationsAdminService } from './applications-admin.service';
 import { IdChecksAdminService } from './id-checks-admin.service';
@@ -391,6 +393,55 @@ export class PeopleAdminService {
    * agent are cancelled by support, all in one transaction. Refused while they are part of an errand in
    * progress, which support settles first.
    */
+  /**
+   * A person's full legal name, date of birth, address and emergency contact, which are masked otherwise
+   * (docs/security-plan.md, D5). Each reveal is in the audit log with its reason, and one staff member can
+   * reveal only so many people a day (Settings, Security).
+   */
+  async reveal(admin: AdminContext, id: string) {
+    const [person] = await this.db.select({ countryCode: users.countryCode }).from(users).where(eq(users.id, id));
+    if (!person) throw notFound('person_not_found', 'Person not found');
+    const cap = (await securityOf(this.countries, person.countryCode)).dailyIdReveals;
+    await this.db.transaction(async (tx) => {
+      // One reveal at a time per admin, so a burst can't pass the cap before any is counted.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'reveal:' + admin.adminId}))`);
+      const [today] = await tx
+        .select({ n: count() })
+        .from(adminAudit)
+        .where(
+          and(
+            eq(adminAudit.adminId, admin.adminId),
+            eq(adminAudit.action, 'person.reveal'),
+            gt(adminAudit.createdAt, new Date(Date.now() - 24 * 3_600_000)),
+          ),
+        );
+      if ((today?.n ?? 0) >= cap) {
+        throw tooMany('reveal_limit', `You've revealed ${cap} people's details in the last day, the most allowed`);
+      }
+      await this.audit.record(tx, admin, {
+        action: 'person.reveal',
+        targetType: 'person',
+        targetId: id,
+        countryCode: person.countryCode,
+      });
+    });
+    const [application, identity] = await Promise.all([
+      this.applications.detail(id, true),
+      this.idChecks.detail(id, true),
+    ]);
+    return {
+      application: application
+        ? {
+            legalName: application.legalName,
+            dateOfBirth: application.dateOfBirth,
+            address: application.address,
+            emergency: application.emergency,
+          }
+        : null,
+      identity: identity ? { legalName: identity.legalName, dateOfBirth: identity.dateOfBirth } : null,
+    };
+  }
+
   async suspend(admin: AdminContext, id: string, note: string) {
     const { closed } = await this.db.transaction(async (tx) => {
       // Accepting and creating errands share this lock, so neither can slip in while this runs.
@@ -427,7 +478,7 @@ export class PeopleAdminService {
         targetType: 'person',
         targetId: id,
         countryCode: user.countryCode,
-        data: { note, closedErrands: live.map((e) => e.id) },
+        data: { note, from: user.status, to: 'suspended', closedErrands: live.map((e) => e.id) },
       });
       return { closed: closedResults };
     });
@@ -449,7 +500,7 @@ export class PeopleAdminService {
         targetType: 'person',
         targetId: id,
         countryCode: user.countryCode,
-        data: { note },
+        data: { note, from: user.status, to: 'active' },
       });
       return { status: 'active' as const };
     });

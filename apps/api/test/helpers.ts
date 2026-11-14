@@ -5,6 +5,7 @@ import request from 'supertest';
 import { needsPasskey } from '@jiffo/shared';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { REASON_HEADER } from '../src/admin/admin.guard';
 import type { MemoryEmailAdapter } from '../src/adapters/email';
 import type { MemoryMessagingAdapter } from '../src/adapters/messaging';
 import type { MemoryPushAdapter } from '../src/adapters/push';
@@ -260,7 +261,13 @@ export async function adminAs(t: TestApp, role: AdminRole) {
   await t.db
     .insert(adminSessions)
     .values({ adminId: admin!.id, tokenHash: sha256(token), expiresAt: new Date(Date.now() + 3_600_000) });
-  return { id: admin!.id, name: admin!.name, headers: { Authorization: `Bearer ${token}` } };
+  // Every change needs a reason (docs/security-plan.md, D7); tests give one with every request, and
+  // admin-audit.e2e checks that a change without one is refused.
+  return {
+    id: admin!.id,
+    name: admin!.name,
+    headers: { Authorization: `Bearer ${token}`, [REASON_HEADER]: 'For a test' },
+  };
 }
 
 /**

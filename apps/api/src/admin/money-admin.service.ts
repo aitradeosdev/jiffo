@@ -524,6 +524,8 @@ export class MoneyAdminService {
         .where(eq(countries.code, person.countryCode));
       const account: AccountRef = { type: input.account, ownerId: person.id };
       const revenue: AccountRef = { type: 'platform_revenue' };
+      // The balance before and after, for the audit log (docs/security-plan.md, D7).
+      const balanceBeforeKobo = await this.ledger.balance(tx, account, person.countryCode);
       try {
         const posted = await this.ledger.post(tx, {
           key: `adjustment:${input.requestId}`,
@@ -578,6 +580,8 @@ export class MoneyAdminService {
           amountKobo: input.amountKobo,
           note: input.note,
           errandId: input.errandId ?? null,
+          balanceBeforeKobo,
+          balanceAfterKobo: await this.ledger.balance(tx, account, person.countryCode),
         },
       });
       return { posted: true };

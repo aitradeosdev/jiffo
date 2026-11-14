@@ -10,6 +10,7 @@ import { SUPPORT_CHECK_LABELS, type Check } from './check-labels';
 import { requireCountry } from './countries';
 import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
+import { maskAddress, maskDate, maskName, maskPhone } from './masking';
 
 export const APPLICATION_STATUSES = ['review', 'checking', 'draft', 'approved', 'rejected'] as const;
 export type ApplicationStatus = (typeof APPLICATION_STATUSES)[number];
@@ -107,8 +108,10 @@ export class ApplicationsAdminService {
     const page = rows.slice(0, query.limit);
     const last = page.at(-1);
     return {
-      applications: page.map(({ cursorAt: _, checks, ...r }) => ({
+      applications: page.map(({ cursorAt: _, checks, legalName, ...r }) => ({
         ...r,
+        // Masked: revealed one person at a time, with a reason (D5).
+        legalName: maskName(legalName),
         /** The checks that didn't pass, which are why it is waiting. */
         flagged: labelled(checks.filter((c) => c.outcome !== 'passed')),
       })),
@@ -130,8 +133,11 @@ export class ApplicationsAdminService {
     );
   }
 
-  /** One agent's application, for their page: results only. */
-  async detail(userId: string) {
+  /**
+   * One agent's application, for their page: results only. Their legal name, date of birth, address and
+   * emergency contact are masked unless `full` (a reveal, with a reason; D5).
+   */
+  async detail(userId: string, full = false) {
     const [row] = await this.db
       .select({
         status: agentApplications.status,
@@ -164,10 +170,18 @@ export class ApplicationsAdminService {
     const { emergencyName, emergencyPhone, emergencyRelationship, checks, ...rest } = row;
     return {
       ...rest,
+      legalName: full ? rest.legalName : maskName(rest.legalName),
+      dateOfBirth: full ? rest.dateOfBirth : maskDate(rest.dateOfBirth),
+      address: full ? rest.address : maskAddress(rest.address),
       checks: labelled(checks),
       emergency: emergencyName
-        ? { name: emergencyName, phone: emergencyPhone, relationship: emergencyRelationship }
+        ? {
+            name: full ? emergencyName : maskName(emergencyName),
+            phone: full ? emergencyPhone : maskPhone(emergencyPhone),
+            relationship: emergencyRelationship,
+          }
         : null,
+      masked: !full,
     };
   }
 

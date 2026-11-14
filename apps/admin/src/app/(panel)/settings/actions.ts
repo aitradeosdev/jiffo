@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { api, ASKED, isPending, messageOf } from '@/lib/api';
+import { api, reasonOf, ASKED, isPending, messageOf } from '@/lib/api';
 
 export interface SaveState {
   error?: string;
@@ -15,6 +15,7 @@ export async function saveSettings(_: SaveState, form: FormData): Promise<SaveSt
   let pending = false;
   try {
     const res = await api<{ version?: number }>(`/admin/settings?country=${encodeURIComponent(country)}`, {
+      reason: reasonOf(form),
       method: 'POST',
       body: {
         basedOn: Number(form.get('basedOn')),
@@ -50,6 +51,7 @@ export async function addCategory(_: Result, form: FormData): Promise<Result> {
   return run(
     () =>
       api('/admin/categories', {
+        reason: reasonOf(form),
         method: 'POST',
         body: {
           country: String(form.get('country') ?? ''),
@@ -68,11 +70,15 @@ export async function addCategory(_: Result, form: FormData): Promise<Result> {
 export async function updateCategory(_: Result, form: FormData): Promise<Result> {
   const id = encodeURIComponent(String(form.get('id') ?? ''));
   if (form.get('remove') === 'yes') {
-    return run(() => api(`/admin/categories/${id}`, { method: 'DELETE' }), '/settings/categories');
+    return run(
+      () => api(`/admin/categories/${id}`, { reason: reasonOf(form), method: 'DELETE' }),
+      '/settings/categories',
+    );
   }
   return run(
     () =>
       api(`/admin/categories/${id}`, {
+        reason: reasonOf(form),
         method: 'PATCH',
         body: {
           name: String(form.get('name') ?? ''),
@@ -91,6 +97,7 @@ export async function updateState(_: Result, form: FormData): Promise<Result> {
   return run(
     () =>
       api(`/admin/states/${encodeURIComponent(String(form.get('id') ?? ''))}`, {
+        reason: reasonOf(form),
         method: 'PATCH',
         body: { enabled: form.get('enabled') === 'on', agentSignups: String(form.get('agentSignups') ?? 'open') },
       }),

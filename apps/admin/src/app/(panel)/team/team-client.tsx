@@ -1,5 +1,6 @@
 'use client';
 
+import { ReasonInput } from '@/components/reason';
 import { useActionState, useState } from 'react';
 import { SubmitButton } from '@/components/submit-button';
 import { buttonClass, Field, inputClass, Notice } from '@/components/ui';
@@ -20,6 +21,7 @@ export function InviteForm() {
   const [state, action] = useActionState<TeamState, FormData>(inviteTeammate, {});
   return (
     <form action={action} className="space-y-4">
+      <ReasonInput />
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Name">
           <input
@@ -99,6 +101,7 @@ export function MemberActions({ member }: { member: Member }) {
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-end gap-2">
         <form action={roleAction}>
+          <ReasonInput />
           <input type="hidden" name="id" value={member.id} />
           <label className="sr-only" htmlFor={`role-${member.id}`}>
             Role for {member.email}
@@ -123,6 +126,7 @@ export function MemberActions({ member }: { member: Member }) {
 
         {member.status === 'disabled' ? (
           <form action={statusAction}>
+            <ReasonInput />
             <input type="hidden" name="id" value={member.id} />
             <input type="hidden" name="status" value="active" />
             <SubmitButton kind="secondary" small>
@@ -131,6 +135,7 @@ export function MemberActions({ member }: { member: Member }) {
           </form>
         ) : confirming === 'disable' ? (
           <form action={statusAction} className="flex gap-1">
+            <ReasonInput />
             <input type="hidden" name="id" value={member.id} />
             <input type="hidden" name="status" value="disabled" />
             <SubmitButton kind="danger" small>
@@ -148,6 +153,7 @@ export function MemberActions({ member }: { member: Member }) {
 
         {member.status === 'disabled' ? null : confirming === 'reset' ? (
           <form action={resetAction} className="flex gap-1">
+            <ReasonInput />
             <input type="hidden" name="id" value={member.id} />
             <SubmitButton kind="danger" small>
               Yes, reset

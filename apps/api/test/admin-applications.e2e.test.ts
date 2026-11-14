@@ -51,7 +51,8 @@ describe('admin: agent applications', () => {
     const ids = res.body.applications.map((a: { id: string }) => a.id);
     expect(ids.indexOf(first.agent.userId)).toBeLessThan(ids.indexOf(second.agent.userId));
     const row = res.body.applications.find((a: { id: string }) => a.id === first.agent.userId);
-    expect(row).toMatchObject({ status: 'review', legalName: 'TUNDE BAKARE', stateName: 'Lagos', area: 'Lekki' });
+    // The legal name is masked in the list (docs/security-plan.md, D5).
+    expect(row).toMatchObject({ status: 'review', legalName: 'T••• B•••', stateName: 'Lagos', area: 'Lekki' });
     expect(row.flagged).toEqual([
       expect.objectContaining({ key: 'selfie', outcome: 'review', label: 'Selfie matches the ID photo' }),
     ]);
@@ -70,8 +71,24 @@ describe('admin: agent applications', () => {
   it('shows the results on the agent page, never the NIN or BVN', async () => {
     const { agent, nin } = await inReview();
     const res = await request(t.http).get(`/v1/admin/people/${agent.userId}`).set(support.headers).expect(200);
+    // Personal details are masked until revealed with a reason (D5).
     expect(res.body.agent.application).toMatchObject({
       status: 'review',
+      legalName: 'T••• B•••',
+      dateOfBirth: '1995-••-••',
+      address: '…, Lekki Phase 1',
+      emergency: { name: 'N••• B•••', phone: '+234•••••••902', relationship: 'Sibling' },
+      masked: true,
+    });
+    expect(JSON.stringify(res.body)).not.toContain('Fola Osibo');
+    // Support only looks: it can't reveal. Verification can, with a reason.
+    const reveal = (who: { headers: Record<string, string> }) =>
+      request(t.http)
+        .post(`/v1/admin/people/${agent.userId}/reveal`)
+        .set(who.headers)
+        .send({ note: 'Checking the address against the ID' });
+    expect((await reveal(support)).status).toBe(403);
+    expect((await reveal(ops)).body.application).toEqual({
       legalName: 'TUNDE BAKARE',
       dateOfBirth: '1995-04-12',
       address: '14 Fola Osibo Road, Lekki Phase 1',

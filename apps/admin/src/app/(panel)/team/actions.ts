@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { api, ASKED, isPending, messageOf } from '@/lib/api';
+import { api, reasonOf, ASKED, isPending, messageOf } from '@/lib/api';
 
 export interface TeamState {
   error?: string;
@@ -20,7 +20,11 @@ export async function inviteTeammate(_: TeamState, form: FormData): Promise<Team
   };
   let res: { emailedTo: string; expiresInHours: number };
   try {
-    res = await api<{ emailedTo: string; expiresInHours: number }>('/admin/team', { method: 'POST', body: typed });
+    res = await api<{ emailedTo: string; expiresInHours: number }>('/admin/team', {
+      reason: reasonOf(form),
+      method: 'POST',
+      body: typed,
+    });
   } catch (error) {
     return { error: messageOf(error), typed };
   }
@@ -37,6 +41,7 @@ export async function updateTeammate(_: TeamState, form: FormData): Promise<Team
   try {
     pending = isPending(
       await api(`/admin/team/${encodeURIComponent(String(form.get('id') ?? ''))}`, {
+        reason: reasonOf(form),
         method: 'PATCH',
         body: { ...(role ? { role: String(role) } : {}), ...(status ? { status: String(status) } : {}) },
       }),
@@ -54,7 +59,7 @@ export async function resetTeammate(_: TeamState, form: FormData): Promise<TeamS
   try {
     const res = await api<{ emailedTo: string; expiresInHours: number }>(
       `/admin/team/${encodeURIComponent(String(form.get('id') ?? ''))}/reset`,
-      { method: 'POST' },
+      { reason: reasonOf(form), method: 'POST' },
     );
     revalidatePath('/team');
     return { emailed: { to: res.emailedTo, hours: res.expiresInHours } };

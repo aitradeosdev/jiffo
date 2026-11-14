@@ -176,6 +176,13 @@
       "when": 1794676634921,
       "tag": "0024_admin_passkeys",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794679202182,
+      "tag": "0025_admin_audit_fields",
+      "breakpoints": true
     }
   ]
 }

@@ -1124,24 +1124,35 @@ export const adminSignInAttempts = pgTable(
   ],
 );
 
-/** What admins changed, written in the same transaction as the change itself. */
+/**
+ * What admins changed, written in the same transaction as the change itself. Append-only: the database
+ * refuses to change or delete a row (migration 0025), so nobody, admins included, can rewrite it.
+ */
 export const adminAudit = pgTable(
   'admin_audit',
   {
     id: bigserial('id', { mode: 'number' }).primaryKey(),
-    adminId: uuid('admin_id')
+    /** The admin who made the change; empty for the server's command line, which `via` names. */
+    adminId: uuid('admin_id').references(() => admins.id),
+    /** Where the change came from: the panel, or the command line on a server. */
+    via: text('via', { enum: ['panel', 'cli'] })
       .notNull()
-      .references(() => admins.id),
+      .default('panel'),
     /** For example team.invite, errand.resolve or wallet.adjust. */
     action: text('action').notNull(),
     targetType: text('target_type'),
     targetId: text('target_id'),
     countryCode: char('country_code', { length: 2 }),
     data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+    /** Why, as the admin gave it (docs/security-plan.md, D7). */
+    reason: text('reason'),
     ip: text('ip'),
+    userAgent: text('user_agent'),
     createdAt: createdAt(),
   },
   (t) => [
+    index('admin_audit_admin_created_idx').on(t.adminId, t.action, t.createdAt),
+    check('admin_audit_actor', sql`${t.adminId} is not null or ${t.via} = 'cli'`),
     index('admin_audit_created_idx').on(t.createdAt),
     index('admin_audit_target_idx').on(t.targetType, t.targetId),
   ],

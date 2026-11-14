@@ -23,9 +23,41 @@ interface Entry {
   targetLabel: string | null;
   countryCode: string | null;
   data: Record<string, unknown>;
+  /** Why, as the admin gave it. */
+  reason: string | null;
+  /** The panel, or the command line on a server. */
+  via: 'panel' | 'cli';
   ip: string | null;
+  userAgent: string | null;
   createdAt: string;
-  admin: { id: string; name: string; email: string };
+  /** None for the command line. */
+  admin: { id: string; name: string; email: string } | null;
+}
+
+/** A browser's name, short enough for the log: "Chrome on macOS" rather than the whole user agent. */
+function browserOf(ua: string | null) {
+  if (!ua) return null;
+  const browser = /Edg\//.test(ua)
+    ? 'Edge'
+    : /Firefox\//.test(ua)
+      ? 'Firefox'
+      : /Chrome\//.test(ua)
+        ? 'Chrome'
+        : /Safari\//.test(ua)
+          ? 'Safari'
+          : 'Another browser';
+  const system = /Windows/.test(ua)
+    ? 'Windows'
+    : /Android/.test(ua)
+      ? 'Android'
+      : /iPhone|iPad/.test(ua)
+        ? 'iOS'
+        : /Mac OS X/.test(ua)
+          ? 'macOS'
+          : /Linux/.test(ua)
+            ? 'Linux'
+            : null;
+  return system ? `${browser} on ${system}` : browser;
 }
 
 /** One line a person can read, from the action and what it changed. */
@@ -34,6 +66,20 @@ function describe(entry: Entry, names: Map<string, string>, currencyOf: (code: s
   switch (entry.action) {
     case 'team.invite':
       return `Invited ${String(entry.data.email)} as ${adminRoleLabel(String(entry.data.role)).toLowerCase()}`;
+    case 'approval.request':
+      return `Asked a second admin to approve: ${String(entry.data.summary ?? '')}`;
+    case 'approval.approve':
+      return entry.data.selfApproved
+        ? `Went ahead without a second admin (nobody else could approve): ${String(entry.data.summary ?? '')}`
+        : `Approved: ${String(entry.data.summary ?? '')}`;
+    case 'approval.reject':
+      return `Turned down: ${String(entry.data.summary ?? '')}`;
+    case 'approval.cancel':
+      return `Took back their request: ${String(entry.data.summary ?? '')}`;
+    case 'person.reveal':
+      return `Revealed ${who}'s personal details`;
+    case 'team.invite_withdrawn':
+      return `Took back the invite for ${who}: the email couldn't be sent`;
     case 'team.reset':
       return `Reset ${who}'s password and authenticator app`;
     case 'team.update': {
@@ -142,7 +188,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
     <>
       <PageHeader
         title="Audit log"
-        subtitle="Every change made in the admin panel, newest first. Nothing here can be edited."
+        subtitle="Every change made in the admin panel or with the server's command line, newest first, with why and from where. Nothing here can be changed or deleted."
       />
       <Card padded={false}>
         {log.entries.length === 0 ? (
@@ -165,8 +211,14 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
                       {dateTime(e.createdAt, country.timezone)}
                     </td>
                     <td className={tdClass}>
-                      <div className="font-semibold">{e.admin.name}</div>
-                      <div className="text-[13px] text-ink-3">{e.admin.email}</div>
+                      {e.admin ? (
+                        <>
+                          <div className="font-semibold">{e.admin.name}</div>
+                          <div className="text-[13px] text-ink-3">{e.admin.email}</div>
+                        </>
+                      ) : (
+                        <div className="font-semibold">Server command line</div>
+                      )}
                     </td>
                     <td className={tdClass}>
                       {e.targetId && (e.targetType === 'person' || e.targetType === 'errand') ? (
@@ -179,11 +231,14 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
                       ) : (
                         describe(e, names, currencyOf)
                       )}
-                      {typeof e.data.note === 'string' ? (
-                        <span className="block text-[13px] text-ink-3">“{e.data.note}”</span>
+                      {e.reason || typeof e.data.note === 'string' ? (
+                        <span className="block text-[13px] text-ink-3">“{e.reason ?? String(e.data.note)}”</span>
                       ) : null}
                     </td>
-                    <td className={`${tdClass} num text-ink-3`}>{e.ip ?? '—'}</td>
+                    <td className={`${tdClass} text-ink-3`}>
+                      <div className="num">{e.ip ?? '—'}</div>
+                      {browserOf(e.userAgent) ? <div className="text-[13px]">{browserOf(e.userAgent)}</div> : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>

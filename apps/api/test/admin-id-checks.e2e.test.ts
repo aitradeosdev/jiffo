@@ -47,7 +47,14 @@ describe("admin: customers' ID checks", () => {
     const counts = await request(t.http).get('/v1/admin/id-checks/counts?country=NG').set(ops.headers).expect(200);
     expect(counts.body.review).toBeGreaterThanOrEqual(1);
     const person = await request(t.http).get(`/v1/admin/people/${who.userId}`).set(ops.headers).expect(200);
-    expect(person.body.customer.identity).toMatchObject({ status: 'review', legalName: 'ADA OKAFOR' });
+    // The name on the ID is masked until revealed with a reason (D5).
+    expect(person.body.customer.identity).toMatchObject({ status: 'review', legalName: 'A••• O•••', masked: true });
+    const revealed = await request(t.http)
+      .post(`/v1/admin/people/${who.userId}/reveal`)
+      .set(ops.headers)
+      .send({ note: 'Comparing the name with the selfie' })
+      .expect(200);
+    expect(revealed.body.identity).toMatchObject({ legalName: 'ADA OKAFOR' });
 
     // Finance can look but not decide; a note is needed.
     await decide(who, { decision: 'verify', note: 'Selfie matches on a second look' }, finance).expect(403);
@@ -61,8 +68,15 @@ describe("admin: customers' ID checks", () => {
     await decide(who, { decision: 'decline', note: 'Changed my mind' })
       .expect(409)
       .expect(/not_in_review/);
-    const [entry] = await t.db.select().from(adminAudit).where(eq(adminAudit.targetId, who.userId));
-    expect(entry).toMatchObject({ action: 'customer_identity.verify', targetType: 'person' });
+    const entries = await t.db.select().from(adminAudit).where(eq(adminAudit.targetId, who.userId));
+    // The reveal and the decision are both in the log, each with its reason.
+    expect(entries.find((e) => e.action === 'person.reveal')).toMatchObject({
+      reason: 'Comparing the name with the selfie',
+    });
+    expect(entries.find((e) => e.action === 'customer_identity.verify')).toMatchObject({
+      targetType: 'person',
+      reason: 'Selfie matches on a second look',
+    });
   });
 
   it("won't verify a second account on an ID another customer holds; declines, and reopens", async () => {

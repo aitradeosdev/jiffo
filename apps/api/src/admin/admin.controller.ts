@@ -27,7 +27,7 @@ import { ID_CHECK_STATUSES, IdChecksAdminService } from './id-checks-admin.servi
 import { adminErrandPermission, AGENT_TIERS, PROVIDER_CATEGORIES } from '@jiffo/shared';
 import { forbidden, notFound } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
-import { AdminGuard, Confirmed, CurrentAdmin, Needs } from './admin.guard';
+import { AdminGuard, Confirmed, CurrentAdmin, Needs, NoReason } from './admin.guard';
 import { AuditService } from './audit.service';
 import { OverviewService } from './overview.service';
 import { TeamService } from './team.service';
@@ -213,6 +213,7 @@ export class AdminController {
   @Post('approvals/:id/approve')
   @HttpCode(200)
   @Needs('read')
+  @NoReason()
   @Confirmed()
   approve(
     @CurrentAdmin() admin: AdminContext,
@@ -236,6 +237,7 @@ export class AdminController {
   @Post('approvals/:id/cancel')
   @HttpCode(200)
   @Needs('read')
+  @NoReason()
   cancelApproval(@CurrentAdmin() admin: AdminContext, @Param('id', new ParseUUIDPipe()) id: string) {
     return this.approvals.cancel(admin, id);
   }
@@ -264,6 +266,7 @@ export class AdminController {
   @Post('providers/:category/:provider/test')
   @HttpCode(200)
   @Needs('settings')
+  @NoReason()
   testProvider(
     @CurrentAdmin() admin: AdminContext,
     @Param(new ZodBody(ProviderParams)) params: z.infer<typeof ProviderParams>,
@@ -528,6 +531,18 @@ export class AdminController {
     @Body(new ZodBody(TierBody)) body: z.infer<typeof TierBody>,
   ) {
     return this.people.setTier(admin, id, body.tier, body.note);
+  }
+
+  /** A person's personal details in full, with a reason, logged and capped per day (D5). */
+  @Post('people/:id/reveal')
+  @HttpCode(200)
+  @Needs('reveal')
+  reveal(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', PersonId) id: string,
+    @Body(new ZodBody(NoteBody)) _body: z.infer<typeof NoteBody>,
+  ) {
+    return this.people.reveal(admin, id);
   }
 
   @Post('people/:id/suspend')
