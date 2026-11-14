@@ -1,3 +1,6 @@
+import { APP_GUARD } from '@nestjs/core';
+import { RateLimitGuard } from './common/rate-limit';
+import { RateLimitModule } from './common/rate-limit.module';
 import { Module } from '@nestjs/common';
 import { AdaptersModule } from './adapters/adapters.module';
 import { AdminModule } from './admin/admin.module';
@@ -24,6 +27,7 @@ import { UsersModule } from './users/users.module';
 @Module({
   imports: [
     ConfigModule,
+    RateLimitModule,
     DatabaseModule,
     AdaptersModule,
     TimersModule,
@@ -45,5 +49,7 @@ import { UsersModule } from './users/users.module';
     AdminModule,
   ],
   controllers: [HealthController],
+  // Every route is rate limited (common/rate-limit.ts).
+  providers: [{ provide: APP_GUARD, useClass: RateLimitGuard }],
 })
 export class AppModule {}

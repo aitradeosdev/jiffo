@@ -46,6 +46,8 @@ export class S3StorageAdapter implements StorageAdapter {
       region,
       ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
       ...(credentials ? { credentials } : {}),
+      // A timeout on every call, as for other providers (docs/security-plan.md, S9).
+      requestHandler: { connectionTimeout: 5_000, requestTimeout: 20_000 },
     });
   }
 

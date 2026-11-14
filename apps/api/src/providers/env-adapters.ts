@@ -8,6 +8,7 @@ import {
   type MessagingAdapter,
 } from '../adapters/messaging';
 import { FakePaymentsAdapter, PaystackPaymentsAdapter, type PaymentsAdapter } from '../adapters/payments';
+import { isPaystackHost, isPaystackTestKey, isTermiiHost, moneyKey, providerUrl, storageEndpoint } from './builders';
 import { ConsolePushAdapter, FcmPushAdapter, MemoryPushAdapter, type PushAdapter } from '../adapters/push';
 import { MemoryStorageAdapter, S3StorageAdapter, type StorageAdapter } from '../adapters/storage';
 import type { AppConfig } from '../config/app-config';
@@ -41,13 +42,21 @@ export function envAdapters(c: AppConfig): Adapters {
   return {
     payments:
       c.PAYMENTS_PROVIDER === 'paystack'
-        ? new PaystackPaymentsAdapter(c.PAYSTACK_SECRET_KEY!, c.PAYSTACK_BASE_URL)
+        ? // The same checks as keys entered in the panel (see builders.ts).
+          new PaystackPaymentsAdapter(
+            moneyKey(c.PAYSTACK_SECRET_KEY!, { production: live }, isPaystackTestKey, 'Paystack'),
+            providerUrl(c.PAYSTACK_BASE_URL, isPaystackHost, 'Paystack'),
+          )
         : live
           ? new NotConfiguredPayments()
           : new FakePaymentsAdapter(c.FAKE_PAYMENTS_SECRET, c.FAKE_PAYMENTS_AUTOPAY_SECONDS * 1000),
     sms:
       c.MESSAGING_PROVIDER === 'termii'
-        ? new TermiiMessagingAdapter(c.TERMII_API_KEY!, c.TERMII_SENDER_ID!, c.TERMII_BASE_URL)
+        ? new TermiiMessagingAdapter(
+            c.TERMII_API_KEY!,
+            c.TERMII_SENDER_ID!,
+            providerUrl(c.TERMII_BASE_URL, isTermiiHost, 'Termii') ?? 'https://api.ng.termii.com',
+          )
         : live
           ? new NotConfiguredMessaging()
           : c.MESSAGING_PROVIDER === 'memory'
@@ -72,7 +81,7 @@ export function envAdapters(c: AppConfig): Adapters {
           : new FakeMapsAdapter(),
     storage:
       c.STORAGE_PROVIDER === 's3'
-        ? new S3StorageAdapter(c.S3_BUCKET!, c.S3_REGION, c.S3_ENDPOINT)
+        ? new S3StorageAdapter(c.S3_BUCKET!, c.S3_REGION, storageEndpoint(c.S3_ENDPOINT, { production: live }))
         : live
           ? new NotConfiguredStorage()
           : new MemoryStorageAdapter(c.PUBLIC_API_URL, c.JWT_SECRET),

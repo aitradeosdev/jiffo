@@ -1,3 +1,4 @@
+import { providerFetch } from './provider-fetch';
 import { Logger } from '@nestjs/common';
 import { importPKCS8, SignJWT } from 'jose';
 
@@ -59,7 +60,7 @@ export class FcmPushAdapter implements PushAdapter {
 
   constructor(
     serviceAccountJson: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = providerFetch,
   ) {
     const parsed = JSON.parse(serviceAccountJson) as Partial<ServiceAccount>;
     if (!parsed.project_id || !parsed.client_email || !parsed.private_key) {

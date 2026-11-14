@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { DB, type Db } from '../db/database.module';
 import { errands, type AppName } from '../db/schema';
 import { SessionVerifier } from '../auth/auth.guard';
+import { RateLimiter } from '../common/rate-limit';
 import type { AuthContext } from '../auth/auth.types';
 import { participantRole } from '../errands/access';
 
@@ -42,6 +43,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnModuleInit, OnMod
   constructor(
     private readonly verifier: SessionVerifier,
     @Inject(DB) private readonly db: Db,
+    private readonly limiter: RateLimiter,
   ) {}
 
   onModuleInit() {
@@ -110,6 +112,13 @@ export class RealtimeGateway implements OnGatewayConnection, OnModuleInit, OnMod
       const token = (client.handshake.auth as { token?: unknown } | undefined)?.token;
       if (typeof token !== 'string') throw new Error('missing token');
       const auth = await this.verifier.verify(token);
+      // New connections are limited per person (docs/security-plan.md, S5): a phone reconnecting on a poor
+      // network is one person, however many others share its address.
+      if (!(await this.limiter.hit('socket', `u:${auth.userId}`)).ok) {
+        client.emit('auth_error', { code: 'rate_limited', message: 'Too many connections. Try again in a minute.' });
+        client.disconnect(true);
+        return;
+      }
       client.data.auth = auth;
       await client.join([userRoom(auth.userId, auth.app), sessionRoom(auth.sessionId)]);
       client.emit('ready', { userId: auth.userId, app: auth.app });

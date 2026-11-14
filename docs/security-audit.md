@@ -32,10 +32,11 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 4. Deposits | aitradeosdev/jiffo#41 | merged |
 | 5. Rules and access | aitradeosdev/jiffo#42 | merged |
 | Rules from fixes 1 to 5 moved into Settings | aitradeosdev/jiffo#43 | merged |
-| 6a. Identity checks: I1, I2 (links), findings 3, 9, 12, 19, 22, and the sandbox half of 10 | aitradeosdev/jiffo#44 | open |
-| 6b. Identity: separate keys and field encryption (I5, I6, finding 21) | aitradeosdev/jiffo#45 | open |
-| 6c. Identity: near name matches to review (I4) | aitradeosdev/jiffo#46 | open |
-| 7. Login: A1, A2 (SMS spend), A8, L9 | aitradeosdev/jiffo#47 | open |
+| 6a. Identity checks: I1, I2 (links), findings 3, 9, 12, 19, 22, and the sandbox half of 10 | aitradeosdev/jiffo#44 | merged |
+| 6b. Identity: separate keys and field encryption (I5, I6, finding 21) | aitradeosdev/jiffo#45 | merged |
+| 6c. Identity: near name matches to review (I4) | aitradeosdev/jiffo#46 | merged |
+| 7. Login: A1, A2 (SMS spend), A8, L9 | aitradeosdev/jiffo#47 | merged |
+| 8a. Server hardening, the API: S3, S5, S9, P4, P11, findings 18, 20, 24 | aitradeosdev/jiffo#48 | open |
 
 ## Summary
 

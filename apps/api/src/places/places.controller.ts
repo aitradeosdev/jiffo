@@ -1,3 +1,4 @@
+import { RateLimit } from '../common/rate-limit';
 import { Controller, Get, Inject, Param, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { AuthGuard, CurrentAuth } from '../auth/auth.guard';
@@ -18,6 +19,7 @@ const DetailQuery = z.object({ session: z.string().max(64).optional() });
 
 /** Address search for the apps. Signed-in only, so the provider key can't be used by anyone else. */
 @Controller('places')
+@RateLimit('paid')
 @UseGuards(AuthGuard)
 export class PlacesController {
   constructor(

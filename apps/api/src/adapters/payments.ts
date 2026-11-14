@@ -1,3 +1,4 @@
+import { providerFetch } from './provider-fetch';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { providerInfo, type FixedAccountNeeds } from '@jiffo/shared';
 import { unavailable } from '../common/errors';
@@ -276,7 +277,7 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
   constructor(
     private readonly secretKey: string,
     private readonly baseUrl = 'https://api.paystack.co',
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = providerFetch,
     /** The bank Paystack issues dedicated accounts from; test keys always use its test bank. */
     private readonly dedicatedBank = 'wema-bank',
     readonly fixedAccountFeeKobo = 0,
@@ -845,7 +846,7 @@ export class FlutterwavePaymentsAdapter implements PaymentsAdapter {
     /** The name customers see on the account number they transfer to. */
     private readonly businessName: string,
     private readonly baseUrl = 'https://api.flutterwave.com',
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = providerFetch,
     readonly fixedAccountFeeKobo = 0,
   ) {}
 

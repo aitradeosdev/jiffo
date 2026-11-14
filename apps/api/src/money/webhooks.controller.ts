@@ -1,10 +1,11 @@
+import { RateLimit } from '../common/rate-limit';
 import { Controller, HttpCode, Inject, Logger, Param, Post, Req } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import { and, eq } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { providerEvents } from '../db/schema';
-import { badRequest, notFound, unauthorized } from '../common/errors';
+import { badRequest, forbidden, notFound, unauthorized } from '../common/errors';
 import { redact } from '../common/redact';
 import { ProvidersService } from '../providers/providers.service';
 import { DepositsService } from './deposits.service';
@@ -19,6 +20,7 @@ import { PayoutsService } from './payouts.service';
  * provider before money moves.
  */
 @Controller('webhooks')
+@RateLimit('webhook')
 export class WebhooksController {
   private readonly logger = new Logger(WebhooksController.name);
 
@@ -33,6 +35,20 @@ export class WebhooksController {
   ) {}
 
   /**
+   * With PAYSTACK_WEBHOOK_IPS set, Paystack's calls are taken only from the addresses Paystack sends from
+   * (docs/security-plan.md, P4), on top of the signature. Needs TRUST_PROXY_HOPS right, so the address seen is
+   * Paystack's and not the load balancer's.
+   */
+  private fromProvider(provider: string, req: Request) {
+    if (provider !== 'paystack' || !this.config.PAYSTACK_WEBHOOK_IPS) return;
+    const allowed = this.config.PAYSTACK_WEBHOOK_IPS.split(',').map((ip) => ip.trim());
+    if (!allowed.includes(req.ip ?? '')) {
+      this.logger.warn(`Paystack call from ${req.ip ?? 'an unknown address'}, which isn't on the allow-list; refused`);
+      throw forbidden('not_allowed', 'Not allowed');
+    }
+  }
+
+  /**
    * Paystack's transfer approval URL: asked before every transfer, it answers 200 only for a withdrawal
    * Jiffo is sending, for its amount and recipient (PayoutsService.approve), and 400 otherwise. The owner
    * registers this address in the Paystack dashboard.
@@ -40,6 +56,7 @@ export class WebhooksController {
   @Post(':provider/transfer-approval')
   @HttpCode(200)
   async approveTransfer(@Param('provider') provider: string, @Req() req: RawBodyRequest<Request>) {
+    this.fromProvider(provider, req);
     const payments = this.providers.named('payments', provider);
     if (!payments?.parseTransferApproval) throw notFound('not_found', 'Not found');
     if (!req.rawBody) throw badRequest('invalid_request', 'Missing body');
@@ -57,6 +74,7 @@ export class WebhooksController {
   @Post(':provider')
   @HttpCode(200)
   async receive(@Param('provider') provider: string, @Req() req: RawBodyRequest<Request>) {
+    this.fromProvider(provider, req);
     const payments = this.providers.named('payments', provider);
     if (!payments) throw notFound('not_found', 'Not found');
     if (!req.rawBody) throw badRequest('invalid_request', 'Missing body');

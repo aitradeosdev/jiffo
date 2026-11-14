@@ -1,3 +1,4 @@
+import { RateLimit } from '../common/rate-limit';
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { AuthGuard, CurrentAuth } from '../auth/auth.guard';
@@ -41,6 +42,7 @@ export class ChatController {
   }
 
   @Post()
+  @RateLimit('chat')
   send(
     @CurrentAuth() auth: AuthContext,
     @Param('id', ErrandId) id: string,

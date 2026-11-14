@@ -1,3 +1,4 @@
+import { providerFetch } from './provider-fetch';
 import { Logger } from '@nestjs/common';
 import { unavailable } from '../common/errors';
 import { africasTalkingApi, africasTalkingCheck, PROVIDER_TIMEOUT_MS } from './africastalking';
@@ -41,7 +42,7 @@ export class TermiiMessagingAdapter implements MessagingAdapter {
     private readonly apiKey: string,
     private readonly senderId: string,
     private readonly baseUrl: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = providerFetch,
   ) {}
 
   async sendOtp(phone: string, code: string, ttlSeconds: number) {
@@ -88,7 +89,7 @@ export class AfricasTalkingMessagingAdapter implements MessagingAdapter {
     private readonly username: string,
     private readonly apiKey: string,
     private readonly senderId?: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = providerFetch,
   ) {}
 
   async sendOtp(phone: string, code: string, ttlSeconds: number) {

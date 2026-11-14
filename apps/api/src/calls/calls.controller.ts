@@ -1,3 +1,4 @@
+import { RateLimit } from '../common/rate-limit';
 import { Body, Controller, HttpCode, Param, Post, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
@@ -30,6 +31,7 @@ const AnsweredBody = z
 
 /** Calls providers asking what to do with a call they placed for Jiffo. */
 @Controller('webhooks/calls')
+@RateLimit('webhook')
 export class CallsWebhookController {
   constructor(private readonly calls: CallsService) {}
 

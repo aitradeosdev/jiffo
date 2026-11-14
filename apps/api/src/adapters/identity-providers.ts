@@ -1,3 +1,4 @@
+import { providerFetch } from './provider-fetch';
 import { createHmac, randomUUID } from 'node:crypto';
 import { safeEqual } from '../common/crypto';
 import {
@@ -131,7 +132,7 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
     /** Jiffo's privacy notice, which Smile ID shows the agent before they agree. */
     private readonly privacyPolicyUrl: string,
     private readonly ctx: ProviderContext,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = providerFetch,
   ) {
     this.base = sandbox ? 'https://testapi.smileidentity.com' : 'https://api.smileidentity.com';
   }
@@ -353,7 +354,7 @@ export class DojahIdentityAdapter implements IdentityAdapter {
     private readonly customerWidgetId: string | undefined,
     sandbox: boolean,
     private readonly ctx: ProviderContext,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = providerFetch,
   ) {
     this.base = sandbox ? 'https://sandbox.dojah.io' : 'https://api.dojah.io';
   }
@@ -640,7 +641,7 @@ export class YouverifyIdentityAdapter implements IdentityAdapter {
     private readonly publicMerchantKey: string,
     private readonly sandbox: boolean,
     private readonly ctx: ProviderContext,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = providerFetch,
   ) {
     this.base = sandbox ? 'https://api.sandbox.youverify.co' : 'https://api.youverify.co';
   }

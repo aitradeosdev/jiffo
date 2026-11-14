@@ -1,3 +1,4 @@
+import { RateLimit } from '../common/rate-limit';
 import { Body, Controller, Get, HttpCode, HttpException, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request, Response } from 'express';
@@ -5,6 +6,7 @@ import { z } from 'zod';
 import { badRequest, notFound, unauthorized } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
 import { referenceRole } from '../adapters/identity';
+import { PAGE_CSP, withNonce } from '../common/security-headers';
 import { HostedPageFailure, IdentityChecksService } from './identity-checks.service';
 
 /** Where each app picks up after a provider's page (their schemes, see the mobile app.config.ts). */
@@ -40,6 +42,7 @@ export class IdentityProviderController {
   constructor(private readonly checks: IdentityChecksService) {}
 
   @Post('webhooks/identity/:provider')
+  @RateLimit('webhook')
   @HttpCode(200)
   async webhook(@Param('provider') provider: string, @Req() req: RawBodyRequest<Request>) {
     if (!req.rawBody) throw badRequest('invalid_request', 'Missing body');
@@ -50,6 +53,7 @@ export class IdentityProviderController {
 
   /** A provider's widget page, for a link the API signed when the check started. */
   @Get('identity/hosted/:provider')
+  @RateLimit('auth')
   async hosted(
     @Param('provider') provider: string,
     @Query('ref') reference: string | undefined,
@@ -86,6 +90,7 @@ export class IdentityProviderController {
           .status(410)
           .type('html')
           .set('cache-control', 'no-store')
+          .set('content-security-policy', PAGE_CSP)
           .send(
             `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Opened elsewhere</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1 style="font-size:24px">This link was opened on another device</h1><p>It works only where it was first opened. Start the check again from the app.</p></body></html>`,
           );
@@ -98,8 +103,9 @@ export class IdentityProviderController {
         .status(error.getStatus())
         .type('html')
         .set('cache-control', 'no-store')
+        .set('content-security-policy', PAGE_CSP)
         .send(
-          `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Try again</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1 style="font-size:24px">The check couldn't start</h1><p>${later ? 'This page was opened too many times. Try again in an hour.' : 'Try again in a moment.'}</p>${later ? '' : '<p><a href="javascript:location.reload()">Try again</a></p>'}</body></html>`,
+          `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Try again</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1 style="font-size:24px">The check couldn't start</h1><p>${later ? 'This page was opened too many times. Try again in an hour.' : 'Try again in a moment.'}</p>${later ? '' : '<p><a href="">Try again</a></p>'}</body></html>`,
         );
       return;
     }
@@ -109,6 +115,7 @@ export class IdentityProviderController {
         .status(410)
         .type('html')
         .set('cache-control', 'no-store')
+        .set('content-security-policy', PAGE_CSP)
         .send(
           `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link expired</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1 style="font-size:24px">This link has expired</h1><p>Start the check again from the app.</p><p><a href="${DONE_URL[forReference(reference)]}">Go back to ${APP_NAME[forReference(reference)]}</a></p></body></html>`,
         );
@@ -119,17 +126,21 @@ export class IdentityProviderController {
         .status(410)
         .type('html')
         .set('cache-control', 'no-store')
+        .set('content-security-policy', PAGE_CSP)
         .send(
           `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Finished</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1 style="font-size:24px">This check is finished</h1><p>It is done, or was started again. Go back to the app.</p><p><a href="${DONE_URL[forReference(reference)]}">Go back to ${APP_NAME[forReference(reference)]}</a></p></body></html>`,
         );
       return;
     }
     keep(page.binding);
-    res.type('html').set('cache-control', 'no-store').send(page.html);
+    // Only the page's own scripts run, and what they load (see security-headers.ts).
+    const { html, csp } = withNonce(page.html);
+    res.type('html').set('cache-control', 'no-store').set('content-security-policy', csp).send(html);
   }
 
   /** What the person entered on a provider's page that Jiffo serves, sent from that page. */
   @Post('identity/hosted/:provider/submit')
+  @RateLimit('auth')
   @HttpCode(200)
   async submitPage(
     @Param('provider') provider: string,
@@ -148,6 +159,7 @@ export class IdentityProviderController {
     const name = APP_NAME[appOf(which)];
     res
       .type('html')
+      .set('content-security-policy', PAGE_CSP)
       .send(
         `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="0;url=${app}"><title>Done</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><p>All done. <a href="${app}">Go back to ${name}</a>.</p></body></html>`,
       );

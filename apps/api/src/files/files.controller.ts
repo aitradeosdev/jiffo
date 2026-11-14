@@ -41,6 +41,9 @@ const SignedQuery = z.object({
  * Development storage only: serves the signed links the memory store hands out, as S3 would.
  * With S3 configured these routes refuse everything.
  */
+/** Photo types the development store serves as images. */
+const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+
 @Controller('dev-files')
 export class DevFilesController {
   constructor(private readonly providers: ProvidersService) {}
@@ -76,7 +79,12 @@ export class DevFilesController {
   ) {
     const file = this.memory('GET', key, q).files.get(key);
     if (!file) throw notFound('not_found', 'Not found');
-    res.setHeader('content-type', file.contentType);
+    // Only photo types are served as what they say they are; anything else (an SVG, a page) comes down as a
+    // file to save, never something the browser runs from the API's own address (docs/security-plan.md, 24).
+    const photo = PHOTO_TYPES.has(file.contentType.split(';')[0]!.trim().toLowerCase());
+    res.setHeader('content-type', photo ? file.contentType : 'application/octet-stream');
+    if (!photo) res.setHeader('content-disposition', 'attachment');
+    res.setHeader('content-security-policy', "default-src 'none'; sandbox");
     res.setHeader('cache-control', 'private, max-age=600');
     res.send(file.bytes);
   }

@@ -1,3 +1,4 @@
+import { RateLimit } from '../common/rate-limit';
 import { Body, Controller, HttpCode, Post, Req, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { APPS } from '../db/schema';
@@ -28,6 +29,7 @@ const VerifyCodeBody = z.object({
 const RefreshBody = z.object({ refreshToken: z.string().min(20).max(200) });
 
 @Controller('auth')
+@RateLimit('auth')
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
@@ -56,6 +58,7 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(200)
+  @RateLimit('refresh')
   async refresh(@Body(new ZodBody(RefreshBody)) body: z.infer<typeof RefreshBody>) {
     try {
       return (await this.auth.refresh(body.refreshToken)).tokens;
