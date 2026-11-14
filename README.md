@@ -278,7 +278,11 @@ Admins join by invite only. Make the first owner from the API's folder, with the
 pnpm admin invite --email you@jiffoapp.com --name "Your Name" --role owner
 ```
 
-Open the printed link to choose a password. The first sign-in sets up an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password), and every sign-in after that needs its code. Owners invite everyone else from the Team page. Invite and reset links are emailed only to the teammate, never shown to whoever made them, so set up an email provider (Resend, Postmark or Amazon SES) under Settings, Providers first. On your own machine they're printed in the API's log; on a shared server outside production, such as staging, set `EMAIL_PROVIDER=none` so links never reach a log. The provider's Test button sends you a test email. If the only owner loses their phone, `pnpm admin reset --email ...` prints a new link on the server.
+Open the printed link to choose a password. The first sign-in sets up an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password), and every sign-in after that needs its code.
+
+**Passkeys.** Owners, Finance and Verification move money or see ID data, so they sign in with a passkey: the fingerprint, face or PIN on their phone or laptop. After their first sign-in with the app's code, they add one before they can do anything else, and from then on sign in with it instead of the code. Passkeys work only on the panel's own address (`ADMIN_URL`), so a look-alike site can't use one. Anyone else may add one too.
+
+**Sessions.** A session ends after 15 minutes without activity and 8 hours in all. Money actions (adjustments, payout accounts, the nightly checks, approving a request) also need the admin to have confirmed it's them in the last 5 minutes, with their passkey or a fresh code; the panel asks, then sends them back to do it again. Set these with `ADMIN_IDLE_MINUTES`, `ADMIN_SESSION_HOURS` and `ADMIN_CONFIRM_MINUTES`. Owners invite everyone else from the Team page. Invite and reset links are emailed only to the teammate, never shown to whoever made them, so set up an email provider (Resend, Postmark or Amazon SES) under Settings, Providers first. On your own machine they're printed in the API's log; on a shared server outside production, such as staging, set `EMAIL_PROVIDER=none` so links never reach a log. The provider's Test button sends you a test email. If the only owner loses their phone, `pnpm admin reset --email ...` prints a new link on the server.
 
 What's in it:
 

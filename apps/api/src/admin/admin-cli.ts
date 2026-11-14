@@ -8,6 +8,7 @@ import { useFieldKey } from '../db/fields';
 import * as schema from '../db/schema';
 import { ADMIN_ROLES, admins } from '../db/schema';
 import { isAdminRole } from '@jiffo/shared';
+import { PasskeysService } from './passkeys.service';
 import { AdminAuthService, normaliseEmail } from './admin-auth.service';
 
 const USAGE = `Jiffo admin accounts, from the server.
@@ -55,7 +56,7 @@ async function main() {
   const pool = new Pool({ connectionString: config.DATABASE_URL, max: 1 });
   useFieldKey(keyFor(config, 'fields'));
   const db = drizzle(pool, { schema });
-  const auth = new AdminAuthService(db, config);
+  const auth = new AdminAuthService(db, config, new PasskeysService(db, config));
   try {
     if (command === 'invite') {
       const role = values.role ?? '';

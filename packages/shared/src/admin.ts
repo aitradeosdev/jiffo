@@ -57,6 +57,13 @@ export const isAdminRole = (value: string): value is AdminRole => (ADMIN_ROLES a
 /** A role's name for people, or the raw value for one this version doesn't know. */
 export const adminRoleLabel = (role: string) => (isAdminRole(role) ? ADMIN_ROLE_INFO[role].label : role);
 
+/**
+ * Roles that move money, approve refunds or see ID data sign in with a passkey (docs/security-plan.md, D2,
+ * X6); for the rest an authenticator app is the minimum.
+ */
+export const needsPasskey = (role: string): boolean =>
+  isAdminRole(role) && ADMIN_ROLE_INFO[role].permissions.some((p) => p === 'money' || p === 'verify');
+
 /** Settling a dispute (resolve_*) needs disputes; any other step into an errand needs errands. */
 export const adminErrandPermission = (event: string): AdminPermission =>
   event.startsWith('resolve_') ? 'disputes' : 'errands';

@@ -14,6 +14,10 @@ export interface AdminContext {
   name: string;
   role: string;
   ip: string | null;
+  /** When they last proved it was them, at sign-in or since. */
+  confirmedAt: Date;
+  /** Their role signs in with a passkey and they have none yet. */
+  passkeyMissing: boolean;
   /**
    * Set when this runs a change a second admin approved: the audit log then shows both people
    * (docs/security-plan.md, D4, D7).

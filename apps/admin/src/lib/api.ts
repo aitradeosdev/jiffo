@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { cache } from 'react';
 import type { AdminPermission, AdminRole } from '@jiffo/shared';
 import { clientIp } from './client-ip';
+import { samePath } from './same-path';
 import { COUNTRY_COOKIE, SESSION_COOKIE } from './cookies';
 import { env } from './env';
 
@@ -45,6 +46,18 @@ interface CallOptions {
  * Calls the API from the panel's server. A missing or ended session sends the admin to sign in, so pages
  * never render half-signed-in.
  */
+/** The page the admin was on, from the request that brought them here; the overview otherwise. */
+async function backPath() {
+  const all = await headers();
+  const referer = all.get('referer');
+  try {
+    const url = new URL(referer ?? '');
+    return url.host === all.get('host') ? samePath(`${url.pathname}${url.search}`) : '/';
+  } catch {
+    return '/';
+  }
+}
+
 export async function api<T>(path: string, options: CallOptions = {}): Promise<T> {
   const token = options.anonymous ? null : (options.token ?? (await cookies()).get(SESSION_COOKIE)?.value);
   if (!options.anonymous && !token) redirect('/sign-in');
@@ -64,6 +77,12 @@ export async function api<T>(path: string, options: CallOptions = {}): Promise<T
     const { code = 'error', message = 'Something went wrong. Try again.', ...details } = json.error ?? {};
     if (res.status === 401 && !options.anonymous && !options.token) {
       redirect(`/sign-in?ended=${code === 'session_idle' ? 'idle' : '1'}`);
+    }
+    if (res.status === 403 && !options.anonymous && !options.token) {
+      // A role that signs in with a passkey adds one before anything else (docs/security-plan.md, D2).
+      if (code === 'passkey_required') redirect('/passkey');
+      // Money actions need a recent confirm: confirm, then come back to the page to do it again (D6).
+      if (code === 'confirm_identity') redirect(`/confirm?back=${encodeURIComponent(await backPath())}`);
     }
     throw new ApiError(res.status, code, message, details);
   }
@@ -86,6 +105,10 @@ export interface Me {
   role: AdminRole;
   permissions: Permission[];
   countries: Country[];
+  /** Their role signs in with a passkey and they have none yet. */
+  needsPasskey: boolean;
+  /** Until when money actions work without confirming again. */
+  confirmedUntil: string;
 }
 
 /** The signed-in admin, fetched once per request however many components ask. */

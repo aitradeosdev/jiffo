@@ -14,9 +14,9 @@ export interface FormState {
 /** Step one: email and password. The challenge for step two is kept in an httpOnly cookie for 10 minutes. */
 export async function signIn(_: FormState, form: FormData): Promise<FormState> {
   const email = String(form.get('email') ?? '');
-  let next: 'code' | 'setup';
+  let next: 'code' | 'setup' | 'passkey';
   try {
-    const res = await api<{ next: 'code' | 'setup'; challenge: string }>('/admin/auth/sign-in', {
+    const res = await api<{ next: 'code' | 'setup' | 'passkey'; challenge: string }>('/admin/auth/sign-in', {
       method: 'POST',
       anonymous: true,
       body: { email, password: String(form.get('password') ?? '') },

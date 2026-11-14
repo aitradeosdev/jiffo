@@ -262,6 +262,9 @@ export class ApprovalsService {
       name: who.name,
       role: who.role,
       ip: row.requestedIp,
+      // Runs on the approver's confirmed session: the change itself was confirmed when it was approved.
+      confirmedAt: decider.confirmedAt,
+      passkeyMissing: false,
       approval: { id: row.id, approvedBy: decider.adminId, selfApproved: self },
     };
   }

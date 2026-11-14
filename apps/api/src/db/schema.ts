@@ -1049,9 +1049,62 @@ export const adminSessions = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     revokedReason: text('revoked_reason'),
+    /**
+     * When the admin last proved it was them: at sign-in, then each time they confirm. Money actions need it
+     * recent (docs/security-plan.md, D6).
+     */
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('admin_sessions_token_uq').on(t.tokenHash), index('admin_sessions_admin_idx').on(t.adminId)],
+);
+
+/**
+ * An admin's passkey (WebAuthn, docs/security-plan.md, D2, X6): the public key only. Roles that move money
+ * or decide ID checks sign in with one.
+ */
+export const adminPasskeys = pgTable(
+  'admin_passkeys',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    adminId: uuid('admin_id')
+      .notNull()
+      .references(() => admins.id),
+    /** The credential's id, base64url, as the browser gives it. */
+    credentialId: text('credential_id').notNull(),
+    /** The COSE public key, base64url. */
+    publicKey: text('public_key').notNull(),
+    /** The authenticator's signature count, so a cloned key that reuses an old count is refused. */
+    counter: bigint('counter', { mode: 'number' }).notNull().default(0),
+    transports: jsonb('transports').$type<string[]>().notNull().default([]),
+    name: text('name').notNull(),
+    createdAt: createdAt(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('admin_passkeys_credential_uq').on(t.credentialId),
+    index('admin_passkeys_admin_idx').on(t.adminId),
+  ],
+);
+
+/** One passkey challenge, used once: to add a passkey, to sign in with one, or to confirm it's them. */
+export const adminPasskeyChallenges = pgTable(
+  'admin_passkey_challenges',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    adminId: uuid('admin_id')
+      .notNull()
+      .references(() => admins.id),
+    purpose: text('purpose', { enum: ['register', 'sign_in', 'confirm'] }).notNull(),
+    challenge: text('challenge').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('admin_passkey_challenges_uq').on(t.challenge),
+    index('admin_passkey_challenges_admin_idx').on(t.adminId),
+  ],
 );
 
 /** Every admin sign-in attempt, kept for the lockouts and as a record. Unknown emails are recorded too. */

@@ -1,9 +1,22 @@
-import { Body, Controller, Get, HttpCode, Inject, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Inject,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { ZodBody } from '../common/zod-body';
 import { AdminAuthService } from './admin-auth.service';
-import { AdminGuard, clientOf, CurrentAdmin, Needs } from './admin.guard';
+import { AdminGuard, clientOf, Confirmed, CurrentAdmin, Needs, OpenWithoutPasskey } from './admin.guard';
+import { PasskeysService } from './passkeys.service';
 import { OverviewService } from './overview.service';
 import type { AdminContext, AdminRequest } from './admin.types';
 
@@ -12,6 +25,32 @@ const AcceptBody = z.object({ token: z.string().min(20).max(200), password: z.st
 const SignInBody = z.object({ email: z.string().email().max(200), password: z.string().min(1).max(200) });
 const ChallengeBody = z.object({ challenge: z.string().min(20).max(2000) });
 const CodeBody = ChallengeBody.extend({ code: z.string().min(6).max(10) });
+const b64 = z.string().min(1).max(20_000);
+/** A passkey answer from the browser, as @simplewebauthn/browser gives it. Extra fields browsers add are kept. */
+const Credential = <T extends z.ZodRawShape>(response: T) =>
+  z
+    .object({
+      id: z.string().min(1).max(1_000),
+      rawId: z.string().min(1).max(1_000),
+      type: z.literal('public-key'),
+      response: z.object(response).passthrough(),
+      clientExtensionResults: z.record(z.string(), z.unknown()).default({}),
+    })
+    .passthrough();
+const Assertion = Credential({
+  clientDataJSON: b64,
+  authenticatorData: b64,
+  signature: b64,
+  userHandle: z.string().max(1_000).optional(),
+});
+const Attestation = Credential({
+  clientDataJSON: b64,
+  attestationObject: b64,
+  transports: z.array(z.string().max(20)).max(10).optional(),
+});
+const PasskeyBody = ChallengeBody.extend({ response: Assertion });
+const AddPasskeyBody = z.object({ response: Attestation, name: z.string().trim().max(60).default('') });
+const ConfirmBody = z.object({ code: z.string().min(6).max(10).optional(), response: Assertion.optional() });
 
 /** Admin sign-in. Everything else under /admin needs a session from here. */
 @Controller('admin')
@@ -19,6 +58,7 @@ export class AdminAuthController {
   constructor(
     private readonly auth: AdminAuthService,
     private readonly overview: OverviewService,
+    private readonly passkeyService: PasskeysService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -53,10 +93,84 @@ export class AdminAuthController {
     return this.auth.verifyCode(body.challenge, body.code, clientOf(req, this.config));
   }
 
+  /** Step two for an admin with a passkey: what the browser needs to ask for it. */
+  @Post('auth/passkey/options')
+  @HttpCode(200)
+  passkeyOptions(@Body(new ZodBody(ChallengeBody)) body: z.infer<typeof ChallengeBody>) {
+    return this.auth.passkeyOptions(body.challenge);
+  }
+
+  @Post('auth/passkey')
+  @HttpCode(200)
+  passkey(@Req() req: AdminRequest, @Body(new ZodBody(PasskeyBody)) body: z.infer<typeof PasskeyBody>) {
+    return this.auth.verifyPasskey(body.challenge, body.response as never, clientOf(req, this.config));
+  }
+
+  /* ---------- The signed-in admin's passkeys ---------- */
+
+  @Get('auth/passkeys')
+  @UseGuards(AdminGuard)
+  @Needs('read')
+  @OpenWithoutPasskey()
+  passkeys(@CurrentAdmin() admin: AdminContext) {
+    return this.passkeyService.list(admin.adminId);
+  }
+
+  @Post('auth/passkeys/options')
+  @HttpCode(200)
+  @UseGuards(AdminGuard)
+  @Needs('read')
+  @OpenWithoutPasskey()
+  passkeyRegistrationOptions(@CurrentAdmin() admin: AdminContext) {
+    return this.passkeyService.registrationOptions(admin.adminId);
+  }
+
+  @Post('auth/passkeys')
+  @UseGuards(AdminGuard)
+  @Needs('read')
+  @OpenWithoutPasskey()
+  addPasskey(
+    @CurrentAdmin() admin: AdminContext,
+    @Body(new ZodBody(AddPasskeyBody)) body: z.infer<typeof AddPasskeyBody>,
+  ) {
+    return this.passkeyService.register(admin.adminId, body.response as never, body.name);
+  }
+
+  @Delete('auth/passkeys/:id')
+  @UseGuards(AdminGuard)
+  @Needs('read')
+  @Confirmed()
+  removePasskey(@CurrentAdmin() admin: AdminContext, @Param('id', new ParseUUIDPipe()) id: string) {
+    return this.passkeyService.remove(admin.adminId, admin.role, id);
+  }
+
+  /* ---------- Confirming it's them, before money actions ---------- */
+
+  @Post('auth/confirm/start')
+  @HttpCode(200)
+  @UseGuards(AdminGuard)
+  @Needs('read')
+  confirmStart(@CurrentAdmin() admin: AdminContext) {
+    return this.auth.confirmStart(admin);
+  }
+
+  @Post('auth/confirm')
+  @HttpCode(200)
+  @UseGuards(AdminGuard)
+  @Needs('read')
+  confirm(
+    @CurrentAdmin() admin: AdminContext,
+    @Req() req: AdminRequest,
+    @Body(new ZodBody(ConfirmBody)) body: z.infer<typeof ConfirmBody>,
+  ) {
+    return this.auth.confirm(admin, { code: body.code, response: body.response as never }, clientOf(req, this.config));
+  }
+
   @Post('auth/sign-out')
   @HttpCode(204)
   @UseGuards(AdminGuard)
   @Needs('read')
+  @OpenWithoutPasskey()
   async signOut(@CurrentAdmin() admin: AdminContext) {
     await this.auth.signOut(admin.sessionId);
   }
@@ -65,6 +179,7 @@ export class AdminAuthController {
   @Get('me')
   @UseGuards(AdminGuard)
   @Needs('read')
+  @OpenWithoutPasskey()
   async me(@CurrentAdmin() admin: AdminContext) {
     return { ...this.auth.me(admin), countries: await this.overview.countries() };
   }

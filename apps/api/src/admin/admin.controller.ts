@@ -27,7 +27,7 @@ import { ID_CHECK_STATUSES, IdChecksAdminService } from './id-checks-admin.servi
 import { adminErrandPermission, AGENT_TIERS, PROVIDER_CATEGORIES } from '@jiffo/shared';
 import { forbidden, notFound } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
-import { AdminGuard, CurrentAdmin, Needs } from './admin.guard';
+import { AdminGuard, Confirmed, CurrentAdmin, Needs } from './admin.guard';
 import { AuditService } from './audit.service';
 import { OverviewService } from './overview.service';
 import { TeamService } from './team.service';
@@ -211,6 +211,7 @@ export class AdminController {
   @Post('approvals/:id/approve')
   @HttpCode(200)
   @Needs('read')
+  @Confirmed()
   approve(
     @CurrentAdmin() admin: AdminContext,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -402,6 +403,7 @@ export class AdminController {
   @Post('money/payout-accounts/:id/decision')
   @HttpCode(200)
   @Needs('money')
+  @Confirmed()
   decidePayoutAccount(
     @CurrentAdmin() admin: AdminContext,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -414,6 +416,7 @@ export class AdminController {
   @Post('money/reconciliation/:id/clear')
   @HttpCode(200)
   @Needs('money')
+  @Confirmed()
   clearReconciliation(
     @CurrentAdmin() admin: AdminContext,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -443,6 +446,7 @@ export class AdminController {
   @Post('money/adjustments')
   @HttpCode(200)
   @Needs('money')
+  @Confirmed()
   async adjust(
     @Res({ passthrough: true }) res: Response,
     @CurrentAdmin() admin: AdminContext,

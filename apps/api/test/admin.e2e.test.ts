@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import request from 'supertest';
+import { needsPasskey } from '@jiffo/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AdminAuthService } from '../src/admin/admin-auth.service';
 import { hashPassword, verifyPassword } from '../src/admin/passwords';
 import { base32Encode, matchTotp, totpCode, totpStep } from '../src/admin/totp';
 import { adminAudit, admins, adminSessions, adminSignInAttempts, type AdminRole } from '../src/db/schema';
+import { SoftPasskey } from './soft-passkey';
 import { createErrand, createTestApp, fund, randomIp, signIn, type TestApp } from './helpers';
 
 const PANEL = 'test-panel-secret-0123456789abcdef0123';
@@ -57,6 +59,8 @@ describe('admin', () => {
     secret: string;
     lastStep: number;
     headers: { Authorization: string };
+    /** Roles that sign in with a passkey have one (docs/security-plan.md, D2). */
+    passkey?: SoftPasskey;
   }
 
   beforeAll(async () => {
@@ -109,13 +113,21 @@ describe('admin', () => {
       .set(fromIp())
       .send({ challenge: signedIn.body.challenge, code: totpCode(setup.body.secret, step) })
       .expect(200);
-    return {
-      id,
-      email,
-      secret: setup.body.secret,
-      lastStep: step,
-      headers: { Authorization: `Bearer ${done.body.token}` },
-    };
+    const headers = { Authorization: `Bearer ${done.body.token}` };
+    // A role that signs in with a passkey adds one first, as the panel asks it to.
+    const passkey = needsPasskey(role) ? await addPasskey(headers) : undefined;
+    return { id, email, secret: setup.body.secret, lastStep: step, headers, passkey };
+  }
+
+  /** Adds a software passkey to the signed-in admin, as the browser would. */
+  async function addPasskey(headers: { Authorization: string }, passkey = new SoftPasskey()) {
+    const options = await request(t.http).post('/v1/admin/auth/passkeys/options').set(headers).expect(200);
+    await request(t.http)
+      .post('/v1/admin/auth/passkeys')
+      .set(headers)
+      .send({ response: passkey.register(options.body), name: 'Test laptop' })
+      .expect(201);
+    return passkey;
   }
 
   /** Signs in again with the next code the app would show. */
@@ -125,6 +137,18 @@ describe('admin', () => {
       .set(fromIp(ip))
       .send({ email: admin.email, password: PASSWORD })
       .expect(200);
+    if (admin.passkey) {
+      expect(first.body.next).toBe('passkey');
+      const options = await request(t.http)
+        .post('/v1/admin/auth/passkey/options')
+        .send({ challenge: first.body.challenge })
+        .expect(200);
+      const res = await request(t.http)
+        .post('/v1/admin/auth/passkey')
+        .set(fromIp(ip))
+        .send({ challenge: first.body.challenge, response: admin.passkey.sign(options.body) });
+      return { res, challenge: first.body.challenge as string };
+    }
     expect(first.body.next).toBe('code');
     // The next code the app would show: newer than the last one used, and not older than the clock allows.
     admin.lastStep = Math.max(admin.lastStep + 1, totpStep() - 1);
@@ -304,14 +328,14 @@ describe('admin', () => {
     expect(ips.map((r) => r.ip)).not.toContain('203.0.113.8');
   });
 
-  it('ends sessions on sign-out and after 30 idle minutes', async () => {
+  it('ends sessions on sign-out and after 15 idle minutes', async () => {
     const admin = await makeAdmin('support');
     await request(t.http).get('/v1/admin/me').set(admin.headers).expect(200);
     const token = admin.headers.Authorization.split(' ')[1]!;
     const { sha256 } = await import('../src/common/crypto');
     await t.db
       .update(adminSessions)
-      .set({ lastSeenAt: new Date(Date.now() - 31 * 60_000) })
+      .set({ lastSeenAt: new Date(Date.now() - 16 * 60_000) })
       .where(eq(adminSessions.tokenHash, sha256(token)));
     const idle = await request(t.http).get('/v1/admin/me').set(admin.headers);
     expect(idle.status).toBe(401);

@@ -2,6 +2,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import { needsPasskey } from '@jiffo/shared';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import type { MemoryEmailAdapter } from '../src/adapters/email';
@@ -22,6 +23,7 @@ import {
   errands,
   errandStops,
   type AdminRole,
+  adminPasskeys,
 } from '../src/db/schema';
 import { sha256 } from '../src/common/crypto';
 import { and, eq, sql } from 'drizzle-orm';
@@ -245,6 +247,15 @@ export async function adminAs(t: TestApp, role: AdminRole) {
       lastSignInAt: new Date(),
     })
     .returning({ id: admins.id, name: admins.name });
+  // A role that signs in with a passkey has one (its sign-in is tested in admin.e2e).
+  if (needsPasskey(role)) {
+    await t.db.insert(adminPasskeys).values({
+      adminId: admin!.id,
+      credentialId: randomUUID(),
+      publicKey: 'test',
+      name: 'Test passkey',
+    });
+  }
   const token = randomUUID();
   await t.db
     .insert(adminSessions)
