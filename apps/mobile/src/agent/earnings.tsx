@@ -33,6 +33,10 @@ interface PayoutAccount {
   bankName: string;
   accountNumber: string;
   accountName: string;
+  /** The only account, and support is still checking it. */
+  inReview?: boolean;
+  /** A new account support is checking; withdrawals go to the one above meanwhile. */
+  pending?: { bankName: string; accountNumber: string; accountName: string } | null;
 }
 
 const STATUS = {
@@ -141,12 +145,26 @@ export function AgentEarnings() {
         <Text variant="sec">Payout account</Text>
         <List>
           {account.data ? (
-            <Row
-              icon="bank"
-              title={`${account.data.bankName} · ${account.data.accountNumber}`}
-              subtitle={account.data.accountName}
-              onPress={() => router.push('/payout-account')}
-            />
+            <>
+              <Row
+                icon="bank"
+                title={`${account.data.bankName} · ${account.data.accountNumber}`}
+                subtitle={
+                  account.data.inReview
+                    ? `${account.data.accountName} · Support is checking it`
+                    : account.data.accountName
+                }
+                onPress={() => router.push('/payout-account')}
+              />
+              {account.data.pending ? (
+                <Row
+                  icon="bank"
+                  title={`${account.data.pending.bankName} · ${account.data.pending.accountNumber}`}
+                  subtitle="New account. Support is checking it; withdrawals go to the one above meanwhile."
+                  onPress={() => router.push('/payout-account')}
+                />
+              ) : null}
+            </>
           ) : account.error ? (
             <Row
               icon="alert"

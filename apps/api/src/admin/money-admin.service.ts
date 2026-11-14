@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import {
+  agentApplications,
   alerts,
   countries,
   deposits,
@@ -326,6 +327,64 @@ export class MoneyAdminService {
    * Finance clears a nightly check that paused instant withdrawals, saying what explained the gap. Instant
    * withdrawals start again once no check is left uncleared.
    */
+  /**
+   * New payout accounts waiting for support, oldest first: the bank's name for each only nearly matched the
+   * legal name on the agent's ID (docs/security-plan.md, I4). Withdrawals keep going to the agent's approved
+   * account until one is decided.
+   */
+  async payoutAccountsToReview(country: string) {
+    const rows = await this.db
+      .select({
+        id: payoutAccounts.id,
+        createdAt: payoutAccounts.createdAt,
+        bankName: payoutAccounts.bankName,
+        accountName: payoutAccounts.accountName,
+        accountNumber: payoutAccounts.accountNumber,
+        accountLast4: payoutAccounts.accountLast4,
+        legalName: agentApplications.legalName,
+        person: { id: users.id, firstName: users.firstName, lastName: users.lastName, phone: users.phone },
+      })
+      .from(payoutAccounts)
+      .innerJoin(users, eq(users.id, payoutAccounts.userId))
+      .leftJoin(agentApplications, eq(agentApplications.userId, payoutAccounts.userId))
+      .where(
+        and(
+          eq(payoutAccounts.reviewStatus, 'pending'),
+          isNull(payoutAccounts.replacedAt),
+          eq(users.countryCode, country),
+        ),
+      )
+      .orderBy(payoutAccounts.createdAt)
+      .limit(100);
+    return {
+      accounts: rows.map(({ accountNumber, ...r }) => ({
+        ...r,
+        accountLast4: r.accountLast4 ?? accountNumber.slice(-4),
+      })),
+    };
+  }
+
+  /** Finance's decision on a payout account waiting for support, with the reason, in the audit log. */
+  async decidePayoutAccount(admin: AdminContext, id: string, decision: 'approve' | 'decline', note: string) {
+    const account = await this.db.transaction(async (tx) => {
+      const decided = await this.payoutsService.decideAccount(tx, { id, decision, adminId: admin.adminId, note });
+      const [owner] = await tx
+        .select({ countryCode: users.countryCode })
+        .from(users)
+        .where(eq(users.id, decided.userId));
+      await this.audit.record(tx, admin, {
+        action: decision === 'approve' ? 'money.payout_account_approve' : 'money.payout_account_decline',
+        targetType: 'person',
+        targetId: decided.userId,
+        countryCode: owner?.countryCode,
+        data: { payoutAccountId: id, accountLast4: decided.accountLast4, note },
+      });
+      return decided;
+    });
+    await this.payoutsService.accountDecided(account, decision);
+    return { decision };
+  }
+
   async clearReconciliation(admin: AdminContext, runId: string, note: string) {
     const run = await this.db.transaction(async (tx) => {
       const [cleared] = await tx

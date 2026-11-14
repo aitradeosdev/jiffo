@@ -11,17 +11,24 @@ export function SubmitButton({
   small,
   className,
   pendingLabel,
+  name,
+  value,
 }: {
   children: ReactNode;
   kind?: 'primary' | 'secondary' | 'danger';
   small?: boolean;
   className?: string;
   pendingLabel?: string;
+  /** Sent with the form when this button submits it, to tell two buttons apart. */
+  name?: string;
+  value?: string;
 }) {
   const { pending } = useFormStatus();
   return (
     <button
       type="submit"
+      name={name}
+      value={value}
       disabled={pending}
       aria-busy={pending}
       className={`${buttonClass(kind, small)} ${className ?? ''}`}

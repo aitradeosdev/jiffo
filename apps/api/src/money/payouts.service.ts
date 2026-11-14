@@ -23,7 +23,7 @@ import { LedgerService, transfer } from './ledger.service';
 import { WalletService } from './wallet.service';
 import { AgentsService } from '../agents/agents.service';
 import { AgentApplicationService } from '../agents/application.service';
-import { matchesLegalName } from '../common/names';
+import { nameMatch } from '../common/names';
 
 type PayoutRow = typeof payouts.$inferSelect;
 const BANKS_TTL_MS = 24 * 3_600_000;
@@ -106,30 +106,53 @@ export class PayoutsService {
 
   /* ---------- Payout account ---------- */
 
+  /** The account withdrawals go to: the one in use and approved. */
   async currentAccount(userId: string) {
+    return this.accountIn(userId, 'approved');
+  }
+
+  /** A new account waiting for support, because the bank's name for it only nearly matched. */
+  async pendingAccount(userId: string) {
+    return this.accountIn(userId, 'pending');
+  }
+
+  private async accountIn(userId: string, status: 'approved' | 'pending') {
     const [account] = await this.db
       .select()
       .from(payoutAccounts)
-      .where(and(eq(payoutAccounts.userId, userId), isNull(payoutAccounts.replacedAt)));
+      .where(
+        and(
+          eq(payoutAccounts.userId, userId),
+          isNull(payoutAccounts.replacedAt),
+          eq(payoutAccounts.reviewStatus, status),
+        ),
+      );
     return account ?? null;
   }
 
   async getAccount(auth: AuthContext) {
-    const account = await this.currentAccount(auth.userId);
-    return account
-      ? {
-          bankCode: account.bankCode,
-          bankName: account.bankName,
-          accountNumber: mask(account.accountNumber),
-          accountName: account.accountName,
-        }
-      : null;
+    const [account, pending] = await Promise.all([this.currentAccount(auth.userId), this.pendingAccount(auth.userId)]);
+    const view = (a: typeof account) =>
+      a
+        ? {
+            bankCode: a.bankCode,
+            bankName: a.bankName,
+            accountNumber: mask(a.accountNumber),
+            accountName: a.accountName,
+          }
+        : null;
+    // The account in use, with any new one support is checking; an agent with only a pending one sees it
+    // as the account, marked as being checked.
+    const current = view(account) ?? view(pending);
+    return current ? { ...current, inReview: !account, pending: account ? view(pending) : null } : null;
   }
 
   /**
    * Saves the agent's payout account. The bank's name for the account must be the agent's: once the
-   * provider has checked their NIN, every word of it must be in the legal name on the NIN record;
-   * before that, it must contain the first and last name in the app.
+   * provider has checked their ID, every word of it must be in the legal name on the ID record; before that,
+   * it must contain the first and last name in the app. A name that only nearly matches the legal name (an
+   * initial, a spelling slip) is kept for support to check, and withdrawals go to the approved account
+   * meanwhile (docs/security-plan.md, I4). Every change is checked the same way, and the agent is told.
    */
   async setAccount(auth: AuthContext, bankCode: string, accountNumber: string) {
     const [me] = await this.db.select().from(users).where(eq(users.id, auth.userId));
@@ -153,19 +176,41 @@ export class PayoutsService {
       throw error;
     }
     const held = nameWords(accountName);
-    const own = legalName
-      ? matchesLegalName(accountName, legalName)
-      : held.has(plainName(me.firstName)) && held.has(plainName(me.lastName));
-    if (!own) {
+    const match = legalName
+      ? nameMatch(accountName, legalName)
+      : held.has(plainName(me.firstName)) && held.has(plainName(me.lastName))
+        ? 'match'
+        : 'none';
+    if (match === 'none') {
       throw unprocessable('account_name_mismatch', 'The account must be in your own name', { accountName });
     }
 
     const { recipientCode } = await payments.createRecipient({ name: accountName, bankCode, accountNumber });
-    await this.db.transaction(async (tx) => {
+    const review = match === 'near';
+    const earlier = await this.db.transaction(async (tx) => {
+      // One change at a time per agent.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payout-account:' + auth.userId}))`);
+      const [before] = await tx
+        .select({ id: payoutAccounts.id })
+        .from(payoutAccounts)
+        .where(
+          and(
+            eq(payoutAccounts.userId, auth.userId),
+            isNull(payoutAccounts.replacedAt),
+            eq(payoutAccounts.reviewStatus, 'approved'),
+          ),
+        );
+      // A matching account replaces the one in use and any waiting; one for support replaces only one waiting.
       await tx
         .update(payoutAccounts)
         .set({ replacedAt: new Date() })
-        .where(and(eq(payoutAccounts.userId, auth.userId), isNull(payoutAccounts.replacedAt)));
+        .where(
+          and(
+            eq(payoutAccounts.userId, auth.userId),
+            isNull(payoutAccounts.replacedAt),
+            review ? eq(payoutAccounts.reviewStatus, 'pending') : undefined,
+          ),
+        );
       await tx.insert(payoutAccounts).values({
         userId: auth.userId,
         provider: payments.name,
@@ -175,9 +220,73 @@ export class PayoutsService {
         accountName,
         accountLast4: accountNumber.slice(-4),
         recipientCode,
+        reviewStatus: review ? 'pending' : 'approved',
       });
+      return before ?? null;
     });
+    // Told on every change, so a change they didn't make doesn't go unnoticed.
+    if (earlier || review) {
+      await this.push
+        .notifyUser(auth.userId, 'agent', {
+          title: review ? 'We are checking your new account' : 'Payout account changed',
+          body: review
+            ? `The name on the account ending ${accountNumber.slice(-4)} is close to the name on your ID, but not the same, so support will check it. Your withdrawals keep going to your current account meanwhile.`
+            : `Withdrawals now go to your account ending ${accountNumber.slice(-4)}. If you didn't change it, contact support now.`,
+          data: { type: 'wallet.payout_account' },
+        })
+        .catch(() => undefined);
+    }
     return this.getAccount(auth);
+  }
+
+  /**
+   * Support's decision on an account waiting for them: approved, it becomes the one withdrawals go to;
+   * declined, it is dropped, and the account in use stays. Runs in the caller's transaction, beside its
+   * audit entry. Gives the account and the agent it belongs to.
+   */
+  async decideAccount(tx: Tx, input: { id: string; decision: 'approve' | 'decline'; adminId: string; note: string }) {
+    const [account] = await tx.select().from(payoutAccounts).where(eq(payoutAccounts.id, input.id)).for('update');
+    if (!account || account.reviewStatus !== 'pending' || account.replacedAt) {
+      throw conflict('not_in_review', 'This account is not waiting for a decision');
+    }
+    const decided = { reviewedBy: input.adminId, reviewedAt: new Date(), reviewNote: input.note };
+    if (input.decision === 'approve') {
+      await tx
+        .update(payoutAccounts)
+        .set({ replacedAt: new Date() })
+        .where(
+          and(
+            eq(payoutAccounts.userId, account.userId),
+            isNull(payoutAccounts.replacedAt),
+            eq(payoutAccounts.reviewStatus, 'approved'),
+          ),
+        );
+      await tx
+        .update(payoutAccounts)
+        .set({ reviewStatus: 'approved', ...decided })
+        .where(eq(payoutAccounts.id, account.id));
+    } else {
+      await tx
+        .update(payoutAccounts)
+        .set({ reviewStatus: 'declined', replacedAt: new Date(), ...decided })
+        .where(eq(payoutAccounts.id, account.id));
+    }
+    return account;
+  }
+
+  /** Tells the agent what support decided about their account. */
+  async accountDecided(account: { userId: string; accountLast4: string | null }, decision: 'approve' | 'decline') {
+    const last4 = account.accountLast4 ?? '';
+    await this.push
+      .notifyUser(account.userId, 'agent', {
+        title: decision === 'approve' ? 'New account approved' : 'New account not approved',
+        body:
+          decision === 'approve'
+            ? `Withdrawals now go to your account ending ${last4}.`
+            : `Support couldn't approve the account ending ${last4}. Your withdrawals keep going to your current account.`,
+        data: { type: 'wallet.payout_account' },
+      })
+      .catch(() => undefined);
   }
 
   /* ---------- Withdrawals ---------- */
@@ -197,7 +306,15 @@ export class PayoutsService {
       this.agents.tier(auth.userId),
     ]);
     const account = await this.currentAccount(auth.userId);
-    if (!account) throw conflict('payout_account_missing', 'Add your bank account first');
+    if (!account) {
+      if (await this.pendingAccount(auth.userId)) {
+        throw conflict(
+          'payout_account_in_review',
+          'Support is checking your bank account. You can withdraw once it is approved.',
+        );
+      }
+      throw conflict('payout_account_missing', 'Add your bank account first');
+    }
     if (amountKobo < settings.limits.minWithdrawalKobo) {
       throw unprocessable('withdrawal_too_small', 'The amount is below the minimum withdrawal', {
         minWithdrawalKobo: settings.limits.minWithdrawalKobo,

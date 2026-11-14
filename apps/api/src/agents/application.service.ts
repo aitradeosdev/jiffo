@@ -106,10 +106,12 @@ export class AgentApplicationService implements IdentityOwner {
     }
     const [user, payout, profile, state, { settings }] = await Promise.all([
       this.db.select().from(users).where(eq(users.id, userId)),
+      // The account in use, or one waiting for support: either counts as the step done.
       this.db
         .select({ accountName: payoutAccounts.accountName })
         .from(payoutAccounts)
-        .where(and(eq(payoutAccounts.userId, userId), isNull(payoutAccounts.replacedAt))),
+        .where(and(eq(payoutAccounts.userId, userId), isNull(payoutAccounts.replacedAt)))
+        .orderBy(sql`${payoutAccounts.reviewStatus} = 'approved' desc`),
       this.db.select({ userId: agentProfiles.userId }).from(agentProfiles).where(eq(agentProfiles.userId, userId)),
       app.stateCode
         ? this.db
@@ -441,10 +443,12 @@ export class AgentApplicationService implements IdentityOwner {
         .where(eq(agentApplications.userId, app.userId));
       return app;
     }
+    // The account in use, or one support is checking, which then goes to review with the application.
     const [payout] = await this.db
       .select({ accountName: payoutAccounts.accountName })
       .from(payoutAccounts)
-      .where(and(eq(payoutAccounts.userId, app.userId), isNull(payoutAccounts.replacedAt)));
+      .where(and(eq(payoutAccounts.userId, app.userId), isNull(payoutAccounts.replacedAt)))
+      .orderBy(sql`${payoutAccounts.reviewStatus} = 'approved' desc`);
     const [user] = await this.db.select().from(users).where(eq(users.id, app.userId));
     const fullName = `${user!.firstName ?? ''} ${user!.lastName ?? ''}`;
     const legal = app.legalName ?? '';

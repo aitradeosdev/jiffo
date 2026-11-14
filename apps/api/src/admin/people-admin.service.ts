@@ -243,9 +243,11 @@ export class PeopleAdminService {
           accountName: payoutAccounts.accountName,
           accountNumber: payoutAccounts.accountNumber,
           createdAt: payoutAccounts.createdAt,
+          reviewStatus: payoutAccounts.reviewStatus,
         })
         .from(payoutAccounts)
-        .where(and(eq(payoutAccounts.userId, id), isNull(payoutAccounts.replacedAt))),
+        .where(and(eq(payoutAccounts.userId, id), isNull(payoutAccounts.replacedAt)))
+        .orderBy(sql`${payoutAccounts.reviewStatus} = 'approved' desc`),
       this.liveErrands(id),
       this.tierTerms(user.countryCode),
       this.idChecks.detail(id),

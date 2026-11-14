@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, View } from 'react-native';
 import { goBack } from '@/nav';
 import { useSession } from '@/auth/session';
 import { ApiError, errorMessage } from '@/api/client';
@@ -34,7 +34,17 @@ export default function PayoutAccount() {
     setBusy(true);
     setError(null);
     try {
-      await api.put('/v1/payout-account', { bankCode: bank.code, accountNumber: number });
+      const saved = await api.put<{ inReview?: boolean; pending?: object | null } | null>('/v1/payout-account', {
+        bankCode: bank.code,
+        accountNumber: number,
+      });
+      // The bank's name is close to the one on the ID but not the same: support checks it first.
+      if (saved?.inReview || saved?.pending) {
+        const message =
+          "The name on this account is close to the name on your ID, but not the same, so support will check it. We'll let you know.";
+        if (Platform.OS === 'web') window.alert(message);
+        else Alert.alert('We are checking your account', message);
+      }
       goBack();
     } catch (e) {
       const held = e instanceof ApiError ? e.details.accountName : undefined;
