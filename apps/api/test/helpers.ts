@@ -18,10 +18,12 @@ import {
   agentApplications,
   customerVerifications,
   deposits,
+  errands,
+  errandStops,
   type AdminRole,
 } from '../src/db/schema';
 import { sha256 } from '../src/common/crypto';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { AppName } from '../src/db/schema';
 
 export interface TestApp {
@@ -139,6 +141,31 @@ export async function createErrand(t: TestApp, customer: Person, overrides: Reco
   return res.body as { id: string; status: string; version: number; buy: boolean; allowedEvents: string[] };
 }
 
+/** The agent's phone reports a position: the errand's drop-off, unless another place is given. */
+export async function atDropoff(t: TestApp, agent: Person, errandId: string, at?: { lat: number; lng: number }) {
+  const [stop] = await t.db
+    .select({ lat: errandStops.lat, lng: errandStops.lng })
+    .from(errandStops)
+    .where(and(eq(errandStops.errandId, errandId), eq(errandStops.kind, 'dropoff')));
+  await request(t.http)
+    .put('/v1/agent/presence')
+    .set(agent.headers)
+    .send(at ?? { lat: stop!.lat, lng: stop!.lng })
+    .expect(200);
+}
+
+/** The agent has waited at the drop-off as long as the settings ask before a photo may be sent. */
+export async function waitedAtDropoff(t: TestApp, errandId: string) {
+  await t.db
+    .update(errands)
+    .set({ deliveredAt: new Date(Date.now() - 24 * 3_600_000) })
+    .where(eq(errands.id, errandId));
+}
+
+/**
+ * Sends an errand event. As an agent's phone would, it reports the drop-off position before the hand-off
+ * steps, and a photo is sent only after the wait: tests of those rules call the API themselves.
+ */
 export async function act(
   t: TestApp,
   person: Person,
@@ -147,6 +174,8 @@ export async function act(
   data: Record<string, unknown> = {},
   status = 200,
 ) {
+  if (['mark_delivered', 'confirm_pin', 'send_dropoff_photo'].includes(event)) await atDropoff(t, person, errandId);
+  if (event === 'send_dropoff_photo') await waitedAtDropoff(t, errandId);
   const res = await request(t.http).post(`/v1/errands/${errandId}/events`).set(person.headers).send({ event, data });
   if (res.status !== status) {
     throw new Error(`${event}: expected ${status}, got ${res.status} ${JSON.stringify(res.body)}`);

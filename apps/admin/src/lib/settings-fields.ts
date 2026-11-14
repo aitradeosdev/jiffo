@@ -189,6 +189,23 @@ export const SECTIONS: Section[] = [
         help: 'A larger shortfall at the provider pauses instant withdrawals until finance clears the check.',
       },
       {
+        path: 'security.handoffDistanceMeters',
+        label: 'Agent must be this near the drop-off to finish',
+        kind: 'count',
+        help: 'In metres. Marking delivered and the PIN are refused further away. 0 turns the check off.',
+      },
+      {
+        path: 'security.offersPerMinute',
+        label: 'Counter-offers per errand per minute, at most',
+        kind: 'count',
+      },
+      {
+        path: 'security.maxActiveErrandsPerAgent',
+        label: 'Errands one agent may hold at once',
+        kind: 'count',
+        help: 'From accepted until done. 0 means no limit.',
+      },
+      {
         path: 'security.lowProviderBalanceKobo',
         label: 'Alert when the provider holds less than',
         kind: 'naira',

@@ -162,6 +162,13 @@ function noteFor(event: ErrandEvent, r: TransitionResult): Note | null {
         title: 'Errand cancelled',
         body: 'Jiffo support cancelled this errand before an agent took it. Nothing was charged.',
       };
+    case 'pin_locked':
+      return {
+        to: 'both',
+        title: 'Held for support',
+        body: 'Too many wrong PINs were entered. Your money stays held while Jiffo support looks at this errand.',
+        chat: 'Too many wrong PINs. Support is looking at this errand; the money stays held until they decide.',
+      };
     case 'admin_intervene':
       return {
         to: 'both',

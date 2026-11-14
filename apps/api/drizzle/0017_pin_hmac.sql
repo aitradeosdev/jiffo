@@ -1,0 +1,1 @@
+ALTER TABLE "errands" ADD COLUMN "pin_hmac" text;

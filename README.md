@@ -148,6 +148,13 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
 - **What it costs:** every provider charge is booked to the ledger as it happens: the fee on each top-up (Jiffo pays it, not the customer), the fee on each transfer out, and the fee for issuing an own account number, which is entered on the provider in the panel because providers don't report it per account. The overview and Money pages show revenue, those costs, and net revenue, the difference.
 - **Escrow:** the fee and service fee are held when an agent accepts, adjusted when a new price is accepted, and returned if the agent leaves or the errand is cancelled. Item money is held separately when the customer locks the item amount.
 - **Hand-off:** item money goes to the agent untouched and withdrawable at once. The fee, less the commission for the agent's tier (set by admin), goes to the agent; Bronze earnings are held for 24 hours. The service fee and commission go to platform revenue.
+- **Protecting the hand-off:**
+  - **At the drop-off:** marking an errand delivered and entering the PIN need the agent's fresh position within the set distance of the drop-off (default 200 m, Settings, Security).
+  - **Wait before a photo:** a drop-off photo is accepted only after the agent has waited the set minutes there, and only while they are still there.
+  - **Current settings:** these limits follow the current settings, also for errands made before a change.
+  - **Last wrong PIN:** freezes the errand for support. Nothing is paid or given back by itself, and each wrong entry is on the errand's record, without the digits.
+  - **PIN storage:** each PIN is encrypted under its errand's own key and checked by a keyed hash. It is cleared when the errand ends.
+  - **Limits:** item money is capped for new agents and new customers. Counter-offers are limited per minute, and admin can cap how many errands one agent holds at once.
 - **Withdrawals:** agents only, to an account in their own name. One free scheduled withdrawal a day, or instant for a fee. A bounced transfer puts the full amount back.
   - **Repeats:** each request carries the app's key, so a repeated tap or a retry makes one withdrawal.
   - **Sending:** one run at a time claims a withdrawal before sending it. Only a first try that the provider refuses outright gives the money back. An unclear answer after that raises an alert instead.

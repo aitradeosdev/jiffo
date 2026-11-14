@@ -268,7 +268,10 @@ export const errands = pgTable(
     settingsVersion: integer('settings_version').notNull(),
     /** The agent's tier when they accepted. Commission and the earnings hold follow it, whatever admin changes later. */
     agentTier: text('agent_tier', { enum: AGENT_TIERS }),
+    /** The hand-off PIN, encrypted under a key for this errand alone ("v2:"), so the customer can see it again. Cleared when the errand ends. */
     pinCipher: text('pin_cipher'),
+    /** A keyed hash of the PIN, for checking what the agent enters without decrypting it. */
+    pinHmac: text('pin_hmac'),
     pinAttempts: smallint('pin_attempts').notNull().default(0),
     version: integer('version').notNull().default(0),
     acceptedAt: timestamp('accepted_at', { withTimezone: true }),

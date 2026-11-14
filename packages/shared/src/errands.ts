@@ -132,6 +132,8 @@ export const ERRAND_EVENTS = {
   unreachable_timeout: { from: ['unreachable'], to: 'disputed', actors: ['system'] },
 
   open_dispute: { from: IN_PROGRESS, to: 'disputed', actors: ['customer', 'agent'] },
+  // The last wrong hand-off PIN freezes both escrows for support: nothing is paid or given back by itself.
+  pin_locked: { from: ['delivered'], to: 'disputed', actors: ['system'] },
   // Admin can freeze the escrows at any point while money is held: only admin moves it from disputed.
   admin_intervene: { from: AGENT_OUT_STATES, to: 'disputed', actors: ['admin'] },
   resolve_complete: { from: ['disputed'], to: 'completed', actors: ['admin'] },
