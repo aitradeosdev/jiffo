@@ -254,6 +254,12 @@ export const SECTIONS: Section[] = [
         help: 'Hours. It must then be asked for again.',
       },
       {
+        path: 'security.dailyIdReveals',
+        label: "People's details one staff member may reveal in a day",
+        kind: 'count',
+        help: 'Legal names, dates of birth, addresses and emergency contacts are hidden until revealed with a reason. Counted per country. 0 means nobody can.',
+      },
+      {
         path: 'security.smsCodesDailyAlert',
         label: 'Alert when sign-in codes sent in a day pass',
         kind: 'count',

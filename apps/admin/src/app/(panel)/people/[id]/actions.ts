@@ -122,3 +122,25 @@ export async function decideIdentity(_: PersonState, form: FormData): Promise<Pe
   back(id, ID_DECISIONS[decision]);
   return {};
 }
+
+export interface Revealed {
+  application: {
+    legalName: string | null;
+    dateOfBirth: string | null;
+    address: string | null;
+    emergency: { name: string; phone: string | null; relationship: string | null } | null;
+  } | null;
+  identity: { legalName: string | null; dateOfBirth: string | null } | null;
+}
+
+/** A person's personal details in full, with a reason: logged and capped per day (docs/security-plan.md, D5). */
+export async function revealPerson(id: string, reason: string): Promise<Revealed | { error: string }> {
+  try {
+    return await api<Revealed>(`/admin/people/${encodeURIComponent(id)}/reveal`, {
+      method: 'POST',
+      body: { note: reason },
+    });
+  } catch (error) {
+    return { error: messageOf(error) };
+  }
+}

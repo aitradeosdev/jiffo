@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { agentTierLabel, yearsOld } from '@jiffo/shared';
+import { agentTierLabel } from '@jiffo/shared';
+import { birth } from './birth';
+import { RevealCard } from './reveal';
 import { notFound } from 'next/navigation';
 import type { ErrandState } from '@jiffo/shared';
 import { Badge, Card, Notice, Stat } from '@/components/ui';
@@ -102,6 +104,8 @@ interface CustomerIdentity {
   createdAt: string;
   /** The provider gave the ID's number, so a second account on it can be caught; needed to verify. */
   hasIdNumber: boolean;
+  /** The name and date of birth are masked until revealed (D5). */
+  masked: boolean;
 }
 
 /** The agent's application: the provider's results and what the agent typed, never their documents. */
@@ -116,6 +120,8 @@ interface Application {
   addressOutcome: string | null;
   address: string | null;
   emergency: { name: string; phone: string | null; relationship: string | null } | null;
+  /** The name, date of birth, address and emergency contact are masked until revealed (D5). */
+  masked: boolean;
   termsAcceptedAt: string | null;
   checks: Check[];
   submittedAt: string | null;
@@ -233,6 +239,7 @@ export default async function PersonPage({
               timeZone={country.timezone}
             />
           ) : null}
+          {can('reveal') && (d.customer.identity || d.agent?.application) ? <RevealCard id={p.id} /> : null}
           {d.agent ? (
             <Card title="As an agent">
               {stats(d.agent.stats)}
@@ -462,7 +469,7 @@ function ApplicationCard({
   const status = statusOf(app.status);
   const rows: Array<[string, ReactNode]> = [
     ['Name on the ID', app.legalName ?? '—'],
-    ['Date of birth', app.dateOfBirth ? `${app.dateOfBirth} · ${yearsOld(app.dateOfBirth)} years old` : '—'],
+    ['Date of birth', birth(app.dateOfBirth, app.masked)],
     ['Works in', app.stateName ? `${app.area ?? ''}${app.area ? ', ' : ''}${app.stateName}` : '—'],
     ['Home address', app.address ?? '—'],
     [
@@ -471,11 +478,7 @@ function ApplicationCard({
         <>
           {app.emergency.name}
           {app.emergency.relationship ? ` (${app.emergency.relationship.toLowerCase()})` : ''}
-          {app.emergency.phone ? (
-            <a href={`tel:${app.emergency.phone}`} className="num ml-2 underline">
-              {app.emergency.phone}
-            </a>
-          ) : null}
+          {app.emergency.phone ? <span className="num ml-2">{app.emergency.phone}</span> : null}
         </>
       ) : (
         '—'
@@ -567,10 +570,7 @@ function IdentityCard({
   const rows: Array<[string, ReactNode]> = [
     ['ID', identity.idName],
     ['Name on the ID', identity.legalName ?? '—'],
-    [
-      'Date of birth',
-      identity.dateOfBirth ? `${identity.dateOfBirth} · ${yearsOld(identity.dateOfBirth)} years old` : '—',
-    ],
+    ['Date of birth', birth(identity.dateOfBirth, identity.masked)],
     ['Checked by', identity.provider],
   ];
   return (

@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { ZodBody } from '../common/zod-body';
 import { AdminAuthService } from './admin-auth.service';
-import { AdminGuard, clientOf, Confirmed, CurrentAdmin, Needs, OpenWithoutPasskey } from './admin.guard';
+import { AdminGuard, clientOf, Confirmed, CurrentAdmin, Needs, NoReason, OpenWithoutPasskey } from './admin.guard';
 import { PasskeysService } from './passkeys.service';
 import { OverviewService } from './overview.service';
 import type { AdminContext, AdminRequest } from './admin.types';
@@ -120,6 +120,7 @@ export class AdminAuthController {
   @HttpCode(200)
   @UseGuards(AdminGuard)
   @Needs('read')
+  @NoReason()
   @OpenWithoutPasskey()
   // A new passkey is a new way in: only after confirming, as for money actions, so a stolen session
   // can't add its own. Just after signing in counts as confirmed.
@@ -131,6 +132,7 @@ export class AdminAuthController {
   @Post('auth/passkeys')
   @UseGuards(AdminGuard)
   @Needs('read')
+  @NoReason()
   @OpenWithoutPasskey()
   @Confirmed()
   addPasskey(
@@ -143,6 +145,7 @@ export class AdminAuthController {
   @Delete('auth/passkeys/:id')
   @UseGuards(AdminGuard)
   @Needs('read')
+  @NoReason()
   @Confirmed()
   removePasskey(@CurrentAdmin() admin: AdminContext, @Param('id', new ParseUUIDPipe()) id: string) {
     return this.passkeyService.remove(admin.adminId, admin.role, id);
@@ -154,6 +157,7 @@ export class AdminAuthController {
   @HttpCode(200)
   @UseGuards(AdminGuard)
   @Needs('read')
+  @NoReason()
   @OpenWithoutPasskey()
   confirmStart(@CurrentAdmin() admin: AdminContext) {
     return this.auth.confirmStart(admin);
@@ -163,6 +167,7 @@ export class AdminAuthController {
   @HttpCode(200)
   @UseGuards(AdminGuard)
   @Needs('read')
+  @NoReason()
   @OpenWithoutPasskey()
   confirm(
     @CurrentAdmin() admin: AdminContext,
@@ -176,6 +181,7 @@ export class AdminAuthController {
   @HttpCode(204)
   @UseGuards(AdminGuard)
   @Needs('read')
+  @NoReason()
   @OpenWithoutPasskey()
   async signOut(@CurrentAdmin() admin: AdminContext) {
     await this.auth.signOut(admin.sessionId);

@@ -2,7 +2,7 @@ import { CanActivate, createParamDecorator, ExecutionContext, Inject, Injectable
 import { Reflector } from '@nestjs/core';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { safeEqual } from '../common/crypto';
-import { forbidden, unauthorized } from '../common/errors';
+import { badRequest, forbidden, unauthorized } from '../common/errors';
 import type { AdminRole } from '../db/schema';
 import { AdminAuthService } from './admin-auth.service';
 import { can, type Permission } from './permissions';
@@ -18,6 +18,43 @@ export const OpenWithoutPasskey = () => SetMetadata(OPEN_WITHOUT_PASSKEY, true);
  * code (docs/security-plan.md, D6). Otherwise the answer asks them to confirm first.
  */
 export const Confirmed = () => SetMetadata(CONFIRMED_KEY, true);
+const NO_REASON_KEY = 'jiffo:admin-no-reason';
+/**
+ * For the few changes that carry no reason of their own: an admin's own sign-in, passkeys and confirms, a
+ * provider's test, and deciding a request (whose reason is the request's).
+ */
+export const NoReason = () => SetMetadata(NO_REASON_KEY, true);
+/**
+ * The header the panel sends a change's reason in, for changes without a note of their own. URI-encoded, since
+ * a header carries only Latin-1 and a reason may say ₦ or use a curly apostrophe.
+ */
+export const REASON_HEADER = 'x-jiffo-reason';
+/** The longest reason, the same as every route's note. */
+const REASON_MAX = 1000;
+const CHANGES = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/** A header's value, decoded; as sent when it isn't URI-encoded (a lone "%", say). */
+function decoded(value: string | undefined) {
+  if (value === undefined) return undefined;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * A change's reason (docs/security-plan.md, D7): the request's own note first, else the reason sent with it.
+ * Between 5 and 1000 characters, or none.
+ */
+export function reasonOf(req: AdminRequest): string | undefined {
+  const body = (req.body ?? {}) as { note?: unknown; reason?: unknown };
+  const given = [body.note, body.reason, decoded(req.header(REASON_HEADER))].find(
+    (v) => typeof v === 'string' && v.trim(),
+  );
+  const text = typeof given === 'string' ? given.trim() : '';
+  return text.length >= 5 && text.length <= REASON_MAX ? text : undefined;
+}
 /**
  * The permission a route needs: every admin route names at least one, and 'read' is the least. With several,
  * any one will do, and the service checks which the request itself needs.
@@ -68,6 +105,11 @@ export class AdminGuard implements CanActivate {
     // A route that forgot to say what it needs is closed, not open.
     if (!needed?.length || !needed.some((p) => can(req.admin!.role as AdminRole, p))) {
       throw forbidden('not_permitted', 'Your role does not allow this');
+    }
+    // Every change says why, and the audit log keeps it (D7).
+    req.admin.reason = reasonOf(req);
+    if (CHANGES.has(req.method) && !flag(NO_REASON_KEY) && !req.admin.reason) {
+      throw badRequest('reason_required', 'Say why, in a few words');
     }
     if (flag(CONFIRMED_KEY) && !this.auth.confirmedRecently(req.admin)) {
       throw forbidden('confirm_identity', "Confirm it's you first, then try again");

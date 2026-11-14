@@ -53,7 +53,7 @@ describe('admin sessions and passkeys', () => {
       email,
       secret: setup.body.secret as string,
       step,
-      headers: { Authorization: `Bearer ${done.body.token}` },
+      headers: { Authorization: `Bearer ${done.body.token}`, 'x-jiffo-reason': 'For a test' },
       expiresAt: done.body.expiresAt as string,
     };
   }

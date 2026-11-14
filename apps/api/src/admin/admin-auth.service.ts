@@ -393,6 +393,7 @@ export class AdminAuthService {
       name: row.admin.name,
       role: row.admin.role,
       ip: client.ip,
+      userAgent: client.userAgent,
       confirmedAt: row.session.confirmedAt,
       // A role that signs in with a passkey, without one yet: only adding one is open (D2).
       passkeyMissing: needsPasskey(row.admin.role) && !row.hasPasskey,

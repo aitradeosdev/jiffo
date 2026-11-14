@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { providerInfo } from '@jiffo/shared';
-import { api, ASKED, isPending, messageOf } from '@/lib/api';
+import { api, reasonOf, ASKED, isPending, messageOf } from '@/lib/api';
 
 export interface ProviderState {
   error?: string;
@@ -37,7 +37,11 @@ export async function saveProvider(_: ProviderState, form: FormData): Promise<Pr
   let pending = false;
   try {
     pending = isPending(
-      await api(`/admin/providers/${category}/${provider}`, { method: 'PUT', body: { config, secrets } }),
+      await api(`/admin/providers/${category}/${provider}`, {
+        reason: reasonOf(form),
+        method: 'PUT',
+        body: { config, secrets },
+      }),
     );
   } catch (error) {
     return { error: messageOf(error) };
@@ -52,6 +56,7 @@ export async function testProvider(_: ProviderState, form: FormData): Promise<Pr
   const { category, provider } = target(form);
   try {
     const test = await api<{ ok: boolean; message: string }>(`/admin/providers/${category}/${provider}/test`, {
+      reason: reasonOf(form),
       method: 'POST',
     });
     revalidatePath('/settings/providers');
@@ -67,7 +72,11 @@ export async function activateProvider(_: ProviderState, form: FormData): Promis
   let pending = false;
   try {
     pending = isPending(
-      await api(`/admin/providers/${category}/active`, { method: 'POST', body: { provider: provider || null } }),
+      await api(`/admin/providers/${category}/active`, {
+        reason: reasonOf(form),
+        method: 'POST',
+        body: { provider: provider || null },
+      }),
     );
   } catch (error) {
     return { error: messageOf(error) };
@@ -80,7 +89,7 @@ export async function activateProvider(_: ProviderState, form: FormData): Promis
 export async function removeProvider(_: ProviderState, form: FormData): Promise<ProviderState> {
   const { category, provider } = target(form);
   try {
-    await api(`/admin/providers/${category}/${provider}`, { method: 'DELETE' });
+    await api(`/admin/providers/${category}/${provider}`, { reason: reasonOf(form), method: 'DELETE' });
   } catch (error) {
     return { error: messageOf(error) };
   }
@@ -92,7 +101,7 @@ export async function removeProvider(_: ProviderState, form: FormData): Promise<
 export async function renewCallback(_: ProviderState, form: FormData): Promise<ProviderState> {
   const { category, provider } = target(form);
   try {
-    await api(`/admin/providers/${category}/${provider}/callback`, { method: 'POST' });
+    await api(`/admin/providers/${category}/${provider}/callback`, { reason: reasonOf(form), method: 'POST' });
   } catch (error) {
     return { error: messageOf(error) };
   }

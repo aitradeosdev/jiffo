@@ -58,7 +58,7 @@ describe('admin', () => {
     email: string;
     secret: string;
     lastStep: number;
-    headers: { Authorization: string };
+    headers: { Authorization: string; 'x-jiffo-reason'?: string };
     /** Roles that sign in with a passkey have one (docs/security-plan.md, D2). */
     passkey?: SoftPasskey;
   }
@@ -113,14 +113,14 @@ describe('admin', () => {
       .set(fromIp())
       .send({ challenge: signedIn.body.challenge, code: totpCode(setup.body.secret, step) })
       .expect(200);
-    const headers = { Authorization: `Bearer ${done.body.token}` };
+    const headers = { Authorization: `Bearer ${done.body.token}`, 'x-jiffo-reason': 'For a test' };
     // A role that signs in with a passkey adds one first, as the panel asks it to.
     const passkey = needsPasskey(role) ? await addPasskey(headers) : undefined;
     return { id, email, secret: setup.body.secret, lastStep: step, headers, passkey };
   }
 
   /** Adds a software passkey to the signed-in admin, as the browser would. */
-  async function addPasskey(headers: { Authorization: string }, passkey = new SoftPasskey()) {
+  async function addPasskey(headers: Admin['headers'], passkey = new SoftPasskey()) {
     const options = await request(t.http).post('/v1/admin/auth/passkeys/options').set(headers).expect(200);
     await request(t.http)
       .post('/v1/admin/auth/passkeys')
@@ -217,7 +217,7 @@ describe('admin', () => {
     expect(me.body).toMatchObject({
       email,
       role: 'operations',
-      permissions: ['read', 'errands', 'disputes', 'suspend', 'tiers'],
+      permissions: ['read', 'errands', 'disputes', 'suspend', 'tiers', 'reveal'],
     });
     expect(me.body.countries.map((c: { code: string }) => c.code)).toContain('NG');
     // Once the app is on, the setup step is closed, so a stolen password can't replace it.
@@ -408,7 +408,7 @@ describe('admin', () => {
     expect(last.status).toBe(200);
     expect(last.body.role).toBe('owner');
     const again = await signInAgain(owner);
-    owner.headers = { Authorization: `Bearer ${again.res.body.token}` };
+    owner.headers = { Authorization: `Bearer ${again.res.body.token}`, 'x-jiffo-reason': 'For a test' };
 
     // Disabling ends sessions at once; giving access back waits for a second owner; a reset clears the
     // password and the app and sends a new link.

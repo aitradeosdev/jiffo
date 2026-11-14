@@ -14,6 +14,13 @@ export interface AdminContext {
   name: string;
   role: string;
   ip: string | null;
+  /** The admin's browser, as the panel passes it on. */
+  userAgent: string | null;
+  /**
+   * Why, for a change: the request's own note, or the reason the panel sends with it. Every change has one
+   * (docs/security-plan.md, D7), and the audit log keeps it.
+   */
+  reason?: string;
   /** When they last proved it was them, at sign-in or since. */
   confirmedAt: Date;
   /** Their role signs in with a passkey and they have none yet. */

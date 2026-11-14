@@ -26,7 +26,26 @@ export class AuditService {
       countryCode: entry.countryCode ?? null,
       // A change that waited for approval says which request it was and who approved it.
       data: admin.approval ? { ...(entry.data ?? {}), approval: admin.approval } : (entry.data ?? {}),
+      reason: admin.reason ?? null,
       ip: admin.ip,
+      userAgent: admin.userAgent,
+    });
+  }
+
+  /**
+   * A change made with the command line on a server (inviting or resetting an admin, say): recorded as
+   * from the command line, with the server's user, since no admin is signed in there.
+   */
+  recordCli(tx: Pick<Tx, 'insert'>, entry: AuditEntry & { reason: string }) {
+    return tx.insert(adminAudit).values({
+      adminId: null,
+      via: 'cli',
+      action: entry.action,
+      targetType: entry.targetType ?? null,
+      targetId: entry.targetId ?? null,
+      countryCode: entry.countryCode ?? null,
+      data: { ...(entry.data ?? {}), serverUser: process.env.USER ?? process.env.USERNAME ?? null },
+      reason: entry.reason,
     });
   }
 
@@ -40,12 +59,16 @@ export class AuditService {
         targetId: adminAudit.targetId,
         countryCode: adminAudit.countryCode,
         data: adminAudit.data,
+        reason: adminAudit.reason,
+        via: adminAudit.via,
         ip: adminAudit.ip,
+        userAgent: adminAudit.userAgent,
         createdAt: adminAudit.createdAt,
         admin: { id: admins.id, name: admins.name, email: admins.email },
       })
       .from(adminAudit)
-      .innerJoin(admins, eq(admins.id, adminAudit.adminId))
+      // The command line's changes have no admin, and are listed too.
+      .leftJoin(admins, eq(admins.id, adminAudit.adminId))
       .where(
         and(
           query.before ? lt(adminAudit.id, query.before) : undefined,

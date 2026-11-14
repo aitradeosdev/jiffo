@@ -11,6 +11,7 @@ import { SUPPORT_CHECK_LABELS, type Check } from './check-labels';
 import { requireCountry } from './countries';
 import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
+import { maskDate, maskName } from './masking';
 
 export const ID_CHECK_STATUSES = ['review', 'checking', 'failed', 'verified', 'declined'] as const;
 export type IdCheckStatus = (typeof ID_CHECK_STATUSES)[number];
@@ -53,7 +54,10 @@ export class IdChecksAdminService {
   }
 
   /** Checks in one state: those waiting for someone oldest first, the rest newest first. */
-  async list(query: { country: string; status: IdCheckStatus; q?: string; before?: string; limit: number }) {
+  async list(
+    query: { country: string; status: IdCheckStatus; q?: string; before?: string; limit: number },
+    byLegalName = false,
+  ) {
     await requireCountry(this.db, query.country);
     const cursor = parseCursor(query.before);
     const oldestFirst = query.status === 'review' || query.status === 'checking';
@@ -80,7 +84,7 @@ export class IdChecksAdminService {
         and(
           eq(users.countryCode, query.country),
           eq(customerVerifications.status, query.status),
-          query.q ? this.search(query.q) : undefined,
+          query.q ? this.search(query.q, byLegalName) : undefined,
           cursor
             ? oldestFirst
               ? sql`(${since}, ${customerVerifications.userId}) > (${cursor.at}::timestamptz, ${cursor.id}::uuid)`
@@ -97,8 +101,10 @@ export class IdChecksAdminService {
     const page = rows.slice(0, query.limit);
     const last = page.at(-1);
     return {
-      checks: page.map(({ cursorAt: _, checks, idType, provider, ...r }) => ({
+      checks: page.map(({ cursorAt: _, checks, idType, provider, legalName, ...r }) => ({
         ...r,
+        // Masked: revealed one person at a time, with a reason (D5).
+        legalName: maskName(legalName),
         idType,
         provider: providerName(provider),
         idName: idName(idType),
@@ -109,7 +115,11 @@ export class IdChecksAdminService {
     };
   }
 
-  private search(text: string): SQL | undefined {
+  /**
+   * By the name in the app, phone or ID; by legal name only for those who may reveal it, since a match would
+   * otherwise confirm a masked name (D5).
+   */
+  private search(text: string, byLegalName: boolean): SQL | undefined {
     const like = containing(text);
     const phone = phoneDigits(text);
     const id = idPrefix(text);
@@ -117,14 +127,17 @@ export class IdChecksAdminService {
     return or(
       ilike(sql`coalesce(${users.firstName}, '') || ' ' || coalesce(${users.lastName}, '')`, like),
       // The legal name is encrypted: it is found by whole words, through its keyed index.
-      words.length ? arrayContains(customerVerifications.legalNameIndex, words) : undefined,
+      byLegalName && words.length ? arrayContains(customerVerifications.legalNameIndex, words) : undefined,
       id ? ilike(sql`${users.id}::text`, id) : undefined,
       phone ? ilike(users.phone, `%${phone}%`) : undefined,
     );
   }
 
-  /** A customer's check for their page in the panel, or null if they haven't checked their ID. */
-  async detail(userId: string) {
+  /**
+   * A customer's check for their page in the panel, or null if they haven't checked their ID. The name and
+   * date of birth on their ID are masked unless `full` (a reveal, with a reason; D5).
+   */
+  async detail(userId: string, full = false) {
     const [row] = await this.db
       .select({
         status: customerVerifications.status,
@@ -149,6 +162,9 @@ export class IdChecksAdminService {
     const { held, pending, ...rest } = row;
     return {
       ...rest,
+      legalName: full ? rest.legalName : maskName(rest.legalName),
+      dateOfBirth: full ? rest.dateOfBirth : maskDate(rest.dateOfBirth),
+      masked: !full,
       provider: providerName(row.provider),
       idName: idName(row.idType),
       checks: labelled(row.checks),

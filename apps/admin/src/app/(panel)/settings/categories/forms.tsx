@@ -1,5 +1,6 @@
 'use client';
 
+import { ReasonInput } from '@/components/reason';
 import { useActionState, useState } from 'react';
 import { SubmitButton } from '@/components/submit-button';
 import { buttonClass, inputClass, Notice } from '@/components/ui';
@@ -62,6 +63,7 @@ export function CategoryRow({ category, canEdit }: { category: Category; canEdit
   const { f, set } = useFields(category);
   return (
     <form action={action} className="grid gap-3 py-4 sm:grid-cols-[1fr_1fr_120px_80px] sm:items-end">
+      <ReasonInput after={state} />
       <input type="hidden" name="id" value={category.id} />
       <fieldset disabled={!canEdit} className="contents">
         <Label
@@ -172,6 +174,7 @@ export function NewCategory({ country }: { country: string }) {
   }, {});
   return (
     <form action={action} className="grid gap-3 sm:grid-cols-2">
+      <ReasonInput after={state} />
       <input type="hidden" name="country" value={country} />
       <label className="block">
         <span className="mb-1.5 block text-sm font-semibold">Name</span>

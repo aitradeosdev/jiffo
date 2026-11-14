@@ -40,6 +40,8 @@ interface CallOptions {
   anonymous?: boolean;
   /** A session token already taken from the cookie, for signing out after the cookie is gone. */
   token?: string;
+  /** Why, for a change without a note of its own: the audit log keeps it (docs/security-plan.md, D7). */
+  reason?: string;
 }
 
 /** The page the admin was on, from the request that brought them here; the overview otherwise. */
@@ -68,6 +70,8 @@ export async function api<T>(path: string, options: CallOptions = {}): Promise<T
     headers: {
       ...(await clientHeaders()),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      // Encoded: a header carries only Latin-1, and a reason may say ₦ or use a curly apostrophe.
+      ...(options.reason ? { 'x-jiffo-reason': encodeURIComponent(options.reason) } : {}),
       ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     },
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
@@ -140,3 +144,6 @@ export function messageOf(error: unknown): string {
 export const isPending = (body: unknown): boolean =>
   !!body && typeof body === 'object' && (body as { pending?: unknown }).pending === true;
 export const ASKED = '/approvals?done=asked';
+
+/** The reason a form sent, for a change's audit entry. */
+export const reasonOf = (form: FormData) => String(form.get('reason') ?? '').trim() || undefined;

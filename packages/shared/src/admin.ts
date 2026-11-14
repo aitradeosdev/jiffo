@@ -24,6 +24,11 @@ export const ADMIN_PERMISSIONS = [
   'settings',
   /** Inviting admins, changing their roles and reading the audit log. */
   'team',
+  /**
+   * Seeing a person's legal name, date of birth, address and emergency contact, which are masked otherwise:
+   * each time with a reason, logged and capped per day (docs/security-plan.md, D5).
+   */
+  'reveal',
 ] as const;
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number];
 
@@ -35,20 +40,24 @@ export const ADMIN_ROLE_INFO: Record<
   operations: {
     label: 'Operations',
     about: 'Errands, disputes, suspensions and agent tiers',
-    permissions: ['read', 'errands', 'disputes', 'suspend', 'tiers'],
+    permissions: ['read', 'errands', 'disputes', 'suspend', 'tiers', 'reveal'],
   },
-  disputes: { label: 'Disputes', about: 'Settling disputes', permissions: ['read', 'disputes'] },
+  disputes: { label: 'Disputes', about: 'Settling disputes', permissions: ['read', 'disputes', 'reveal'] },
   verification: {
     label: 'Verification',
     about: "Agent applications and customers' ID checks",
-    permissions: ['read', 'verify'],
+    permissions: ['read', 'verify', 'reveal'],
   },
   finance: {
     label: 'Finance',
     about: 'Money: refunds, adjustments and payouts',
-    permissions: ['read', 'money'],
+    permissions: ['read', 'money', 'reveal'],
   },
-  safety: { label: 'Safety', about: 'Suspending accounts that put people at risk', permissions: ['read', 'suspend'] },
+  safety: {
+    label: 'Safety',
+    about: 'Suspending accounts that put people at risk',
+    permissions: ['read', 'suspend', 'reveal'],
+  },
   support: { label: 'Support', about: 'Can look, but not change anything', permissions: ['read'] },
 };
 

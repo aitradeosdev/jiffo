@@ -107,8 +107,11 @@ describe('changing a payout account', () => {
 
     const waiting = (await toCheck()).find((a) => a.person.id === who.userId)!;
     expect(waiting).toMatchObject({ accountName: 'T BAKARE', legalName: 'TUNDE ADEWALE BAKARE' });
-    // Only finance and owners decide.
+    // Only finance and owners decide, and only they see the legal name to compare (D5).
     const ops = await adminAs(t, 'operations');
+    const seen = (await request(t.http).get('/v1/admin/money/payout-accounts?country=NG').set(ops.headers).expect(200))
+      .body.accounts as Array<{ id: string; legalName: string }>;
+    expect(seen.find((a) => a.id === waiting.id)).toMatchObject({ legalName: 'T••• A••• B•••' });
     expect((await decide(waiting.id, 'approve', ops)).status).toBe(403);
     await decide(waiting.id, 'approve').expect(200);
     expect((await inUse(who)).id).toBe(waiting.id);

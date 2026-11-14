@@ -19,6 +19,7 @@ import { AlertsService } from '../alerts/alerts.service';
 import { PayoutsService } from '../money/payouts.service';
 import { InsufficientFunds, LedgerService, transfer, type AccountRef } from '../money/ledger.service';
 import { AuditService } from './audit.service';
+import { maskName } from './masking';
 import { requireCountry } from './countries';
 import { containing, cursorOf, exactTime, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
@@ -328,7 +329,7 @@ export class MoneyAdminService {
    * legal name on the agent's ID (docs/security-plan.md, I4). Withdrawals keep going to the agent's approved
    * account until one is decided.
    */
-  async payoutAccountsToReview(country: string) {
+  async payoutAccountsToReview(country: string, fullNames: boolean) {
     // Only approved agents': an account saved during the application is decided with the application.
     const waiting = and(
       eq(payoutAccounts.reviewStatus, 'pending'),
@@ -364,6 +365,8 @@ export class MoneyAdminService {
       accounts: rows.map(({ accountNumber, ...r }) => ({
         ...r,
         accountLast4: r.accountLast4 ?? accountNumber.slice(-4),
+        // Masked for anyone who can't decide (D5); the bank's own account name is shown as the bank gave it.
+        legalName: fullNames ? r.legalName : maskName(r.legalName),
       })),
       /** How many are waiting in all; the list shows the oldest first, up to its limit. */
       total: count?.n ?? rows.length,
@@ -524,6 +527,8 @@ export class MoneyAdminService {
         .where(eq(countries.code, person.countryCode));
       const account: AccountRef = { type: input.account, ownerId: person.id };
       const revenue: AccountRef = { type: 'platform_revenue' };
+      // The balance before and after, for the audit log (docs/security-plan.md, D7).
+      const balanceBeforeKobo = await this.ledger.balance(tx, account, person.countryCode);
       try {
         const posted = await this.ledger.post(tx, {
           key: `adjustment:${input.requestId}`,
@@ -578,6 +583,8 @@ export class MoneyAdminService {
           amountKobo: input.amountKobo,
           note: input.note,
           errandId: input.errandId ?? null,
+          balanceBeforeKobo,
+          balanceAfterKobo: await this.ledger.balance(tx, account, person.countryCode),
         },
       });
       return { posted: true };
