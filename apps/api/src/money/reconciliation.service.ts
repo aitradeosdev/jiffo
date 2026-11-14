@@ -6,6 +6,7 @@ import { PAYMENTS, type PaymentsAdapter } from '../adapters/payments';
 import { LedgerService } from './ledger.service';
 import { ProvidersService } from '../providers/providers.service';
 import { DepositsService } from './deposits.service';
+import { FixedAccountsService } from './fixed-accounts.service';
 
 const DAY_MS = 86_400_000;
 
@@ -24,6 +25,7 @@ export class ReconciliationService {
     private readonly ledger: LedgerService,
     private readonly deposits: DepositsService,
     private readonly providers: ProvidersService,
+    private readonly fixedAccounts: FixedAccountsService,
   ) {}
 
   /**
@@ -52,6 +54,7 @@ export class ReconciliationService {
 
   async run() {
     await this.deposits.syncExpired();
+    await this.fixedAccounts.refreshPending();
     const live = await this.db.select().from(countries).where(eq(countries.enabled, true));
     const results = [];
     for (const country of live) {

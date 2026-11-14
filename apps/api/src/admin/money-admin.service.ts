@@ -29,7 +29,9 @@ const REVENUE_SOURCES: Record<string, string> = {
   adjustment: 'Adjustments',
 };
 const PROVIDER_CHARGES: Record<string, string> = {
-  deposit: 'Top-up fees (paid by Jiffo)',
+  deposit: 'Top-up fees, one-time account numbers',
+  fixed_deposit: 'Top-up fees, own account numbers',
+  fixed_account: 'Own account numbers issued',
   payout_sent: 'Transfer fees',
 };
 
@@ -60,7 +62,7 @@ export class MoneyAdminService {
     // The same window for the totals and the chart: whole local days, today included.
     const since = sql`(date_trunc('day', now() at time zone ${tz}) - make_interval(days => ${days - 1})) at time zone ${tz}`;
     const rows = async (query: SQL) => (await this.db.execute(query)).rows;
-    const [held, platform, revenue, charges, topUps, withdrawals, daily] = await Promise.all([
+    const [held, platform, revenue, charges, topUps, withdrawals, daily, fixed] = await Promise.all([
       rows(sql`select type, coalesce(sum(balance), 0)::bigint as kobo from ledger_accounts
         where country_code = ${country} and owner_id is not null group by type`),
       // Platform accounts aren't kept as a running balance; they are the sum of their postings, read
@@ -76,10 +78,11 @@ export class MoneyAdminService {
         join ledger_accounts a on a.id = p.account_id join journal_entries j on j.id = p.journal_id
         where a.country_code = ${country} and a.type = 'provider_fees' and p.created_at >= ${since}
         group by j.kind order by 2 desc`),
-      rows(sql`select count(*)::int as n, coalesce(sum(paid_kobo), 0)::bigint as kobo,
+      rows(sql`select method, count(*)::int as n, coalesce(sum(paid_kobo), 0)::bigint as kobo,
           coalesce(sum(fees_kobo), 0)::bigint as fees,
           count(*) filter (where sender_mismatch)::int as mismatched
-        from deposits where country_code = ${country} and status = 'succeeded' and completed_at >= ${since}`),
+        from deposits where country_code = ${country} and status = 'succeeded' and completed_at >= ${since}
+        group by method`),
       rows(sql`select count(*) filter (where status = 'succeeded')::int as n,
           coalesce(sum(send_kobo) filter (where status = 'succeeded'), 0)::bigint as kobo,
           count(*) filter (where status = 'failed')::int as failed,
@@ -98,11 +101,25 @@ export class MoneyAdminService {
           group by 1)
         select d.day, coalesce(s.revenue, 0)::bigint as revenue, coalesce(s.charges, 0)::bigint as charges
         from days d left join sums s on s.day = d.day order by d.day`),
+      // Own account numbers: issued in the window and what that cost, and how many there are now.
+      rows(sql`select count(*) filter (where activated_at >= ${since})::int as issued,
+          coalesce(sum(issue_fee_kobo) filter (where activated_at >= ${since}), 0)::bigint as cost,
+          count(*) filter (where status = 'active')::int as active,
+          count(*) filter (where status = 'pending')::int as pending,
+          count(*) filter (where status = 'failed' and updated_at >= ${since})::int as failed
+        from fixed_accounts where country_code = ${country}`),
     ]);
     const n = (v: unknown) => Number(v ?? 0);
     const byType = (list: Record<string, unknown>[], type: string) => n(list.find((r) => r.type === type)?.kobo);
-    const t = topUps[0] ?? {};
     const w = withdrawals[0] ?? {};
+    const f = fixed[0] ?? {};
+    const method = (m: string) => {
+      const r = topUps.find((row) => row.method === m) ?? {};
+      return { count: n(r.n), kobo: n(r.kobo), feesKobo: n(r.fees) };
+    };
+    const total = (key: string) => topUps.reduce((acc, r) => acc + n(r[key]), 0);
+    const revenueKobo = revenue.reduce((acc, r) => acc + n(r.kobo), 0);
+    const chargesKobo = charges.reduce((acc, r) => acc + n(r.kobo), 0);
     return {
       days,
       held: {
@@ -117,7 +134,11 @@ export class MoneyAdminService {
         revenueKobo: -byType(platform, 'platform_revenue'),
         providerFeesKobo: byType(platform, 'provider_fees'),
         inTransitKobo: -byType(platform, 'payouts_in_transit'),
+        /** Everything earned, less everything providers charged, since the start. */
+        netRevenueKobo: -byType(platform, 'platform_revenue') - byType(platform, 'provider_fees'),
       },
+      /** The window's revenue, what providers charged in it, and what is left: what Jiffo actually made. */
+      earnings: { revenueKobo, providerChargesKobo: chargesKobo, netRevenueKobo: revenueKobo - chargesKobo },
       revenue: revenue.map((r) => ({
         kind: String(r.kind),
         label: REVENUE_SOURCES[String(r.kind)] ?? String(r.kind),
@@ -128,9 +149,28 @@ export class MoneyAdminService {
         label: PROVIDER_CHARGES[String(r.kind)] ?? String(r.kind),
         kobo: n(r.kobo),
       })),
-      topUps: { count: n(t.n), kobo: n(t.kobo), feesKobo: n(t.fees), senderMismatch: n(t.mismatched) },
+      topUps: {
+        count: total('n'),
+        kobo: total('kobo'),
+        feesKobo: total('fees'),
+        senderMismatch: total('mismatched'),
+        oneTime: method('one_time'),
+        fixed: method('fixed'),
+      },
+      fixedAccounts: {
+        issued: n(f.issued),
+        issueCostKobo: n(f.cost),
+        active: n(f.active),
+        pending: n(f.pending),
+        failed: n(f.failed),
+      },
       withdrawals: { count: n(w.n), kobo: n(w.kobo), failed: n(w.failed), pending: n(w.pending) },
-      daily: daily.map((r) => ({ day: String(r.day), revenueKobo: n(r.revenue), chargesKobo: n(r.charges) })),
+      daily: daily.map((r) => ({
+        day: String(r.day),
+        revenueKobo: n(r.revenue),
+        chargesKobo: n(r.charges),
+        netKobo: n(r.revenue) - n(r.charges),
+      })),
     };
   }
 
@@ -150,6 +190,7 @@ export class MoneyAdminService {
         createdAt: deposits.createdAt,
         completedAt: deposits.completedAt,
         status: deposits.status,
+        method: deposits.method,
         expiresAt: deposits.expiresAt,
         reference: deposits.reference,
         amountKobo: deposits.amountKobo,
@@ -188,7 +229,7 @@ export class MoneyAdminService {
       ...page,
       deposits: page.deposits.map(({ expiresAt, ...d }) => ({
         ...d,
-        status: d.status === 'pending' && expiresAt.getTime() <= now ? ('expired' as const) : d.status,
+        status: d.status === 'pending' && expiresAt && expiresAt.getTime() <= now ? ('expired' as const) : d.status,
       })),
     };
   }

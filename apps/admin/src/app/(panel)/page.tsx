@@ -23,6 +23,8 @@ interface Overview {
   today: {
     errandFeesKobo: number;
     revenueKobo: number;
+    providerCostsKobo: number;
+    netRevenueKobo: number;
     topUps: number;
     topUpsKobo: number;
     absorbedFeesKobo: number;
@@ -37,7 +39,7 @@ interface Overview {
     applications: number;
     idChecks: number;
   };
-  week: Array<{ day: string; completed: number; revenueKobo: number }>;
+  week: Array<{ day: string; completed: number; revenueKobo: number; costsKobo: number; netRevenueKobo: number }>;
   reconciliation: { at: string; differenceKobo: number; pendingDeposits: number; stuckPayouts: number } | null;
 }
 
@@ -134,9 +136,10 @@ export default async function OverviewPage() {
           <div className="my-5 border-t border-line" />
           <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
             <Stat
-              label="Jiffo revenue"
-              value={naira(o.today.revenueKobo)}
-              hint="Service fees, commission and withdrawal fees"
+              label="Net revenue"
+              value={naira(o.today.netRevenueKobo)}
+              tone={o.today.netRevenueKobo < 0 ? 'danger' : undefined}
+              hint={`${naira(o.today.revenueKobo)} earned, less ${naira(o.today.providerCostsKobo)} in payment provider costs`}
             />
             <Stat label="Errand fees paid" value={naira(o.today.errandFeesKobo)} hint="On errands completed today" />
             <Stat
@@ -160,14 +163,15 @@ export default async function OverviewPage() {
               columns={o.week.map((d) => ({ label: shortDay(d.day), value: d.completed, shown: count(d.completed) }))}
             />
           </Card>
-          <Card title="Jiffo revenue, last 7 days">
+          <Card title="Net revenue, last 7 days">
+            {/* Revenue less payment provider costs. A day that cost more than it earned has no column. */}
             <ColumnChart
-              title="Jiffo revenue, last 7 days"
-              empty="No revenue this week"
+              title="Net revenue, last 7 days"
+              empty="Nothing earned after costs this week"
               columns={o.week.map((d) => ({
                 label: shortDay(d.day),
-                value: d.revenueKobo,
-                shown: naira(d.revenueKobo),
+                value: d.netRevenueKobo,
+                shown: naira(d.netRevenueKobo),
               }))}
             />
           </Card>

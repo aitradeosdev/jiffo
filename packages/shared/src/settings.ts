@@ -95,6 +95,14 @@ export const CountrySettingsSchema = z.object({
     selfieTries: z.number().int().positive(),
     reviewTargetHours: z.number().int().positive(),
   }),
+  /**
+   * How customers add money: a one-time account number for each top-up, and their own fixed account number
+   * they can transfer any amount to at any time, where the payments provider in use issues them.
+   */
+  topUps: z
+    .object({ oneTimeAccount: z.boolean(), fixedAccount: z.boolean() })
+    .refine((t) => t.oneTimeAccount || t.fixedAccount, 'Keep at least one way to add money')
+    .default({ oneTimeAccount: true, fixedAccount: false }),
   profiles: z.object({
     showCustomerPhotoBeforeAccept: z.boolean(),
   }),
@@ -152,6 +160,7 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
     selfieTries: 3,
     reviewTargetHours: 24,
   },
+  topUps: { oneTimeAccount: true, fixedAccount: false },
   profiles: { showCustomerPhotoBeforeAccept: false },
 };
 
@@ -171,6 +180,8 @@ export function publicSettings(s: CountrySettings) {
       maxDepositKobo: s.limits.maxDepositKobo,
       minWithdrawalKobo: s.limits.minWithdrawalKobo,
     },
+    /** The ways to add money admin turned on (a fixed account also needs a provider that issues them). */
+    topUps: s.topUps,
     identity: {
       customerIdTypes: s.identity.customerIdTypes,
       agentIdTypes: s.identity.agentIdTypes,

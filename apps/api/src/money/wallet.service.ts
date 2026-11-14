@@ -60,6 +60,7 @@ const HOLDING_STATES = ERRAND_STATES.filter((s) => s !== 'requested' && !TERMINA
 /** What each journal kind looks like in the wallet history. */
 const HISTORY_LABELS: Record<string, string> = {
   deposit: 'Bank transfer top-up',
+  fixed_deposit: 'Bank transfer to your account number',
   fee_lock: 'Errand fee held',
   fee_adjust: 'Errand fee changed',
   fee_refund: 'Errand fee returned',

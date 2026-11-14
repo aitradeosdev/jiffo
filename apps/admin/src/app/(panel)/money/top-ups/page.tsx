@@ -27,6 +27,8 @@ interface Deposit {
   id: string;
   createdAt: string;
   status: keyof typeof STATUS;
+  /** one_time: to an account number issued for this top-up. fixed: to the customer's own account number. */
+  method: 'one_time' | 'fixed';
   reference: string;
   amountKobo: number;
   paidKobo: number | null;
@@ -98,6 +100,9 @@ export default async function TopUpsPage({
                     </td>
                     <td className={tdClass}>
                       <Badge tone={STATUS[d.status].tone}>{STATUS[d.status].label}</Badge>
+                      <div className="mt-1 text-[13px] text-ink-3">
+                        {d.method === 'fixed' ? 'To their own account number' : 'To a one-time account number'}
+                      </div>
                     </td>
                     <td className={`${tdClass} num text-right font-semibold`}>
                       {d.paidKobo !== null ? (

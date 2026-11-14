@@ -2,6 +2,7 @@ import { Global, Inject, Module, OnModuleInit } from '@nestjs/common';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { RECURRING_JOBS, type RecurringJobs } from '../timers/recurring-jobs';
 import { DepositsService } from './deposits.service';
+import { FixedAccountsService } from './fixed-accounts.service';
 import { LedgerService } from './ledger.service';
 import { MoneyController } from './money.controller';
 import { PayoutsService } from './payouts.service';
@@ -12,8 +13,15 @@ import { WebhooksController } from './webhooks.controller';
 @Global()
 @Module({
   controllers: [MoneyController, WebhooksController],
-  providers: [LedgerService, WalletService, DepositsService, PayoutsService, ReconciliationService],
-  exports: [LedgerService, WalletService, DepositsService, PayoutsService, ReconciliationService],
+  providers: [
+    LedgerService,
+    WalletService,
+    DepositsService,
+    FixedAccountsService,
+    PayoutsService,
+    ReconciliationService,
+  ],
+  exports: [LedgerService, WalletService, DepositsService, FixedAccountsService, PayoutsService, ReconciliationService],
 })
 export class MoneyModule implements OnModuleInit {
   constructor(

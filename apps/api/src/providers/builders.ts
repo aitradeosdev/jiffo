@@ -16,6 +16,14 @@ import {
 type Values = Record<string, string>;
 const sandboxMode = (v: string | undefined) => (v ?? '').trim().toLowerCase() === 'sandbox';
 const optional = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
+/** A fee admin typed in naira, as kobo; empty is none. Anything else is refused when the settings are saved. */
+const nairaFee = (v: string | undefined) => {
+  const text = optional(v)?.replace(/[₦,\s]/g, '');
+  if (!text) return 0;
+  const naira = Number(text);
+  if (!Number.isFinite(naira) || naira < 0 || naira > 100_000) throw new Error('The fee must be an amount in naira');
+  return Math.round(naira * 100);
+};
 
 /**
  * How each provider's adapter is made from the fields admin saved (secrets already decrypted). Every
@@ -25,8 +33,23 @@ export const BUILDERS: {
   [C in ProviderCategory]: Record<string, (v: Values, ctx: ProviderContext) => Adapters[C]>;
 } = {
   payments: {
-    flutterwave: (v) => new FlutterwavePaymentsAdapter(v.secretKey!, v.secretHash!, v.businessName!),
-    paystack: (v) => new PaystackPaymentsAdapter(v.secretKey!, optional(v.baseUrl)),
+    flutterwave: (v) =>
+      new FlutterwavePaymentsAdapter(
+        v.secretKey!,
+        v.secretHash!,
+        v.businessName!,
+        undefined,
+        undefined,
+        nairaFee(v.fixedAccountFee),
+      ),
+    paystack: (v) =>
+      new PaystackPaymentsAdapter(
+        v.secretKey!,
+        optional(v.baseUrl),
+        undefined,
+        optional(v.dedicatedBank),
+        nairaFee(v.fixedAccountFee),
+      ),
   },
   sms: {
     africastalking: (v) => new AfricasTalkingMessagingAdapter(v.username!, v.apiKey!, optional(v.senderId)),

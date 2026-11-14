@@ -8,6 +8,7 @@ import { notFound } from '../common/errors';
 import { PushService } from '../push/push.service';
 import { formatNaira } from '@jiffo/shared';
 import { DepositsService } from './deposits.service';
+import { FixedAccountsService } from './fixed-accounts.service';
 import { PayoutsService } from './payouts.service';
 import { WalletService } from './wallet.service';
 
@@ -17,6 +18,17 @@ const WithdrawalBody = z.object({ amountKobo: Kobo, speed: z.enum(['instant', 's
 const PayoutAccountBody = z.object({
   bankCode: z.string().min(2).max(10),
   accountNumber: z.string().regex(/^\d{10}$/, 'Account numbers are 10 digits'),
+});
+const FixedAccountBody = z.object({
+  bvn: z
+    .string()
+    .regex(/^\d{11}$/, 'A BVN is 11 digits')
+    .optional(),
+  bankCode: z.string().min(2).max(10).optional(),
+  accountNumber: z
+    .string()
+    .regex(/^\d{10}$/, 'Account numbers are 10 digits')
+    .optional(),
 });
 const TipBody = z.object({ amountKobo: Kobo.max(10_000_000) });
 const Page = z.object({
@@ -33,6 +45,7 @@ export class MoneyController {
     private readonly deposits: DepositsService,
     private readonly payouts: PayoutsService,
     private readonly push: PushService,
+    private readonly fixedAccounts: FixedAccountsService,
   ) {}
 
   /** Customer app: the balance. Agent app: available and held earnings, and when held money frees up. */
@@ -64,6 +77,23 @@ export class MoneyController {
     return this.deposits.get(auth, id);
   }
 
+  /** The ways to add money on offer, and the customer's own account number when they have one. */
+  @Get('wallet/top-up')
+  @Apps('customer')
+  topUpOptions(@CurrentAuth() auth: AuthContext) {
+    return this.fixedAccounts.view(auth);
+  }
+
+  /** Asks the provider for the customer's own account number. The BVN and bank account are passed on, never kept. */
+  @Post('wallet/fixed-account')
+  @Apps('customer')
+  issueFixedAccount(
+    @CurrentAuth() auth: AuthContext,
+    @Body(new ZodBody(FixedAccountBody)) body: z.infer<typeof FixedAccountBody>,
+  ) {
+    return this.fixedAccounts.issue(auth, body);
+  }
+
   @Post('wallet/withdrawals')
   @Apps('agent')
   withdraw(@CurrentAuth() auth: AuthContext, @Body(new ZodBody(WithdrawalBody)) body: z.infer<typeof WithdrawalBody>) {
@@ -76,8 +106,8 @@ export class MoneyController {
     return this.payouts.list(auth, 30);
   }
 
+  /** Agents choose their payout bank; customers their own bank when a fixed account needs one. */
   @Get('banks')
-  @Apps('agent')
   banks() {
     return this.payouts.listBanks();
   }
