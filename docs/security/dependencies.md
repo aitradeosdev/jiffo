@@ -11,6 +11,9 @@ How Jiffo keeps track of the code it uses from others (docs/security-plan.md, R1
   test tools are left out of this gate: they never reach a phone, the panel or the API's servers.
 - **Dependency review.** On a pull request, `actions/dependency-review-action` fails when the change adds or
   updates a package the apps ship to a version with a high or critical advisory (`.github/workflows/security.yml`).
+  It needs GitHub's dependency graph: turn it on under Settings, Advanced Security, then add the repository
+  variable `DEPENDENCY_REVIEW` with the value `on` (Settings, Secrets and variables, Actions, Variables).
+  Until then the job is skipped, and the audit in CI is the gate.
 - **Dependabot.** Opens weekly pull requests for npm packages and for the GitHub Actions the workflows use
   (`.github/dependabot.yml`). Build and test tools come grouped in one pull request.
 - **Code and secret scanning.** CodeQL (security-extended queries) and gitleaks run on every push, every pull

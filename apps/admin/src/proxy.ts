@@ -36,8 +36,8 @@ export function proxy(request: NextRequest) {
   }
   const nonce = btoa(crypto.randomUUID());
   const csp = contentPolicy(nonce);
+  // Next.js reads the nonce from the request's policy and puts it on every script it adds to the page.
   const headers = new Headers(request.headers);
-  headers.set('x-nonce', nonce);
   headers.set('content-security-policy', csp);
   const response = NextResponse.next({ request: { headers } });
   response.headers.set('content-security-policy', csp);

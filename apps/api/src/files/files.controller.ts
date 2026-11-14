@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { UPLOAD_PURPOSES } from '../db/schema';
 import { AuthGuard, CurrentAuth } from '../auth/auth.guard';
 import type { AuthContext } from '../auth/auth.types';
+import { DevelopmentOnlyGuard } from '../common/development-only.guard';
 import { ZodBody } from '../common/zod-body';
 import { forbidden, notFound } from '../common/errors';
 import { MemoryStorageAdapter } from '../adapters/storage';
@@ -39,12 +40,13 @@ const SignedQuery = z.object({
 
 /**
  * Development storage only: serves the signed links the memory store hands out, as S3 would.
- * With S3 configured these routes refuse everything.
+ * With S3 configured these routes refuse everything, and in production they aren't there at all.
  */
 /** Photo types the development store serves as images. */
 const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 
 @Controller('dev-files')
+@UseGuards(DevelopmentOnlyGuard)
 export class DevFilesController {
   constructor(private readonly providers: ProvidersService) {}
 

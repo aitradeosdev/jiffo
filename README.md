@@ -108,7 +108,7 @@ Every errand change goes through one endpoint, `POST /errands/:id/events`, with 
 
 Each outside service is a port with one adapter per provider. **Owners choose the provider in the admin panel** (Settings, Providers): they enter the keys from Jiffo's account with it, test them, and switch it on. The change reaches every API process within 30 seconds, with no restart. Keys are stored encrypted (AES-256-GCM) under `SECRETS_KEY`, a 64-character hex key that production requires and that should be kept apart from the database: whoever has both can read the keys, and changing it means entering them again. The panel never shows a saved key, only its last characters, and the audit log records which fields changed, never their values. A provider can be switched on only after its test passes. Things a provider started finish with it after a switch: a top-up is checked with the provider that issued its account number, an identity check finishes where it began, and a payout goes through the provider in use, which registers the agent's bank account first if it was added under another one. The nightly money check adds up every provider still holding money.
 
-Webhook addresses are shown in the panel, built from `PUBLIC_API_URL`, which must be the API's public address in production.
+Webhook addresses are shown in the panel, built from `PUBLIC_API_URL`, which must be the API's public https address in production (it won't start otherwise).
 
 | Service         | Providers in the panel         |
 | --------------- | ------------------------------ |

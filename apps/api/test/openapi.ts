@@ -237,6 +237,7 @@ export function openApiDocument(app: INestApplication) {
         'Every HTTP route the API serves, generated from its controllers by `pnpm --filter @jiffo/api openapi`; a test fails when this file is out of date. ' +
         'A route with no `security` is open to anyone. `x-rate-limit` is the limit class it counts under (common/rate-limit.ts), ' +
         '`x-apps` the apps whose sign-in it takes, and `x-permission` what an admin role needs. Errors are `{ error: { code, message } }`. ' +
+        'Routes behind `DevelopmentOnlyGuard` answer 404 in production. ' +
         'Live updates use a socket.io connection with the app access token (realtime/realtime.gateway.ts), not listed here.',
     },
     components: {

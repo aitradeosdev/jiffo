@@ -43,9 +43,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Needs GitHub's dependency graph (Settings, Advanced Security). Once it's on, set the repository variable
+  # DEPENDENCY_REVIEW to "on" and this runs on every pull request (docs/security/dependencies.md).
   dependencies:
     name: New dependencies
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && vars.DEPENDENCY_REVIEW == 'on'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

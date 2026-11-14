@@ -7,8 +7,9 @@ const hexKey = (name: string) =>
 /** SECURITY_CONTACT's addresses, in order. */
 export const contactsOf = (value: string | undefined) =>
   (value ?? '')
-    .split(',')
-    .map((c) => c.trim())
+    // Split only where the next contact starts, so a comma inside a link stays in it.
+    .split(/[\s,]+(?=mailto:|https:\/\/)/)
+    .map((c) => c.trim().replace(/,+$/, ''))
     .filter(Boolean);
 
 const EnvSchema = z
@@ -67,7 +68,10 @@ const EnvSchema = z
     S3_REGION: z.string().default('af-south-1'),
     /** For S3-compatible stores other than AWS. */
     S3_ENDPOINT: z.string().url().optional(),
-    /** The API's own address as the apps reach it. Used for development file links. */
+    /**
+     * The API's own address as the apps and providers reach it: webhook addresses, identity pages, security.txt
+     * and development file links. Required in production, over https.
+     */
     PUBLIC_API_URL: z.string().url().default('http://localhost:3000'),
     GOOGLE_MAPS_API_KEY: z.string().optional(),
     PAYMENTS_PROVIDER: z.enum(['paystack', 'fake']).default('fake'),
@@ -191,6 +195,12 @@ const EnvSchema = z
         contactsOf(env.SECURITY_CONTACT).length > 0,
         'SECURITY_CONTACT',
         'must be set in production, for security.txt',
+      );
+      // Webhook addresses, identity pages and security.txt are built from it.
+      need(
+        /^https:\/\//.test(env.PUBLIC_API_URL) && !/^https:\/\/(localhost|127\.|\[::1\])/.test(env.PUBLIC_API_URL),
+        'PUBLIC_API_URL',
+        "must be the API's public https address in production",
       );
     }
   });

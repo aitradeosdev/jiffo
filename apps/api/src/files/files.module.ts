@@ -4,8 +4,7 @@ import { UploadsService } from './uploads.service';
 
 @Global()
 @Module({
-  // The development store's file routes don't exist in production (docs/security-plan.md, S8).
-  controllers: process.env.NODE_ENV === 'production' ? [UploadsController] : [UploadsController, DevFilesController],
+  controllers: [UploadsController, DevFilesController],
   providers: [UploadsService],
   exports: [UploadsService],
 })
