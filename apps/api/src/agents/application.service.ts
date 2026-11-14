@@ -2,11 +2,12 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { and, eq, isNull, ne, sql } from 'drizzle-orm';
 import { ID_TYPE_KEYS, ID_TYPES, yearsOld, type IdType } from '@jiffo/shared';
 import { nameIndex } from '../db/fields';
+import { liveAccounts } from '../money/payout-accounts';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { agentApplications, agentPresence, agentProfiles, payoutAccounts, states, users } from '../db/schema';
 import { type IdentityAdapter, type IdentityRequest, type IdentityResult } from '../adapters/identity';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../common/errors';
-import { matchesLegalName } from '../common/names';
+import { matchesLegalName, nameMatch } from '../common/names';
 import {
   ID_CHECK_LABELS,
   IdentityChecksService,
@@ -106,10 +107,11 @@ export class AgentApplicationService implements IdentityOwner {
     }
     const [user, payout, profile, state, { settings }] = await Promise.all([
       this.db.select().from(users).where(eq(users.id, userId)),
-      this.db
-        .select({ accountName: payoutAccounts.accountName })
-        .from(payoutAccounts)
-        .where(and(eq(payoutAccounts.userId, userId), isNull(payoutAccounts.replacedAt))),
+      // The account in use, or one waiting for support: either counts as the step done.
+      liveAccounts(this.db, userId).then(({ approved, pending }) => {
+        const account = approved ?? pending;
+        return account ? [{ accountName: account.accountName }] : [];
+      }),
       this.db.select({ userId: agentProfiles.userId }).from(agentProfiles).where(eq(agentProfiles.userId, userId)),
       app.stateCode
         ? this.db
@@ -441,10 +443,10 @@ export class AgentApplicationService implements IdentityOwner {
         .where(eq(agentApplications.userId, app.userId));
       return app;
     }
-    const [payout] = await this.db
-      .select({ accountName: payoutAccounts.accountName })
-      .from(payoutAccounts)
-      .where(and(eq(payoutAccounts.userId, app.userId), isNull(payoutAccounts.replacedAt)));
+    // A new account waiting for support is the one checked, since approving the application approves it;
+    // otherwise the account in use.
+    const live = await liveAccounts(this.db, app.userId);
+    const payout = live.pending ?? live.approved;
     const [user] = await this.db.select().from(users).where(eq(users.id, app.userId));
     const fullName = `${user!.firstName ?? ''} ${user!.lastName ?? ''}`;
     const legal = app.legalName ?? '';
@@ -480,8 +482,10 @@ export class AgentApplicationService implements IdentityOwner {
       {
         key: 'bank',
         ...pass(
-          !!payout && !!legal && matchesLegalName(payout.accountName, legal),
-          'The bank account is in another name',
+          !!payout && !!legal && nameMatch(payout.accountName, legal) === 'match',
+          payout && legal && nameMatch(payout.accountName, legal) === 'near'
+            ? "The bank account's name is close to the ID record's, but not the same. Approving the application approves the account."
+            : 'The bank account is in another name',
         ),
       },
     ];
@@ -617,6 +621,19 @@ export class AgentApplicationService implements IdentityOwner {
       .set({ status: 'approved', idFingerprint, ...decided })
       .where(eq(agentApplications.userId, input.userId))
       .returning();
+    // A payout account waiting because its name only nearly matched was looked at with the application, so
+    // approving one approves the other: support decides once.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payout-account:' + input.userId}))`);
+    const { approved, pending } = await liveAccounts(tx, input.userId);
+    if (pending) {
+      if (approved) {
+        await tx.update(payoutAccounts).set({ replacedAt: new Date() }).where(eq(payoutAccounts.id, approved.id));
+      }
+      await tx
+        .update(payoutAccounts)
+        .set({ reviewStatus: 'approved', reviewedBy: input.adminId, reviewedAt: new Date(), reviewNote: input.note })
+        .where(eq(payoutAccounts.id, pending.id));
+    }
     return { before: app, after: row! };
   }
 

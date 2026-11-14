@@ -195,6 +195,13 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
     - Rows saved before this are encrypted in the background when a server starts.
   - **Searching by legal name:** support finds people by any whole word of their legal name, through a keyed index. Partial words still match the name in the app.
   - **Payout account numbers:** their last four digits are kept readable for lists.
+- **Payout accounts:**
+  - **Match:** every word of the bank's name for the account must be in the legal name on the ID record. Otherwise the account is refused.
+  - **Near match:**
+    - When the bank's name is close but not the same (an initial, or a slip of a letter, each word of the ID used once), the account waits for a check, and withdrawals keep going to the approved account meanwhile.
+    - Saved during the application, it is decided with the application.
+    - Saved later, finance approves or declines it on the Withdrawals tab.
+  - **Changes:** every change is checked the same way, and the agent gets a push whenever their account changes, so a change they didn't make doesn't go unnoticed.
 - **Protecting the hand-off:**
   - **At the drop-off:** marking an errand delivered and entering the PIN need the agent's fresh position within the set distance of the drop-off (default 200 m, Settings, Security).
   - **Wait before a photo:** a drop-off photo is accepted only after the agent has waited the set minutes there, and only while they are still there.

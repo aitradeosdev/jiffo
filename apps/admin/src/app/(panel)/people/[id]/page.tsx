@@ -55,7 +55,14 @@ interface Detail {
     heldKobo: number;
     rating: number | null;
     stats: Stats;
-    payoutAccount: { bankName: string; accountName: string; last4: string; since: string } | null;
+    payoutAccount: {
+      bankName: string;
+      accountName: string;
+      last4: string;
+      since: string;
+      /** Waiting for finance: its name only nearly matched the ID's. */
+      inReview?: boolean;
+    } | null;
     application: Application | null;
   } | null;
   customer: { identity: CustomerIdentity | null; walletKobo: number; rating: number | null; stats: Stats };
@@ -354,7 +361,9 @@ export default async function PersonPage({
                   <dt className="text-ink-3">Payout account</dt>
                   <dd>
                     {d.agent.payoutAccount
-                      ? `${d.agent.payoutAccount.accountName}, ${d.agent.payoutAccount.bankName} ····${d.agent.payoutAccount.last4}`
+                      ? `${d.agent.payoutAccount.accountName}, ${d.agent.payoutAccount.bankName} ····${d.agent.payoutAccount.last4}${
+                          d.agent.payoutAccount.inReview ? ' (waiting for finance to check it)' : ''
+                        }`
                       : 'None yet'}
                   </dd>
                 </div>

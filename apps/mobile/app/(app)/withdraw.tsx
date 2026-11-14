@@ -15,7 +15,9 @@ import { Chip, Row } from '@/ui/parts';
 export default function Withdraw() {
   const { api } = useSession();
   const wallet = useResource<{ availableKobo: number }>('/v1/wallet');
-  const account = useResource<{ bankName: string; accountNumber: string } | null>('/v1/payout-account');
+  const account = useResource<{ bankName: string; accountNumber: string; inReview?: boolean } | null>(
+    '/v1/payout-account',
+  );
   const [text, setText] = useState('');
   const [speed, setSpeed] = useState<'scheduled' | 'instant'>('scheduled');
   const [busy, setBusy] = useState(false);
@@ -61,6 +63,19 @@ export default function Withdraw() {
       <Screen footer={<Button label="Add bank account" onPress={() => router.replace('/payout-account')} />}>
         <Text variant="title">Add your bank account first</Text>
         <Text tone="ink2">Withdrawals go only to an account in your own name.</Text>
+      </Screen>
+    );
+  }
+
+  // The only account is still being checked: there is nowhere to send money yet.
+  if (account.data?.inReview) {
+    return (
+      <Screen footer={<Button label="Go back" onPress={goBack} />}>
+        <Text variant="title">We are checking your bank account</Text>
+        <Text tone="ink2">
+          The name on {account.data.bankName} {account.data.accountNumber} is close to the name on your ID, but not the
+          same, so support is checking it. You can withdraw once it is approved.
+        </Text>
       </Screen>
     );
   }

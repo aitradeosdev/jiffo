@@ -1,11 +1,12 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ListControls, Pager } from '@/components/list-controls';
-import { Badge, Card, Empty, tableClass, tdClass, thClass } from '@/components/ui';
-import { api, getCountry } from '@/lib/api';
+import { Badge, Card, Empty, Notice, tableClass, tdClass, thClass } from '@/components/ui';
+import { api, getCountry, getMe } from '@/lib/api';
 import { nameOf, type PersonRef } from '@/lib/errands';
 import { dateTime, money } from '@/lib/format';
 import { listLink } from '@/lib/links';
+import { AccountDecisionForm } from './accounts';
 
 export const metadata: Metadata = { title: 'Withdrawals' };
 
@@ -20,6 +21,22 @@ const STATUS = {
   succeeded: { label: 'Paid', tone: 'brand' },
   failed: { label: 'Failed, returned', tone: 'danger' },
 } as const;
+
+/** A new payout account whose bank name only nearly matched the agent's legal name. */
+interface AccountToCheck {
+  id: string;
+  createdAt: string;
+  bankName: string;
+  accountName: string;
+  accountLast4: string;
+  legalName: string | null;
+  person: PersonRef;
+}
+
+const DONE: Record<string, string> = {
+  approve: 'Account approved. Withdrawals now go to it.',
+  decline: 'Account declined. Withdrawals keep going to the approved one.',
+};
 
 interface Payout {
   id: string;
@@ -40,7 +57,7 @@ interface Payout {
 export default async function WithdrawalsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string; q?: string; before?: string }>;
+  searchParams: Promise<{ filter?: string; q?: string; before?: string; done?: string }>;
 }) {
   const p = await searchParams;
   const filter = FILTERS.some((f) => f.value === p.filter) ? p.filter! : 'all';
@@ -52,13 +69,56 @@ export default async function WithdrawalsPage({
     ...(q ? { q } : {}),
     ...(p.before ? { before: p.before } : {}),
   });
-  const page = await api<{ payouts: Payout[]; next: string | null }>(`/admin/money/payouts?${query}`);
+  const [page, { accounts, total }, me] = await Promise.all([
+    api<{ payouts: Payout[]; next: string | null }>(`/admin/money/payouts?${query}`),
+    api<{ accounts: AccountToCheck[]; total: number }>(`/admin/money/payout-accounts?country=${country.code}`),
+    getMe(),
+  ]);
+  const canDecide = me.permissions.includes('money');
+  const done = DONE[p.done ?? ''];
   const naira = (kobo: number) => money(kobo, country.currency);
   const link = (changes: Record<string, string | null>) =>
     listLink('/money/withdrawals', { filter, q }, changes, { filter: 'all' });
 
   return (
     <>
+      {done ? (
+        <div className="mb-4">
+          <Notice tone="brand">{done}</Notice>
+        </div>
+      ) : null}
+      {accounts.length ? (
+        <div className="mb-5">
+          <Card title={`New payout accounts to check (${total})`}>
+            <p className="text-sm text-ink-2">
+              The bank&apos;s name for each is close to the name on the agent&apos;s ID, but not the same. Withdrawals
+              keep going to their approved account until you decide.
+              {total > accounts.length ? ` Showing the oldest ${accounts.length}.` : ''}
+            </p>
+            <ul className="mt-3 divide-y divide-line">
+              {accounts.map((a) => (
+                <li key={a.id} className="py-3">
+                  <p className="text-sm">
+                    <Link href={`/people/${a.person.id}`} className="font-semibold underline">
+                      {nameOf(a.person)}
+                    </Link>{' '}
+                    <span className="text-ink-3">· {dateTime(a.createdAt, country.timezone)}</span>
+                  </p>
+                  <p className="mt-1 text-sm">
+                    <span className="font-semibold">Bank&apos;s name: </span>
+                    {a.accountName} ({a.bankName}, ending {a.accountLast4})
+                  </p>
+                  <p className="text-sm">
+                    <span className="font-semibold">Name on their ID: </span>
+                    {a.legalName ?? 'Not checked yet'}
+                  </p>
+                  {canDecide ? <AccountDecisionForm id={a.id} /> : null}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+      ) : null}
       <ListControls
         base="/money/withdrawals"
         label="Filter withdrawals"

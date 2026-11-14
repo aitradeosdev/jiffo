@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import {
+  agentApplications,
   alerts,
   countries,
   deposits,
@@ -320,6 +321,74 @@ export class MoneyAdminService {
       .where(eq(reconciliationRuns.countryCode, country))
       .orderBy(desc(reconciliationRuns.createdAt))
       .limit(60);
+  }
+
+  /**
+   * New payout accounts waiting for support, oldest first: the bank's name for each only nearly matched the
+   * legal name on the agent's ID (docs/security-plan.md, I4). Withdrawals keep going to the agent's approved
+   * account until one is decided.
+   */
+  async payoutAccountsToReview(country: string) {
+    // Only approved agents': an account saved during the application is decided with the application.
+    const waiting = and(
+      eq(payoutAccounts.reviewStatus, 'pending'),
+      isNull(payoutAccounts.replacedAt),
+      eq(users.countryCode, country),
+      eq(agentApplications.status, 'approved'),
+    );
+    const LIST_MAX = 100;
+    const rows = await this.db
+      .select({
+        id: payoutAccounts.id,
+        createdAt: payoutAccounts.createdAt,
+        bankName: payoutAccounts.bankName,
+        accountName: payoutAccounts.accountName,
+        accountNumber: payoutAccounts.accountNumber,
+        accountLast4: payoutAccounts.accountLast4,
+        legalName: agentApplications.legalName,
+        person: { id: users.id, firstName: users.firstName, lastName: users.lastName, phone: users.phone },
+      })
+      .from(payoutAccounts)
+      .innerJoin(users, eq(users.id, payoutAccounts.userId))
+      .innerJoin(agentApplications, eq(agentApplications.userId, payoutAccounts.userId))
+      .where(waiting)
+      .orderBy(payoutAccounts.createdAt)
+      .limit(LIST_MAX);
+    const [count] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(payoutAccounts)
+      .innerJoin(users, eq(users.id, payoutAccounts.userId))
+      .innerJoin(agentApplications, eq(agentApplications.userId, payoutAccounts.userId))
+      .where(waiting);
+    return {
+      accounts: rows.map(({ accountNumber, ...r }) => ({
+        ...r,
+        accountLast4: r.accountLast4 ?? accountNumber.slice(-4),
+      })),
+      /** How many are waiting in all; the list shows the oldest first, up to its limit. */
+      total: count?.n ?? rows.length,
+    };
+  }
+
+  /** Finance's decision on a payout account waiting for support, with the reason, in the audit log. */
+  async decidePayoutAccount(admin: AdminContext, id: string, decision: 'approve' | 'decline', note: string) {
+    const account = await this.db.transaction(async (tx) => {
+      const decided = await this.payoutsService.decideAccount(tx, { id, decision, adminId: admin.adminId, note });
+      const [owner] = await tx
+        .select({ countryCode: users.countryCode })
+        .from(users)
+        .where(eq(users.id, decided.userId));
+      await this.audit.record(tx, admin, {
+        action: decision === 'approve' ? 'money.payout_account_approve' : 'money.payout_account_decline',
+        targetType: 'person',
+        targetId: decided.userId,
+        countryCode: owner?.countryCode,
+        data: { payoutAccountId: id, accountLast4: decided.accountLast4, note },
+      });
+      return decided;
+    });
+    await this.payoutsService.accountDecided(account, decision);
+    return { decision };
   }
 
   /**

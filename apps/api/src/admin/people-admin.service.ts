@@ -8,6 +8,7 @@ import {
   TERMINAL_STATES,
   type AgentTier,
 } from '@jiffo/shared';
+import { liveAccounts } from '../money/payout-accounts';
 import { DB, type Db, type Tx } from '../db/database.module';
 import {
   admins,
@@ -18,7 +19,6 @@ import {
   errands,
   journalEntries,
   ledgerAccounts,
-  payoutAccounts,
   postings,
   sessions,
   users,
@@ -237,15 +237,11 @@ export class PeopleAdminService {
         .where(eq(ledgerAccounts.ownerId, id))
         .orderBy(desc(postings.id))
         .limit(20),
-      this.db
-        .select({
-          bankName: payoutAccounts.bankName,
-          accountName: payoutAccounts.accountName,
-          accountNumber: payoutAccounts.accountNumber,
-          createdAt: payoutAccounts.createdAt,
-        })
-        .from(payoutAccounts)
-        .where(and(eq(payoutAccounts.userId, id), isNull(payoutAccounts.replacedAt))),
+      // The account withdrawals go to, or one waiting for support if there is no other.
+      liveAccounts(this.db, id).then(({ approved, pending }) => {
+        const account = approved ?? pending;
+        return account ? [account] : [];
+      }),
       this.liveErrands(id),
       this.tierTerms(user.countryCode),
       this.idChecks.detail(id),
@@ -295,6 +291,8 @@ export class PeopleAdminService {
                   accountName: p.accountName,
                   last4: p.accountNumber.slice(-4),
                   since: p.createdAt,
+                  /** Waiting for support: its name only nearly matched, and withdrawals can't go to it yet. */
+                  inReview: p.reviewStatus === 'pending',
                 }
               : null,
           }

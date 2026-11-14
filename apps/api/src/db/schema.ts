@@ -609,14 +609,29 @@ export const payoutAccounts = pgTable(
     accountLast4: text('account_last4'),
     /** Some providers' recipient codes carry the account number (Flutterwave's), so it is encrypted too. */
     recipientCode: encrypted('payout_accounts', 'recipient_code').notNull(),
+    /**
+     * approved: withdrawals go here. pending: the bank's name for it only nearly matches the legal name, so
+     * support looks first, and withdrawals keep going to the approved one meanwhile. declined: support said no.
+     */
+    reviewStatus: text('review_status', { enum: ['approved', 'pending', 'declined'] })
+      .notNull()
+      .default('approved'),
+    reviewedBy: uuid('reviewed_by').references(() => admins.id),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    reviewNote: text('review_note'),
     createdAt: createdAt(),
     replacedAt: timestamp('replaced_at', { withTimezone: true }),
   },
   (t) => [
     index('payout_accounts_user_idx').on(t.userId),
+    // One account in use, and at most one waiting for support, per agent.
     uniqueIndex('payout_accounts_current_uq')
       .on(t.userId)
-      .where(sql`${t.replacedAt} is null`),
+      .where(sql`${t.replacedAt} is null and ${t.reviewStatus} = 'approved'`),
+    uniqueIndex('payout_accounts_pending_uq')
+      .on(t.userId)
+      .where(sql`${t.replacedAt} is null and ${t.reviewStatus} = 'pending'`),
+    index('payout_accounts_review_idx').on(t.reviewStatus, t.createdAt),
   ],
 );
 

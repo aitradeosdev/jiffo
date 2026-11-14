@@ -132,6 +132,7 @@ const ApplicationsQuery = z.object({
   before: z.string().max(80).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });
+const PayoutAccountDecisionBody = z.object({ decision: z.enum(['approve', 'decline']), note: Note });
 /** The note is shown to the agent when their application is declined. */
 const DecisionBody = z.object({ decision: z.enum(['approve', 'reject', 'reopen']), note: Note });
 const IdDecisionBody = z.object({ decision: z.enum(['verify', 'decline', 'reopen']), note: Note });
@@ -310,6 +311,25 @@ export class AdminController {
   @Needs('read')
   moneyReconciliation(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
     return this.money.reconciliation(query.country);
+  }
+
+  /** New payout accounts whose bank name only nearly matched the agent's legal name, for finance to decide. */
+  @Get('money/payout-accounts')
+  @Needs('read')
+  payoutAccountsToReview(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
+    return this.money.payoutAccountsToReview(query.country);
+  }
+
+  /** Finance and owners only: approves or declines a payout account waiting for support, saying why. */
+  @Post('money/payout-accounts/:id/decision')
+  @HttpCode(200)
+  @Needs('money')
+  decidePayoutAccount(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodBody(PayoutAccountDecisionBody)) body: z.infer<typeof PayoutAccountDecisionBody>,
+  ) {
+    return this.money.decidePayoutAccount(admin, id, body.decision, body.note);
   }
 
   /** Finance and owners only: clears a nightly check that paused instant withdrawals, saying why. */

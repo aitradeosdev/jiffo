@@ -499,6 +499,8 @@ describe('money', () => {
         bankName: 'Guaranty Trust Bank',
         accountNumber: '******6789',
         accountName: 'BAKARE TUNDE ADEWALE',
+        inReview: false,
+        pending: null,
       });
 
       const nameless = await signIn(t, 'agent');
