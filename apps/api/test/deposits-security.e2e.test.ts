@@ -102,8 +102,11 @@ describe('top-ups under abuse', () => {
       const who = await customer();
       const requestId = randomUUID();
       const results = await Promise.all(Array.from({ length: 10 }, () => deposit(who, { requestId })));
-      expect(results.every((r) => r.status === 201)).toBe(true);
-      expect(new Set(results.map((r) => r.body.id)).size).toBe(1);
+      // Each gets the same top-up, or hears it is still being opened: never a second one.
+      const created = results.filter((r) => r.status === 201);
+      const waiting = results.filter((r) => r.status === 409 && r.body.error.code === 'top_up_in_progress');
+      expect(created.length + waiting.length).toBe(10);
+      expect(new Set(created.map((r) => r.body.id)).size).toBe(1);
       expect(await t.db.select().from(deposits).where(eq(deposits.userId, who.userId))).toHaveLength(1);
     });
   });
