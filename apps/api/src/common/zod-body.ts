@@ -104,7 +104,7 @@ export function refuseUnknownFields(schema: ZodTypeAny, value: unknown, prefix: 
  * never set a status, amount or role by adding it. Queries keep ignoring extra parameters.
  */
 export class ZodBody<T> implements PipeTransform<unknown, T> {
-  constructor(private readonly schema: ZodType<T, ZodTypeDef, unknown>) {}
+  constructor(readonly schema: ZodType<T, ZodTypeDef, unknown>) {}
 
   transform(value: unknown, metadata?: ArgumentMetadata): T {
     if (metadata?.type === 'body') refuseUnknownFields(this.schema, value);

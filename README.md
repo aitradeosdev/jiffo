@@ -108,7 +108,7 @@ Every errand change goes through one endpoint, `POST /errands/:id/events`, with 
 
 Each outside service is a port with one adapter per provider. **Owners choose the provider in the admin panel** (Settings, Providers): they enter the keys from Jiffo's account with it, test them, and switch it on. The change reaches every API process within 30 seconds, with no restart. Keys are stored encrypted (AES-256-GCM) under `SECRETS_KEY`, a 64-character hex key that production requires and that should be kept apart from the database: whoever has both can read the keys, and changing it means entering them again. The panel never shows a saved key, only its last characters, and the audit log records which fields changed, never their values. A provider can be switched on only after its test passes. Things a provider started finish with it after a switch: a top-up is checked with the provider that issued its account number, an identity check finishes where it began, and a payout goes through the provider in use, which registers the agent's bank account first if it was added under another one. The nightly money check adds up every provider still holding money.
 
-Webhook addresses are shown in the panel, built from `PUBLIC_API_URL`, which must be the API's public address in production.
+Webhook addresses are shown in the panel, built from `PUBLIC_API_URL`, which must be the API's public https address in production (it won't start otherwise).
 
 | Service         | Providers in the panel         |
 | --------------- | ------------------------------ |
@@ -184,7 +184,9 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
     - Live payment keys are refused outside production, and test keys in it. This holds for keys from the environment too.
     - A refused redirect says where it pointed, so a provider that moved is easy to tell from one that is down.
   - **Paystack:** with `PAYSTACK_WEBHOOK_IPS` set, Paystack's calls are taken only from those addresses.
-  - **Development storage:** serves only photos as images. Anything else comes down as a file.
+  - **Development storage:** serves only photos as images. Anything else comes down as a file. Its file routes don't exist in production.
+  - **Route list:** `docs/api/openapi.json` lists every route: who may call it, its rate-limit class, and the parameters and body it takes. It's read from the controllers, and a test fails when it's out of date. Rewrite it with `pnpm --filter @jiffo/api openapi`. There is one API version, `/v1`.
+  - **Reporting a security problem:** `/.well-known/security.txt` and the `/security` page give the contact in `SECURITY_CONTACT`, required in production.
 - **Signing in:**
   - **Codes:** each number and each phone may ask for 3 codes in 15 minutes and 10 in a day (Settings, Limits). A phone already signed in to the number isn't held to the number's limits, so a stranger asking for codes to it can't lock the owner out.
   - **Network addresses:** limited too (`OTP_PER_IP_PER_HOUR`, `OTP_PER_IP_PER_DAY`), but higher, since mobile networks put many customers behind one address.
@@ -248,6 +250,14 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
   - **Alerts:** gaps, a low balance, refused or unclear transfers and Paystack's transfer OTP show there and on the overview.
 - **Reconciliation:** every night the ledger's cash is compared with the Paystack balance and the result is saved for finance.
 
+## Checks on every change
+
+- **CI** (`.github/workflows/ci.yml`): lint, types, tests, and `pnpm audit` on what the apps ship. The workflow can only read the repository, and every action is pinned to a commit.
+- **Security scans** (`.github/workflows/security.yml`): CodeQL and gitleaks on every push and pull request and once a week, and a dependency review on pull requests.
+- **Dependabot** opens weekly updates for packages and actions.
+- **Lint** refuses `dangerouslySetInnerHTML`, so nothing a person typed can be drawn as markup.
+- Accepted advisories, and why: [docs/security/dependencies.md](docs/security/dependencies.md). The third-party code each app ships: [docs/security/sdks.md](docs/security/sdks.md). New features start with a [threat model](docs/security/threat-model.md), and the pull request template has a security checklist.
+
 ## Running the admin panel
 
 `apps/admin` is the panel Jiffo staff use. Its server calls the API on each admin's behalf, so the session token stays in an httpOnly cookie and never reaches the browser's scripts.
@@ -257,6 +267,8 @@ cd apps/admin
 cp .env.example .env.local
 pnpm dev
 ```
+
+Every page gets a content policy with a fresh nonce: only the panel's own scripts run, and pages can't be framed. HTTPS is insisted on in production.
 
 It opens on port 3001. Set `ADMIN_PANEL_SECRET` to the same value in both `apps/api/.env` and `apps/admin/.env.local`, so the API sees each admin's own IP address for sign-in limits and the audit log.
 

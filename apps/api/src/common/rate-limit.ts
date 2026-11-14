@@ -75,7 +75,7 @@ export function parseLimits(text: string | undefined): Record<LimitClass, number
   return limits;
 }
 
-const LIMIT_KEY = 'jiffo:rate-limit';
+export const LIMIT_KEY = 'jiffo:rate-limit';
 /** Counts a route (or a controller's routes) under a class other than "default". */
 export const RateLimit = (limit: LimitClass) => SetMetadata(LIMIT_KEY, limit);
 

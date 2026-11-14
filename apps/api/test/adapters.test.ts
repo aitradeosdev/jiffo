@@ -567,8 +567,17 @@ describe('config', () => {
       ADMIN_TOTP_KEY: 'd'.repeat(64),
       FIELD_KEY: 'e'.repeat(64),
       ADMIN_TOKEN_SECRET: 'w'.repeat(32),
+      SECURITY_CONTACT: 'mailto:security@jiffoapp.com',
+      PUBLIC_API_URL: 'https://api.jiffoapp.com',
     };
     expect(loadConfig(ready).TRUST_PROXY_HOPS).toBe(1);
+    // security.txt needs somewhere to send reports.
+    expect(() => loadConfig({ ...ready, SECURITY_CONTACT: undefined })).toThrow(/SECURITY_CONTACT/);
+    expect(() => loadConfig({ ...ready, SECURITY_CONTACT: ' , ' })).toThrow(/SECURITY_CONTACT/);
+    // Links built from the API's address must work for the apps and providers.
+    expect(() => loadConfig({ ...ready, PUBLIC_API_URL: undefined })).toThrow(/PUBLIC_API_URL/);
+    expect(() => loadConfig({ ...ready, PUBLIC_API_URL: 'http://api.jiffoapp.com' })).toThrow(/PUBLIC_API_URL/);
+    expect(() => loadConfig({ ...ready, PUBLIC_API_URL: 'https://localhost:3000' })).toThrow(/PUBLIC_API_URL/);
     expect(() => loadConfig({ ...ready, FIELD_KEY: undefined })).toThrow(/FIELD_KEY/);
     expect(() => loadConfig({ ...ready, FIELD_KEY: base.PIN_KEY })).toThrow(/all be different/);
     expect(() => loadConfig({ ...ready, ADMIN_PANEL_SECRET: 'too short' })).toThrow(/ADMIN_PANEL_SECRET/);

@@ -1,0 +1,15 @@
+# Secret scanning (docs/security-plan.md, S2): gitleaks' own rules. The one exception is a made-up key in a
+# test, and only one that says so (test, fake, example, dummy). A real-looking key anywhere, tests and example
+# files included, fails the Security run.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Made-up keys in tests"
+condition = "AND"
+paths = [
+  '''(^|/)test/''',
+  '''\.test\.tsx?$''',
+]
+regexTarget = "match"
+regexes = ['''(?i)(test|fake|example|dummy)''']

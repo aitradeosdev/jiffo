@@ -33,11 +33,11 @@ export default async function SetupPage() {
       <ol className="mb-6 space-y-5 text-[15px]">
         <li>
           <span className="font-semibold">1. Scan this code with the app</span>
-          <div
-            className="mt-3 w-44 rounded-xl bg-white p-3 [&>svg]:h-auto [&>svg]:w-full"
-            role="img"
-            aria-label="QR code for your authenticator app"
-            dangerouslySetInnerHTML={{ __html: qr }}
+          {/* An image of the server-made code, rather than its markup in the page. */}
+          <img
+            className="mt-3 h-auto w-44 rounded-xl bg-white p-3"
+            src={`data:image/svg+xml;utf8,${encodeURIComponent(qr)}`}
+            alt="QR code for your authenticator app"
           />
         </li>
         <li>
