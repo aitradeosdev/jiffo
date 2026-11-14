@@ -110,6 +110,8 @@ export const CountrySettingsSchema = z.object({
     addressCheck: z.enum(['physical', 'digital']),
     selfieTries: z.number().int().positive(),
     reviewTargetHours: z.number().int().positive(),
+    /** Identity checks one account may start in a day: each is a paid check, and could be a name lookup. */
+    checkStartsPerDay: z.number().int().min(1).max(20).default(3),
   }),
   /**
    * How customers add money: a one-time account number for each top-up, and their own fixed account number
@@ -204,6 +206,7 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
     addressCheck: 'physical',
     selfieTries: 3,
     reviewTargetHours: 24,
+    checkStartsPerDay: 3,
   },
   topUps: { oneTimeAccount: true, fixedAccount: false },
   profiles: { showCustomerPhotoBeforeAccept: false },

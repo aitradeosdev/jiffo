@@ -134,6 +134,13 @@
       "when": 1794652175009,
       "tag": "0018_deposit_safety",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794660741103,
+      "tag": "0019_identity_safety",
+      "breakpoints": true
     }
   ]
 }

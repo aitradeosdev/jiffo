@@ -28,7 +28,7 @@ export class CustomerIdentityController {
   @Post()
   @HttpCode(200)
   start(@CurrentAuth() auth: AuthContext, @Body(new ZodBody(StartBody)) body: z.infer<typeof StartBody>) {
-    return this.identity.start(auth.userId, body);
+    return this.identity.start(auth.userId, body, auth.sessionId);
   }
 
   @Post('finish')

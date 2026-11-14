@@ -20,6 +20,22 @@ The code on `main` at commit 87a57cf (14 November 2026), checked against `docs/s
 
 Paths are relative to `apps/api/src/` unless they start with `apps/`, `packages/` or `test/` (meaning `apps/api/test/`).
 
+## Progress
+
+The tables below stay as they were at the audit. What has been fixed since:
+
+| Fix | Pull request | State |
+|---|---|---|
+| 1. Payouts and reconciliation | aitradeosdev/jiffo#38 | merged |
+| 2. Ledger guards | aitradeosdev/jiffo#39 | merged |
+| 3. The errand money path | aitradeosdev/jiffo#40 | merged |
+| 4. Deposits | aitradeosdev/jiffo#41 | merged |
+| 5. Rules and access | aitradeosdev/jiffo#42 | merged |
+| Rules from fixes 1 to 5 moved into Settings | aitradeosdev/jiffo#43 | merged |
+| 6a. Identity checks: I1, I2 (links), findings 3, 9, 12, 19, 22, and the sandbox half of 10 | aitradeosdev/jiffo#44 | open |
+| 6b. Identity: separate keys and field encryption (I5, I6, finding 21) | | next |
+| 6c. Identity: near name matches to review (I4) | | next |
+
 ## Summary
 
 The money core is sound:

@@ -21,6 +21,7 @@ export const conflict = (code: string, message: string, details?: Record<string,
 export const unprocessable = (code: string, message: string, details?: Record<string, unknown>) =>
   new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, code, message, details);
 export const locked = (code: string, message: string) => new ApiError(HttpStatus.LOCKED, code, message);
+export const gone = (code: string, message: string) => new ApiError(HttpStatus.GONE, code, message);
 export const tooMany = (code: string, message: string, details?: Record<string, unknown>) =>
   new ApiError(HttpStatus.TOO_MANY_REQUESTS, code, message, details);
 export const unavailable = (code: string, message: string) =>

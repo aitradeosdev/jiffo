@@ -94,7 +94,14 @@ export interface IdentityAdapter {
    * A result the provider sent us, once its signature shows it came from them; null when it doesn't. May ask
    * the provider to confirm it, and throws IdentityProviderError when it can't, so the provider sends it again.
    */
-  parseWebhook?(rawBody: Buffer, headers: Headers): Promise<{ reference: string; result: IdentityResult } | null>;
+  /**
+   * A signed result from the provider. A provider whose signature doesn't cover the body gives a replay key
+   * (its signature and the job), so the API can make sure it never vouches for a second, different body.
+   */
+  parseWebhook?(
+    rawBody: Buffer,
+    headers: Headers,
+  ): Promise<{ reference: string; result: IdentityResult; replayKey?: string } | null>;
   /** For providers whose widget runs in a page Jiffo serves: that page, for the check as started. */
   page?(reference: string, request: IdentityRequest): string | Promise<string>;
   /**
@@ -119,7 +126,8 @@ export const IDENTITY = Symbol('IDENTITY');
 
 /**
  * For development and tests: checks finish at once. The ID number's last four characters pick the result, so
- * every path can be tried: 0000 fails the ID, 1111 sends the selfie to review, 1818 is someone under 18.
+ * every path can be tried: 0000 fails the ID, 1111 sends the selfie to review, 2222 fails the selfie (the ID's
+ * record is found), 1818 is someone under 18.
  * An address containing "unknown" goes to review.
  */
 export class FakeIdentityAdapter implements IdentityAdapter {
@@ -151,8 +159,13 @@ export class FakeIdentityAdapter implements IdentityAdapter {
         : []),
       {
         key: 'selfie',
-        outcome: ending === '1111' ? 'review' : 'passed',
-        note: ending === '1111' ? 'Selfie did not clearly match the ID photo' : undefined,
+        outcome: ending === '1111' ? 'review' : ending === '2222' ? 'failed' : 'passed',
+        note:
+          ending === '1111'
+            ? 'Selfie did not clearly match the ID photo'
+            : ending === '2222'
+              ? "Selfie doesn't match the ID photo"
+              : undefined,
       },
     ];
     const outcome: CheckOutcome = checks.some((c) => c.outcome === 'failed')

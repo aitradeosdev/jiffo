@@ -54,7 +54,7 @@ export class AgentApplicationController {
   @Post('identity')
   @HttpCode(200)
   startIdentity(@CurrentAuth() auth: AuthContext, @Body(new ZodBody(IdentityBody)) body: z.infer<typeof IdentityBody>) {
-    return this.applications.startIdentity(auth.userId, body);
+    return this.applications.startIdentity(auth.userId, body, auth.sessionId);
   }
 
   @Post('identity/finish')

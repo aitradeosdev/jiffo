@@ -95,6 +95,7 @@ export class ProvidersAdminService {
             secretHints: row?.secretHints ?? {},
             updatedAt: row?.updatedAt ?? null,
             updatedBy: found?.updatedBy ?? null,
+            problem: row ? this.providers.problemOf(category, p.key) : null,
             lastTest: row?.lastTestAt
               ? {
                   at: row.lastTestAt,
