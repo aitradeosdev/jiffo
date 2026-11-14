@@ -1,4 +1,5 @@
 import type { ProviderCategory } from '@jiffo/shared';
+import { PostmarkEmailAdapter, ResendEmailAdapter, SesEmailAdapter } from '../adapters/email';
 import { GoogleMapsAdapter } from '../adapters/maps';
 import { AfricasTalkingMessagingAdapter, TermiiMessagingAdapter } from '../adapters/messaging';
 import { AfricasTalkingCallsAdapter, TwilioCallsAdapter } from '../adapters/calls';
@@ -25,6 +26,20 @@ const sandboxMode = (v: string | undefined, ctx: ProviderContext) => {
   return sandbox;
 };
 const optional = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
+/** An AWS region name, such as eu-west-1: it becomes part of the provider's address. */
+const awsRegion = (v: string | undefined) => {
+  const text = (v ?? '').trim().toLowerCase();
+  if (!/^[a-z]{2}(-[a-z]+)+-\d$/.test(text)) throw new Error('The region must be an AWS region, such as eu-west-1');
+  return text;
+};
+/** A sender: an address, or a name and an address, as in "Jiffo <team@jiffoapp.com>". One line only. */
+export const sender = (v: string | undefined) => {
+  const text = (v ?? '').trim();
+  if (!/^([^<>\r\n@,;]+<[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+>|[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+)$/.test(text)) {
+    throw new Error('Send from must be an address, or a name and an address like "Jiffo <team@jiffoapp.com>"');
+  }
+  return text;
+};
 
 /**
  * A provider address typed in the panel, only if it is https on one of the provider's own hosts
@@ -155,6 +170,16 @@ export const BUILDERS: {
         accessKeyId: v.accessKeyId!,
         secretAccessKey: v.secretAccessKey!,
       }),
+  },
+  email: {
+    resend: (v) => new ResendEmailAdapter(v.apiKey!, sender(v.from)),
+    postmark: (v) => new PostmarkEmailAdapter(v.serverToken!, sender(v.from)),
+    ses: (v) =>
+      new SesEmailAdapter(
+        awsRegion(v.region),
+        { accessKeyId: v.accessKeyId!, secretAccessKey: v.secretAccessKey! },
+        sender(v.from),
+      ),
   },
 };
 

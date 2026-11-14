@@ -1,3 +1,4 @@
+import type { EmailAdapter } from '../adapters/email';
 import type { MapsAdapter } from '../adapters/maps';
 import type { MessagingAdapter } from '../adapters/messaging';
 import type { PaymentsAdapter } from '../adapters/payments';
@@ -52,4 +53,9 @@ export class NotConfiguredPayments implements PaymentsAdapter {
   parseWebhook() {
     return null;
   }
+}
+
+export class NotConfiguredEmail implements EmailAdapter {
+  readonly name = 'none';
+  send = refuse('email');
 }

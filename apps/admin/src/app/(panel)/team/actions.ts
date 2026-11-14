@@ -7,9 +7,8 @@ export interface TeamState {
   error?: string;
   /** What was typed, given back after a refusal so the form keeps it. */
   typed?: { name: string; email: string; role: string };
-  /** A fresh invite link, shown once. */
-  inviteUrl?: string;
-  forEmail?: string;
+  /** Where the link went, only ever the teammate's own email, and for how long it works. */
+  emailed?: { to: string; hours: number };
 }
 
 export async function inviteTeammate(_: TeamState, form: FormData): Promise<TeamState> {
@@ -19,9 +18,12 @@ export async function inviteTeammate(_: TeamState, form: FormData): Promise<Team
     role: String(form.get('role') ?? ''),
   };
   try {
-    const res = await api<{ inviteUrl: string }>('/admin/team', { method: 'POST', body: typed });
+    const res = await api<{ emailedTo: string; expiresInHours: number }>('/admin/team', {
+      method: 'POST',
+      body: typed,
+    });
     revalidatePath('/team');
-    return { inviteUrl: res.inviteUrl, forEmail: typed.email };
+    return { emailed: { to: res.emailedTo, hours: res.expiresInHours } };
   } catch (error) {
     return { error: messageOf(error), typed };
   }
@@ -44,14 +46,12 @@ export async function updateTeammate(_: TeamState, form: FormData): Promise<Team
 
 export async function resetTeammate(_: TeamState, form: FormData): Promise<TeamState> {
   try {
-    const res = await api<{ inviteUrl: string }>(
+    const res = await api<{ emailedTo: string; expiresInHours: number }>(
       `/admin/team/${encodeURIComponent(String(form.get('id') ?? ''))}/reset`,
-      {
-        method: 'POST',
-      },
+      { method: 'POST' },
     );
     revalidatePath('/team');
-    return { inviteUrl: res.inviteUrl, forEmail: String(form.get('email') ?? '') };
+    return { emailed: { to: res.emailedTo, hours: res.expiresInHours } };
   } catch (error) {
     return { error: messageOf(error) };
   }

@@ -3,7 +3,16 @@ import type { IdType } from './identity';
  * The services Jiffo uses from outside providers, and which providers it can use for each. Admin chooses
  * one per category and enters its keys in the panel; the keys are stored encrypted and never shown again.
  */
-export const PROVIDER_CATEGORIES = ['payments', 'sms', 'identity', 'calls', 'push', 'maps', 'storage'] as const;
+export const PROVIDER_CATEGORIES = [
+  'payments',
+  'sms',
+  'identity',
+  'calls',
+  'push',
+  'maps',
+  'storage',
+  'email',
+] as const;
 export type ProviderCategory = (typeof PROVIDER_CATEGORIES)[number];
 
 export const PROVIDER_CATEGORY_INFO: Record<ProviderCategory, { label: string; about: string }> = {
@@ -24,6 +33,11 @@ export const PROVIDER_CATEGORY_INFO: Record<ProviderCategory, { label: string; a
     label: 'File storage',
     about:
       'Photos of receipts, items and drop-offs. Changing the bucket does not move files already stored: copy them first.',
+  },
+  email: {
+    label: 'Email',
+    about:
+      "Invites and access resets for the admin team. Links go only to the teammate's own address, never to whoever made them.",
   },
 };
 
@@ -401,6 +415,65 @@ export const PROVIDERS: ProviderInfo[] = [
       },
       { key: 'accessKeyId', label: 'Access key ID', secret: true, required: true },
       { key: 'secretAccessKey', label: 'Secret access key', secret: true, required: true },
+    ],
+  },
+  {
+    key: 'resend',
+    category: 'email',
+    name: 'Resend',
+    about: 'Email through Resend.',
+    fields: [
+      { key: 'apiKey', label: 'API key', secret: true, required: true, hint: 'A sending-only key is enough.' },
+      {
+        key: 'from',
+        label: 'Send from',
+        secret: false,
+        required: true,
+        placeholder: 'Jiffo <team@jiffoapp.com>',
+        hint: 'An address on a domain verified with the provider.',
+      },
+    ],
+  },
+  {
+    key: 'postmark',
+    category: 'email',
+    name: 'Postmark',
+    about: "Email through Postmark's transactional stream.",
+    fields: [
+      { key: 'serverToken', label: 'Server API token', secret: true, required: true },
+      {
+        key: 'from',
+        label: 'Send from',
+        secret: false,
+        required: true,
+        placeholder: 'Jiffo <team@jiffoapp.com>',
+        hint: 'An address on a domain verified with the provider.',
+      },
+    ],
+  },
+  {
+    key: 'ses',
+    category: 'email',
+    name: 'Amazon SES',
+    about: "Email through Amazon SES. The account must be out of SES's sandbox to reach any address.",
+    fields: [
+      { key: 'region', label: 'Region', secret: false, required: true, placeholder: 'eu-west-1' },
+      {
+        key: 'accessKeyId',
+        label: 'Access key ID',
+        secret: true,
+        required: true,
+        hint: 'For a user allowed only ses:SendEmail and ses:GetAccount.',
+      },
+      { key: 'secretAccessKey', label: 'Secret access key', secret: true, required: true },
+      {
+        key: 'from',
+        label: 'Send from',
+        secret: false,
+        required: true,
+        placeholder: 'Jiffo <team@jiffoapp.com>',
+        hint: 'An address on a domain verified with the provider.',
+      },
     ],
   },
 ];
