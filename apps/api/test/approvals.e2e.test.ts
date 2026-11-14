@@ -379,7 +379,7 @@ describe('admin approvals', () => {
       request(t.http)[method](`/v1/admin/providers${path}`).set(owner.headers);
     try {
       await api('put', '/sms/termii')
-        .send({ config: { senderId: 'Jiffo' }, secrets: { apiKey: 'TL-first-key-0123456789' } })
+        .send({ config: { senderId: 'Jiffo' }, secrets: { apiKey: 'TL-test-first-0123456789' } })
         .expect(200);
       vi.spyOn(TermiiMessagingAdapter.prototype, 'check').mockResolvedValue('Connected');
       await api('post', '/sms/termii/test').expect(200);
@@ -396,10 +396,10 @@ describe('admin approvals', () => {
 
       // New keys for the provider in use wait, sealed.
       const change = await api('put', '/sms/termii')
-        .send({ secrets: { apiKey: 'TL-second-key-9876543210' } })
+        .send({ secrets: { apiKey: 'TL-test-second-9876543210' } })
         .expect(202);
       const [pending] = await t.db.select().from(adminApprovals).where(eq(adminApprovals.id, change.body.approval.id));
-      expect(JSON.stringify(pending)).not.toContain('TL-second-key');
+      expect(JSON.stringify(pending)).not.toContain('TL-test-second');
       const before = (await t.db.select().from(providerSettings).where(eq(providerSettings.provider, 'termii')))[0]!;
       expect(before.secretHints).toEqual({ apiKey: '••••6789' });
       await approve(change.body.approval.id, second).expect(200);

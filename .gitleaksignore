@@ -1,0 +1,5 @@
+# Findings gitleaks reports that were checked and are not secrets. Each line is a finding's fingerprint, as the
+# Security run prints it. Add one only after checking the value is made up, and say what it was.
+#
+# A made-up Termii key in a test, renamed in a later commit so the allowlist recognises it as one.
+820dc6d7ce9cc2aab9867dab4e3ab616c05892e2:apps/api/test/approvals.e2e.test.ts:generic-api-key:341
