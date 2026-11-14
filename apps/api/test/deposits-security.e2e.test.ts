@@ -52,7 +52,7 @@ describe('top-ups under abuse', () => {
   }
 
   describe('the own-account route', () => {
-    it('never credits one of our one-time references as a transfer into an own account', async () => {
+    it('checks one of our one-time references the one-time way, whatever route it came by', async () => {
       const who = await customer();
       const res = await deposit(who).expect(201);
       const [row] = await t.db.select().from(deposits).where(eq(deposits.id, res.body.id));
@@ -66,13 +66,27 @@ describe('top-ups under abuse', () => {
       await deliverWebhook(t, forged);
       const all = await t.db.select().from(deposits).where(eq(deposits.userId, who.userId));
       expect(all.filter((d) => d.method === 'fixed')).toHaveLength(0);
+      // Credited once, as the one-time top-up it is.
+      expect((await balanceOf(t, who)).balanceKobo).toBe(500_000);
     });
   });
 
   describe('unknown references', () => {
-    it('raises an alert for a paid top-up nobody here knows', async () => {
-      const hook = t.payments.webhook('charge.success', { id: 78, reference: `jd-${randomUUID()}` });
-      await deliverWebhook(t, hook).expect(200);
+    it('raises an alert for a paid top-up nobody here knows, and only once the provider confirms it', async () => {
+      // Never paid: nothing to look at.
+      await deliverWebhook(t, t.payments.webhook('charge.success', { id: 78, reference: `jd-${randomUUID()}` })).expect(
+        200,
+      );
+      expect(await alertsOf('deposit_unknown')).toHaveLength(0);
+      // Paid at the provider, but no top-up here has that reference.
+      const reference = `jd-${randomUUID()}`;
+      await t.payments.createTransferDeposit({
+        reference,
+        amountKobo: 500_000,
+        email: 'nobody@customers.jiffoapp.com',
+        expiresAt: new Date(Date.now() + 30 * 60_000),
+      });
+      await deliverWebhook(t, t.payments.pay(reference)).expect(200);
       expect(await alertsOf('deposit_unknown')).not.toHaveLength(0);
     });
   });
@@ -96,18 +110,22 @@ describe('top-ups under abuse', () => {
   });
 
   describe('own account numbers', () => {
-    it('are issued in the verified legal name, not the name typed in the profile', async () => {
+    it('are asked for only in the name on the verified ID', async () => {
       const who = await customer();
       await t.db
         .update(customerVerifications)
         .set({ legalName: 'Chioma Adaeze Nwosu' })
         .where(eq(customerVerifications.userId, who.userId));
-      const res = await request(t.http)
-        .post('/v1/wallet/fixed-account')
+      const issue = () =>
+        request(t.http).post('/v1/wallet/fixed-account').set(who.headers).send({ bvn: '22212345678' });
+      // The profile says Ada Okafor: an invented name isn't sent to test the BVN against.
+      expect((await issue().expect(422)).body.error.code).toBe('name_not_on_id');
+      await request(t.http)
+        .patch('/v1/me')
         .set(who.headers)
-        .send({ bvn: '22212345678' })
-        .expect(201);
-      expect(res.body.accountName).toBe('Jiffo Chioma Nwosu');
+        .send({ firstName: 'Chioma', lastName: 'Nwosu' })
+        .expect(200);
+      expect((await issue().expect(201)).body.accountName).toBe('Jiffo Chioma Nwosu');
     });
 
     it('take only a few failed tries a day, and say why in general terms', async () => {

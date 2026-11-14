@@ -87,6 +87,8 @@ export interface FixedPayment extends DepositStatus {
   providerRef?: string;
   /** How the money came in, where the provider says (Paystack: dedicated_nuban for an own account). */
   channel?: string;
+  /** Whether the provider's own record shows a transfer into an own account number. False is not credited. */
+  toFixedAccount?: boolean;
   ownerRef?: string;
 }
 
@@ -368,7 +370,8 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
    */
   async verifyFixedPayment(reference: string): Promise<FixedPayment> {
     const payment = await this.verifyCharge(reference);
-    return payment.channel && payment.channel !== 'dedicated_nuban' ? { ...payment, status: 'failed' } : payment;
+    // Only a charge Paystack itself shows as a dedicated-account transfer counts; a missing channel doesn't.
+    return { ...payment, toFixedAccount: payment.channel === 'dedicated_nuban' };
   }
 
   private async call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
@@ -655,6 +658,7 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
       senderName: p.senderName,
       senderBank: p.senderName ? 'Test Bank' : null,
       ownerRef: p.ownerRef,
+      toFixedAccount: true,
     };
   }
 

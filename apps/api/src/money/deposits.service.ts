@@ -4,7 +4,7 @@ import { and, count, desc, eq, gt, lt, sql } from 'drizzle-orm';
 import { formatNaira } from '@jiffo/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
-import { deposits, users } from '../db/schema';
+import { customerVerifications, deposits, users } from '../db/schema';
 import { FakePaymentsAdapter, PAYMENTS, type PaymentsAdapter } from '../adapters/payments';
 import { CountriesService } from '../countries/countries.service';
 import { PushService } from '../push/push.service';
@@ -17,6 +17,7 @@ import { ProvidersService } from '../providers/providers.service';
 import { CustomerIdentityService } from '../identity/customer-identity.service';
 import { FixedAccountsService } from './fixed-accounts.service';
 import { LedgerService } from './ledger.service';
+import { AlertsService } from '../alerts/alerts.service';
 
 const MINUTE_MS = 60_000;
 /** Open one-time account numbers a customer can have at once. */
@@ -70,6 +71,7 @@ export class DepositsService {
     private readonly providers: ProvidersService,
     private readonly customerIdentity: CustomerIdentityService,
     private readonly fixedAccounts: FixedAccountsService,
+    private readonly alerts: AlertsService,
   ) {
     // The fake bank of development settles top-ups by itself; it then tells this service, as a webhook would.
     if (env.payments instanceof FakePaymentsAdapter) {
@@ -99,7 +101,13 @@ export class DepositsService {
         maxDepositKobo,
       });
     }
-    const row = await this.db.transaction(async (tx) => {
+    // The lock covers only the checks and a placeholder row: the provider is asked after, outside the
+    // transaction, so slow provider calls never hold a database connection.
+    const reference = `jd-${randomUUID()}`;
+    const expiresAt = new Date(Date.now() + settings.timers.depositAccountMinutes * MINUTE_MS);
+    // One provider for the whole step: a switch in between must not record another than the one used.
+    const payments = this.providers.current('payments');
+    const claimed = await this.db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'deposit:' + auth.userId}))`);
       if (requestKey) {
         const [same] = await tx
@@ -110,7 +118,10 @@ export class DepositsService {
           if (same.amountKobo !== amountKobo) {
             throw conflict('request_reused', 'This request was already used for another top-up');
           }
-          return same;
+          if (!same.accountNumber && same.status === 'pending') {
+            throw conflict('top_up_in_progress', 'Still getting your account number. Try again in a moment.');
+          }
+          return { row: same, repeat: true };
         }
       }
       const [open] = await tx
@@ -122,17 +133,7 @@ export class DepositsService {
       if ((open?.n ?? 0) >= MAX_OPEN_DEPOSITS) {
         throw tooMany('too_many_open_deposits', 'Finish or wait out your open top-ups first');
       }
-      const reference = `jd-${randomUUID()}`;
-      const expiresAt = new Date(Date.now() + settings.timers.depositAccountMinutes * MINUTE_MS);
-      // One provider for the whole step: a switch in between must not record another than the one used.
-      const payments = this.providers.current('payments');
-      const account = await payments.createTransferDeposit({
-        reference,
-        amountKobo,
-        email: `${auth.userId}@${this.config.PAYMENT_EMAIL_DOMAIN}`,
-        expiresAt,
-      });
-      const [created] = await tx
+      const [placeholder] = await tx
         .insert(deposits)
         .values({
           userId: auth.userId,
@@ -141,15 +142,38 @@ export class DepositsService {
           reference,
           requestKey,
           amountKobo,
-          accountNumber: account.accountNumber,
-          accountName: account.accountName,
-          bankName: account.bankName,
-          expiresAt: account.expiresAt,
+          accountNumber: '',
+          accountName: '',
+          bankName: '',
+          expiresAt,
         })
         .returning();
-      return created!;
+      return { row: placeholder!, repeat: false };
     });
-    return depositView(row);
+    if (claimed.repeat) return depositView(claimed.row);
+    let account: Awaited<ReturnType<PaymentsAdapter['createTransferDeposit']>>;
+    try {
+      account = await payments.createTransferDeposit({
+        reference,
+        amountKobo,
+        email: `${auth.userId}@${this.config.PAYMENT_EMAIL_DOMAIN}`,
+        expiresAt,
+      });
+    } catch (error) {
+      await this.db.update(deposits).set({ status: 'failed' }).where(eq(deposits.id, claimed.row.id));
+      throw error;
+    }
+    const [row] = await this.db
+      .update(deposits)
+      .set({
+        accountNumber: account.accountNumber,
+        accountName: account.accountName,
+        bankName: account.bankName,
+        expiresAt: account.expiresAt,
+      })
+      .where(eq(deposits.id, claimed.row.id))
+      .returning();
+    return depositView(row!);
   }
 
   async list(auth: AuthContext, limit: number) {
@@ -247,11 +271,8 @@ export class DepositsService {
    */
   async recordFixedPayment(provider: string, paymentRef: string): Promise<DepositRow | null> {
     const reference = `${provider}:${paymentRef}`;
-    // Our own one-time references are never transfers into an own account: such an event is misrouted.
-    if (paymentRef.startsWith('jd-')) {
-      this.logger.warn(`Event for ${paymentRef} routed as an own-account transfer: not credited that way`);
-      return null;
-    }
+    // Our own one-time references are never transfers into an own account: checked the one-time way.
+    if (paymentRef.startsWith('jd-')) return this.sync(paymentRef);
     const [seen] = await this.db.select().from(deposits).where(eq(deposits.reference, reference));
     if (seen) return seen;
 
@@ -261,6 +282,17 @@ export class DepositsService {
     if (status.status === 'pending') throw new Error(`Payment ${reference} not visible as paid yet`);
     if (status.status !== 'success') {
       this.logger.warn(`Fixed account payment ${reference} is ${status.status}; nothing credited`);
+      return null;
+    }
+    // Paid, but not shown as a transfer into an own account: kept for a person to look at, not credited.
+    if (status.toFixedAccount === false) {
+      await this.alerts.raise({
+        countryCode: this.config.DEFAULT_COUNTRY,
+        kind: 'deposit_misrouted',
+        dedupeKey: reference,
+        message: `${provider} reported ${reference} as a transfer into an own account number, but its own record shows another way of paying. Nothing was credited: find whose money it is.`,
+        data: { provider, paymentRef, channel: status.channel ?? null },
+      });
       return null;
     }
     const account = await this.fixedAccounts.findForPayment(provider, status);
@@ -324,9 +356,15 @@ export class DepositsService {
   private async senderMismatch(userId: string, senderName: string | null) {
     if (!senderName) return false;
     const [customer] = await this.db
-      .select({ firstName: users.firstName, lastName: users.lastName })
+      .select({ firstName: users.firstName, lastName: users.lastName, legalName: customerVerifications.legalName })
       .from(users)
+      .leftJoin(customerVerifications, eq(customerVerifications.userId, users.id))
       .where(eq(users.id, userId));
+    // Against the name on the verified ID where there is one: the profile name is whatever was typed.
+    if (customer?.legalName) {
+      const legal = nameWords(customer.legalName);
+      return ![...nameWords(senderName)].some((w) => legal.has(w));
+    }
     return !senderMatches(senderName, customer?.firstName ?? null, customer?.lastName ?? null);
   }
 

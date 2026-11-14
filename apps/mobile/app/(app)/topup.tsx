@@ -85,8 +85,8 @@ export default function TopUp() {
   // phone clock that is off doesn't matter.
   const known = useRef<Set<string> | null>(null);
   const kobo = parseNaira(text);
-  // One key per amount: a repeated tap, or a retry after a lost answer, opens one top-up.
-  const requestId = useMemo(() => Crypto.randomUUID(), [kobo]);
+  // One key per amount, kept in a ref: a repeated tap, or a retry after a lost answer, opens one top-up.
+  const requestKey = useRef<{ kobo: number | null; id: string } | null>(null);
   const valid = kobo !== null && kobo >= min && (max === null || kobo <= max);
   const fixed = options.data?.fixedAccount;
   const own = fixed?.account ?? null;
@@ -154,6 +154,8 @@ export default function TopUp() {
     setBusy(true);
     setError(null);
     try {
+      if (requestKey.current?.kobo !== kobo) requestKey.current = { kobo, id: Crypto.randomUUID() };
+      const requestId = requestKey.current.id;
       setDeposit(await api.post<Deposit>('/v1/wallet/deposits', { amountKobo: kobo, requestId }));
     } catch (e) {
       // Money comes in only from verified customers: the check comes first.

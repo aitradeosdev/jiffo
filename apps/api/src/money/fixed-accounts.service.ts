@@ -6,6 +6,7 @@ import { customerVerifications, fixedAccounts, users } from '../db/schema';
 import { fixedOwnerRef, ownerOfFixedRef, type FixedAccountState, type PaymentsAdapter } from '../adapters/payments';
 import type { AuthContext } from '../auth/auth.types';
 import { conflict, tooMany, unavailable, unprocessable } from '../common/errors';
+import { matchesLegalName } from '../common/names';
 import { CountriesService } from '../countries/countries.service';
 import { CustomerIdentityService } from '../identity/customer-identity.service';
 import { ProvidersService } from '../providers/providers.service';
@@ -36,8 +37,7 @@ const MAX_FAILURES = 3;
 const FAILURE_WINDOW_MS = 24 * 3_600_000;
 const UNREACHABLE = "We couldn't reach the bank. Try again.";
 /** What the customer is told when the provider refuses; its own words stay with support. */
-const REFUSED =
-  "We couldn't issue an account number with those details. Check your BVN and try again, or contact support.";
+const REFUSED = "We couldn't issue an account number with those details. Check them and try again, or contact support.";
 
 export const fixedAccountView = (a: FixedAccountRow) => ({
   id: a.id,
@@ -45,7 +45,7 @@ export const fixedAccountView = (a: FixedAccountRow) => ({
   accountNumber: a.accountNumber,
   accountName: a.accountName,
   bankName: a.bankName,
-  /** Why the provider couldn't issue it, in its words. */
+  /** Why it couldn't be issued, in general terms: the provider's own words stay with support. */
   failureReason: a.status !== 'failed' ? null : a.failureReason === UNREACHABLE ? UNREACHABLE : REFUSED,
   activatedAt: a.activatedAt,
 });
@@ -151,12 +151,15 @@ export class FixedAccountsService {
       .from(users)
       .leftJoin(customerVerifications, eq(customerVerifications.userId, users.id))
       .where(eq(users.id, auth.userId));
-    // The name on the verified ID, not the one typed in the profile: the provider checks the BVN against it.
-    const legal = (user?.legalName ?? '').trim().split(/\s+/).filter(Boolean);
-    const firstName = legal.length >= 2 ? legal[0]! : user?.firstName;
-    const lastName = legal.length >= 2 ? legal[legal.length - 1]! : user?.lastName;
+    const firstName = user?.firstName;
+    const lastName = user?.lastName;
     if (!user || !firstName || !lastName) {
       throw unprocessable('name_required', 'Add your first and last name to your profile first');
+    }
+    // The provider checks the BVN against the name sent: it must be the name on the verified ID, so an
+    // invented one can't be tested. The profile's order is kept, as ID records vary in theirs.
+    if (user.legalName && !matchesLegalName(`${firstName} ${lastName}`, user.legalName)) {
+      throw unprocessable('name_not_on_id', 'Your name in the app must match the name on your ID. Update it first.');
     }
 
     // Claimed first, so two taps never ask twice. A new row, one that failed, or one the provider lost or
@@ -207,7 +210,14 @@ export class FixedAccountsService {
       this.logger.warn(`Issuing a fixed account at ${payments.name} failed: ${(error as Error).message}`);
       await this.db
         .update(fixedAccounts)
-        .set({ status: 'failed', failureReason: UNREACHABLE, checkingUntil: null })
+        .set({
+          status: 'failed',
+          failureReason: UNREACHABLE,
+          checkingUntil: null,
+          // Counted too: a provider error must not become a way round the day's tries.
+          failures: sql`case when ${fixedAccounts.lastFailureAt} > now() - interval '1 day' then ${fixedAccounts.failures} + 1 else 1 end`,
+          lastFailureAt: new Date(),
+        })
         .where(eq(fixedAccounts.id, claimed.id));
       throw unavailable('provider_unavailable', "We couldn't reach the bank. Try again in a moment.");
     }

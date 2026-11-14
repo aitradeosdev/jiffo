@@ -76,8 +76,9 @@ export class WebhooksController {
     try {
       if (event.kind === 'deposit') {
         const deposit = await this.deposits.sync(event.reference);
-        // Paid, by the provider's word, for a reference nobody here knows: money arrived with no customer.
-        if (!deposit) {
+        // A reference nobody here knows: if the provider confirms it was paid, money arrived with no customer.
+        const paid = deposit ? null : await payments.verifyDeposit(event.reference).catch(() => null);
+        if (paid?.status === 'success') {
           await this.alerts.raise({
             countryCode: this.config.DEFAULT_COUNTRY,
             kind: 'deposit_unknown',

@@ -129,7 +129,7 @@ describe('adding money: own account numbers', () => {
     expect((await issue(who, { bvn: '22212340000' }).expect(201)).body).toMatchObject({
       status: 'failed',
       // The provider's own words stay with support; the customer gets a general reason.
-      failureReason: expect.stringContaining('Check your BVN'),
+      failureReason: expect.stringContaining('Check them'),
       accountNumber: null,
     });
     expect((await issue(who).expect(201)).body.status).toBe('active');

@@ -396,7 +396,7 @@ describe('Paystack payments', () => {
       ok({ status: 'success', amount: 500_000, fees: 0, currency: 'NGN', channel: 'bank_transfer' }),
     );
     const payment = await new PaystackPaymentsAdapter('sk', 'https://api.example.test', impl).verifyFixedPayment('T1');
-    expect(payment.status).toBe('failed');
+    expect(payment.toFixedAccount).toBe(false);
   });
 
   it('confirms a transfer into a dedicated account with whose it was', async () => {
@@ -406,6 +406,7 @@ describe('Paystack payments', () => {
         amount: 1_000_000,
         fees: 10_000,
         currency: 'NGN',
+        channel: 'dedicated_nuban',
         customer: { customer_code: 'CUS_8' },
         authorization: { sender_name: 'ADA OKAFOR', sender_bank: 'GTBank' },
       }),
@@ -418,6 +419,8 @@ describe('Paystack payments', () => {
       senderName: 'ADA OKAFOR',
       senderBank: 'GTBank',
       providerRef: 'CUS_8',
+      channel: 'dedicated_nuban',
+      toFixedAccount: true,
     });
     expect(calls[0]!.url).toBe('https://api.example.test/transaction/verify/T9');
   });
