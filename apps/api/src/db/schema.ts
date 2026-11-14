@@ -19,7 +19,15 @@ import {
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { encrypted } from './fields';
-import { ADMIN_ROLES, AGENT_TIERS, type AdminRole, type CountrySettings, type ErrandState } from '@jiffo/shared';
+import {
+  ADMIN_ROLES,
+  AGENT_TIERS,
+  APPROVAL_KINDS,
+  APPROVAL_STATUSES,
+  type AdminRole,
+  type CountrySettings,
+  type ErrandState,
+} from '@jiffo/shared';
 
 /** PostGIS point (longitude, latitude). Written with ST_MakePoint, read back through the lat/lng columns. */
 const geographyPoint = customType<{ data: string; driverData: string }>({
@@ -1083,6 +1091,51 @@ export const adminAudit = pgTable(
   (t) => [
     index('admin_audit_created_idx').on(t.createdAt),
     index('admin_audit_target_idx').on(t.targetType, t.targetId),
+  ],
+);
+
+/**
+ * A change waiting for a second admin (docs/security-plan.md, D3, D4, X7). It runs only when someone other
+ * than the person who asked approves it, unless nobody else holds the permission (selfApproved). The
+ * database refuses a decision by the requester otherwise, whatever the code does.
+ */
+export const adminApprovals = pgTable(
+  'admin_approvals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    kind: text('kind', { enum: APPROVAL_KINDS }).notNull(),
+    /** What the approver must be allowed to do. */
+    permission: text('permission').notNull(),
+    countryCode: char('country_code', { length: 2 }),
+    targetType: text('target_type'),
+    targetId: text('target_id'),
+    /** What it does, in a sentence, for the person deciding. */
+    summary: text('summary').notNull(),
+    /** The request as it was made. Secret values (provider keys) are sealed, never stored readable. */
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    requestedBy: uuid('requested_by')
+      .notNull()
+      .references(() => admins.id),
+    requestedIp: text('requested_ip'),
+    /** Why, from the person asking. */
+    note: text('note').notNull(),
+    status: text('status', { enum: APPROVAL_STATUSES }).notNull().default('pending'),
+    selfApproved: boolean('self_approved').notNull().default(false),
+    decidedBy: uuid('decided_by').references(() => admins.id),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    decisionNote: text('decision_note'),
+    result: jsonb('result').$type<Record<string, unknown>>(),
+    error: text('error'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('admin_approvals_status_idx').on(t.status, t.createdAt),
+    index('admin_approvals_requested_idx').on(t.requestedBy, t.createdAt),
+    check(
+      'admin_approvals_second_person',
+      sql`${t.decidedBy} is null or ${t.decidedBy} <> ${t.requestedBy} or ${t.selfApproved} or ${t.status} = 'cancelled'`,
+    ),
   ],
 );
 

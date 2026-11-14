@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { providerInfo } from '@jiffo/shared';
-import { api, messageOf } from '@/lib/api';
+import { api, ASKED, isPending, messageOf } from '@/lib/api';
 
 export interface ProviderState {
   error?: string;
@@ -34,11 +34,16 @@ export async function saveProvider(_: ProviderState, form: FormData): Promise<Pr
       config[f.key] = value;
     }
   }
+  let pending = false;
   try {
-    await api(`/admin/providers/${category}/${provider}`, { method: 'PUT', body: { config, secrets } });
+    pending = isPending(
+      await api(`/admin/providers/${category}/${provider}`, { method: 'PUT', body: { config, secrets } }),
+    );
   } catch (error) {
     return { error: messageOf(error) };
   }
+  // New settings for the provider in use wait for a second owner.
+  if (pending) redirect(ASKED);
   back(category, provider, 'saved');
   return {};
 }
@@ -59,11 +64,15 @@ export async function testProvider(_: ProviderState, form: FormData): Promise<Pr
 /** Switches a provider on for its category; an empty provider goes back to the server's own setting. */
 export async function activateProvider(_: ProviderState, form: FormData): Promise<ProviderState> {
   const { category, provider } = target(form);
+  let pending = false;
   try {
-    await api(`/admin/providers/${category}/active`, { method: 'POST', body: { provider: provider || null } });
+    pending = isPending(
+      await api(`/admin/providers/${category}/active`, { method: 'POST', body: { provider: provider || null } }),
+    );
   } catch (error) {
     return { error: messageOf(error) };
   }
+  if (pending) redirect(ASKED);
   back(category, provider, provider ? 'on' : 'off');
   return {};
 }

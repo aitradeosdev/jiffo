@@ -82,7 +82,8 @@ export class SettingsAdminService {
    * new errands use this one. `basedOn` is the version the admin edited, so two owners editing at once
    * can't overwrite each other.
    */
-  async saveSettings(admin: AdminContext, code: string, input: { basedOn: number; settings: unknown; note: string }) {
+  /** The settings checked: their shape, and that customers can still add money and both sides can verify. */
+  private async validated(code: string, input: { settings: unknown }) {
     // Customers verify with a number and a selfie: an ID document for them is refused, not quietly dropped.
     const asked = (input.settings as { identity?: { customerIdTypes?: unknown } } | null)?.identity?.customerIdTypes;
     if (Array.isArray(asked) && asked.some((t) => !(CUSTOMER_ID_TYPES as readonly unknown[]).includes(t))) {
@@ -129,6 +130,33 @@ export class SettingsAdminService {
       }
     }
     await this.country(code);
+    return parsed.data;
+  }
+
+  /**
+   * A settings change checked as if saved, without saving: what a second admin is asked to approve
+   * (docs/security-plan.md, D4, X10). Says what it changes.
+   */
+  async settingsRequest(code: string, input: { basedOn: number; settings: unknown; note: string }) {
+    const parsed = await this.validated(code, input);
+    const [latest] = await this.db
+      .select()
+      .from(settingsVersions)
+      .where(eq(settingsVersions.countryCode, code))
+      .orderBy(desc(settingsVersions.version))
+      .limit(1);
+    if (!latest) throw notFound('settings_missing', `No settings saved for ${code}`);
+    if (latest.version !== input.basedOn) {
+      throw conflict('settings_changed', 'Someone saved newer settings. Reload and make your change again.', {
+        version: latest.version,
+      });
+    }
+    const before = CountrySettingsSchema.safeParse(latest.data);
+    return { changes: settingChanges(before.success ? before.data : latest.data, parsed), version: latest.version };
+  }
+
+  async saveSettings(admin: AdminContext, code: string, input: { basedOn: number; settings: unknown; note: string }) {
+    const parsed = await this.validated(code, input);
     return this.db.transaction(async (tx) => {
       // One save at a time per country: a second save made at the same moment then sees the first's version.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'settings:' + code}))`);
@@ -145,13 +173,13 @@ export class SettingsAdminService {
         });
       }
       const before = CountrySettingsSchema.safeParse(latest.data);
-      const changes = settingChanges(before.success ? before.data : latest.data, parsed.data);
+      const changes = settingChanges(before.success ? before.data : latest.data, parsed);
       if (changes.length === 0) return { version: latest.version, changes };
       const version = latest.version + 1;
       await tx.insert(settingsVersions).values({
         countryCode: code,
         version,
-        data: parsed.data as CountrySettings,
+        data: parsed as CountrySettings,
         createdBy: admin.adminId,
       });
       await this.audit.record(tx, admin, {

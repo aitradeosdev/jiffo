@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OtpService } from '../src/auth/otp.service';
 import { sha256 } from '../src/common/crypto';
 import { devices, otpChallenges, refreshTokens, sessions } from '../src/db/schema';
-import { adminAs, createTestApp, randomIp, randomPhone, signIn, type TestApp } from './helpers';
+import { adminAs, createTestApp, randomIp, randomPhone, signIn, type TestApp, approved } from './helpers';
 
 const device = () => ({ key: randomUUID(), platform: 'ios' as const });
 
@@ -281,11 +281,16 @@ describe('phone sign-in', () => {
       const now = await read();
       const settings = structuredClone(now.settings);
       settings.security.smsCodesDailyAlert = smsCodesDailyAlert;
-      await request(t.http)
-        .post('/v1/admin/settings?country=NG')
-        .set(owner.headers)
-        .send({ basedOn: now.version, settings, note: 'SMS alert level for a test' })
-        .expect(200);
+      expect(
+        (
+          await approved(t, 'owner', (h) =>
+            request(t.http)
+              .post('/v1/admin/settings?country=NG')
+              .set(h)
+              .send({ basedOn: now.version, settings, note: 'SMS alert level for a test' }),
+          )
+        ).status,
+      ).toBe(200);
     };
     const before = (await read()).settings.security.smsCodesDailyAlert as number;
     await save(1);

@@ -31,6 +31,9 @@ export const DEFAULT_SECURITY_SETTINGS = {
   boardNearKm: 5,
   ownAccountTriesPerDay: 3,
   smsCodesDailyAlert: 5_000,
+  disputeSplitApprovalKobo: 2_000_000,
+  busyAgentErrands: 50,
+  approvalExpiryHours: 72,
 };
 
 /**
@@ -157,6 +160,20 @@ export const CountrySettingsSchema = z.object({
       ownAccountTriesPerDay: z.number().int().min(1).max(20).default(3),
       /** Sign-in codes sent in the country in a day above which finance hears of it: each is a paid SMS. */
       smsCodesDailyAlert: z.number().int().min(1).max(1_000_000).default(5_000),
+      /**
+       * A dispute split paying the agent more than this (fee, items and wallet charge together) needs a second
+       * admin's approval (D4, E7). 0 means every split does.
+       */
+      disputeSplitApprovalKobo: kobo.default(2_000_000),
+      /** Suspending an agent with at least this many completed errands needs a second admin's approval (D4). */
+      busyAgentErrands: z.number().int().min(1).max(100_000).default(50),
+      /** How long a change waits for a second admin before it lapses and must be asked for again. */
+      approvalExpiryHours: z
+        .number()
+        .int()
+        .min(1)
+        .max(24 * 14)
+        .default(72),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
 });

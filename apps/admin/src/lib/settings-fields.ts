@@ -236,6 +236,24 @@ export const SECTIONS: Section[] = [
         help: 'Refusals and times the bank could not be reached both count. After this many, the customer waits a day or contacts support.',
       },
       {
+        path: 'security.disputeSplitApprovalKobo',
+        label: 'A dispute split needs a second admin when it pays the agent more than',
+        kind: 'naira',
+        help: 'The fee, the items and any charge to the customer together. ₦0 means every split needs one.',
+      },
+      {
+        path: 'security.busyAgentErrands',
+        label: 'Suspending an agent needs a second admin once they have completed',
+        kind: 'count',
+        help: 'Errands. A newer agent is suspended at once.',
+      },
+      {
+        path: 'security.approvalExpiryHours',
+        label: 'A change waiting for a second admin lapses after',
+        kind: 'hours',
+        help: 'Hours. It must then be asked for again.',
+      },
+      {
         path: 'security.smsCodesDailyAlert',
         label: 'Alert when sign-in codes sent in a day pass',
         kind: 'count',

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
-import type { ErrandState } from '@jiffo/shared';
+import { adminErrandPermission, type ErrandState } from '@jiffo/shared';
 import { ChatList, WHO, type ChatMessage } from '@/components/chat-list';
 import { Badge, Card, Notice } from '@/components/ui';
 import { api, ApiError, getCountry, getMe } from '@/lib/api';
@@ -102,7 +102,9 @@ export default async function ErrandPage({
   const time = (iso: string) => dateTime(iso, country.timezone);
   const e = d.errand;
   const status = STATUS[e.status];
-  const canAct = me.permissions.includes('operate') && d.actions.length > 0;
+  // Only the actions this admin's role allows: stepping in needs errands, settling a dispute needs disputes.
+  const actions = d.actions.filter((a) => me.permissions.includes(adminErrandPermission(a)));
+  const canAct = actions.length > 0;
 
   /** The useful facts an event carried, in words. */
   const factsOf = (ev: Detail['events'][number]): ReactNode[] => {
@@ -213,7 +215,7 @@ export default async function ErrandPage({
                 key={e.version}
                 id={e.id}
                 version={e.version}
-                actions={d.actions}
+                actions={actions}
                 facts={{
                   currency: country.currency,
                   heldFeeKobo: d.money.heldFeeKobo,

@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { api, ApiError, messageOf } from '@/lib/api';
+import { api, ApiError, ASKED, isPending, messageOf } from '@/lib/api';
 import { nairaToKobo } from '@/lib/format';
 
 export interface PersonState {
@@ -31,8 +31,9 @@ export async function adjustBalance(_: PersonState, form: FormData): Promise<Per
   const amountKobo = nairaToKobo(String(form.get('amount') ?? ''));
   if (!(amountKobo > 0)) return { error: 'Enter an amount' };
   const errandId = String(form.get('errandId') ?? '');
+  let pending = false;
   try {
-    const res = await api<{ posted: boolean }>('/admin/money/adjustments', {
+    const res = await api<{ posted?: boolean }>('/admin/money/adjustments', {
       method: 'POST',
       body: {
         personId: id,
@@ -44,11 +45,13 @@ export async function adjustBalance(_: PersonState, form: FormData): Promise<Per
         ...(errandId ? { errandId } : {}),
       },
     });
+    pending = isPending(res);
     // The same form was already saved (a retry after a lost answer): say so rather than claim a new change.
-    if (!res.posted) return { error: 'This adjustment was already saved. Refresh the page to see it.' };
+    if (!pending && !res.posted) return { error: 'This adjustment was already saved. Refresh the page to see it.' };
   } catch (error) {
     return { error: messageOf(error) };
   }
+  if (pending) redirect(ASKED);
   back(id, 'adjust');
   return {};
 }
@@ -56,17 +59,20 @@ export async function adjustBalance(_: PersonState, form: FormData): Promise<Per
 export async function changeAccess(_: PersonState, form: FormData): Promise<PersonState> {
   const id = String(form.get('id') ?? '');
   const what = form.get('what') === 'reactivate' ? 'reactivate' : 'suspend';
+  let pending = false;
   try {
-    await api(`/admin/people/${encodeURIComponent(id)}/${what}`, {
+    const res = await api(`/admin/people/${encodeURIComponent(id)}/${what}`, {
       method: 'POST',
       body: { note: String(form.get('note') ?? '') },
     });
+    pending = isPending(res);
   } catch (error) {
     if (error instanceof ApiError && error.code === 'has_live_errands') {
       return { error: error.message, errandIds: (error.details.errandIds as string[] | undefined) ?? [] };
     }
     return { error: messageOf(error) };
   }
+  if (pending) redirect(ASKED);
   back(id, what);
   return {};
 }

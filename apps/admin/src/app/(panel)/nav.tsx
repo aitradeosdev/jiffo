@@ -8,6 +8,8 @@ export interface NavItem {
   href: string;
   label: string;
   icon: ReactNode;
+  /** A number to show beside the label, such as requests waiting for this admin. */
+  count?: number;
 }
 
 /** The panel's sections. The current one is marked for screen readers as well as drawn darker. */
@@ -28,6 +30,14 @@ export function Nav({ items }: { items: NavItem[] }) {
           >
             {item.icon}
             {item.label}
+            {item.count ? (
+              <span
+                className="ml-auto rounded-full bg-brand-soft px-2 text-[12px] font-bold text-brand-ink"
+                aria-label={`${item.count} waiting`}
+              >
+                {item.count}
+              </span>
+            ) : null}
           </Link>
         );
       })}

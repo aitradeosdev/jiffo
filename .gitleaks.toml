@@ -1,6 +1,6 @@
-# Secret scanning (docs/security-plan.md, S2): gitleaks' own rules. The one exception is a made-up key in a
-# test, and only one that says so (test, fake, example, dummy). A real-looking key anywhere, tests and example
-# files included, fails the Security run.
+# Secret scanning (docs/security-plan.md, S2): gitleaks' own rules. A real-looking key anywhere, tests and
+# example files included, fails the Security run. A made-up key a test needs is marked on its own line with a
+# `gitleaks:allow` comment; a finding already in the history that was checked goes in .gitleaksignore.
 [extend]
 useDefault = true
 

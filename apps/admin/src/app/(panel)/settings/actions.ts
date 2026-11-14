@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { api, messageOf } from '@/lib/api';
+import { api, ASKED, isPending, messageOf } from '@/lib/api';
 
 export interface SaveState {
   error?: string;
@@ -11,9 +11,10 @@ export interface SaveState {
 
 export async function saveSettings(_: SaveState, form: FormData): Promise<SaveState> {
   const country = String(form.get('country') ?? '');
-  let version: number;
+  let version = 0;
+  let pending = false;
   try {
-    const res = await api<{ version: number }>(`/admin/settings?country=${encodeURIComponent(country)}`, {
+    const res = await api<{ version?: number }>(`/admin/settings?country=${encodeURIComponent(country)}`, {
       method: 'POST',
       body: {
         basedOn: Number(form.get('basedOn')),
@@ -21,12 +22,15 @@ export async function saveSettings(_: SaveState, form: FormData): Promise<SaveSt
         note: String(form.get('note') ?? ''),
       },
     });
-    version = res.version;
+    pending = isPending(res);
+    version = res.version ?? 0;
   } catch (error) {
     const message = messageOf(error);
     const issues = (error as { details?: { issues?: SaveState['issues'] } }).details?.issues;
     return { error: message, issues };
   }
+  // Settings changes wait for a second owner (docs/security-plan.md, D4, X10).
+  if (pending) redirect(ASKED);
   redirect(`/settings?saved=${version}`);
 }
 

@@ -9,8 +9,11 @@ import { can, type Permission } from './permissions';
 import type { AdminContext, AdminRequest, ClientInfo } from './admin.types';
 
 export const PERMISSION_KEY = 'jiffo:admin-permission';
-/** The permission a route needs. Every admin route names one; 'read' is the least. */
-export const Needs = (permission: Permission) => SetMetadata(PERMISSION_KEY, permission);
+/**
+ * The permission a route needs: every admin route names at least one, and 'read' is the least. With several,
+ * any one will do, and the service checks which the request itself needs.
+ */
+export const Needs = (...permissions: [Permission, ...Permission[]]) => SetMetadata(PERMISSION_KEY, permissions);
 
 /**
  * The admin's own IP and browser. The panel's server calls the API for the admin, so it passes them on in
@@ -43,12 +46,12 @@ export class AdminGuard implements CanActivate {
     if (scheme?.toLowerCase() !== 'bearer' || !token) throw unauthorized('missing_token', 'Sign in to continue');
     req.admin = await this.auth.authenticate(token, clientOf(req, this.config));
 
-    const needed = this.reflector.getAllAndOverride<Permission | undefined>(PERMISSION_KEY, [
+    const needed = this.reflector.getAllAndOverride<Permission[] | undefined>(PERMISSION_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
     // A route that forgot to say what it needs is closed, not open.
-    if (!needed || !can(req.admin.role as AdminRole, needed)) {
+    if (!needed?.length || !needed.some((p) => can(req.admin!.role as AdminRole, p))) {
       throw forbidden('not_permitted', 'Your role does not allow this');
     }
     return true;

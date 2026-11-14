@@ -10,8 +10,10 @@ import {
   Post,
   Put,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { z } from 'zod';
 import { ADMIN_ROLES } from '../db/schema';
 import { ADMIN_ERRAND_EVENTS } from '../errands/errands.service';
@@ -22,13 +24,23 @@ import { SettingsAdminService } from './settings-admin.service';
 import { ProvidersAdminService } from './providers-admin.service';
 import { APPLICATION_STATUSES, ApplicationsAdminService } from './applications-admin.service';
 import { ID_CHECK_STATUSES, IdChecksAdminService } from './id-checks-admin.service';
-import { AGENT_TIERS, PROVIDER_CATEGORIES } from '@jiffo/shared';
-import { notFound } from '../common/errors';
+import { adminErrandPermission, AGENT_TIERS, PROVIDER_CATEGORIES } from '@jiffo/shared';
+import { forbidden, notFound } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
 import { AdminGuard, CurrentAdmin, Needs } from './admin.guard';
 import { AuditService } from './audit.service';
 import { OverviewService } from './overview.service';
 import { TeamService } from './team.service';
+import { ApprovalRequests } from './approval-requests';
+import { ApprovalsService } from './approvals.service';
+import { can } from './permissions';
+import type { AdminRole } from '../db/schema';
+
+/** A change waiting for a second admin answers 202, with the request; one that ran answers as before. */
+const held = <T>(res: Response, out: T) => {
+  if (out && typeof out === 'object' && 'pending' in out && out.pending) res.status(202);
+  return out;
+};
 import type { AdminContext } from './admin.types';
 
 const AdminId = new ParseUUIDPipe({ exceptionFactory: () => notFound('admin_not_found', 'Teammate not found') });
@@ -110,6 +122,15 @@ const ActBody = z.object({
   split: z.object({ agentKobo: kobo, jiffoKobo: kobo, itemsToAgentKobo: kobo, chargeCustomerKobo: kobo }).optional(),
 });
 const CountryQuery = z.object({ country: z.string().length(2).toUpperCase() });
+const ApprovalsQuery = z.object({
+  done: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+const ApproveBody = z.object({ note: z.string().trim().max(1000).optional() }).default({});
+const RejectBody = z.object({ note: z.string().trim().min(5, 'Say why, in a few words').max(1000) });
 const ProviderCategory = z.enum(PROVIDER_CATEGORIES);
 const ProviderParams = z.object({ category: ProviderCategory, provider: z.string().min(1).max(40) });
 const ProviderBody = z.object({
@@ -166,7 +187,55 @@ export class AdminController {
     private readonly applications: ApplicationsAdminService,
     private readonly idChecks: IdChecksAdminService,
     private readonly providerSettings: ProvidersAdminService,
+    private readonly approvals: ApprovalsService,
+    private readonly gated: ApprovalRequests,
   ) {}
+
+  /* ---------- Approvals: changes waiting for a second admin ---------- */
+
+  @Get('approvals')
+  @Needs('read')
+  listApprovals(
+    @CurrentAdmin() admin: AdminContext,
+    @Query(new ZodBody(ApprovalsQuery)) query: z.infer<typeof ApprovalsQuery>,
+  ) {
+    return this.approvals.list(admin, query);
+  }
+
+  @Get('approvals/waiting')
+  @Needs('read')
+  approvalsWaiting(@CurrentAdmin() admin: AdminContext) {
+    return this.approvals.waitingFor(admin);
+  }
+
+  @Post('approvals/:id/approve')
+  @HttpCode(200)
+  @Needs('read')
+  approve(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodBody(ApproveBody)) body: z.infer<typeof ApproveBody>,
+  ) {
+    return this.approvals.approve(admin, id, body.note);
+  }
+
+  @Post('approvals/:id/reject')
+  @HttpCode(200)
+  @Needs('read')
+  reject(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodBody(RejectBody)) body: z.infer<typeof RejectBody>,
+  ) {
+    return this.approvals.reject(admin, id, body.note);
+  }
+
+  @Post('approvals/:id/cancel')
+  @HttpCode(200)
+  @Needs('read')
+  cancelApproval(@CurrentAdmin() admin: AdminContext, @Param('id', new ParseUUIDPipe()) id: string) {
+    return this.approvals.cancel(admin, id);
+  }
 
   /* ---------- Providers: owners only, as the keys are Jiffo's accounts with them ---------- */
 
@@ -178,12 +247,14 @@ export class AdminController {
 
   @Put('providers/:category/:provider')
   @Needs('settings')
-  saveProvider(
+  async saveProvider(
+    @Res({ passthrough: true }) res: Response,
+
     @CurrentAdmin() admin: AdminContext,
     @Param(new ZodBody(ProviderParams)) params: z.infer<typeof ProviderParams>,
     @Body(new ZodBody(ProviderBody)) body: z.infer<typeof ProviderBody>,
   ) {
-    return this.providerSettings.save(admin, params.category, params.provider, body);
+    return held(res, await this.gated.providerSave(admin, params.category, params.provider, body));
   }
 
   @Post('providers/:category/:provider/test')
@@ -219,12 +290,14 @@ export class AdminController {
   @Post('providers/:category/active')
   @HttpCode(200)
   @Needs('settings')
-  activateProvider(
+  async activateProvider(
+    @Res({ passthrough: true }) res: Response,
+
     @CurrentAdmin() admin: AdminContext,
     @Param('category', new ZodBody(ProviderCategory)) category: z.infer<typeof ProviderCategory>,
     @Body(new ZodBody(ActivateBody)) body: z.infer<typeof ActivateBody>,
   ) {
-    return this.providerSettings.activate(admin, category, body.provider);
+    return held(res, await this.gated.providerSwitch(admin, category, body.provider));
   }
 
   @Get('settings')
@@ -237,12 +310,14 @@ export class AdminController {
   @Post('settings')
   @HttpCode(200)
   @Needs('settings')
-  saveSettings(
+  async saveSettings(
+    @Res({ passthrough: true }) res: Response,
+
     @CurrentAdmin() admin: AdminContext,
     @Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>,
     @Body(new ZodBody(SaveSettingsBody)) body: z.infer<typeof SaveSettingsBody>,
   ) {
-    return this.settingsAdmin.saveSettings(admin, query.country, body);
+    return held(res, await this.gated.settingsChange(admin, query.country, body));
   }
 
   @Get('categories')
@@ -368,8 +443,12 @@ export class AdminController {
   @Post('money/adjustments')
   @HttpCode(200)
   @Needs('money')
-  adjust(@CurrentAdmin() admin: AdminContext, @Body(new ZodBody(AdjustBody)) body: z.infer<typeof AdjustBody>) {
-    return this.money.adjust(admin, body);
+  async adjust(
+    @Res({ passthrough: true }) res: Response,
+    @CurrentAdmin() admin: AdminContext,
+    @Body(new ZodBody(AdjustBody)) body: z.infer<typeof AdjustBody>,
+  ) {
+    return held(res, await this.gated.adjustment(admin, body));
   }
 
   @Get('applications')
@@ -387,7 +466,7 @@ export class AdminController {
   /** Approve or decline an agent application the checks sent to review, or reopen a declined one. */
   @Post('people/:id/application')
   @HttpCode(200)
-  @Needs('operate')
+  @Needs('verify')
   decideApplication(
     @CurrentAdmin() admin: AdminContext,
     @Param('id', PersonId) id: string,
@@ -411,7 +490,7 @@ export class AdminController {
   /** Verify or decline a customer's ID check the provider sent to review, or reopen a declined one. */
   @Post('people/:id/identity')
   @HttpCode(200)
-  @Needs('operate')
+  @Needs('verify')
   decideIdentity(
     @CurrentAdmin() admin: AdminContext,
     @Param('id', PersonId) id: string,
@@ -434,7 +513,7 @@ export class AdminController {
 
   @Post('people/:id/tier')
   @HttpCode(200)
-  @Needs('operate')
+  @Needs('tiers')
   setTier(
     @CurrentAdmin() admin: AdminContext,
     @Param('id', PersonId) id: string,
@@ -445,18 +524,20 @@ export class AdminController {
 
   @Post('people/:id/suspend')
   @HttpCode(200)
-  @Needs('operate')
-  suspend(
+  @Needs('suspend')
+  async suspend(
+    @Res({ passthrough: true }) res: Response,
+
     @CurrentAdmin() admin: AdminContext,
     @Param('id', PersonId) id: string,
     @Body(new ZodBody(NoteBody)) body: z.infer<typeof NoteBody>,
   ) {
-    return this.people.suspend(admin, id, body.note);
+    return held(res, await this.gated.suspend(admin, id, body.note));
   }
 
   @Post('people/:id/reactivate')
   @HttpCode(200)
-  @Needs('operate')
+  @Needs('suspend')
   reactivate(
     @CurrentAdmin() admin: AdminContext,
     @Param('id', PersonId) id: string,
@@ -486,13 +567,19 @@ export class AdminController {
   /** Step in, arrange a redelivery, or settle a dispute. */
   @Post('errands/:id/actions')
   @HttpCode(200)
-  @Needs('operate')
-  act(
+  @Needs('errands', 'disputes')
+  async act(
+    @Res({ passthrough: true }) res: Response,
+
     @CurrentAdmin() admin: AdminContext,
     @Param('id', ErrandId) id: string,
     @Body(new ZodBody(ActBody)) body: z.infer<typeof ActBody>,
   ) {
-    return this.errands.act(admin, id, body);
+    // Stepping in needs errands; settling a dispute needs disputes.
+    if (!can(admin.role as AdminRole, adminErrandPermission(body.event))) {
+      throw forbidden('not_permitted', 'Your role does not allow this');
+    }
+    return held(res, await this.gated.errandAction(admin, id, body));
   }
 
   @Get('overview')
@@ -509,18 +596,24 @@ export class AdminController {
 
   @Post('team')
   @Needs('team')
-  invite(@CurrentAdmin() admin: AdminContext, @Body(new ZodBody(InviteBody)) body: z.infer<typeof InviteBody>) {
-    return this.team.invite(admin, body);
+  async invite(
+    @Res({ passthrough: true }) res: Response,
+    @CurrentAdmin() admin: AdminContext,
+    @Body(new ZodBody(InviteBody)) body: z.infer<typeof InviteBody>,
+  ) {
+    return held(res, await this.gated.invite(admin, body));
   }
 
   @Patch('team/:id')
   @Needs('team')
-  update(
+  async update(
+    @Res({ passthrough: true }) res: Response,
+
     @CurrentAdmin() admin: AdminContext,
     @Param('id', AdminId) id: string,
     @Body(new ZodBody(UpdateBody)) body: z.infer<typeof UpdateBody>,
   ) {
-    return this.team.update(admin, id, body);
+    return held(res, await this.gated.teamChange(admin, id, body));
   }
 
   /** A new invite link, clearing their password and authenticator app. */

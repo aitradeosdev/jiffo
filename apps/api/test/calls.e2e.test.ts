@@ -6,7 +6,17 @@ import { ChatService } from '../src/chat/chat.service';
 import { errandCalls, errands, providerSettings } from '../src/db/schema';
 import { AfricasTalkingCallsAdapter } from '../src/adapters/calls';
 import { ProvidersService } from '../src/providers/providers.service';
-import { act, adminAs, createErrand, createTestApp, fund, signIn, type Person, type TestApp } from './helpers';
+import {
+  act,
+  adminAs,
+  createErrand,
+  createTestApp,
+  fund,
+  signIn,
+  type Person,
+  type TestApp,
+  switchProvider,
+} from './helpers';
 
 describe('masked calls', () => {
   let t: TestApp;
@@ -118,7 +128,7 @@ describe('masked calls', () => {
         .expect(200);
       vi.spyOn(AfricasTalkingCallsAdapter.prototype, 'check').mockResolvedValue('Connected');
       await panel('post', '/calls/africastalking/test').expect(200);
-      await panel('post', '/calls/active').send({ provider: 'africastalking' }).expect(200);
+      await switchProvider(t, 'calls', 'africastalking');
       const listed = await request(t.http).get('/v1/admin/providers').set(admin.headers).expect(200);
       const url: string = listed.body.categories
         .find((c: { category: string }) => c.category === 'calls')

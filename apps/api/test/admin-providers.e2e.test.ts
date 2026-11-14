@@ -7,7 +7,17 @@ import { FlutterwavePaymentsAdapter, PaystackPaymentsAdapter } from '../src/adap
 import { adminAudit, deposits, payoutAccounts, payouts, providerSettings } from '../src/db/schema';
 import { ProvidersService } from '../src/providers/providers.service';
 import { SecretBox } from '../src/providers/secret-box';
-import { adminAs, balanceOf, createTestApp, deliverWebhook, randomPhone, signIn, type TestApp } from './helpers';
+import {
+  adminAs,
+  approved,
+  balanceOf,
+  createTestApp,
+  deliverWebhook,
+  randomPhone,
+  signIn,
+  type TestApp,
+  switchProvider,
+} from './helpers';
 
 describe('admin: providers', () => {
   let t: TestApp;
@@ -81,7 +91,7 @@ describe('admin: providers', () => {
 
     vi.spyOn(TermiiMessagingAdapter.prototype, 'check').mockResolvedValue('Connected. Balance: 500 NGN');
     expect((await api('post', '/sms/termii/test')).body).toEqual({ ok: true, message: 'Connected. Balance: 500 NGN' });
-    await api('post', '/sms/active').send({ provider: 'termii' }).expect(200);
+    await switchProvider(t, 'sms', 'termii');
 
     const sent = vi.spyOn(TermiiMessagingAdapter.prototype, 'sendOtp').mockResolvedValue();
     const phone = randomPhone();
@@ -90,7 +100,7 @@ describe('admin: providers', () => {
     expect(t.messaging.lastCodeFor(phone)).toBeUndefined();
 
     // A changed key needs a new test before it can be switched on again.
-    await api('post', '/sms/active').send({ provider: null }).expect(200);
+    await switchProvider(t, 'sms', null);
     await api('put', '/sms/termii')
       .send({ secrets: { apiKey: 'TL-new-key-9876' } })
       .expect(200);
@@ -151,26 +161,24 @@ describe('admin: providers', () => {
       .set(agent.headers)
       .send({ bankCode: '058', accountNumber: '0222333444' })
       .expect(200);
-    const finance = await adminAs(t, 'finance');
-    await request(t.http)
-      .post('/v1/admin/money/adjustments')
-      .set(finance.headers)
-      .send({
+    const credited = await approved(t, 'finance', (h) =>
+      request(t.http).post('/v1/admin/money/adjustments').set(h).send({
         personId: agent.userId,
         account: 'agent_available',
         direction: 'credit',
         amountKobo: 300_000,
         note: 'Test earnings for the payout switch',
         requestId: crypto.randomUUID(),
-      })
-      .expect(200);
+      }),
+    );
+    expect(credited.status).toBe(200);
 
     await api('put', '/payments/paystack')
       .send({ secrets: { secretKey: 'sk_test_abcdefgh1234' } })
       .expect(200);
     vi.spyOn(PaystackPaymentsAdapter.prototype, 'balance').mockResolvedValue(1_000_000);
     await api('post', '/payments/paystack/test').expect(200);
-    await api('post', '/payments/active').send({ provider: 'paystack' }).expect(200);
+    await switchProvider(t, 'payments', 'paystack');
 
     const verify = vi.spyOn(PaystackPaymentsAdapter.prototype, 'verifyDeposit');
     const [deposit] = await t.db.select().from(deposits).where(eq(deposits.id, started.body.id));
@@ -198,7 +206,7 @@ describe('admin: providers', () => {
 
     // Paystack can't be removed while it is in use or has a payout to finish.
     expect((await api('delete', '/payments/paystack')).body.error.code).toBe('provider_active');
-    await api('post', '/payments/active').send({ provider: null }).expect(200);
+    await switchProvider(t, 'payments', null);
     expect((await api('delete', '/payments/paystack')).body.error.code).toBe('provider_in_use');
     await t.db.update(payouts).set({ status: 'failed' }).where(eq(payouts.id, payout!.id));
     // A top-up never paid, long past being checked, doesn't keep Paystack's keys.
@@ -219,7 +227,7 @@ describe('admin: providers', () => {
       .expect(200);
     vi.spyOn(FlutterwavePaymentsAdapter.prototype, 'balance').mockResolvedValue(0);
     await api('post', '/payments/flutterwave/test').expect(200);
-    await api('post', '/payments/active').send({ provider: 'flutterwave' }).expect(200);
+    await switchProvider(t, 'payments', 'flutterwave');
 
     vi.spyOn(FlutterwavePaymentsAdapter.prototype, 'createTransferDeposit').mockResolvedValue({
       accountNumber: '7824822527',
@@ -267,6 +275,6 @@ describe('admin: providers', () => {
     expect((await balanceOf(t, customer)).balanceKobo).toBe(0);
     await send('hash-abc-123').expect(200);
     expect((await balanceOf(t, customer)).balanceKobo).toBe(250_000);
-    await api('post', '/payments/active').send({ provider: null }).expect(200);
+    await switchProvider(t, 'payments', null);
   });
 });

@@ -6,7 +6,16 @@ import { SmileIdIdentityAdapter, YouverifyIdentityAdapter } from '../src/adapter
 import { agentApplications, customerVerifications, providerSettings, settingsVersions } from '../src/db/schema';
 import { ProvidersService } from '../src/providers/providers.service';
 import { APP_CONFIG, type AppConfig } from '../src/config/app-config';
-import { adminAs, createTestApp, errandBody, signIn, type Person, type TestApp } from './helpers';
+import {
+  adminAs,
+  createTestApp,
+  errandBody,
+  signIn,
+  type Person,
+  type TestApp,
+  approved,
+  switchProvider,
+} from './helpers';
 
 /** An ID number that is new on every run, ending in the fake provider's code for the path wanted. */
 const unique = (prefix: string, length: number, ending = '4567') =>
@@ -38,11 +47,16 @@ describe('identity checks: ID types, and customers', () => {
     const now = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
     const settings = structuredClone(now.settings);
     Object.assign(settings.identity, changes);
-    await request(t.http)
-      .post('/v1/admin/settings?country=NG')
-      .set(owner.headers)
-      .send({ basedOn: now.version, settings, note: 'ID types for a test' })
-      .expect(200);
+    expect(
+      (
+        await approved(t, 'owner', (h) =>
+          request(t.http)
+            .post('/v1/admin/settings?country=NG')
+            .set(h)
+            .send({ basedOn: now.version, settings, note: 'ID types for a test' }),
+        )
+      ).status,
+    ).toBe(200);
   }
 
   const me = (who: Person) => request(t.http).get('/v1/me/identity').set(who.headers);
@@ -172,10 +186,12 @@ describe('identity checks: ID types, and customers', () => {
       const now = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
       const settings = structuredClone(now.settings);
       Object.assign(settings.identity, changes);
-      return request(t.http)
-        .post('/v1/admin/settings?country=NG')
-        .set(owner.headers)
-        .send({ basedOn: now.version, settings, note: 'Trying ID settings' });
+      return approved(t, 'owner', (h) =>
+        request(t.http)
+          .post('/v1/admin/settings?country=NG')
+          .set(h)
+          .send({ basedOn: now.version, settings, note: 'Trying ID settings' }),
+      );
     };
     const docs = await save({ customerIdTypes: ['nin', 'passport'] });
     expect(docs.status).toBe(400);
@@ -189,13 +205,13 @@ describe('identity checks: ID types, and customers', () => {
       .expect(200);
     vi.spyOn(YouverifyIdentityAdapter.prototype, 'check').mockResolvedValue('Connected');
     await panel('post', '/identity/youverify/test').expect(200);
-    await panel('post', '/identity/active').send({ provider: 'youverify' }).expect(200);
+    await switchProvider(t, 'identity', 'youverify');
     // Youverify checks the NIN (and a licence) with a selfie, not the BVN: customers left with only the BVN
     // couldn't verify.
     const none = await save({ customerIdTypes: ['bvn'] });
     expect(none.status).toBe(400);
     expect(none.body.error.issues[0].message).toMatch(/Youverify checks NIN slip or card/);
-    await panel('post', '/identity/active').send({ provider: null }).expect(200);
+    await switchProvider(t, 'identity', null);
   });
 
   it('still knows NINs fingerprinted before other IDs, so a second account on one is caught', async () => {
@@ -232,7 +248,7 @@ describe('identity checks: ID types, and customers', () => {
       .expect(200);
     vi.spyOn(SmileIdIdentityAdapter.prototype, 'check').mockResolvedValue('Connected');
     await panel('post', '/identity/smileid/test').expect(200);
-    await panel('post', '/identity/active').send({ provider: 'smileid' }).expect(200);
+    await switchProvider(t, 'identity', 'smileid');
 
     // Admin accepts only the NIN from agents, but requires their BVN: with Smile ID the BVN is the ID.
     await identitySettings({ agentIdTypes: ['nin'], requireBvnForAgents: true });
@@ -313,6 +329,6 @@ describe('identity checks: ID types, and customers', () => {
       .get('/v1/identity/done?for=customer')
       .expect(200)
       .expect(/jiffo:\/\/identity-done/);
-    await panel('post', '/identity/active').send({ provider: null }).expect(200);
+    await switchProvider(t, 'identity', null);
   });
 });

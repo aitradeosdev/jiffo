@@ -3,7 +3,16 @@ import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { customerVerifications, deposits, fixedAccounts } from '../src/db/schema';
-import { adminAs, balanceOf, createTestApp, deliverWebhook, signIn, type Person, type TestApp } from './helpers';
+import {
+  adminAs,
+  balanceOf,
+  createTestApp,
+  deliverWebhook,
+  signIn,
+  type Person,
+  type TestApp,
+  approved,
+} from './helpers';
 
 /** Abuse cases for top-ups: forged routes, unknown references, races, and own account numbers. */
 describe('top-ups under abuse', () => {
@@ -27,11 +36,16 @@ describe('top-ups under abuse', () => {
     const now = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
     const settings = structuredClone(now.settings);
     settings.topUps = { oneTimeAccount, fixedAccount };
-    await request(t.http)
-      .post('/v1/admin/settings?country=NG')
-      .set(owner.headers)
-      .send({ basedOn: now.version, settings, note: 'Ways to add money for a test' })
-      .expect(200);
+    expect(
+      (
+        await approved(t, 'owner', (h) =>
+          request(t.http)
+            .post('/v1/admin/settings?country=NG')
+            .set(h)
+            .send({ basedOn: now.version, settings, note: 'Ways to add money for a test' }),
+        )
+      ).status,
+    ).toBe(200);
   }
   const alertsOf = async (kind: string) =>
     (

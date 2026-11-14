@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
-import { DB, type Db } from '../db/database.module';
+import { DB, type Db, type Tx } from '../db/database.module';
 import {
   agentApplications,
   alerts,
@@ -465,6 +465,51 @@ export class MoneyAdminService {
   }
 
   /**
+   * An adjustment checked before it waits for a second admin: the person, that they have that account, that
+   * the errand is theirs, and for a debit that the account holds enough now. It is checked again when it runs.
+   */
+  async checkAdjustment(input: AdjustmentInput) {
+    return this.db.transaction(async (tx) => {
+      const person = await this.checked(tx, input, false);
+      if (input.direction === 'debit') {
+        const ref: AccountRef = { type: input.account, ownerId: person.id };
+        if ((await this.ledger.balance(tx, ref, person.countryCode)) < input.amountKobo) {
+          throw conflict('balance_too_low', "That's more than the account holds");
+        }
+      }
+      return person;
+    });
+  }
+
+  private async checked(tx: Tx, input: AdjustmentInput, lock: boolean) {
+    const query = tx.select().from(users).where(eq(users.id, input.personId));
+    const [person] = lock ? await query.for('update') : await query;
+    if (!person) throw notFound('person_not_found', 'Person not found');
+    const app = input.account === 'customer_wallet' ? 'customer' : 'agent';
+    const [usesApp] = await tx
+      .select({ id: devices.id })
+      .from(devices)
+      .where(and(eq(devices.userId, person.id), eq(devices.app, app)))
+      .limit(1);
+    if (!usesApp) {
+      throw unprocessable(
+        'wrong_account',
+        `This person has no ${app === 'customer' ? 'customer wallet' : 'agent balance'}`,
+      );
+    }
+    if (input.errandId) {
+      const [errand] = await tx
+        .select({ id: errands.id })
+        .from(errands)
+        .where(
+          and(eq(errands.id, input.errandId), or(eq(errands.customerId, person.id), eq(errands.agentId, person.id))),
+        );
+      if (!errand) throw unprocessable('errand_not_theirs', 'That errand is not one of theirs');
+    }
+    return person;
+  }
+
+  /**
    * Finance corrects a balance by hand: a credit is paid by Jiffo out of revenue (a goodwill credit or a
    * refund after the fact); a debit takes money back into revenue (recovering an overpayment). A debit
    * can't take more than the account holds. Every adjustment needs a reason and is audited; a repeated
@@ -472,29 +517,7 @@ export class MoneyAdminService {
    */
   async adjust(admin: AdminContext, input: AdjustmentInput) {
     return this.db.transaction(async (tx) => {
-      const [person] = await tx.select().from(users).where(eq(users.id, input.personId)).for('update');
-      if (!person) throw notFound('person_not_found', 'Person not found');
-      const app = input.account === 'customer_wallet' ? 'customer' : 'agent';
-      const [usesApp] = await tx
-        .select({ id: devices.id })
-        .from(devices)
-        .where(and(eq(devices.userId, person.id), eq(devices.app, app)))
-        .limit(1);
-      if (!usesApp) {
-        throw unprocessable(
-          'wrong_account',
-          `This person has no ${app === 'customer' ? 'customer wallet' : 'agent balance'}`,
-        );
-      }
-      if (input.errandId) {
-        const [errand] = await tx
-          .select({ id: errands.id })
-          .from(errands)
-          .where(
-            and(eq(errands.id, input.errandId), or(eq(errands.customerId, person.id), eq(errands.agentId, person.id))),
-          );
-        if (!errand) throw unprocessable('errand_not_theirs', 'That errand is not one of theirs');
-      }
+      const person = await this.checked(tx, input, true);
       const [{ currency } = { currency: 'NGN' }] = await tx
         .select({ currency: countries.currency })
         .from(countries)

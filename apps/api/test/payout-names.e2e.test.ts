@@ -144,7 +144,7 @@ describe('changing a payout account', () => {
     // Not in finance's list: the application is where it's decided.
     expect((await toCheck()).some((a) => a.person.id === who.userId)).toBe(false);
     await request(t.http).post('/v1/agent/application/submit').set(who.headers).expect(200);
-    const ops = await adminAs(t, 'operations');
+    const ops = await adminAs(t, 'verification');
     const detail = (await request(t.http).get(`/v1/admin/people/${who.userId}`).set(ops.headers).expect(200)).body;
     const bank = detail.agent.application.checks.find((c: { key: string }) => c.key === 'bank');
     expect(bank).toMatchObject({ outcome: 'review', note: expect.stringContaining('Approving the application') });

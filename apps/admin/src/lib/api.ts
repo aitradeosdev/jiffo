@@ -105,3 +105,11 @@ export function messageOf(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   throw error;
 }
+
+/**
+ * A change that waits for a second admin answers { pending: true } (docs/security-plan.md, D4). The panel
+ * then shows the request on the Approvals page rather than claiming it happened.
+ */
+export const isPending = (body: unknown): boolean =>
+  !!body && typeof body === 'object' && (body as { pending?: unknown }).pending === true;
+export const ASKED = '/approvals?done=asked';
