@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { goBack } from '@/nav';
@@ -8,6 +8,7 @@ import { ApiError, errorMessage } from '@/api/client';
 import { useCustomerIdentity } from '@/identity/customer';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { useResource } from '@/api/useResource';
+import { useRealtimeEvent } from '@/realtime/realtime';
 import { naira, parseNaira } from '@/money';
 import { timeLabel } from '@/errands/when';
 import { useColors } from '@/theme/theme';
@@ -52,6 +53,8 @@ interface Bank {
 
 const PRESETS = [200_000, 500_000, 1_000_000, 2_000_000];
 const POLL_MS = 8_000;
+/** The own number's screen hears of transfers live; this check is only in case an event is missed. */
+const OWN_POLL_MS = 20_000;
 
 /**
  * Add money, by bank transfer: to the customer's own account number when they have one (any amount, any
@@ -70,13 +73,16 @@ export default function TopUp() {
   const [deposit, setDeposit] = useState<Deposit | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  // Which number was copied, so another one on screen later never shows as copied.
+  const [copied, setCopied] = useState<string | null>(null);
   const { identity, error: identityError } = useCustomerIdentity();
   const options = useResource<TopUpOptions>('/v1/wallet/top-up');
   // The one-time flow even though the customer has their own number, or the form to get one.
   const [mode, setMode] = useState<'auto' | 'one_time' | 'fixed_form'>('auto');
   const [received, setReceived] = useState<Deposit | null>(null);
-  const opened = useRef(Date.now());
+  // Top-ups already there when the own number showed: any other that lands is new. Ids, not the time, so a
+  // phone clock that is off doesn't matter.
+  const known = useRef<Set<string> | null>(null);
   const kobo = parseNaira(text);
   const valid = kobo !== null && kobo >= min && (max === null || kobo <= max);
   const fixed = options.data?.fixedAccount;
@@ -85,31 +91,47 @@ export default function TopUp() {
   const oneTime = options.data?.oneTimeAccount ?? true;
   const offered = !!fixed?.available && (!own || own.status === 'failed');
 
-  // While the customer's own number is on screen, or being issued, check every few seconds for what changed:
-  // a transfer that landed in it, or the number being ready.
+  const ownStatus = own?.status;
+  const watching = !deposit && !received && mode === 'auto';
+  const setOptions = options.setData;
+
+  /** Looks for a transfer into the own number that landed since it showed. */
+  const checkLanded = useCallback(async () => {
+    const list = await api.get<Deposit[]>('/v1/wallet/deposits');
+    if (!known.current) {
+      known.current = new Set(list.map((d) => d.id));
+      return;
+    }
+    const landed = list.find((d) => d.method === 'fixed' && d.status === 'succeeded' && !known.current!.has(d.id));
+    if (landed) setReceived(landed);
+  }, [api]);
+
+  // While the own number is on screen, or being issued: what changed, from the live event, else a slower check.
   useEffect(() => {
-    if (deposit || received || mode !== 'auto' || !own || own.status === 'failed') return;
-    const timer = setInterval(async () => {
+    if (!watching || (ownStatus !== 'active' && ownStatus !== 'pending')) return;
+    const check = async () => {
       try {
-        if (own.status === 'pending') {
-          options.setData(await api.get<TopUpOptions>('/v1/wallet/top-up'));
-          return;
-        }
-        const list = await api.get<Deposit[]>('/v1/wallet/deposits');
-        const landed = list.find(
-          (d) =>
-            d.method === 'fixed' &&
-            d.status === 'succeeded' &&
-            !!d.completedAt &&
-            new Date(d.completedAt).getTime() >= opened.current - 5_000,
-        );
-        if (landed) setReceived(landed);
+        if (ownStatus === 'pending') setOptions(await api.get<TopUpOptions>('/v1/wallet/top-up'));
+        else await checkLanded();
       } catch {
         // The next check may get through.
       }
-    }, POLL_MS);
+    };
+    if (ownStatus === 'active' && !known.current) check();
+    const timer = setInterval(check, ownStatus === 'pending' ? POLL_MS : OWN_POLL_MS);
     return () => clearInterval(timer);
-  }, [api, deposit, received, mode, own, options]);
+  }, [api, watching, ownStatus, setOptions, checkLanded]);
+
+  useRealtimeEvent<{ reason?: string; depositId?: string }>('wallet.updated', (event) => {
+    // The own number is ready.
+    if (event.reason === 'fixed_account') options.reloadSoon();
+    // A top-up landed: the one-time one on screen, or a transfer into the own number.
+    if (event.depositId && deposit?.id === event.depositId) {
+      api.get<Deposit>(`/v1/wallet/deposits/${event.depositId}`).then(setDeposit, () => undefined);
+    } else if (event.depositId && watching && ownStatus === 'active') {
+      checkLanded().catch(() => undefined);
+    }
+  });
 
   // While the account number is open, check every few seconds whether the transfer has landed.
   useEffect(() => {
@@ -182,7 +204,9 @@ export default function TopUp() {
     );
   }
 
-  if (received) {
+  // A top-up landed: the one-time one, or a transfer into the own number.
+  const landed = received ?? (deposit?.status === 'succeeded' ? deposit : null);
+  if (landed) {
     return (
       <Screen footer={<Button label="Done" onPress={() => goBack()} />}>
         <View style={styles.hero}>
@@ -190,25 +214,7 @@ export default function TopUp() {
             <Icon name="check" size={36} weight={2.8} color={c.onBrand} />
           </View>
           <Text variant="title" accessibilityRole="header" accessibilityLiveRegion="polite">
-            {naira(received.paidKobo ?? received.amountKobo)} received
-          </Text>
-          <Text variant="sub" tone="ink3" style={{ textAlign: 'center' }}>
-            It&apos;s in your wallet and ready for your next errand.
-          </Text>
-        </View>
-      </Screen>
-    );
-  }
-
-  if (deposit?.status === 'succeeded') {
-    return (
-      <Screen footer={<Button label="Done" onPress={() => goBack()} />}>
-        <View style={styles.hero}>
-          <View style={[styles.tick, { backgroundColor: c.brand2 }]}>
-            <Icon name="check" size={36} weight={2.8} color={c.onBrand} />
-          </View>
-          <Text variant="title" accessibilityRole="header" accessibilityLiveRegion="polite">
-            {naira(deposit.paidKobo ?? deposit.amountKobo)} received
+            {naira(landed.paidKobo ?? landed.amountKobo)} received
           </Text>
           <Text variant="sub" tone="ink3" style={{ textAlign: 'center' }}>
             It&apos;s in your wallet and ready for your next errand.
@@ -234,28 +240,20 @@ export default function TopUp() {
           number={deposit.accountNumber}
           bank={deposit.bankName}
           name={deposit.accountName}
-          copied={copied}
-          onCopied={() => setCopied(true)}
+          copied={copied === deposit.accountNumber}
+          onCopied={() => setCopied(deposit.accountNumber)}
         />
-        <View style={styles.steps}>
-          {[
+        <Steps
+          lines={[
             `Open your bank app and send exactly ${naira(deposit.amountKobo)} to the account above.`,
             "It usually shows here within a minute. We'll update this screen when it lands.",
             deposit.expired
               ? 'This account number has expired. If you already sent the money, it will still reach your wallet.'
               : `This account number is for this top-up only, open until ${until}.`,
-          ].map((line, i) => (
-            <View key={i} style={styles.step}>
-              <Text style={[styles.stepNum, { color: c.ink2 }]}>{i + 1}.</Text>
-              <Text
-                style={[styles.stepText, { color: i === 2 && deposit.expired ? c.danger : c.ink2 }]}
-                accessibilityLiveRegion={i === 2 ? 'polite' : undefined}
-              >
-                {line}
-              </Text>
-            </View>
-          ))}
-        </View>
+          ]}
+          live={2}
+          alert={deposit.expired ? 2 : undefined}
+        />
       </Screen>
     );
   }
@@ -285,8 +283,8 @@ export default function TopUp() {
           number={own.accountNumber}
           bank={own.bankName ?? 'Bank'}
           name={own.accountName ?? ''}
-          copied={copied}
-          onCopied={() => setCopied(true)}
+          copied={copied === own.accountNumber}
+          onCopied={() => setCopied(own.accountNumber)}
         />
         <Steps
           lines={[
@@ -440,14 +438,20 @@ function AccountCard({
   );
 }
 
-function Steps({ lines }: { lines: string[] }) {
+/** Numbered steps. `live` is read out when it changes; `alert` is shown as a warning. */
+function Steps({ lines, live, alert }: { lines: string[]; live?: number; alert?: number }) {
   const c = useColors();
   return (
     <View style={styles.steps}>
       {lines.map((line, i) => (
         <View key={i} style={styles.step}>
           <Text style={[styles.stepNum, { color: c.ink2 }]}>{i + 1}.</Text>
-          <Text style={[styles.stepText, { color: c.ink2 }]}>{line}</Text>
+          <Text
+            style={[styles.stepText, { color: i === alert ? c.danger : c.ink2 }]}
+            accessibilityLiveRegion={i === live ? 'polite' : undefined}
+          >
+            {line}
+          </Text>
         </View>
       ))}
     </View>
@@ -506,7 +510,7 @@ function FixedAccountForm({
       footer={
         <View style={{ gap: 8 }}>
           <Button label="Get my account number" onPress={submit} disabled={!ready} loading={busy} />
-          {onBack ? <Button kind="plain" label="Back" onPress={onBack} /> : null}
+          <Button kind="plain" label={onBack ? 'Back' : 'Later'} onPress={onBack ?? (() => goBack())} />
         </View>
       }
     >
@@ -547,6 +551,14 @@ function FixedAccountForm({
             <View>
               <Field label="Bank" value={search} onChangeText={setSearch} placeholder="Search banks" />
               {banks.loading && !banks.data ? <ActivityIndicator /> : null}
+              {banks.error && !banks.data ? (
+                <View style={{ gap: 8, alignItems: 'flex-start' }}>
+                  <Text variant="note" tone="danger">
+                    Couldn&apos;t load the list of banks. Check your connection.
+                  </Text>
+                  <Button kind="secondary" small label="Try again" onPress={banks.reload} />
+                </View>
+              ) : null}
               {matches.map((b) => (
                 <Row key={b.code} icon="bank" title={b.name} onPress={() => setBank(b)} />
               ))}
@@ -567,10 +579,12 @@ function FixedAccountForm({
           {error ?? failure}
         </Text>
       ) : null}
-      <Text variant="note" tone="ink3">
-        Your BVN goes to our payments provider to issue the account. Jiffo doesn&apos;t keep it, and it doesn&apos;t
-        give anyone access to your bank account.
-      </Text>
+      {needs === 'nothing' ? null : (
+        <Text variant="note" tone="ink3">
+          Your BVN goes to our payments provider to issue the account. Jiffo doesn&apos;t keep it, and it doesn&apos;t
+          give anyone access to your bank account.
+        </Text>
+      )}
     </Screen>
   );
 }

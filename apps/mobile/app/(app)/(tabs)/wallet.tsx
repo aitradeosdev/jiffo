@@ -168,7 +168,7 @@ function Wallet() {
           <Row
             icon="bank"
             title="Add money by bank transfer"
-            subtitle="To your own account number, or one made for a top-up, from any bank app"
+            subtitle="From any bank app, to the account number Add money gives you"
             subtitleLines={3}
           />
           <Row
