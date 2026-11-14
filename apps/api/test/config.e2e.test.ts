@@ -16,7 +16,8 @@ describe('country config', () => {
   it('serves the public config for Nigeria', async () => {
     const res = await request(t.http).get('/v1/config/ng').expect(200);
     expect(res.body.country).toMatchObject({ code: 'NG', currency: 'NGN', phonePrefix: '+234' });
-    expect(res.body.settingsVersion).toBe(1);
+    // Other files in the run may have saved newer versions.
+    expect(res.body.settingsVersion).toBeGreaterThanOrEqual(1);
     expect(res.body.features).toEqual({ calls: true });
     expect(res.body.states).toHaveLength(37);
     expect(res.body.states.map((s: { code: string }) => s.code)).toContain('FC');

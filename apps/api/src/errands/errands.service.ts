@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { and, desc, eq, gt, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import {
+  AGENT_OUT_STATES,
   canRevealPin,
   commissionBpsFor,
   splitFeeEscrow,
@@ -19,8 +20,8 @@ import { DB, type Db, type Tx } from '../db/database.module';
 import { earningHolds, errandEvents, errandRatings, errandStops, errands, journalEntries, users } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
 import type { AuthContext } from '../auth/auth.types';
-import { decrypt, encrypt, numericCode, safeEqual } from '../common/crypto';
-import { ApiError, badRequest, conflict, forbidden, locked, notFound, unprocessable } from '../common/errors';
+import { decrypt, encrypt, errandPinKey, numericCode, pinDigest, safeEqual } from '../common/crypto';
+import { ApiError, badRequest, conflict, forbidden, locked, notFound, tooMany, unprocessable } from '../common/errors';
 import { ERRAND_TIMERS, type ErrandTimerJob, type ErrandTimers } from '../timers/errand-timers';
 import { CustomerFundsLow, WalletService, type DisputeSplit } from '../money/wallet.service';
 import { AgentsService } from '../agents/agents.service';
@@ -48,6 +49,16 @@ interface EventEffect {
   patch: Patch;
   record: Record<string, unknown>;
 }
+
+/** The last wrong hand-off PIN: the errand is frozen for support instead of the entry being refused. */
+class PinLock {
+  constructor(readonly attempts: number) {}
+}
+
+/** A position older than this doesn't show the agent is at the drop-off. */
+const LOCATION_FRESH_MS = 5 * 60_000;
+/** A customer with fewer finished errands than this is new, and the new-customer item limit applies. */
+const NEW_CUSTOMER_ERRANDS = 3;
 
 const HOUR_MS = 3_600_000;
 const MINUTE_MS = 60_000;
@@ -275,7 +286,56 @@ export class ErrandsService implements OnModuleInit {
     if (!canRevealPin(errand.status) || !errand.pinCipher) {
       throw conflict('pin_not_available', 'Your PIN shows once the agent marks the errand delivered');
     }
-    return { pin: decrypt(this.config.PIN_KEY, errand.pinCipher) };
+    return { pin: this.openPin(errand.id, errand.pinCipher) };
+  }
+
+  /** The PIN from its cipher: under the errand's own key ("v2:"), or the master key for older errands. */
+  private openPin(errandId: string, cipher: string) {
+    return cipher.startsWith('v2:')
+      ? decrypt(errandPinKey(this.config.PIN_KEY, errandId), cipher.slice(3))
+      : decrypt(this.config.PIN_KEY, cipher);
+  }
+
+  /** The entered PIN against the errand's: by its keyed hash, or by decrypting it for older errands. */
+  private pinMatches(errand: ErrandRow, pin: string) {
+    if (errand.pinHmac) return safeEqual(pinDigest(errandPinKey(this.config.PIN_KEY, errand.id), pin), errand.pinHmac);
+    return !!errand.pinCipher && safeEqual(this.openPin(errand.id, errand.pinCipher), pin);
+  }
+
+  /**
+   * The most item money this errand may hold: a new (Bronze) agent's limit, and a new customer's (fewer
+   * than NEW_CUSTOMER_ERRANDS finished errands), whichever is lower. Null when neither applies.
+   */
+  private async itemLimit(tx: Tx, errand: ErrandRow, settings: CountrySettings) {
+    const limits: number[] = [];
+    if ((errand.agentTier ?? 'bronze') === 'bronze') limits.push(settings.limits.newAgentItemLimitKobo);
+    const [done] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(errands)
+      .where(and(eq(errands.customerId, errand.customerId), eq(errands.status, 'completed')));
+    if ((done?.n ?? 0) < NEW_CUSTOMER_ERRANDS) limits.push(settings.limits.newCustomerItemLimitKobo);
+    return limits.length ? Math.min(...limits) : null;
+  }
+
+  /** Whether the agent's latest position is fresh and within the set distance of the drop-off. */
+  private async assertAtDropoff(tx: Tx, errand: ErrandRow, settings: CountrySettings) {
+    const meters = settings.security.handoffDistanceMeters;
+    if (!meters) return;
+    const { rows } = await tx.execute<{ locatedAt: Date | string | null; distance: number | string | null }>(sql`
+      select p.located_at as "locatedAt", ST_Distance(p.location, s.location) as distance
+      from agent_presence p, errand_stops s
+      where p.user_id = ${errand.agentId} and s.errand_id = ${errand.id} and s.kind = 'dropoff'
+        and p.location is not null
+      order by s.seq desc limit 1`);
+    const at = rows[0];
+    const fresh = at?.locatedAt && Date.now() - new Date(at.locatedAt).getTime() < LOCATION_FRESH_MS;
+    if (!at || !fresh) {
+      throw unprocessable('location_needed', 'Turn on location: Jiffo checks you are at the drop-off');
+    }
+    const distance = Number(at.distance);
+    if (distance > meters) {
+      throw unprocessable('not_at_dropoff', 'Go to the drop-off first', { distanceMeters: Math.round(distance) });
+    }
   }
 
   /* ---------- Creating ---------- */
@@ -620,6 +680,30 @@ export class ErrandsService implements OnModuleInit {
       const to = nextState(errand.status, input.event, transitionContext(errand, actor));
       const event = input.event as ErrandEvent;
       const effect = await this.effectOf(tx, event, errand, auth, input.data, settings, money.tier);
+      if (effect instanceof PinLock) {
+        // Frozen for support: both escrows stay held until support decides.
+        const frozen = await this.write(
+          tx,
+          errand,
+          'pin_locked',
+          'disputed',
+          { patch: { pinAttempts: effect.attempts }, record: { attempts: effect.attempts } },
+          'system',
+          null,
+        );
+        await this.wallet.onErrandTransition(tx, { before: errand, after: frozen, event: 'pin_locked', ...money });
+        await this.scheduleTimers(frozen, settings);
+        return {
+          error: locked('pin_locked', 'Too many wrong PINs. Jiffo support will look at this errand and sort it out.'),
+          frozen: {
+            before: errand,
+            after: frozen,
+            event: 'pin_locked',
+            record: {},
+            settings,
+          } satisfies TransitionResult,
+        };
+      }
       if (effect instanceof ApiError) return { error: effect };
 
       const after = await this.write(tx, errand, event, to, effect, actor, auth.userId);
@@ -631,7 +715,10 @@ export class ErrandsService implements OnModuleInit {
       };
     });
 
-    if ('error' in outcome) throw outcome.error;
+    if ('error' in outcome) {
+      if ('frozen' in outcome && outcome.frozen) await this.notifier.transitioned(outcome.frozen);
+      throw outcome.error;
+    }
     await this.notifier.transitioned(outcome.result);
     await this.afterAgentLeft(outcome.result.before, outcome.result.after);
     return this.viewOne(outcome.result.after, outcome.role, auth.userId);
@@ -760,6 +847,8 @@ export class ErrandsService implements OnModuleInit {
         updatedAt: now,
         ...(to === 'completed' ? { completedAt: now } : {}),
         ...(to === 'cancelled' ? { cancelledAt: now } : {}),
+        // Once the errand is over, nobody needs its PIN again.
+        ...(TERMINAL_STATES.has(to) ? { pinCipher: null } : {}),
       })
       .where(and(eq(errands.id, errand.id), eq(errands.version, errand.version)))
       .returning();
@@ -798,12 +887,13 @@ export class ErrandsService implements OnModuleInit {
     data: Record<string, unknown>,
     settings: CountrySettings,
     tier: AgentTier,
-  ): Promise<EventEffect | ApiError> {
+  ): Promise<EventEffect | ApiError | PinLock> {
     const now = new Date();
     const releaseAgent: Patch = {
       agentId: null,
       agentTier: null,
       pinCipher: null,
+      pinHmac: null,
       pinAttempts: 0,
       pendingOfferKobo: null,
       acceptedAt: null,
@@ -820,13 +910,25 @@ export class ErrandsService implements OnModuleInit {
         if (agent?.status !== 'active')
           throw forbidden('account_suspended', 'This account is suspended. Contact support.');
         if (!agent.firstName) throw conflict('profile_incomplete', 'Add your name before accepting errands');
+        // One accept at a time per agent, so the cap on errands held at once can't be raced.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'agent-accept:' + auth.userId}))`);
+        const [held] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(errands)
+          .where(and(eq(errands.agentId, auth.userId), inArray(errands.status, [...AGENT_OUT_STATES])));
+        const cap = settings.security.maxActiveErrandsPerAgent;
+        if (cap > 0 && (held?.n ?? 0) >= cap) {
+          throw conflict('too_many_errands', 'Finish an errand you have before taking another');
+        }
         const pin = numericCode(4);
+        const key = errandPinKey(this.config.PIN_KEY, errand.id);
         return {
           patch: {
             agentId: auth.userId,
             agentTier: tier,
             acceptedAt: now,
-            pinCipher: encrypt(this.config.PIN_KEY, pin),
+            pinCipher: `v2:${encrypt(key, pin)}`,
+            pinHmac: pinDigest(key, pin),
             pinAttempts: 0,
           },
           record: { agentId: auth.userId },
@@ -839,6 +941,19 @@ export class ErrandsService implements OnModuleInit {
         return { patch: { pendingOfferKobo: null }, record: this.parse('cancel', data) };
       case 'send_offer': {
         const { amountKobo } = this.parse('send_offer', data);
+        const [recent] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(errandEvents)
+          .where(
+            and(
+              eq(errandEvents.errandId, errand.id),
+              eq(errandEvents.event, 'send_offer'),
+              gt(errandEvents.createdAt, new Date(now.getTime() - MINUTE_MS)),
+            ),
+          );
+        if ((recent?.n ?? 0) >= settings.security.offersPerMinute) {
+          throw tooMany('too_many_offers', 'Wait a minute before sending another price');
+        }
         if (amountKobo === errand.feeKobo)
           throw unprocessable('offer_unchanged', 'The new price is the same as the current fee');
         if (amountKobo < settings.pricing.minFeeKobo) {
@@ -875,26 +990,57 @@ export class ErrandsService implements OnModuleInit {
         return { patch: { startedAt: now }, record: {} };
       case 'send_item_amount': {
         const { amountKobo, photos } = this.parse('send_item_amount', data);
+        const limit = await this.itemLimit(tx, errand, settings);
+        if (limit !== null && amountKobo > limit) {
+          throw unprocessable(
+            'item_limit',
+            'This is more item money than this errand can hold. Contact support for big purchases.',
+            {
+              limitKobo: limit,
+            },
+          );
+        }
         return { patch: { itemAmountKobo: amountKobo }, record: { amountKobo, photos } };
       }
       case 'mark_delivered':
+        await this.assertAtDropoff(tx, errand, settings);
         return { patch: { deliveredAt: now }, record: {} };
       case 'confirm_pin': {
         const { pin } = this.parse('confirm_pin', data);
+        await this.assertAtDropoff(tx, errand, settings);
         const limit = settings.limits.pinAttempts;
-        if (errand.pinAttempts >= limit) {
-          throw locked('pin_locked', 'Too many wrong PINs. Send a drop-off photo instead, or contact support.');
-        }
-        const actual = errand.pinCipher ? decrypt(this.config.PIN_KEY, errand.pinCipher) : null;
-        if (!actual || !safeEqual(actual, pin)) {
+        if (!this.pinMatches(errand, pin)) {
           const attempts = errand.pinAttempts + 1;
+          if (attempts >= limit) return new PinLock(attempts);
           await tx.update(errands).set({ pinAttempts: attempts }).where(eq(errands.id, errand.id));
-          return unprocessable('wrong_pin', 'That PIN is not right', { attemptsLeft: Math.max(0, limit - attempts) });
+          // On the errand's record, for support and the customer: never the digits tried.
+          await tx.insert(errandEvents).values({
+            errandId: errand.id,
+            event: 'pin_wrong',
+            fromStatus: errand.status,
+            toStatus: errand.status,
+            actorRole: 'agent',
+            actorId: auth.userId,
+            data: { attemptsLeft: limit - attempts },
+          });
+          return unprocessable('wrong_pin', 'That PIN is not right', { attemptsLeft: limit - attempts });
         }
         return { patch: {}, record: { method: 'pin' } };
       }
-      case 'send_dropoff_photo':
+      case 'send_dropoff_photo': {
+        // The photo is for a customer who isn't there: the agent waits at the drop-off first.
+        const waitMs = settings.timers.dropoffWaitMinutes * MINUTE_MS;
+        const waited = errand.deliveredAt ? now.getTime() - errand.deliveredAt.getTime() : 0;
+        if (waited < waitMs) {
+          const minutes = Math.ceil((waitMs - waited) / MINUTE_MS);
+          throw conflict(
+            'dropoff_wait',
+            `Wait ${minutes} more minute${minutes === 1 ? '' : 's'} at the drop-off before sending a photo`,
+            { secondsLeft: Math.ceil((waitMs - waited) / 1000) },
+          );
+        }
         return { patch: {}, record: this.parse('send_dropoff_photo', data) };
+      }
       case 'report_unreachable':
         return { patch: {}, record: this.parse('report_unreachable', data) };
       case 'open_dispute':

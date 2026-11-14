@@ -139,27 +139,32 @@ describe('errands', () => {
         'accept_offer',
         'start',
         'mark_delivered',
+        // The wrong PIN tried above is on the record, without its digits.
+        'pin_wrong',
         'confirm_pin',
       ]);
       expect(JSON.stringify(events.body)).not.toContain(code);
     });
 
-    it('locks the PIN after five wrong tries, leaving the photo route', async () => {
+    it('freezes the errand for support after five wrong PINs, with no photo route round it', async () => {
       const errand = await createErrand(t, customer);
       await act(t, agent, errand.id, 'accept');
       await act(t, agent, errand.id, 'start');
       await act(t, agent, errand.id, 'mark_delivered');
       const code = await pin(errand.id);
       const wrong = code === '0000' ? '1111' : '0000';
-      for (let i = 0; i < 5; i++) await act(t, agent, errand.id, 'confirm_pin', { pin: wrong }, 422);
-      expect((await act(t, agent, errand.id, 'confirm_pin', { pin: code }, 423)).error.code).toBe('pin_locked');
-
-      await act(t, agent, errand.id, 'send_dropoff_photo', {
-        photo: await photo(t, agent, errand.id, 'dropoff_photo'),
-      });
-      const approved = await act(t, customer, errand.id, 'approve_photo');
-      expect(approved.completedBy).toBe('photo');
-      expect(approved.status).toBe('completed');
+      for (let i = 0; i < 4; i++) await act(t, agent, errand.id, 'confirm_pin', { pin: wrong }, 422);
+      expect((await act(t, agent, errand.id, 'confirm_pin', { pin: wrong }, 423)).error.code).toBe('pin_locked');
+      // Even the right PIN, or a photo, does nothing now: support settles it.
+      await act(t, agent, errand.id, 'confirm_pin', { pin: code }, 409);
+      await act(
+        t,
+        agent,
+        errand.id,
+        'send_dropoff_photo',
+        { photo: await photo(t, agent, errand.id, 'dropoff_photo') },
+        409,
+      );
     });
   });
 

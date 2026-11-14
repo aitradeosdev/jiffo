@@ -24,6 +24,9 @@ export const DEFAULT_SECURITY_SETTINGS = {
   instantWithdrawalPlatformDailyKobo: 1_000_000_000,
   reconciliationToleranceKobo: 50_000,
   lowProviderBalanceKobo: 50_000_000,
+  handoffDistanceMeters: 200,
+  offersPerMinute: 5,
+  maxActiveErrandsPerAgent: 0,
 };
 
 /**
@@ -125,6 +128,12 @@ export const CountrySettingsSchema = z.object({
       reconciliationToleranceKobo: kobo,
       /** Below this, the money held at the payments provider raises an alert. */
       lowProviderBalanceKobo: kobo,
+      /** How near the drop-off the agent must be to mark it delivered and take the PIN. 0 turns it off. */
+      handoffDistanceMeters: z.number().int().min(0).max(5_000).default(200),
+      /** Counter-offers an agent may send on one errand in a minute. */
+      offersPerMinute: z.number().int().min(1).max(60).default(5),
+      /** Errands one agent may hold at once, from accepted until done. 0 means no limit. */
+      maxActiveErrandsPerAgent: z.number().int().min(0).max(20).default(0),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
 });

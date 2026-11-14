@@ -3,6 +3,7 @@ import {
   createDecipheriv,
   createHash,
   createHmac,
+  hkdfSync,
   randomBytes,
   randomInt,
   timingSafeEqual,
@@ -42,3 +43,16 @@ export function decrypt(keyHex: string, sealed: string): string {
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8');
 }
+
+/**
+ * A hand-off PIN's own key, derived from the master key and the errand: one errand's key opens no other,
+ * and the master key alone opens no PIN.
+ */
+export const errandPinKey = (masterHex: string, errandId: string) =>
+  Buffer.from(
+    hkdfSync('sha256', Buffer.from(masterHex, 'hex'), Buffer.from(errandId), 'jiffo hand-off pin', 32),
+  ).toString('hex');
+
+/** A keyed hash of a PIN, for checking an entry without decrypting the PIN. */
+export const pinDigest = (keyHex: string, pin: string) =>
+  createHmac('sha256', Buffer.from(keyHex, 'hex')).update(pin).digest('hex');
