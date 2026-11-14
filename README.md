@@ -1,10 +1,109 @@
-# Jiffo
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/jiffo-wordmark-white.svg">
+    <img src="brand/jiffo-wordmark.svg" alt="Jiffo" width="220">
+  </picture>
+</p>
+
+<h3 align="center">Get your errands done.</h3>
+
+<p align="center">
+  Groceries, parcels, pharmacy runs and queues, by verified agents near you in Nigeria.<br>
+  Your money is held until the errand is done.
+</p>
+
+<p align="center">
+  <a href="https://github.com/aitradeosdev/jiffo/actions/workflows/ci.yml"><img src="https://github.com/aitradeosdev/jiffo/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/aitradeosdev/jiffo/actions/workflows/security.yml"><img src="https://github.com/aitradeosdev/jiffo/actions/workflows/security.yml/badge.svg?branch=main" alt="Security"></a>
+  <img src="https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22">
+  <img src="https://img.shields.io/badge/pnpm-10-F69220?logo=pnpm&logoColor=white" alt="pnpm 10">
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
+</p>
+
+<p align="center">
+  <a href="#getting-started">Getting started</a> ·
+  <a href="#how-an-errand-works">How it works</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="docs/admin-panel.md">Admin panel</a> ·
+  <a href="#security">Security</a>
+</p>
+
+---
+
+## Overview
 
 Jiffo is an errand marketplace for Nigeria. Customers post an errand (groceries, parcels, pharmacy runs, queues and more), a verified agent nearby accepts it, and the money is held in escrow until hand-off. The customer releases it with a PIN or by approving a drop-off photo.
 
 The product is built from day one with adapters, so new countries, states and outside providers (payments, identity checks, maps, chat, calls, SMS, push, storage) plug in without changing the core.
 
-## What's here
+<table>
+  <tr>
+    <td align="center" valign="top" width="33%">
+      <img src="brand/jiffo-icon-customer-rounded.svg" width="64" alt="Jiffo app icon"><br>
+      <b>Jiffo</b><br>
+      <sub>iOS and Android</sub>
+      <p>For customers: post an errand, follow the agent live, chat and call without sharing numbers, and release the money with a PIN or by approving a drop-off photo.</p>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="brand/jiffo-icon-agent-rounded.svg" width="64" alt="Jiffo Agent app icon"><br>
+      <b>Jiffo Agent</b><br>
+      <sub>iOS and Android</sub>
+      <p>For agents: apply and verify once, go online, take errands from the board nearby, and withdraw earnings to a bank account in their own name.</p>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="brand/jiffo-icon-customer-rounded.svg" width="64" alt="Admin panel icon"><br>
+      <b>Admin panel</b><br>
+      <sub>Web</sub>
+      <p>For Jiffo staff: errands and disputes, people, applications and ID checks, money, settings and providers. See <a href="docs/admin-panel.md">the admin panel guide</a>.</p>
+    </td>
+  </tr>
+</table>
+
+## Screens
+
+<p align="center">
+  <img src="docs/images/customer-screens.png" alt="The first seven customer app screens: home, choosing a category, planning the errand, a no-purchase errand, confirming, finding an agent and the agent accepting" width="100%">
+  <br><sub><b>Jiffo</b>: from posting an errand to an agent accepting it</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/agent-screens.png" alt="The first seven agent app screens: offline, the selfie check, the errand board, an urgent request, an accepted errand, sending a new price and chat" width="100%">
+  <br><sub><b>Jiffo Agent</b>: from going online to agreeing the price</sub>
+</p>
+
+Every screen of the design, numbered: [customer app](docs/prototype-sheets/jiffo-customer-prototype.png) (31 screens) and [agent app](docs/prototype-sheets/jiffo-agent-prototype.png) (45). To click through them, download [`docs/prototypes/customer.html`](docs/prototypes/customer.html) or [`agent.html`](docs/prototypes/agent.html) and open it in a browser; the panel beside the phone jumps to any screen and plays the other side of the errand.
+
+## How an errand works
+
+1. **Post.** The customer says what they need, picks a category and the stops, and sees a suggested fee for the distance.
+2. **Match.** Verified agents nearby see it on their board, with only the general area until one accepts. When an agent accepts, the fee and service fee are held from the customer's wallet.
+3. **Agree.** Before starting, the agent may ask for a new price, which the customer accepts or declines. For a purchase, the agent sends the receipt and the customer locks the item amount, held separately.
+4. **Track.** The customer follows the agent on the map, and they chat and call without either seeing the other's number.
+5. **Hand off.** The customer gives the agent their PIN, or, when nobody can come to the door, approves the agent's drop-off photo.
+6. **Get paid.** Item money goes to the agent at once. The fee, less the commission for the agent's tier, goes to their earnings, which they withdraw to a bank account in their own name.
+
+## Highlights
+
+- **Money held safely.** A double-entry ledger in whole kobo, escrow from acceptance to hand-off, webhooks applied exactly once, and a nightly check against the payment provider.
+- **Verified people.** Customers and agents check their ID with a selfie, through Smile ID, Dojah or Youverify. One account per ID.
+- **Live and private.** Live location while an agent is on the way, chat with photos, and calls that hide both numbers.
+- **Providers chosen in the panel.** SMS, payments, identity checks, calls, push, maps, files and email. Keys are stored encrypted and a switch takes effect without a restart.
+- **Ready for more countries.** Countries, states, categories and versioned settings are data, not code.
+- **Staff controls.** Roles, passkeys, two-person approval, masked personal details and an audit log nobody can rewrite.
+
+## Tech stack
+
+| Layer       | Built with                                                                            |
+| ----------- | ------------------------------------------------------------------------------------- |
+| Apps        | React Native with Expo (TypeScript). One codebase, two store apps                     |
+| Admin panel | Next.js (TypeScript)                                                                  |
+| Backend     | Node.js with NestJS, one deployable app split into modules                            |
+| Data        | PostgreSQL with PostGIS; Redis with BullMQ for live locations, rate limits and timers |
+| Real-time   | WebSockets (Socket.IO over Redis) and Firebase Cloud Messaging                        |
+| Files       | S3 private storage with signed links                                                  |
+| Hosting     | AWS Cape Town (af-south-1), pending legal confirmation for data residency             |
+
+## Repository layout
 
 | Path                     | Contents                                                                                                                                                                                                                          |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -16,41 +115,15 @@ The product is built from day one with adapters, so new countries, states and ou
 | `docs/prototypes/src/`   | The prototype source files and build scripts. Run `sh build.sh` and `sh build-agent.sh` from this folder to rebuild the two HTML files.                                                                                           |
 | `docs/prototype-sheets/` | One overview image per app, showing every prototype screen, numbered and labelled.                                                                                                                                                |
 | `brand/`                 | The Jiffo logo set: wordmark, app icons and the small j mark as SVG, plus PNG exports. See `brand/README.md`.                                                                                                                     |
+| `docs/`                  | The [admin panel guide](docs/admin-panel.md), the [security plan](docs/security-plan.md), [audit](docs/security-audit.md) and [controls](docs/security/controls.md), and the [route list](docs/api/openapi.json).                 |
 
-## Agreed build stack
+## Getting started
 
-- **Apps:** React Native with Expo (TypeScript). One codebase, two store apps: Jiffo (customers) and Jiffo Agent.
-- **Admin panel:** Next.js (TypeScript).
-- **Backend:** Node.js with NestJS, one deployable app split into modules.
-- **Data:** PostgreSQL with PostGIS; Redis with BullMQ for live locations, rate limits and timers.
-- **Real-time:** WebSockets (Socket.IO over Redis) and Firebase Cloud Messaging.
-- **Files:** S3 private storage with signed links.
-- **Hosting:** AWS Cape Town (af-south-1), pending legal confirmation for data residency.
+### Prerequisites
 
-Money is kept in a double-entry ledger in whole kobo, with idempotent webhooks and daily reconciliation against the payment provider.
+Node 22, pnpm 10 and Docker.
 
-## Running the apps
-
-`apps/mobile` builds both store apps from one codebase. `APP_VARIANT` picks which one: `customer` (Jiffo, the default) or `agent` (Jiffo Agent). Each has its own name, icon, bundle identifier and screens.
-
-With the backend running locally:
-
-```bash
-cd apps/mobile
-EXPO_PUBLIC_API_URL=http://<your computer's LAN address>:3000 pnpm start
-```
-
-Open it in Expo Go, or press `w` for the web version. The web version draws a stand-in map; phones show real maps (Apple Maps on iOS, Google Maps on Android). Android builds need `GOOGLE_MAPS_ANDROID_API_KEY` set to a key with the Maps SDK for Android enabled. Use `pnpm start:agent` for the agent app. Switching between the two needs the bundler cache cleared, which both scripts do.
-
-A new customer checks their ID right after giving their name: their NIN or BVN and a selfie, once, with the identity provider in use; they can look around first, and adding money and requesting errands open once they are verified. A new agent fills in the application before seeing the board: their state and area, identity (one of the IDs admin accepts for agents, their BVN when required, and a selfie), address and an emergency contact, a payout account, errand preferences, and the agent terms. In development the identity provider is a stand-in: an ID number ending in 1111 sends the selfie to review, 1818 is someone under 18, 0000 fails the ID, and any other passes. With `FAKE_PAYMENTS_AUTOPAY_SECONDS` set, the fake bank also takes any account number to be in the agent's name.
-
-While an agent is online or on an errand, the agent app keeps sending their location when they switch to their maps app or lock the phone, if they chose "Allow all the time" (the app explains why before the phone asks). On Android a notification shows while it does. It stops when they go offline with nothing running. This needs a development or store build; Expo Go and the web version send the location only while the app is open.
-
-`pnpm --filter @jiffo/mobile export:web` builds both apps for the web, the same way CI does.
-
-## Running the backend
-
-You need Node 22, pnpm 10 and Docker.
+### Backend
 
 ```bash
 pnpm install
@@ -77,9 +150,54 @@ Before opening a pull request, also run `pnpm lint`, `pnpm format:check` and `pn
 
 After changing `apps/api/src/db/schema.ts`, run `pnpm --filter @jiffo/api db:generate` and commit the new migration.
 
+### Mobile apps
+
+`apps/mobile` builds both store apps from one codebase. `APP_VARIANT` picks which one: `customer` (Jiffo, the default) or `agent` (Jiffo Agent). Each has its own name, icon, bundle identifier and screens.
+
+With the backend running locally:
+
+```bash
+cd apps/mobile
+EXPO_PUBLIC_API_URL=http://<your computer's LAN address>:3000 pnpm start
+```
+
+Open it in Expo Go, or press `w` for the web version. The web version draws a stand-in map; phones show real maps (Apple Maps on iOS, Google Maps on Android). Android builds need `GOOGLE_MAPS_ANDROID_API_KEY` set to a key with the Maps SDK for Android enabled. Use `pnpm start:agent` for the agent app. Switching between the two needs the bundler cache cleared, which both scripts do.
+
+A new customer checks their ID right after giving their name: their NIN or BVN and a selfie, once, with the identity provider in use; they can look around first, and adding money and requesting errands open once they are verified. A new agent fills in the application before seeing the board: their state and area, identity (one of the IDs admin accepts for agents, their BVN when required, and a selfie), address and an emergency contact, a payout account, errand preferences, and the agent terms. In development the identity provider is a stand-in: an ID number ending in 1111 sends the selfie to review, 1818 is someone under 18, 0000 fails the ID, and any other passes. With `FAKE_PAYMENTS_AUTOPAY_SECONDS` set, the fake bank also takes any account number to be in the agent's name.
+
+While an agent is online or on an errand, the agent app keeps sending their location when they switch to their maps app or lock the phone, if they chose "Allow all the time" (the app explains why before the phone asks). On Android a notification shows while it does. It stops when they go offline with nothing running. This needs a development or store build; Expo Go and the web version send the location only while the app is open.
+
+`pnpm --filter @jiffo/mobile export:web` builds both apps for the web, the same way CI does.
+
+### Admin panel
+
+`apps/admin` is the panel Jiffo staff use. Its server calls the API on each admin's behalf, so the session token stays in an httpOnly cookie and never reaches the browser's scripts.
+
+```bash
+cd apps/admin
+cp .env.example .env.local
+pnpm dev
+```
+
+It opens on port 3001. Set `ADMIN_PANEL_SECRET` to the same value in both `apps/api/.env` and `apps/admin/.env.local`, so the API sees each admin's own IP address for sign-in limits and the audit log.
+
+Admins join by invite only. Make the first owner from the API's folder, with the API's environment loaded:
+
+```bash
+pnpm admin invite --email you@jiffoapp.com --name "Your Name" --role owner --reason "First owner"
+```
+
+Open the printed link to choose a password. The first sign-in sets up an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password), and every sign-in after that needs its code.
+
+In production the panel must sit behind a load balancer (`TRUST_PROXY_HOPS` of at least 1), and the API needs `ADMIN_URL` set to the panel's address for invite links.
+
+Roles, passkeys, sessions, two-person approval, the audit log and personal details are covered in [docs/admin-panel.md](docs/admin-panel.md).
+
+## Architecture
+
 ### API outline
 
-All routes are under `/v1` except `GET /health`. Errors always look like `{ "error": { "code": "...", "message": "..." } }`.
+All routes are under `/v1` except `GET /health`. The full list, with who may call each route and what it takes, is [docs/api/openapi.json](docs/api/openapi.json). Errors always look like `{ "error": { "code": "...", "message": "..." } }`.
 
 | Area              | Routes                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -119,6 +237,7 @@ Webhook addresses are shown in the panel, built from `PUBLIC_API_URL`, which mus
 | Push            | Firebase Cloud Messaging       |
 | Maps            | Google Maps Platform           |
 | Files           | S3, or any S3-compatible store |
+| Email           | Resend, Postmark, Amazon SES   |
 
 While no provider is switched on for a service, the environment's choice below is used. In development and tests that is a stand-in (console SMS, a fake bank, and so on); in production a stand-in is never used, and a service set in neither place answers that it isn't set up yet.
 
@@ -148,109 +267,21 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
 - **What it costs:** every provider charge is booked to the ledger as it happens: the fee on each top-up (Jiffo pays it, not the customer), the fee on each transfer out, and the fee for issuing an own account number, which is entered on the provider in the panel because providers don't report it per account. The overview and Money pages show revenue, those costs, and net revenue, the difference.
 - **Escrow:** the fee and service fee are held when an agent accepts, adjusted when a new price is accepted, and returned if the agent leaves or the errand is cancelled. Item money is held separately when the customer locks the item amount.
 - **Hand-off:** item money goes to the agent untouched and withdrawable at once. The fee, less the commission for the agent's tier (set by admin), goes to the agent; Bronze earnings are held for 24 hours. The service fee and commission go to platform revenue.
-- **Access rules:**
-  - **Request bodies:** a field an endpoint doesn't take is refused at any depth, event data included, not quietly dropped. Provider callbacks opt out with `.passthrough()`.
-  - **Waiting errands:**
-    - Only approved agents see them.
-    - Until an agent accepts, each stop shows only its general area and a point rounded to about a kilometre: no street, house number or label.
-    - The event list never names the agents who took or left an errand.
-  - **The board:**
-    - It searches around the agent's own last position, reported within the set minutes (default 5, Settings, Security).
-    - The place the app asks about must be within the set distance of that position (default 5 km, Settings, Security).
-    - Phones report their own position, so this limits what a scraper sees but can't prove where a phone is.
-  - **Agent's position:** the customer sees it only while the agent is on the way for them, up to the drop-off. An agent holding a second errand they haven't started isn't followed by that customer.
-  - **Live connections:**
-    - Rooms go through Redis, so sign-out and suspension drop sockets on every server at once.
-    - Each server also re-checks its own sockets every 30 seconds, as a safety net.
-    - CORS_ORIGINS must list the allowed origins in production. It is checked on every socket connection, WebSocket included, as well as on HTTP.
-  - **Provider details and logs:**
-    - The apps never get the provider's wording for a failure.
-    - Chat pushes never quote the message.
-    - Stored webhook bodies have account numbers, phone numbers, emails and names masked.
-    - Every log line passes through the same masking. Production logs are JSON.
-- **Server defences:**
-  - **Rate limits:**
-    - Every route is limited a minute, counted in Redis so every server shares the counts. A signed-in person is counted as themselves, so many customers behind one mobile-network address don't add up.
-    - Anyone not signed in is counted by address, against the route's limit and an overall one. A made-up token doesn't change that.
-    - Refreshes count per session.
-    - Paid lookups (places, quotes), the board, chat, presence, sign-in and webhooks have their own limits, and new live connections are limited per person.
-    - Set them with `RATE_LIMITS` (for example `paid=20,auth=60`).
-  - **Headers:**
-    - Every answer says not to sniff, frame or refer, with a content policy that lets nothing load. HTTPS is insisted on in production.
-    - Identity widget pages run only their own scripts, by a fresh nonce.
-  - **Provider calls:**
-    - Every call to a provider has a timeout and never follows a redirect.
-    - Provider addresses typed in the panel must be the provider's own https hosts.
-    - Live payment keys are refused outside production, and test keys in it. This holds for keys from the environment too.
-    - A refused redirect says where it pointed, so a provider that moved is easy to tell from one that is down.
-  - **Paystack:** with `PAYSTACK_WEBHOOK_IPS` set, Paystack's calls are taken only from those addresses.
-  - **Development storage:** serves only photos as images. Anything else comes down as a file. Its file routes don't exist in production.
-  - **Route list:** `docs/api/openapi.json` lists every route: who may call it, its rate-limit class, and the parameters and body it takes. It's read from the controllers, and a test fails when it's out of date. Rewrite it with `pnpm --filter @jiffo/api openapi`. There is one API version, `/v1`.
-  - **Reporting a security problem:** `/.well-known/security.txt` and the `/security` page give the contact in `SECURITY_CONTACT`, required in production.
-- **Signing in:**
-  - **Codes:** each number and each phone may ask for 3 codes in 15 minutes and 10 in a day (Settings, Limits). A phone already signed in to the number isn't held to the number's limits, so a stranger asking for codes to it can't lock the owner out.
-  - **Network addresses:** limited too (`OTP_PER_IP_PER_HOUR`, `OTP_PER_IP_PER_DAY`), but higher, since mobile networks put many customers behind one address.
-  - **Bursts:** each request is counted one at a time, so a burst can't slip past. One that arrives while another for the same number, phone or address is being counted is told to try again at once, not queued.
-  - **SMS spend:** every 10 minutes, finance gets an alert if a country has sent more codes in the last day than the set level (Settings, Security), since each is a paid SMS. It fires once per day.
-  - **A new phone:** signing in on one signs the others out of that app, and they get a push saying so.
-  - **Copied refresh tokens:**
-    - A refresh token used twice ends every session of the account, in both apps.
-    - The one exception is the app sending it again within a minute while the token it got back is unused, which means the answer was lost on the way.
-  - **Session length:** however often it is refreshed, a session ends `SESSION_MAX_DAYS` (default 90) after sign-in.
-- **Identity checks:**
-  - **The name on an ID:**
-    - Kept only for a check that didn't fail, so a failed selfie can't turn a check into a way to look up whose ID a number is.
-    - Shown to the person only once they are verified, or for agents approved.
-  - **Starting checks:** each account may start a set number a day (default 3, Settings, Identity), whatever the results, since each is a paid check.
-  - **Pages Jiffo serves for a provider:**
-    - Links expire after an hour.
-    - They work only while the app session that started the check is signed in.
-    - They work only in the browser that first opened them, so a forwarded link doesn't open.
-    - Opens are limited per check each hour, counted across all servers.
-  - **Smile ID:** its callback signature covers only a timestamp. The verdict is re-read from Smile ID, and a signature is accepted with one body only, so it can't be replayed with another.
-  - **Sandbox mode:** refused for identity providers in production.
-  - **Approving an agent:** never takes an ID away from another account that proved it with its own checks.
-- **Keys and personal details:**
-  - **One key per job:**
-    - `ID_FINGERPRINT_KEY` fingerprints ID numbers.
-    - `ADMIN_TOTP_KEY` encrypts admin authenticator secrets.
-    - `FIELD_KEY` encrypts personal details.
-    - `ADMIN_TOKEN_SECRET` signs admin sign-in steps.
-    - Production requires each, all different from each other and from the other secrets. In development they are derived from `PIN_KEY`.
-    - A deployment that already has data sets the first three to what `pnpm admin derived-keys` prints, so its fingerprints, authenticators and personal details stay readable. A new deployment generates fresh ones.
-  - **Encrypted at rest:**
-    - What's encrypted: legal names, dates of birth, agents' home addresses and emergency contacts, and payout accounts (number, name and the provider's recipient code, which can carry the number).
-    - The database holds only AES-256-GCM ciphertext, bound to its table and column. The API reads and writes plain text.
-    - Rows saved before this are encrypted in the background when a server starts.
-  - **Searching by legal name:** support finds people by any whole word of their legal name, through a keyed index. Partial words still match the name in the app.
-  - **Payout account numbers:** their last four digits are kept readable for lists.
-- **Payout accounts:**
-  - **Match:** every word of the bank's name for the account must be in the legal name on the ID record. Otherwise the account is refused.
-  - **Near match:**
-    - When the bank's name is close but not the same (an initial, or a slip of a letter, each word of the ID used once), the account waits for a check, and withdrawals keep going to the approved account meanwhile.
-    - Saved during the application, it is decided with the application.
-    - Saved later, finance approves or declines it on the Withdrawals tab.
-  - **Changes:** every change is checked the same way, and the agent gets a push whenever their account changes, so a change they didn't make doesn't go unnoticed.
-- **Protecting the hand-off:**
-  - **At the drop-off:** marking an errand delivered and entering the PIN need the agent's fresh position within the set distance of the drop-off (default 200 m, Settings, Security).
-  - **Wait before a photo:** a drop-off photo is accepted only after the agent has waited the set minutes there, and only while they are still there.
-  - **Current settings:** these limits follow the current settings, also for errands made before a change.
-  - **Last wrong PIN:** freezes the errand for support. Nothing is paid or given back by itself, and each wrong entry is on the errand's record, without the digits.
-  - **PIN storage:** each PIN is encrypted under its errand's own key and checked by a keyed hash. It is cleared when the errand ends.
-  - **Limits:** item money is capped for new agents and new customers. Counter-offers are limited per minute, and admin can cap how many errands one agent holds at once.
-- **Withdrawals:** agents only, to an account in their own name. One free scheduled withdrawal a day, or instant for a fee. A bounced transfer puts the full amount back.
-  - **Repeats:** each request carries the app's key, so a repeated tap or a retry makes one withdrawal.
-  - **Sending:** one run at a time claims a withdrawal before sending it. Only a first try that the provider refuses outright gives the money back. An unclear answer after that raises an alert instead.
-  - **Suspension:** a suspended agent's withdrawals wait until they are reactivated.
-  - **Daily caps (Settings, Security):** instant withdrawals are capped per agent and for all agents together.
-  - **Paystack's transfer approval URL:** `POST /v1/webhooks/paystack/transfer-approval`, registered in the Paystack dashboard. It approves only a withdrawal Jiffo is sending, for its exact amount and the agent's recipient.
-- **Nightly check:**
-  - **Shortfalls:** if the provider holds less than the ledger beyond the tolerance in Settings, Security, instant withdrawals pause until finance clears the check, with a note, under Money, Nightly checks.
-  - **Low balance:** checked every 15 minutes.
-  - **Alerts:** gaps, a low balance, refused or unclear transfers and Paystack's transfer OTP show there and on the overview.
-- **Reconciliation:** every night the ledger's cash is compared with the Paystack balance and the result is saved for finance.
 
-## Checks on every change
+How withdrawals, payout accounts, the hand-off and the nightly check are protected is in [docs/security/controls.md](docs/security/controls.md).
+
+## Security
+
+Jiffo moves people's money and checks their identity, so its security is planned, audited and tested in the open:
+
+- [Security plan](docs/security-plan.md): what is required.
+- [Security audit](docs/security-audit.md): where each requirement stands, and the fixes since.
+- [Security controls](docs/security/controls.md): how the API, the apps and the money paths are protected, area by area.
+- [Threat model](docs/security/threat-model.md): where every new feature starts.
+
+To report a security problem, use the contact the API publishes at `/.well-known/security.txt`.
+
+### Checks on every change
 
 - **CI** (`.github/workflows/ci.yml`): lint, types, tests, and `pnpm audit` on what the apps ship. The workflow can only read the repository, and every action is pinned to a commit.
 - **Security scans** (`.github/workflows/security.yml`): CodeQL and gitleaks on every push and pull request and once a week, and a dependency review on pull requests.
@@ -258,70 +289,6 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
 - **Lint** refuses `dangerouslySetInnerHTML`, so nothing a person typed can be drawn as markup.
 - Accepted advisories, and why: [docs/security/dependencies.md](docs/security/dependencies.md). The third-party code each app ships: [docs/security/sdks.md](docs/security/sdks.md). New features start with a [threat model](docs/security/threat-model.md), and the pull request template has a security checklist.
 
-## Running the admin panel
+## Brand
 
-`apps/admin` is the panel Jiffo staff use. Its server calls the API on each admin's behalf, so the session token stays in an httpOnly cookie and never reaches the browser's scripts.
-
-```bash
-cd apps/admin
-cp .env.example .env.local
-pnpm dev
-```
-
-Every page gets a content policy with a fresh nonce: only the panel's own scripts run, and pages can't be framed. HTTPS is insisted on in production.
-
-It opens on port 3001. Set `ADMIN_PANEL_SECRET` to the same value in both `apps/api/.env` and `apps/admin/.env.local`, so the API sees each admin's own IP address for sign-in limits and the audit log.
-
-Admins join by invite only. Make the first owner from the API's folder, with the API's environment loaded:
-
-```bash
-pnpm admin invite --email you@jiffoapp.com --name "Your Name" --role owner --reason "First owner"
-```
-
-Open the printed link to choose a password. The first sign-in sets up an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password), and every sign-in after that needs its code.
-
-**Passkeys.** Owners, Operations, Disputes, Finance and Verification move money, settle disputes (refunding customers) or see ID data, so they sign in with a passkey: the fingerprint, face or PIN on their phone or laptop. After their first sign-in with the app's code, they add one before they can do anything else, and from then on sign in with it instead of the code. Passkeys work only on the panel's own address (`ADMIN_URL`), so a look-alike site can't use one. Anyone else may add one too. Adding a passkey needs a recent confirm, as money actions do, so a stolen session can't add its own; a reset removes the teammate's passkeys along with the password and app.
-
-**Sessions.** A session ends after 15 minutes without activity and 8 hours in all. Money actions (adjustments, payout accounts, the nightly checks, settling a dispute, approving a request, changing a provider) also need the admin to have confirmed it's them in the last 5 minutes, with their passkey or a fresh code; the panel asks, then sends them back to do it again. Set these with `ADMIN_IDLE_MINUTES`, `ADMIN_SESSION_HOURS` and `ADMIN_CONFIRM_MINUTES`. Owners invite everyone else from the Team page. Invite and reset links are emailed only to the teammate, never shown to whoever made them, so set up an email provider (Resend, Postmark or Amazon SES) under Settings, Providers first. On your own machine they're printed in the API's log; on a shared server outside production, such as staging, set `EMAIL_PROVIDER=none` so links never reach a log. The provider's Test button sends you a test email. If the only owner loses their phone, `pnpm admin reset --email ... --reason ...` prints a new link on the server. Both commands are recorded in the audit log as from the command line, with their reason.
-
-What's in it:
-
-- **Overview:** today's errands, agents online, net revenue (revenue less payment provider costs), top-ups and the fees Jiffo absorbs, withdrawals, and anything that needs attention.
-- **Errands and disputes:** search every errand, read its full history (timeline, chat, photos, money), and settle disputes, the standard way or by splitting the money held.
-- **People:** customers and agents, with their activity and money; set agent tiers, suspend and reactivate accounts, and adjust balances.
-- **Applications:** agent applications by state. The ones whose checks didn't all pass wait in review, longest first; operations approves or declines each from the agent's page, seeing the provider's results and what the agent typed, never their documents. A decline's reason is shown to the agent.
-- **ID checks:** customers' ID checks by state. Those the provider couldn't settle wait in review, longest first; operations verifies or declines each from the customer's page (never with an ID another customer holds), or reopens a declined one so they can check again. The decline's reason is shown to the customer. The providers page says which IDs each identity provider checks.
-- **Money:** what Jiffo holds, earns and pays providers (net revenue), top-ups by way of paying in, customers' own account numbers and what issuing them cost, withdrawals and the nightly check against the payment provider.
-- **Settings:** prices, fees, commission, timers, limits and identity rules as versioned settings, plus categories and states.
-- **Team and audit log:** who can use the panel, and every change anyone made in it.
-
-| Role         | Can                                                                |
-| ------------ | ------------------------------------------------------------------ |
-| Owner        | Everything, including the team, settings, providers and audit log  |
-| Operations   | Errands, disputes, suspending accounts and agent tiers             |
-| Disputes     | Settling disputes                                                  |
-| Verification | Agent applications and customers' ID checks                        |
-| Finance      | Money: refunds, wallet adjustments, payout accounts and the checks |
-| Safety       | Suspending accounts that put people at risk                        |
-| Support      | Look at everything, change nothing                                 |
-
-**Two-person approval.** These changes wait on the Approvals page until a second admin whose role allows them approves:
-
-- every wallet adjustment and refund (finance or an owner)
-- a dispute split paying the agent more than the set amount (Settings, Security; disputes, operations or an owner)
-- every settings change, including fees, timers and limits (an owner)
-- a new teammate, a role change, or giving a disabled teammate their access back (an owner)
-- suspending an agent with at least the set number of completed errands (Settings, Security)
-- switching a provider, or changing the keys of the one in use (an owner); the new keys wait sealed
-
-The person who asked can never approve their own request, and the database refuses it too. An approved change runs as the person who asked, and the audit log shows both. When nobody else on the team has ever held the permission (a new team with a single owner, say), the change goes ahead at once and is marked as approved by the person who asked. Teammates who were disabled or reset still count, so nobody can go it alone by switching the others off; a team that has lost its other approvers adds one with `pnpm admin invite` on the server. Disabling a teammate always happens at once. Requests lapse after the hours set in Settings, Security (default 72).
-
-The disputes team settles a dispute as complete or cancelled, the standard way or by splitting the money held: the fee between the agent, Jiffo and the customer, the item money between the agent and the customer, and, when the customer never locked the item amount, up to that amount from their wallet for the agent. Every action needs a reason, which stays in the timeline and the audit log and is never shown to the customer or agent.
-
-Five wrong passwords for one email from one network, or five wrong codes for one admin, pause sign-in for 15 minutes; a reset lifts the pause.
-
-**Audit log.** Every change needs a reason of a few words, which the panel asks for beside it; the API refuses a change without one. The log keeps who made the change, when, from which network and browser, why, and for balances and account status the value before and after. The database refuses any edit, deletion or emptying of it, from the app or a stray query; whoever owns the database could still switch that off, which is why a copy outside it matters. Commands run with `pnpm admin` on the server are logged as from the command line, with their reason. A write-once copy kept outside the app (such as S3 Object Lock in a separate account) is for whoever runs the hosting.
-
-**Personal details.** Applications and ID checks show legal names, dates of birth, home addresses and emergency contacts masked, as `A••• O•••` and the year of birth. Anyone with the reveal permission (every role but support) can show one person's full details with a reason, which goes in the audit log, and can search those lists by legal name. Each staff member can reveal up to 20 people a day in each country; owners change that in Settings, Security. Payout accounts waiting for review show the legal name in full only to finance and owners, who compare it with the bank's. ID numbers and selfies aren't stored, so there is nothing of them to show.
-
-In production the panel must sit behind a load balancer (`TRUST_PROXY_HOPS` of at least 1), and the API needs `ADMIN_URL` set to the panel's address for invite links.
+The wordmark, app icons, colours and type are in [`brand/`](brand/README.md).
