@@ -75,24 +75,32 @@ export class AuditService {
    */
   async refuseOwnAccount(
     tx: Tx | Db,
-    admin: AdminContext,
+    admin: Pick<AdminContext, 'phone'>,
     targetType: string | null | undefined,
     targetId: string | null | undefined,
+    /** Checking the person who asked for a change, before a second admin runs it. */
+    asker = false,
   ) {
     const people = await this.peopleIn(tx, targetType, targetId);
     if (!people.length) return;
     if (!admin.phone) {
-      throw forbidden(
-        'phone_needed',
-        "An owner must add your phone number on the Team page before you can change people's accounts",
-      );
+      throw asker
+        ? forbidden('asker_phone_needed', "The person who asked has no phone number yet, so this can't run. Reject it.")
+        : forbidden(
+            'phone_needed',
+            "An owner must add your phone number on the Team page before you can change people's accounts",
+          );
     }
     const [own] = await tx
       .select({ id: users.id })
       .from(users)
       .where(and(inArray(users.id, people), eq(users.phone, admin.phone)))
       .limit(1);
-    if (own) throw forbidden('own_account', "You can't change your own Jiffo account. Ask a teammate.");
+    if (own) {
+      throw asker
+        ? forbidden('asker_own_account', 'This is about the account of the person who asked. Reject it.')
+        : forbidden('own_account', "You can't change your own Jiffo account. Ask a teammate.");
+    }
   }
 
   /**

@@ -150,7 +150,7 @@ export class ApprovalRequests implements OnModuleInit {
     return this.approvals.submit(admin, {
       kind: 'team_invite',
       payload: { ...input, email, phone },
-      summary: `Add ${email} to the team as ${ADMIN_ROLE_INFO[input.role].label}`,
+      summary: `Add ${email} to the team as ${ADMIN_ROLE_INFO[input.role].label}, with the phone number ${maskPhone(phone)}`,
       note: `Invite ${input.name.trim()}`,
       targetType: 'admin',
       targetId: email,
@@ -158,9 +158,9 @@ export class ApprovalRequests implements OnModuleInit {
   }
 
   /**
-   * A role change, giving a disabled teammate their access back (D4), or changing the phone number that links
-   * their own app account (D3): a new number could unlink it. Disabling someone takes access away, and a
-   * first number only adds protection, so those run at once.
+   * A role change, giving a disabled teammate their access back (D4), or setting the phone number that links
+   * their own app account (D3): one owner alone could otherwise choose a number that links nothing. Disabling
+   * someone takes access away, so it runs at once.
    */
   async teamChange(admin: AdminContext, id: string, change: TeamChange): Promise<unknown> {
     if (id === admin.adminId) throw forbidden('own_account', "You can't change your own access. Ask another owner.");
@@ -169,21 +169,22 @@ export class ApprovalRequests implements OnModuleInit {
     const newRole = change.role && change.role !== target.role ? change.role : null;
     const reEnabled = change.status === 'active' && target.status === 'disabled';
     const phone = change.phone ? this.team.phoneOf(change.phone) : null;
-    const newPhone = phone && target.phone && phone !== target.phone ? phone : null;
-    if (!newRole && !reEnabled && !newPhone) return this.team.update(admin, id, phone ? { ...change, phone } : change);
+    const newPhone = phone && phone !== target.phone ? phone : null;
+    const { phone: _typed, ...rest } = change;
+    if (!newRole && !reEnabled && !newPhone) return this.team.update(admin, id, rest);
     // Taking access away never waits: a disable sent with a role change happens now, the role change waits.
     if (change.status === 'disabled') {
       await this.team.update(admin, id, { status: 'disabled' });
-      return this.teamChange(admin, id, { role: change.role, phone: change.phone });
+      return this.teamChange(admin, id, { role: change.role, ...(newPhone ? { phone: newPhone } : {}) });
     }
     const what = [
       newRole ? `make them ${ADMIN_ROLE_INFO[newRole].label}` : null,
       reEnabled ? 'give their access back' : null,
-      newPhone ? `change their phone number to ${maskPhone(newPhone)}` : null,
+      newPhone ? `${target.phone ? 'change' : 'set'} their phone number to ${maskPhone(newPhone)}` : null,
     ].filter(Boolean);
     return this.approvals.submit(admin, {
       kind: 'team_change',
-      payload: { id, change: { ...change, ...(phone ? { phone } : {}) } },
+      payload: { id, change: { ...rest, ...(newPhone ? { phone: newPhone } : {}) } },
       summary: `${target.name} (${target.email}): ${what.join(' and ')}`,
       note: what.join(' and '),
       targetType: 'admin',

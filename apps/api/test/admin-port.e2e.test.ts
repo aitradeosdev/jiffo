@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:net';
-import type { Server as HttpServer } from 'node:http';
+import { request as httpRequest, type Server as HttpServer } from 'node:http';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isAdminPath, listenAdmin } from '../src/common/admin-port';
@@ -49,6 +49,24 @@ describe('the admin API on its own port', () => {
     await request(t.http).get('/health').expect(200);
   });
 
+  it('refuses an admin route asked for with a full address on the public port', async () => {
+    const owner = await adminAs(t, 'owner');
+    const { port } = (t.http as HttpServer).address() as { port: number };
+    // GET http://host/v1/admin/me: Express routes it by its path, so the split must too.
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = httpRequest(
+        { host: '127.0.0.1', port, path: 'http://api.jiffoapp.com/v1/admin/me', headers: owner.headers },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+    expect(status).toBe(404);
+  });
+
   it('answers admin routes on the admin port, and nothing else', async () => {
     const owner = await adminAs(t, 'owner');
     expect((await request(adminUrl).get('/v1/admin/me').set(owner.headers).expect(200)).body).toMatchObject({
@@ -70,5 +88,7 @@ describe('the admin API on its own port', () => {
     expect(isAdminPath('/v1/administrator', 'v1')).toBe(false);
     expect(isAdminPath('/v1/errands/admin', 'v1')).toBe(false);
     expect(isAdminPath('/v1/%zz/admin', 'v1')).toBe(false);
+    expect(isAdminPath('http://api.jiffoapp.com/v1/admin/me', 'v1')).toBe(true);
+    expect(isAdminPath('HTTP://API.JIFFOAPP.COM//V1/ADMIN', 'v1')).toBe(true);
   });
 });

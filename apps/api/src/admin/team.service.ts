@@ -65,13 +65,14 @@ export class TeamService {
    */
   async invite(by: AdminContext, input: { email: string; name: string; role: AdminRole; phone: string }) {
     const email = this.mail.ready();
+    const phone = this.phoneOf(input.phone);
     const made = await this.db.transaction(async (tx) => {
-      const made = await this.auth.addAdmin(tx, { ...input, phone: this.phoneOf(input.phone), invitedBy: by.adminId });
+      const made = await this.auth.addAdmin(tx, { ...input, phone, invitedBy: by.adminId });
       await this.audit.record(tx, by, {
         action: 'team.invite',
         targetType: 'admin',
         targetId: made.id,
-        data: { email: made.email, role: input.role, phone: maskPhone(this.phoneOf(input.phone)) },
+        data: { email: made.email, role: input.role, phone: maskPhone(phone) },
       });
       return made;
     });
@@ -105,6 +106,8 @@ export class TeamService {
   /** Changes a teammate's role or phone number, or disables or re-enables them. Not for your own account. */
   async update(by: AdminContext, id: string, change: TeamChange) {
     if (id === by.adminId) throw forbidden('own_account', "You can't change your own access. Ask another owner.");
+    // A teammate's number is only ever set with a second owner's approval (D3).
+    if (change.phone && !by.approval) throw forbidden('needs_approval', 'A new phone number needs a second owner');
     return this.db.transaction(async (tx) => {
       const target = await this.lockTarget(tx, id);
       const role = change.role ?? target.role;

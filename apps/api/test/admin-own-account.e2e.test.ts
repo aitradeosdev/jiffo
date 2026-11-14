@@ -96,6 +96,36 @@ describe('staff and their own app accounts', () => {
     expect((await balanceOf(t, me)).balanceKobo).toBe(0);
   });
 
+  it("won't run a request whose asker has since lost their number, and leaves it to be rejected", async () => {
+    const person = await signIn(t, 'customer');
+    const asker = await adminAs(t, 'finance');
+    const approver = await adminAs(t, 'finance');
+    const asked = await request(t.http).post('/v1/admin/money/adjustments').set(asker.headers).send({
+      personId: person.userId,
+      account: 'customer_wallet',
+      direction: 'credit',
+      amountKobo: 100_000,
+      note: 'Goodwill for a late delivery',
+      requestId: randomUUID(),
+    });
+    expect(asked.status).toBe(202);
+    await t.db.update(admins).set({ phone: null }).where(eq(admins.id, asker.id));
+    refused(
+      await request(t.http)
+        .post(`/v1/admin/approvals/${asked.body.approval.id}/approve`)
+        .set(approver.headers)
+        .send({}),
+      'asker_phone_needed',
+    );
+    const [approval] = await t.db.select().from(adminApprovals).where(eq(adminApprovals.id, asked.body.approval.id));
+    expect(approval!.status).toBe('pending');
+    await request(t.http)
+      .post(`/v1/admin/approvals/${asked.body.approval.id}/reject`)
+      .set(approver.headers)
+      .send({ note: 'Their number is missing' })
+      .expect(200);
+  });
+
   it('refuses settling an errand they are the customer or the agent of', async () => {
     const customer = await signIn(t, 'customer');
     const agent: Person = await signIn(t, 'agent');
@@ -144,7 +174,7 @@ describe('staff and their own app accounts', () => {
     await request(t.http).delete(`/v1/admin/categories/${made.body.id}`).set(owner.headers).expect(200);
   });
 
-  it('takes a phone with every invite; adding one is at once, and changing it waits for a second owner', async () => {
+  it('takes a phone with every invite, shown to the approver, and a new one waits for a second owner', async () => {
     const owner = await adminAs(t, 'owner');
     const second = await adminAs(t, 'owner');
     const email = `own-${randomUUID().slice(0, 8)}@jiffoapp.com`;
@@ -154,6 +184,8 @@ describe('staff and their own app accounts', () => {
     expect(bad.status).toBe(400);
     expect(bad.body.error.code).toBe('invalid_phone');
     const asked = await invite({ email, name: 'New Teammate', role: 'support', phone: '0803 123 4567' }).expect(202);
+    // The approver sees the number that will link their account.
+    expect(asked.body.approval.summary).toContain('+234•••••••567');
     await request(t.http)
       .post(`/v1/admin/approvals/${asked.body.approval.id}/approve`)
       .set(second.headers)
@@ -166,31 +198,35 @@ describe('staff and their own app accounts', () => {
       phone: '+234•••••••567',
     });
 
-    // A teammate with no phone yet gets one at once: it only adds protection.
+    // Setting or changing a teammate's number waits for a second owner: a number could unlink their account.
     const none = await adminAs(t, 'support', { phone: null });
+    const phoneOf = async () =>
+      (await t.db.select({ phone: admins.phone }).from(admins).where(eq(admins.id, none.id)))[0]!.phone;
+    for (const [typed, stored] of [
+      ['08031234568', '+2348031234568'],
+      ['08031234569', '+2348031234569'],
+    ] as const) {
+      const before = await phoneOf();
+      const change = await request(t.http)
+        .patch(`/v1/admin/team/${none.id}`)
+        .set(owner.headers)
+        .send({ phone: typed })
+        .expect(202);
+      expect(change.body.approval.summary).toMatch(/phone number to \+234•+\d{3}/);
+      expect(await phoneOf()).toBe(before);
+      await request(t.http)
+        .post(`/v1/admin/approvals/${change.body.approval.id}/approve`)
+        .set(second.headers)
+        .send({})
+        .expect(200);
+      expect(await phoneOf()).toBe(stored);
+    }
+    // The same number again is no change at all.
     await request(t.http)
-      .patch(`/v1/admin/team/${none.id}`)
-      .set(owner.headers)
-      .send({ phone: '08031234568' })
-      .expect(200);
-    const [added] = await t.db.select({ phone: admins.phone }).from(admins).where(eq(admins.id, none.id));
-    expect(added!.phone).toBe('+2348031234568');
-    // Changing it could unlink their account, so a second owner must agree.
-    const change = await request(t.http)
       .patch(`/v1/admin/team/${none.id}`)
       .set(owner.headers)
       .send({ phone: '08031234569' })
-      .expect(202);
-    expect(change.body.approval.summary).toMatch(/phone/);
-    const [still] = await t.db.select({ phone: admins.phone }).from(admins).where(eq(admins.id, none.id));
-    expect(still!.phone).toBe('+2348031234568');
-    await request(t.http)
-      .post(`/v1/admin/approvals/${change.body.approval.id}/approve`)
-      .set(second.headers)
-      .send({})
       .expect(200);
-    const [changed] = await t.db.select({ phone: admins.phone }).from(admins).where(eq(admins.id, none.id));
-    expect(changed!.phone).toBe('+2348031234569');
     // Nobody changes their own.
     refused(
       await request(t.http).patch(`/v1/admin/team/${owner.id}`).set(owner.headers).send({ phone: '08031234570' }),

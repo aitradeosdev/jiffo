@@ -47,7 +47,7 @@ Owners invite everyone else from the Team page. Invite and reset links are email
 
 Every teammate gives their own phone number when invited: the number of the Jiffo customer or agent account they hold, or would hold. Nobody can change their own account from the panel, or an errand it is part of: not crediting or adjusting it, suspending or reactivating it, deciding its application or ID check, revealing its details, settling its dispute, or asking for or approving any of those. Someone else on the team must. It holds for every route, since the check is made where each change is recorded.
 
-A teammate with no number yet can't change anyone's account until one is added; the Team page says who. An owner adds a number for a teammate at once, but changing one waits for a second owner, since a new number could unlink their account. Nobody changes their own: another owner does, or `pnpm admin phone --email ... --phone ... --reason ...` on the server, for a team made before numbers were asked for.
+A teammate with no number yet can't change anyone's account until one is added; the Team page says who. Setting or changing a teammate's number waits for a second owner, who sees it, as an invite's does: one owner alone could otherwise choose a number that links nothing. A request whose asker has since lost their number won't run; reject it. Nobody changes their own number: another owner does, or `pnpm admin phone --email ... --phone ... --reason ...` on the server, for a team made before numbers were asked for.
 
 ## Two-person approval
 

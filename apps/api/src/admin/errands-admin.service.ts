@@ -396,11 +396,14 @@ export class ErrandsAdminService {
   }
 
   /** Support's own action on an errand, recorded in the audit log in the same transaction. */
-  act(
+  async act(
     admin: AdminContext,
     id: string,
     input: { event: AdminErrandEvent; version: number; note: string; split?: DisputeSplit },
   ) {
+    // Not on an errand of their own (D3): checked first too, since the errand's timers are set before the
+    // audit entry that would refuse it.
+    await this.audit.refuseOwnAccount(this.db, admin, 'errand', id);
     return this.errandsService.adminTransition(id, admin.adminId, input, (tx, before, after) =>
       this.audit.record(tx, admin, {
         action: `errand.${input.event}`,

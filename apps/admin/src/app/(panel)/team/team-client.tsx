@@ -102,6 +102,8 @@ interface Member {
 /** A teammate's role picker and access buttons. Disabling and resetting ask first. */
 export function MemberActions({ member }: { member: Member }) {
   const [confirming, setConfirming] = useState<'disable' | 'reset' | 'phone' | null>(null);
+  // Held in state: React clears a form's fields after its action, which would lose a number that was refused.
+  const [phoneTyped, setPhoneTyped] = useState('');
   // The question closes once the answer is back, so the button keeps showing it is working until then.
   const answered =
     (run: (state: TeamState, form: FormData) => Promise<TeamState>) => async (state: TeamState, form: FormData) => {
@@ -112,7 +114,9 @@ export function MemberActions({ member }: { member: Member }) {
   const [roleState, roleAction] = useActionState<TeamState, FormData>(updateTeammate, {});
   const [statusState, statusAction] = useActionState<TeamState, FormData>(answered(updateTeammate), {});
   const [resetState, resetAction] = useActionState<TeamState, FormData>(answered(resetTeammate), {});
-  const [phoneState, phoneAction] = useActionState<TeamState, FormData>(answered(updateTeammate), {});
+  // Not closed on an answer: a number that is refused stays there to correct. One that is taken waits for a
+  // second owner, and the page moves to the Approvals page.
+  const [phoneState, phoneAction] = useActionState<TeamState, FormData>(updateTeammate, {});
   const error = roleState.error || statusState.error || resetState.error || phoneState.error;
 
   return (
@@ -206,6 +210,8 @@ export function MemberActions({ member }: { member: Member }) {
             maxLength={30}
             autoComplete="off"
             placeholder="0803 123 4567"
+            value={phoneTyped}
+            onChange={(e) => setPhoneTyped(e.currentTarget.value)}
             className={`${inputClass} h-9 max-w-[200px]`}
           />
           <SubmitButton small>Save</SubmitButton>
@@ -213,15 +219,15 @@ export function MemberActions({ member }: { member: Member }) {
             Cancel
           </button>
         </form>
-      ) : (
+      ) : member.status === 'disabled' ? null : (
         <div className="flex justify-end">
           <button type="button" className={buttonClass('ghost', true)} onClick={() => setConfirming('phone')}>
             {member.phone ? 'Change phone number' : 'Add phone number'}
           </button>
         </div>
       )}
-      {confirming === 'phone' && member.phone ? (
-        <p className="text-right text-[13px] text-ink-3">A new number waits for a second owner.</p>
+      {confirming === 'phone' ? (
+        <p className="text-right text-[13px] text-ink-3">The number waits for a second owner.</p>
       ) : null}
       {confirming === 'reset' ? (
         <p className="text-right text-[13px] text-ink-3">

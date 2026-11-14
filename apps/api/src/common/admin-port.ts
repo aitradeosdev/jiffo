@@ -8,9 +8,20 @@ import type { NextFunction, Request, Response } from 'express';
  * the open internet, and every other route answers only on the public port.
  */
 
-/** The path as Express would route it: case and repeated slashes don't matter to it, so not here either. */
+/**
+ * The path as Express would route it: case and repeated slashes don't matter to it, so not here either, and
+ * a full address in the request line (GET http://host/v1/admin/me) is routed by its path.
+ */
 function routedPath(url: string) {
-  let path = url.split('?')[0] ?? '';
+  let path = url;
+  if (!path.startsWith('/')) {
+    try {
+      path = new URL(path).pathname;
+    } catch {
+      // Not an address: as sent.
+    }
+  }
+  path = path.split('?')[0] ?? '';
   try {
     path = decodeURIComponent(path);
   } catch {
