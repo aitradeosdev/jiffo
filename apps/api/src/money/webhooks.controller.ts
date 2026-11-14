@@ -5,6 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { providerEvents } from '../db/schema';
 import { badRequest, notFound, unauthorized } from '../common/errors';
+import { redact } from '../common/redact';
 import { ProvidersService } from '../providers/providers.service';
 import { DepositsService } from './deposits.service';
 import { FixedAccountsService } from './fixed-accounts.service';
@@ -65,7 +66,7 @@ export class WebhooksController {
     const kind = event.kind === 'ignored' ? event.event : event.kind;
     await this.db
       .insert(providerEvents)
-      .values({ provider, eventKey: event.eventKey, kind, payload: event.raw })
+      .values({ provider, eventKey: event.eventKey, kind, payload: redact(event.raw) })
       .onConflictDoNothing();
     const [stored] = await this.db
       .select()

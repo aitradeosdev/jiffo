@@ -2,7 +2,16 @@ import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminAudit, agentApplications, agentPresence } from '../src/db/schema';
-import { adminAs, completeApplication, createTestApp, signIn, uniqueNin, type Person, type TestApp } from './helpers';
+import {
+  boardRequest,
+  adminAs,
+  completeApplication,
+  createTestApp,
+  signIn,
+  uniqueNin,
+  type Person,
+  type TestApp,
+} from './helpers';
 
 describe('admin: agent applications', () => {
   let t: TestApp;
@@ -30,8 +39,7 @@ describe('admin: agent applications', () => {
   }
   const decide = (agent: Person, body: Record<string, unknown>, as = ops) =>
     request(t.http).post(`/v1/admin/people/${agent.userId}/application`).set(as.headers).send(body);
-  const board = (agent: Person) =>
-    request(t.http).get('/v1/errands/board?lat=6.4480&lng=3.4700&radiusKm=5').set(agent.headers);
+  const board = (agent: Person) => boardRequest(t, agent, 'lat=6.4480&lng=3.4700&radiusKm=5');
 
   it('lists applications waiting for review with what was flagged, oldest first', async () => {
     const first = await inReview();

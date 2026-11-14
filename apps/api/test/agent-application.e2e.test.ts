@@ -5,6 +5,7 @@ import { IdentityUnavailable } from '../src/adapters/identity';
 import { ENV_ADAPTERS, type Adapters } from '../src/providers/env-adapters';
 import { agentApplications, states } from '../src/db/schema';
 import {
+  boardRequest,
   act,
   completeApplication,
   createErrand,
@@ -44,7 +45,7 @@ describe('agent application', () => {
   it('keeps agents off the board until they are approved', async () => {
     const agent = await newAgent();
     const errand = await createErrand(t, customer);
-    const board = await request(t.http).get('/v1/errands/board?lat=6.4480&lng=3.4700&radiusKm=5').set(agent.headers);
+    const board = await boardRequest(t, agent, 'lat=6.4480&lng=3.4700&radiusKm=5');
     expect(board.status).toBe(403);
     expect(board.body.error.code).toBe('application_pending');
     await request(t.http)
@@ -99,7 +100,7 @@ describe('agent application', () => {
     expect(JSON.stringify(row)).not.toContain('22212345678');
     expect(row!.idFingerprint).toMatch(/^[0-9a-f]{64}$/);
     // Now they can work, and the application is closed for edits.
-    await request(t.http).get('/v1/errands/board?lat=6.4480&lng=3.4700&radiusKm=5').set(agent.headers).expect(200);
+    await boardRequest(t, agent, 'lat=6.4480&lng=3.4700&radiusKm=5').expect(200);
     expect((await call(agent, 'patch', '', { area: 'Ikoyi' })).status).toBe(409);
   });
 
@@ -224,7 +225,7 @@ describe('agent application', () => {
       const res = await call(agent, 'post', '/submit').expect(200);
       expect(res.body.status).toBe('review');
       expect(res.body.checks.find((c: { key: string }) => c.key === key)).toMatchObject({ outcome });
-      await request(t.http).get('/v1/errands/board?lat=6.4480&lng=3.4700&radiusKm=5').set(agent.headers).expect(403);
+      await boardRequest(t, agent, 'lat=6.4480&lng=3.4700&radiusKm=5').expect(403);
     }
     // An address the provider can't confirm goes to review too.
     const agent = await newAgent();

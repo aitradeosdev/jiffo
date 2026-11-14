@@ -326,3 +326,36 @@ export async function agentWithMoney(t: TestApp, amountKobo = 1_000_000) {
     .expect(200);
   return agent;
 }
+
+/**
+ * Asks the board about a spot, as the agent app does: its phone reports being there first, as the board
+ * answers only around where the agent is. Awaited, or with .expect(status), like a supertest request.
+ */
+type BoardResponse = Awaited<ReturnType<ReturnType<typeof request>['get']>>;
+interface BoardCall extends PromiseLike<BoardResponse> {
+  expect(status: number): Promise<BoardResponse>;
+}
+
+export function boardRequest(t: TestApp, agent: Person, query = 'lat=6.4480&lng=3.4700&radiusKm=5'): BoardCall {
+  const params = new URLSearchParams(query);
+  const there = async () => {
+    await request(t.http)
+      .put('/v1/agent/presence')
+      .set(agent.headers)
+      .send({ online: true, lat: Number(params.get('lat')), lng: Number(params.get('lng')) });
+  };
+  const ask = () => request(t.http).get(`/v1/errands/board?${query}`).set(agent.headers);
+  const run = async (): Promise<BoardResponse> => {
+    await there();
+    return ask();
+  };
+  return {
+    expect: async (status: number) => {
+      await there();
+      return ask().expect(status);
+    },
+    then(onDone, onError) {
+      return run().then(onDone, onError);
+    },
+  };
+}

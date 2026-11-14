@@ -148,6 +148,13 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
 - **What it costs:** every provider charge is booked to the ledger as it happens: the fee on each top-up (Jiffo pays it, not the customer), the fee on each transfer out, and the fee for issuing an own account number, which is entered on the provider in the panel because providers don't report it per account. The overview and Money pages show revenue, those costs, and net revenue, the difference.
 - **Escrow:** the fee and service fee are held when an agent accepts, adjusted when a new price is accepted, and returned if the agent leaves or the errand is cancelled. Item money is held separately when the customer locks the item amount.
 - **Hand-off:** item money goes to the agent untouched and withdrawable at once. The fee, less the commission for the agent's tier (set by admin), goes to the agent; Bronze earnings are held for 24 hours. The service fee and commission go to platform revenue.
+- **Access rules:**
+  - **Request bodies:** a field an endpoint doesn't take is refused, not quietly dropped.
+  - **Waiting errands:** only approved agents see them, with the drop-off area rather than the exact address until they accept.
+  - **The board:** answers only around the agent's own recent position.
+  - **Agent's position:** the customer sees it only while the agent is on the way for them, up to the drop-off.
+  - **Live connections:** each server re-checks its sockets every 30 seconds, dropping ended sessions and suspended accounts and leaving errands the person is no longer on. CORS_ORIGINS must list the allowed origins in production, for HTTP and sockets alike.
+  - **Provider details:** the apps never get the provider's wording for a failure, and stored webhook bodies have account numbers, phone numbers and emails masked.
 - **Protecting the hand-off:**
   - **At the drop-off:** marking an errand delivered and entering the PIN need the agent's fresh position within the set distance of the drop-off (default 200 m, Settings, Security).
   - **Wait before a photo:** a drop-off photo is accepted only after the agent has waited the set minutes there, and only while they are still there.

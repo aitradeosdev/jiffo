@@ -23,6 +23,19 @@ export function eventsFor(errand: ErrandRow, role: ViewerRole): ErrandEvent[] {
   return role === 'prospect' ? events.filter((e) => e === 'accept') : events;
 }
 
+/**
+ * Where a drop-off is, as an agent sees it before accepting: the area (the last parts of the address) and a
+ * point rounded to about a kilometre, so waiting errands can't be mined for customers' exact addresses.
+ */
+function dropoffArea(s: StopRow) {
+  const parts = s.address
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const round = (n: number) => Math.round(n * 100) / 100;
+  return { address: parts.slice(-2).join(', ') || 'Drop-off area', lat: round(s.lat), lng: round(s.lng) };
+}
+
 export function errandView(
   errand: ErrandRow,
   stops: StopRow[],
@@ -50,7 +63,15 @@ export function errandView(
     settingsVersion: errand.settingsVersion,
     stops: [...stops]
       .sort((a, b) => a.seq - b.seq)
-      .map((s) => ({ seq: s.seq, kind: s.kind, label: s.label, address: s.address, lat: s.lat, lng: s.lng })),
+      .map((s) => ({
+        seq: s.seq,
+        kind: s.kind,
+        label: s.label,
+        address: s.address,
+        lat: s.lat,
+        lng: s.lng,
+        ...(role === 'prospect' && s.kind === 'dropoff' ? dropoffArea(s) : {}),
+      })),
     customer: people.customer,
     agent: people.agent,
     role,

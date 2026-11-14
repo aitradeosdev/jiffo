@@ -4,7 +4,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { agentProfiles, categories, earningHolds } from '../src/db/schema';
 import { and } from 'drizzle-orm';
 import { LedgerService } from '../src/money/ledger.service';
-import { act, balanceOf, createErrand, createTestApp, fund, signIn, type Person, type TestApp } from './helpers';
+import {
+  boardRequest,
+  act,
+  balanceOf,
+  createErrand,
+  createTestApp,
+  fund,
+  signIn,
+  type Person,
+  type TestApp,
+} from './helpers';
 
 describe('agent profile', () => {
   let t: TestApp;
@@ -17,8 +27,7 @@ describe('agent profile', () => {
   });
   afterAll(() => t.close());
 
-  const board = (agent: Person) =>
-    request(t.http).get('/v1/errands/board?lat=6.4480&lng=3.4700&radiusKm=5').set(agent.headers).expect(200);
+  const board = (agent: Person) => boardRequest(t, agent, 'lat=6.4480&lng=3.4700&radiusKm=5').expect(200);
   const ids = (res: { body: { errands: Array<{ id: string }> } }) => res.body.errands.map((e) => e.id);
   const setTier = (agent: Person, tier: 'bronze' | 'silver' | 'gold' | 'platinum') =>
     t.db

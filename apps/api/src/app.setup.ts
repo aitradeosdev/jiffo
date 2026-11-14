@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { APP_CONFIG, type AppConfig } from './config/app-config';
 import { ApiExceptionFilter } from './common/errors';
+import { ConfiguredIoAdapter } from './realtime/io-adapter';
 
 /** Shared by main.ts and the tests, so the tests run the app exactly as production does. */
 export function configureApp(app: INestApplication) {
@@ -18,6 +19,7 @@ export function configureApp(app: INestApplication) {
   app.enableCors({
     origin: config.CORS_ORIGINS === '*' ? true : config.CORS_ORIGINS.split(',').map((o) => o.trim()),
   });
+  app.useWebSocketAdapter(new ConfiguredIoAdapter(app, config.CORS_ORIGINS));
   app.enableShutdownHooks();
   return app;
 }

@@ -9,6 +9,13 @@ import type { AuthContext } from '../auth/auth.types';
 
 /** States in which the agent is out doing the errand, so the customer may see where they are. */
 export const TRAVEL_STATES = AGENT_OUT_STATES;
+/**
+ * When the customer sees where the agent is: while the agent is on the way for them, up to the drop-off.
+ * After a drop-off photo, or once the customer is unreachable, the agent's position is their own again.
+ */
+export const SHARE_STATES: readonly string[] = AGENT_OUT_STATES.filter(
+  (s) => s !== 'photo_pending' && s !== 'unreachable',
+);
 /** A position not refreshed for this long is deleted, whatever the agent's app last said. */
 const KEEP_FOR_MS = 30 * 60_000;
 
@@ -41,7 +48,7 @@ export class PresenceService {
   async report(auth: AuthContext, input: { online?: boolean; lat?: number; lng?: number }) {
     const [running, [current]] = await Promise.all([
       this.db
-        .select({ id: errands.id, customerId: errands.customerId })
+        .select({ id: errands.id, customerId: errands.customerId, status: errands.status })
         .from(errands)
         .where(and(eq(errands.agentId, auth.userId), inArray(errands.status, [...TRAVEL_STATES]))),
       input.online === undefined
@@ -77,7 +84,7 @@ export class PresenceService {
     // forget the position again rather than keep it.
     if (!body.online && sharing) await this.forgetIfIdle(auth.userId);
     if (located) {
-      for (const e of running) {
+      for (const e of running.filter((r) => SHARE_STATES.includes(r.status))) {
         this.realtime.toUser(e.customerId, 'customer', 'agent.location', {
           errandId: e.id,
           lat: body.lat,

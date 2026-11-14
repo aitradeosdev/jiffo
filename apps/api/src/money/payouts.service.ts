@@ -46,6 +46,9 @@ const bankKey = (name: string) =>
     .replace(/\b(plc|limited|ltd|bank|nigeria)\b/g, '')
     .replace(/[^a-z0-9]/g, '');
 
+/** What an agent is told when a withdrawal fails: the provider's own words stay with support. */
+const PAYOUT_FAILED = "The bank couldn't take this transfer. Check your bank account details, or contact support.";
+
 export const payoutView = (p: PayoutRow) => ({
   id: p.id,
   speed: p.speed,
@@ -53,7 +56,7 @@ export const payoutView = (p: PayoutRow) => ({
   amountKobo: p.amountKobo,
   feeKobo: p.feeKobo,
   sendKobo: p.sendKobo,
-  failureReason: p.failureReason,
+  failureReason: p.status === 'failed' ? PAYOUT_FAILED : null,
   createdAt: p.createdAt,
   sentAt: p.sentAt,
   completedAt: p.completedAt,

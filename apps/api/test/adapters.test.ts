@@ -550,12 +550,15 @@ describe('config', () => {
     expect(() => loadConfig({ ...live, TRUST_PROXY_HOPS: '1', ADMIN_PANEL_SECRET: 'z'.repeat(32) })).toThrow(
       /ADMIN_URL/,
     );
-    const ready = {
+    const allowed = {
       ...live,
       TRUST_PROXY_HOPS: '1',
       ADMIN_PANEL_SECRET: 'z'.repeat(32),
       ADMIN_URL: 'https://admin.jiffoapp.com',
     };
+    // Any origin is never allowed in production: the list must be given.
+    expect(() => loadConfig(allowed)).toThrow(/CORS_ORIGINS/);
+    const ready = { ...allowed, CORS_ORIGINS: 'https://admin.jiffoapp.com' };
     expect(loadConfig(ready).TRUST_PROXY_HOPS).toBe(1);
     expect(() => loadConfig({ ...ready, ADMIN_PANEL_SECRET: 'too short' })).toThrow(/ADMIN_PANEL_SECRET/);
   });
