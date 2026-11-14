@@ -127,6 +127,13 @@
       "when": 1794650713468,
       "tag": "0017_pin_hmac",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794652175009,
+      "tag": "0018_deposit_safety",
+      "breakpoints": true
     }
   ]
 }

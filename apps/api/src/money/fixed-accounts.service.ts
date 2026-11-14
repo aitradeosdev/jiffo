@@ -2,10 +2,11 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, desc, eq, gt, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
-import { fixedAccounts, users } from '../db/schema';
+import { customerVerifications, fixedAccounts, users } from '../db/schema';
 import { fixedOwnerRef, ownerOfFixedRef, type FixedAccountState, type PaymentsAdapter } from '../adapters/payments';
 import type { AuthContext } from '../auth/auth.types';
-import { conflict, unavailable, unprocessable } from '../common/errors';
+import { conflict, tooMany, unavailable, unprocessable } from '../common/errors';
+import { matchesLegalName } from '../common/names';
 import { CountriesService } from '../countries/countries.service';
 import { CustomerIdentityService } from '../identity/customer-identity.service';
 import { ProvidersService } from '../providers/providers.service';
@@ -31,14 +32,21 @@ export interface IssueInput {
   accountNumber?: string;
 }
 
+/** Failed tries allowed in a day: each is a provider check, and unlimited tries would test BVNs against names. */
+const MAX_FAILURES = 3;
+const FAILURE_WINDOW_MS = 24 * 3_600_000;
+const UNREACHABLE = "We couldn't reach the bank. Try again.";
+/** What the customer is told when the provider refuses; its own words stay with support. */
+const REFUSED = "We couldn't issue an account number with those details. Check them and try again, or contact support.";
+
 export const fixedAccountView = (a: FixedAccountRow) => ({
   id: a.id,
   status: a.status,
   accountNumber: a.accountNumber,
   accountName: a.accountName,
   bankName: a.bankName,
-  /** Why the provider couldn't issue it, in its words. */
-  failureReason: a.status === 'failed' ? a.failureReason : null,
+  /** Why it couldn't be issued, in general terms: the provider's own words stay with support. */
+  failureReason: a.status !== 'failed' ? null : a.failureReason === UNREACHABLE ? UNREACHABLE : REFUSED,
   activatedAt: a.activatedAt,
 });
 
@@ -125,12 +133,33 @@ export class FixedAccountsService {
     if (needs === 'bvn_and_bank' && (!input.bankCode || !input.accountNumber)) {
       throw unprocessable('bank_account_required', 'Choose your bank and enter your account number');
     }
+    if (
+      mine &&
+      mine.failures >= MAX_FAILURES &&
+      mine.lastFailureAt &&
+      Date.now() - mine.lastFailureAt.getTime() < FAILURE_WINDOW_MS
+    ) {
+      throw tooMany('too_many_tries', 'Too many tries today. Try again tomorrow, or contact support.');
+    }
     const [user] = await this.db
-      .select({ firstName: users.firstName, lastName: users.lastName, phone: users.phone })
+      .select({
+        firstName: users.firstName,
+        lastName: users.lastName,
+        phone: users.phone,
+        legalName: customerVerifications.legalName,
+      })
       .from(users)
+      .leftJoin(customerVerifications, eq(customerVerifications.userId, users.id))
       .where(eq(users.id, auth.userId));
-    if (!user?.firstName || !user.lastName) {
+    const firstName = user?.firstName;
+    const lastName = user?.lastName;
+    if (!user || !firstName || !lastName) {
       throw unprocessable('name_required', 'Add your first and last name to your profile first');
+    }
+    // The provider checks the BVN against the name sent: it must be the name on the verified ID, so an
+    // invented one can't be tested. The profile's order is kept, as ID records vary in theirs.
+    if (user.legalName && !matchesLegalName(`${firstName} ${lastName}`, user.legalName)) {
+      throw unprocessable('name_not_on_id', 'Your name in the app must match the name on your ID. Update it first.');
     }
 
     // Claimed first, so two taps never ask twice. A new row, one that failed, or one the provider lost or
@@ -168,8 +197,8 @@ export class FixedAccountsService {
       state = await payments.issueFixedAccount({
         ownerRef,
         email: `${auth.userId}@${this.config.PAYMENT_EMAIL_DOMAIN}`,
-        firstName: user.firstName,
-        lastName: user.lastName,
+        firstName,
+        lastName,
         phone: user.phone,
         bvn: input.bvn,
         bankCode: needs === 'bvn_and_bank' ? input.bankCode : undefined,
@@ -181,7 +210,14 @@ export class FixedAccountsService {
       this.logger.warn(`Issuing a fixed account at ${payments.name} failed: ${(error as Error).message}`);
       await this.db
         .update(fixedAccounts)
-        .set({ status: 'failed', failureReason: "We couldn't reach the bank. Try again.", checkingUntil: null })
+        .set({
+          status: 'failed',
+          failureReason: UNREACHABLE,
+          checkingUntil: null,
+          // Counted too: a provider error must not become a way round the day's tries.
+          failures: sql`case when ${fixedAccounts.lastFailureAt} > now() - interval '1 day' then ${fixedAccounts.failures} + 1 else 1 end`,
+          lastFailureAt: new Date(),
+        })
         .where(eq(fixedAccounts.id, claimed.id));
       throw unavailable('provider_unavailable', "We couldn't reach the bank. Try again in a moment.");
     }
@@ -316,6 +352,13 @@ export class FixedAccountsService {
           status: state.status,
           providerRef: state.providerRef ?? row.providerRef,
           failureReason: state.status === 'failed' ? state.reason : null,
+          // A refusal counts towards the day's tries; one more than a day after the last starts again at 1.
+          ...(state.status === 'failed'
+            ? {
+                failures: sql`case when ${fixedAccounts.lastFailureAt} > now() - interval '1 day' then ${fixedAccounts.failures} + 1 else 1 end`,
+                lastFailureAt: now,
+              }
+            : {}),
           checkingUntil: null,
           updatedAt: now,
         })
@@ -340,6 +383,7 @@ export class FixedAccountsService {
           accountName: state.accountName,
           bankName: state.bankName,
           failureReason: null,
+          failures: 0,
           checkingUntil: null,
           ...(first ? { activatedAt: now, issueFeeKobo: fee } : {}),
           updatedAt: now,

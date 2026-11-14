@@ -529,10 +529,13 @@ export const deposits = pgTable(
     senderBank: text('sender_bank'),
     /** The sender's name does not match the customer's: shown to admin as a fraud signal. */
     senderMismatch: boolean('sender_mismatch').notNull().default(false),
+    /** The app's key for the request, so a repeated tap makes one top-up. */
+    requestKey: text('request_key'),
     createdAt: createdAt(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
   (t) => [
+    uniqueIndex('deposits_request_key_uq').on(t.userId, t.requestKey),
     uniqueIndex('deposits_reference_uq').on(t.reference),
     index('deposits_user_idx').on(t.userId, t.createdAt),
     // The admin list: a country's top-ups, newest first.
@@ -566,6 +569,9 @@ export const fixedAccounts = pgTable(
     accountName: text('account_name'),
     bankName: text('bank_name'),
     failureReason: text('failure_reason'),
+    /** Failed tries in a row, and when the last one was: a few a day are allowed, so BVNs can't be tested. */
+    failures: integer('failures').notNull().default(0),
+    lastFailureAt: timestamp('last_failure_at', { withTimezone: true }),
     /** When this attempt was asked for: one the provider still hasn't settled after a week can be asked again. */
     requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
     /** Set while one request asks the provider about it, so two never do at once. */

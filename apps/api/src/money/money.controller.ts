@@ -13,7 +13,11 @@ import { PayoutsService } from './payouts.service';
 import { WalletService } from './wallet.service';
 
 const Kobo = z.number().int().positive().max(100_000_000_000);
-const DepositBody = z.object({ amountKobo: Kobo });
+const DepositBody = z.object({
+  amountKobo: Kobo,
+  /** The app's key for this request: a repeated tap makes one top-up. */
+  requestId: z.string().uuid().optional(),
+});
 const WithdrawalBody = z.object({
   amountKobo: Kobo,
   speed: z.enum(['instant', 'scheduled']),
@@ -67,7 +71,7 @@ export class MoneyController {
   @Post('wallet/deposits')
   @Apps('customer')
   deposit(@CurrentAuth() auth: AuthContext, @Body(new ZodBody(DepositBody)) body: z.infer<typeof DepositBody>) {
-    return this.deposits.create(auth, body.amountKobo);
+    return this.deposits.create(auth, body.amountKobo, body.requestId);
   }
 
   @Get('wallet/deposits')

@@ -85,6 +85,10 @@ const needsOf = (key: string): FixedAccountNeeds | undefined => providerInfo('pa
 export interface FixedPayment extends DepositStatus {
   /** The provider's reference for the account (Paystack's customer), or ours (Flutterwave's tx_ref). */
   providerRef?: string;
+  /** How the money came in, where the provider says (Paystack: dedicated_nuban for an own account). */
+  channel?: string;
+  /** Whether the provider's own record shows a transfer into an own account number. False is not credited. */
+  toFixedAccount?: boolean;
   ownerRef?: string;
 }
 
@@ -360,9 +364,14 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
     return { status: 'pending', providerRef: code };
   }
 
-  /** A transfer into a dedicated account: the same check as a one-time top-up, with whose account it was. */
+  /**
+   * A transfer into a dedicated account: the same check as a one-time top-up, with whose account it was. A
+   * charge Paystack doesn't show as a dedicated-account transfer isn't one, whatever the webhook said.
+   */
   async verifyFixedPayment(reference: string): Promise<FixedPayment> {
-    return this.verifyCharge(reference);
+    const payment = await this.verifyCharge(reference);
+    // Only a charge Paystack itself shows as a dedicated-account transfer counts; a missing channel doesn't.
+    return { ...payment, toFixedAccount: payment.channel === 'dedicated_nuban' };
   }
 
   private async call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
@@ -401,7 +410,7 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
   }
 
   async verifyDeposit(reference: string): Promise<DepositStatus> {
-    const { providerRef: _customer, ...status } = await this.verifyCharge(reference);
+    const { providerRef: _customer, channel: _channel, ...status } = await this.verifyCharge(reference);
     return status;
   }
 
@@ -411,8 +420,9 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
       amount: number;
       fees: number | null;
       currency: string;
+      channel?: string | null;
       customer?: { customer_code?: string } | null;
-      authorization?: { sender_name?: string | null; sender_bank?: string | null } | null;
+      authorization?: { sender_name?: string | null; sender_bank?: string | null; channel?: string | null } | null;
     }>('GET', `/transaction/verify/${encodeURIComponent(reference)}`);
     const status =
       data.status === 'success'
@@ -428,6 +438,7 @@ export class PaystackPaymentsAdapter implements PaymentsAdapter {
       senderName: data.authorization?.sender_name ?? null,
       senderBank: data.authorization?.sender_bank ?? null,
       providerRef: data.customer?.customer_code,
+      channel: data.channel ?? data.authorization?.channel ?? undefined,
     };
   }
 
@@ -647,6 +658,7 @@ export class FakePaymentsAdapter implements PaymentsAdapter {
       senderName: p.senderName,
       senderBank: p.senderName ? 'Test Bank' : null,
       ownerRef: p.ownerRef,
+      toFixedAccount: true,
     };
   }
 
