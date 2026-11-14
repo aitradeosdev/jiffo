@@ -83,7 +83,6 @@ describe('top-ups under abuse', () => {
       await t.payments.createTransferDeposit({
         reference,
         amountKobo: 500_000,
-        email: 'nobody@customers.jiffoapp.com',
         expiresAt: new Date(Date.now() + 30 * 60_000),
       });
       await deliverWebhook(t, t.payments.pay(reference)).expect(200);
