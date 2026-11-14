@@ -152,7 +152,8 @@ export class AgentApplicationService implements IdentityOwner {
       emergency: app.emergencyName
         ? { name: app.emergencyName, phone: app.emergencyPhone, relationship: app.emergencyRelationship }
         : null,
-      legalName: app.legalName,
+      // The ID record's name only once the checks showed the ID is theirs (docs/security-plan.md, I1).
+      legalName: app.status === 'approved' || app.identityOutcome === 'passed' ? app.legalName : null,
       checks: app.checks.map((c) => ({ ...c, label: CHECK_LABELS[c.key] ?? c.key })),
       submittedAt: app.submittedAt,
       /** Who runs the checks, as the app names them, and how soon support usually looks at one in review. */
@@ -181,7 +182,11 @@ export class AgentApplicationService implements IdentityOwner {
    * required). Any numbers go to the provider and are not kept; the ID's fingerprint waits as pending until
    * the provider shows the ID is theirs.
    */
-  async startIdentity(userId: string, input: { idType?: string; idNumber?: string; nin?: string; bvn?: string }) {
+  async startIdentity(
+    userId: string,
+    input: { idType?: string; idNumber?: string; nin?: string; bvn?: string },
+    sessionId: string,
+  ) {
     const app = await this.load(userId);
     if (app.status !== 'draft') {
       throw conflict('application_submitted', 'Your application is already sent. We will text you when it is checked.');
@@ -190,15 +195,22 @@ export class AgentApplicationService implements IdentityOwner {
     const { settings } = await this.countries.currentSettings(app.countryCode);
     // Earlier versions of the app send only a NIN.
     const idType = input.idType ?? (input.nin ? 'nin' : undefined);
-    const started = await this.checks.start('agent', person, settings.identity, {
-      idType,
-      idNumber: input.idNumber ?? input.nin,
-      bvn: input.bvn,
-    });
+    const started = await this.checks.start(
+      'agent',
+      person,
+      settings.identity,
+      {
+        idType,
+        idNumber: input.idNumber ?? input.nin,
+        bvn: input.bvn,
+      },
+      userId,
+    );
     await this.updateDraft(userId, {
       pendingIdFingerprint: started.pendingFingerprint,
       identityProvider: started.provider,
       identityReference: started.reference,
+      identitySessionId: sessionId,
       identityIdType: started.request.idType,
       identityWithBvn: started.request.withBvn,
       identityOutcome: null,
@@ -220,7 +232,9 @@ export class AgentApplicationService implements IdentityOwner {
           isNull(agentApplications.identityOutcome),
         ),
       );
-    return app ? { userId: app.userId, provider, reference, request: requestOf(app) } : null;
+    return app
+      ? { userId: app.userId, provider, reference, request: requestOf(app), sessionId: app.identitySessionId }
+      : null;
   }
 
   /** A provider's result for a check still waited on, as the identity service hands it over. */
@@ -576,15 +590,16 @@ export class AgentApplicationService implements IdentityOwner {
             ne(agentApplications.userId, input.userId),
           ),
         );
-      if (holder?.status === 'approved') {
-        throw conflict('nin_held', 'Another approved agent account uses this NIN', { userId: holder.userId });
-      }
-      // An account that isn't approved lets the NIN go to the one support approves.
+      // An account holds an ID only once its own ID and selfie checks proved it theirs. Approving this one
+      // never takes the ID away from it: support decides that account first (docs/security-plan.md, 22).
       if (holder) {
-        await tx
-          .update(agentApplications)
-          .set({ idFingerprint: null, updatedAt: new Date() })
-          .where(eq(agentApplications.userId, holder.userId));
+        throw conflict(
+          'nin_held',
+          holder.status === 'approved'
+            ? 'Another approved agent account uses this ID'
+            : 'Another agent account proved this ID with its own checks. Decide that application first.',
+          { userId: holder.userId },
+        );
       }
       idFingerprint = app.pendingIdFingerprint;
     }
@@ -596,13 +611,17 @@ export class AgentApplicationService implements IdentityOwner {
     return { before: app, after: row! };
   }
 
-  /** The verified legal name, once the provider has checked the agent's NIN. */
+  /** The verified legal name: once every identity check passed, or support approved the application. */
   async legalName(userId: string) {
     const [row] = await this.db
-      .select({ legalName: agentApplications.legalName, outcome: agentApplications.identityOutcome })
+      .select({
+        legalName: agentApplications.legalName,
+        outcome: agentApplications.identityOutcome,
+        status: agentApplications.status,
+      })
       .from(agentApplications)
       .where(eq(agentApplications.userId, userId));
-    return row?.outcome && row.legalName ? row.legalName : null;
+    return row?.legalName && (row.outcome === 'passed' || row.status === 'approved') ? row.legalName : null;
   }
 
   /** Refuses agents whose application isn't approved: they can't see the board, go online or accept. */

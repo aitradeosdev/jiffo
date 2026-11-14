@@ -12,6 +12,13 @@ const DONE_URL = { customer: 'jiffo://identity-done', agent: 'jiffo-agent://iden
 const APP_NAME = { customer: 'Jiffo', agent: 'Jiffo Agent' } as const;
 const appOf = (value: unknown): keyof typeof DONE_URL => (value === 'customer' ? 'customer' : 'agent');
 const forReference = (reference: string | undefined) => referenceRole(reference);
+/** The cookie that keeps a check's page to the browser it was first opened in. */
+const BINDING_COOKIE = 'jiffo_check';
+const cookieOf = (req: Request) =>
+  (req.headers.cookie ?? '')
+    .split(';')
+    .map((c) => c.trim().split('='))
+    .find(([name]) => name === BINDING_COOKIE)?.[1];
 
 /** From a provider's page that Jiffo serves: the signed link it was opened with, the numbers and the session. */
 const PageBody = z
@@ -46,13 +53,28 @@ export class IdentityProviderController {
   async hosted(
     @Param('provider') provider: string,
     @Query('ref') reference: string | undefined,
+    @Query('exp') expires: string | undefined,
     @Query('sig') signature: string | undefined,
+    @Req() req: Request,
     @Res() res: Response,
   ) {
-    let page: string | null;
+    let page: Awaited<ReturnType<IdentityProviderController['checks']['hostedPage']>>;
     try {
-      page = reference && signature ? await this.checks.hostedPage(provider, reference, signature) : null;
+      page =
+        reference && expires && signature
+          ? await this.checks.hostedPage(provider, { reference, expires, signature }, cookieOf(req))
+          : null;
     } catch (error) {
+      if (error instanceof HttpException && error.getStatus() === 410) {
+        res
+          .status(410)
+          .type('html')
+          .set('cache-control', 'no-store')
+          .send(
+            `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Opened elsewhere</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1 style="font-size:24px">This link was opened on another device</h1><p>It works only where it was first opened. Start the check again from the app.</p></body></html>`,
+          );
+        return;
+      }
       // The provider couldn't start the check, or the page was opened too often: said in the browser.
       if (!(error instanceof HttpException) || ![429, 503].includes(error.getStatus())) throw error;
       const later = error.getStatus() === 429;
@@ -76,14 +98,27 @@ export class IdentityProviderController {
         );
       return;
     }
-    res.type('html').set('cache-control', 'no-store').send(page);
+    if (page.binding) {
+      res.cookie(BINDING_COOKIE, page.binding, {
+        httpOnly: true,
+        secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
+        sameSite: 'lax',
+        path: '/v1/identity/hosted',
+        maxAge: 24 * 3_600_000,
+      });
+    }
+    res.type('html').set('cache-control', 'no-store').send(page.html);
   }
 
   /** What the person entered on a provider's page that Jiffo serves, sent from that page. */
   @Post('identity/hosted/:provider/submit')
   @HttpCode(200)
-  async submitPage(@Param('provider') provider: string, @Body(new ZodBody(PageBody)) body: z.infer<typeof PageBody>) {
-    const result = await this.checks.submitPage(provider, body);
+  async submitPage(
+    @Param('provider') provider: string,
+    @Body(new ZodBody(PageBody)) body: z.infer<typeof PageBody>,
+    @Req() req: Request,
+  ) {
+    const result = await this.checks.submitPage(provider, body, cookieOf(req));
     if (!result) throw notFound('not_found', 'Not found');
     return result;
   }

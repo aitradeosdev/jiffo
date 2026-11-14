@@ -169,6 +169,12 @@ export const SECTIONS: Section[] = [
       },
       { path: 'identity.selfieTries', label: 'Selfie tries', kind: 'count' },
       { path: 'identity.reviewTargetHours', label: 'Review within', kind: 'hours' },
+      {
+        path: 'identity.checkStartsPerDay',
+        label: 'ID checks one account may start a day',
+        kind: 'count',
+        help: 'Each is a paid check with the provider. After this many, the person waits a day or contacts support.',
+      },
     ],
   },
   {

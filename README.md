@@ -168,6 +168,19 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
     - Chat pushes never quote the message.
     - Stored webhook bodies have account numbers, phone numbers, emails and names masked.
     - Every log line passes through the same masking. Production logs are JSON.
+- **Identity checks:**
+  - **The name on an ID:**
+    - Kept only for a check that didn't fail, so a failed selfie can't turn a check into a way to look up whose ID a number is.
+    - Shown to the person only once they are verified, or for agents approved.
+  - **Starting checks:** each account may start a set number a day (default 3, Settings, Identity), whatever the results, since each is a paid check.
+  - **Pages Jiffo serves for a provider:**
+    - Links expire after an hour.
+    - They work only while the app session that started the check is signed in.
+    - They work only in the browser that first opened them, so a forwarded link doesn't open.
+    - Opens are limited per check each hour, counted across all servers.
+  - **Smile ID:** its callback signature covers only a timestamp. The verdict is re-read from Smile ID, and a signature is accepted with one body only, so it can't be replayed with another.
+  - **Sandbox mode:** refused for identity providers in production.
+  - **Approving an agent:** never takes an ID away from another account that proved it with its own checks.
 - **Protecting the hand-off:**
   - **At the drop-off:** marking an errand delivered and entering the PIN need the agent's fresh position within the set distance of the drop-off (default 200 m, Settings, Security).
   - **Wait before a photo:** a drop-off photo is accepted only after the agent has waited the set minutes there, and only while they are still there.

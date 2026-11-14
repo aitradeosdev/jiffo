@@ -22,6 +22,9 @@ export const secretBinding = (category: string, provider: string) => `provider:$
  * every 30 seconds (and at once after a change here), so choosing an adapter never waits on the database.
  * A category with no provider switched on uses the environment's choice.
  */
+/** How long a link to a provider's page that this API serves works after the check starts. */
+export const HOSTED_LINK_TTL_MS = 60 * 60_000;
+
 @Injectable()
 export class ProvidersService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ProvidersService.name);
@@ -40,9 +43,21 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
     const master = secretsKeyFrom(config);
     this.box = new SecretBox(master);
     const linkKey = Buffer.from(hkdfSync('sha256', Buffer.from(master, 'hex'), Buffer.alloc(0), 'jiffo links', 32));
+    const publicApiUrl = config.PUBLIC_API_URL.replace(/\/$/, '');
+    const sign = (text: string) => createHmac('sha256', linkKey).update(text).digest('hex').slice(0, 32);
     this.context = {
-      publicApiUrl: config.PUBLIC_API_URL.replace(/\/$/, ''),
-      sign: (text) => createHmac('sha256', linkKey).update(text).digest('hex').slice(0, 32),
+      publicApiUrl,
+      sign,
+      hostedLink: (provider, reference) => {
+        const expires = String(Date.now() + HOSTED_LINK_TTL_MS);
+        const query = new URLSearchParams({
+          ref: reference,
+          exp: expires,
+          sig: sign(`${provider}:${reference}:${expires}`),
+        });
+        return `${publicApiUrl}/v1/identity/hosted/${provider}?${query.toString()}`;
+      },
+      production: config.NODE_ENV === 'production',
     };
   }
 

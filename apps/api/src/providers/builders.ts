@@ -14,7 +14,16 @@ import {
 } from '../adapters/identity-providers';
 
 type Values = Record<string, string>;
-const sandboxMode = (v: string | undefined) => (v ?? '').trim().toLowerCase() === 'sandbox';
+/**
+ * Whether a provider runs in its sandbox. Refused in production (docs/security-plan.md, finding 10): a
+ * sandbox passes anyone, so one admin switching to it would let unverified people through.
+ */
+const sandboxMode = (v: string | undefined, ctx: ProviderContext) => {
+  const sandbox = (v ?? '').trim().toLowerCase() === 'sandbox';
+  if (sandbox && ctx.production)
+    throw new Error('Sandbox mode is for testing. In production, use live mode and live keys.');
+  return sandbox;
+};
 const optional = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
 /** A fee admin typed in naira, as kobo; empty is none. Anything else is refused when the settings are saved. */
 const nairaFee = (v: string | undefined) => {
@@ -58,7 +67,7 @@ export const BUILDERS: {
   },
   identity: {
     smileid: (v, ctx) =>
-      new SmileIdIdentityAdapter(v.partnerId!, v.apiKey!, sandboxMode(v.mode), v.privacyPolicyUrl!, ctx),
+      new SmileIdIdentityAdapter(v.partnerId!, v.apiKey!, sandboxMode(v.mode, ctx), v.privacyPolicyUrl!, ctx),
     dojah: (v, ctx) =>
       new DojahIdentityAdapter(
         v.appId!,
@@ -67,10 +76,11 @@ export const BUILDERS: {
         v.widgetId!,
         v.webhookSecret!,
         optional(v.customerWidgetId),
-        sandboxMode(v.mode),
+        sandboxMode(v.mode, ctx),
         ctx,
       ),
-    youverify: (v, ctx) => new YouverifyIdentityAdapter(v.secretKey!, v.publicMerchantKey!, sandboxMode(v.mode), ctx),
+    youverify: (v, ctx) =>
+      new YouverifyIdentityAdapter(v.secretKey!, v.publicMerchantKey!, sandboxMode(v.mode, ctx), ctx),
   },
   calls: {
     africastalking: (v) => new AfricasTalkingCallsAdapter(v.username!, v.apiKey!, v.phoneNumber!),

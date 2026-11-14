@@ -7,6 +7,7 @@ import {
   customType,
   doublePrecision,
   index,
+  primaryKey,
   integer,
   jsonb,
   pgTable,
@@ -697,6 +698,42 @@ export const providerEvents = pgTable(
   (t) => [uniqueIndex('provider_events_key_uq').on(t.provider, t.eventKey)],
 );
 
+/**
+ * Identity checks started, and their pages opened, for the limits on both (docs/security-plan.md, I1): each
+ * may cost a paid check with the provider. A page open also records the browser it was first opened in.
+ */
+export const identityAttempts = pgTable(
+  'identity_attempts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    kind: text('kind', { enum: ['start', 'page_open'] }).notNull(),
+    userId: uuid('user_id').references(() => users.id),
+    reference: text('reference'),
+    /** For a page open: a hash of the cookie its browser was given, so the link works only there. */
+    binding: text('binding'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('identity_attempts_user_ix').on(t.userId, t.createdAt),
+    index('identity_attempts_reference_ix').on(t.reference, t.createdAt),
+  ],
+);
+
+/**
+ * Webhook signatures already seen, with a hash of the body each came with, for providers whose signature
+ * doesn't cover the body (Smile ID): the same signature never vouches for a different body.
+ */
+export const webhookSignatures = pgTable(
+  'webhook_signatures',
+  {
+    provider: text('provider').notNull(),
+    signature: text('signature').notNull(),
+    bodyHash: text('body_hash').notNull(),
+    seenAt: timestamp('seen_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.provider, t.signature] })],
+);
+
 /** The daily check of the ledger's cash against the balance the payment provider reports. */
 export const reconciliationRuns = pgTable('reconciliation_runs', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -841,6 +878,8 @@ export const agentApplications = pgTable(
     identityIdType: text('identity_id_type'),
     identityWithBvn: boolean('identity_with_bvn').notNull().default(false),
     identityReference: text('identity_reference'),
+    /** The app session the check was started from: its hosted page works only while that session lasts. */
+    identitySessionId: uuid('identity_session_id'),
     identityOutcome: text('identity_outcome', { enum: ['passed', 'failed', 'review'] }),
     identityCheckedAt: timestamp('identity_checked_at', { withTimezone: true }),
     legalName: text('legal_name'),
@@ -889,6 +928,8 @@ export const customerVerifications = pgTable(
     status: text('status', { enum: ['checking', 'verified', 'review', 'failed', 'declined'] }).notNull(),
     provider: text('provider').notNull(),
     reference: text('reference').notNull(),
+    /** The app session the check was started from: its hosted page works only while that session lasts. */
+    sessionId: uuid('session_id'),
     idType: text('id_type').notNull(),
     /** The provider's overall answer, once back. */
     outcome: text('outcome', { enum: ['passed', 'failed', 'review'] }),

@@ -30,6 +30,13 @@ export interface ProviderContext {
   publicApiUrl: string;
   /** Signs a short text with a key only the API holds, for links it hands out. */
   sign(text: string): string;
+  /**
+   * The link to a provider's page that this API serves, for one check: signed, and good for a limited time
+   * (docs/security-plan.md, I2).
+   */
+  hostedLink(provider: string, reference: string): string;
+  /** Running in production, where providers' sandbox modes are refused. */
+  production: boolean;
 }
 
 /** How long a request to an identity provider may take. */
@@ -227,7 +234,9 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
       ],
       idNumber: fields?.id_number,
     };
-    return { reference, result };
+    // The signature covers only the timestamp, so the API accepts it with this body once, and never again
+    // with another.
+    return { reference, result, signature };
   }
 
   /** A job's verdict from Smile ID itself; null when they don't know the job. */
@@ -370,12 +379,11 @@ export class DojahIdentityAdapter implements IdentityAdapter {
     return { status: res.status, json: (await res.json().catch(() => null)) as T | null };
   }
 
-  /** The page the app opens: Jiffo's address, signed so only links the API made are served. */
+  /** The page the app opens: Jiffo's address, signed and short-lived, so only links the API made are served. */
   async startIdentity(input: { reference: string }) {
-    const ref = encodeURIComponent(input.reference);
     return {
       reference: input.reference,
-      url: `${this.ctx.publicApiUrl}/v1/identity/hosted/dojah?ref=${ref}&sig=${this.ctx.sign(`dojah:${input.reference}`)}`,
+      url: this.ctx.hostedLink('dojah', input.reference),
     };
   }
 
@@ -655,12 +663,11 @@ export class YouverifyIdentityAdapter implements IdentityAdapter {
     return json.data as T;
   }
 
-  /** The page the app opens: Jiffo's address, signed so only links the API made are served. */
+  /** The page the app opens: Jiffo's address, signed and short-lived, so only links the API made are served. */
   async startIdentity(input: { reference: string }) {
-    const ref = encodeURIComponent(input.reference);
     return {
       reference: input.reference,
-      url: `${this.ctx.publicApiUrl}/v1/identity/hosted/youverify?ref=${ref}&sig=${this.ctx.sign(`youverify:${input.reference}`)}`,
+      url: this.ctx.hostedLink('youverify', input.reference),
     };
   }
 

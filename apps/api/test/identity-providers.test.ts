@@ -18,7 +18,12 @@ function fakeFetch(respond: (call: Call) => Response) {
   }) as typeof fetch;
   return { impl, calls };
 }
-const ctx = { publicApiUrl: 'https://api.jiffo.test', sign: (text: string) => `sig(${text})` };
+const ctx = {
+  publicApiUrl: 'https://api.jiffo.test',
+  sign: (text: string) => `sig(${text})`,
+  hostedLink: (provider: string, reference: string) => `link(${provider}:${reference})`,
+  production: false,
+};
 const person = { firstName: 'Tunde', lastName: 'Bakare', phone: '+2348031234567' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
@@ -89,6 +94,8 @@ describe('Smile ID', () => {
           ],
           idNumber: '12345678901',
         },
+        // Given back so the API can refuse it with any other body.
+        signature: expect.any(String),
       });
       expect(calls[1]!.url).toBe('https://testapi.smileidentity.com/v3/status/job_01');
       expect(calls[1]!.init.headers).toMatchObject({ 'SmileID-Partner-ID': '1234', 'SmileID-Token': 'jwt-1' });
@@ -156,9 +163,7 @@ describe('Dojah', () => {
 
   it('opens a signed page on our side that runs the widget for this reference', async () => {
     const dojah = make(fakeFetch(() => json({})).impl);
-    expect((await dojah.startIdentity({ reference: 'jid-3' })).url).toBe(
-      'https://api.jiffo.test/v1/identity/hosted/dojah?ref=jid-3&sig=sig(dojah:jid-3)',
-    );
+    expect((await dojah.startIdentity({ reference: 'jid-3' })).url).toBe('link(dojah:jid-3)');
     const page = dojah.page('jid-3', { role: 'agent', idType: 'nin', withBvn: false });
     expect(page).toContain('https://api.jiffo.test/v1/identity/done?for=agent');
     // Customers get their own flow: the NIN or BVN and a selfie, no document.
@@ -291,9 +296,7 @@ describe('Youverify', () => {
       url.endsWith('/session/generate') ? envelope({ sessionId: 'sess-1' }) : envelope({ authToken: 'tok-1' }),
     );
     const youverify = make(impl);
-    expect((await youverify.startIdentity({ reference: 'jid-4' })).url).toBe(
-      'https://api.jiffo.test/v1/identity/hosted/youverify?ref=jid-4&sig=sig(youverify:jid-4)',
-    );
+    expect((await youverify.startIdentity({ reference: 'jid-4' })).url).toBe('link(youverify:jid-4)');
     const page = await youverify.page('jid-4', { role: 'agent', idType: 'nin', withBvn: false });
     expect(calls[0]!.url).toBe('https://api.sandbox.youverify.co/v2/api/identity/sdk/session/generate');
     expect(calls[0]!.init.headers).toMatchObject({ token: 'yv-secret' });

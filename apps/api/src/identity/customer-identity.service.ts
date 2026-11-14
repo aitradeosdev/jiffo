@@ -73,7 +73,8 @@ export class CustomerIdentityService implements IdentityOwner {
       idType: row?.idType ?? null,
       /** How the current or last check ran, with the provider it was started with. */
       startedFlow: row ? this.checks.startedWith(row.provider).flow : null,
-      legalName: row?.legalName ?? null,
+      // The ID record's name only once the check showed the ID is theirs (docs/security-plan.md, I1).
+      legalName: row?.status === 'verified' ? row.legalName : null,
       checks: (row?.checks ?? []).map((c) => ({ ...c, label: LABELS[c.key] ?? c.key })),
       /** Said to the customer only when support declined. */
       decisionNote: row?.status === 'declined' ? row.decisionNote : null,
@@ -87,7 +88,7 @@ export class CustomerIdentityService implements IdentityOwner {
   }
 
   /** Starts a check with the ID the customer chose. Any number goes to the provider and is not kept. */
-  async start(userId: string, input: { idType?: string; idNumber?: string }) {
+  async start(userId: string, input: { idType?: string; idNumber?: string }, sessionId: string) {
     const row = await this.load(userId);
     if (row?.status === 'verified') throw conflict('already_verified', "You're already verified");
     if (row?.status === 'declined') {
@@ -103,11 +104,13 @@ export class CustomerIdentityService implements IdentityOwner {
       { firstName: user.firstName, lastName: user.lastName, phone: user.phone },
       settings.identity,
       input,
+      userId,
     );
     const values = {
       status: 'checking' as const,
       provider: started.provider,
       reference: started.reference,
+      sessionId,
       idType: started.request.idType,
       outcome: null,
       checks: [],
@@ -171,6 +174,7 @@ export class CustomerIdentityService implements IdentityOwner {
           provider,
           reference,
           request: { role: 'customer', idType: row.idType as IdType, withBvn: false },
+          sessionId: row.sessionId,
         }
       : null;
   }

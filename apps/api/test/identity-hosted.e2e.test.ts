@@ -86,17 +86,21 @@ describe("identity checks on the provider's own page", () => {
       id_fields: { first_name: 'Tunde', last_name: 'Bakare', date_of_birth: '1995-04-12', id_number: nin },
     });
     const timestamp = new Date().toISOString();
-    const sign = (key: string) => createHmac('sha256', key).update(`${timestamp}1234sid_request`).digest('base64');
-    const deliver = (signature: string) =>
+    const sign = (key: string, at = timestamp) =>
+      createHmac('sha256', key).update(`${at}1234sid_request`).digest('base64');
+    const deliver = (signature: string, payload = body) =>
       request(t.http)
         .post('/v1/webhooks/identity/smileid')
         .set('content-type', 'application/json')
         .set('response-timestamp', timestamp)
         .set('response-signature', signature)
         .set('smileid-job-id', 'job_01')
-        .send(body);
+        .send(payload);
     await deliver(sign('someone-else')).expect(401);
     await deliver(sign('smile-key')).expect(200);
+    // Smile ID resending the same callback is fine; the same signature on any other body is a replay.
+    await deliver(sign('smile-key')).expect(200);
+    await deliver(sign('smile-key'), body.replace('Tunde', 'Someone')).expect(401);
     expect(status).toHaveBeenCalledWith('job_01');
     // Settled at once, keeping only the result: no NIN, no payload.
     const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
@@ -122,11 +126,12 @@ describe("identity checks on the provider's own page", () => {
     const secondRef = String(again.body.url).split('/').pop()!;
     status.mockResolvedValue({ status: 'clear', user_id: secondRef });
     const secondBody = body.replace(reference, secondRef);
+    const later = new Date(Date.now() + 1000).toISOString();
     await request(t.http)
       .post('/v1/webhooks/identity/smileid')
       .set('content-type', 'application/json')
-      .set('response-timestamp', timestamp)
-      .set('response-signature', sign('smile-key'))
+      .set('response-timestamp', later)
+      .set('response-signature', sign('smile-key', later))
       .set('smileid-job-id', 'job_02')
       .send(secondBody)
       .expect(200);
@@ -146,11 +151,12 @@ describe("identity checks on the provider's own page", () => {
       .expect(200);
     expect(String(fresh.body.url)).not.toContain(secondRef);
     status.mockResolvedValue({ status: 'block', user_id: secondRef });
+    const latest = new Date(Date.now() + 2000).toISOString();
     await request(t.http)
       .post('/v1/webhooks/identity/smileid')
       .set('content-type', 'application/json')
-      .set('response-timestamp', timestamp)
-      .set('response-signature', sign('smile-key'))
+      .set('response-timestamp', latest)
+      .set('response-signature', sign('smile-key', latest))
       .set('smileid-job-id', 'job_02')
       .send(secondBody)
       .expect(200);
@@ -210,7 +216,6 @@ describe("identity checks on the provider's own page", () => {
       .expect(200);
     const url = new URL(started.body.url);
     const ref = url.searchParams.get('ref')!;
-    const sig = url.searchParams.get('sig')!;
     type Session = { newSession: () => Promise<{ sessionId: string; sessionToken: string }> };
     const session = vi.spyOn(YouverifyIdentityAdapter.prototype as unknown as Session, 'newSession');
     // Youverify down: a page that says so, not an error in JSON.
@@ -225,10 +230,31 @@ describe("identity checks on the provider's own page", () => {
       .expect(200);
     expect(page.text).toContain('National Identification Number');
     expect(page.text).not.toContain('yv-secret');
+    // The browser that opened it keeps it: the cookie it was given.
+    const cookie = String(page.headers['set-cookie']).split(';')[0]!;
+    expect(cookie).toMatch(/^jiffo_check=[0-9a-f]{64}$/);
+    // The page sends with its own signature, not the link's.
+    const sig = /"sig":"([0-9a-f]{32})"/.exec(page.text)![1]!;
+    expect(sig).not.toBe(url.searchParams.get('sig'));
+    await request(t.http)
+      .get(url.pathname + url.search)
+      .set('cookie', cookie)
+      .expect(200);
+    // The same link forwarded to anyone else, or with its time changed, doesn't open.
+    expect((await request(t.http).get(url.pathname + url.search)).status).toBe(410);
+    const later = new URL(url);
+    later.searchParams.set('exp', String(Date.now() + 10 * 3_600_000));
+    await request(t.http)
+      .get(later.pathname + later.search)
+      .set('cookie', cookie)
+      .expect(404);
 
     const nin = uniqueNin();
-    const submit = (body: object) => request(t.http).post('/v1/identity/hosted/youverify/submit').send(body);
+    const submit = (body: object, from = cookie) =>
+      request(t.http).post('/v1/identity/hosted/youverify/submit').set('cookie', from).send(body);
     await submit({ ref, sig: '0'.repeat(32), idNumber: nin }).expect(404);
+    // Sent from another browser: refused, even with the right signature.
+    expect((await submit({ ref, sig, idNumber: nin }, 'jiffo_check=' + 'a'.repeat(64))).status).toBe(410);
     // A page served before ID types sends the NIN under its old name.
     await submit({ ref, sig, nin: '123' })
       .expect(400)
@@ -294,14 +320,34 @@ describe("identity checks on the provider's own page", () => {
       .send({ consent: true, idType: 'nin' })
       .expect(200);
     const link = new URL(again.body.url);
-    for (let i = 0; i < 20; i += 1)
+    // The same browser, as a person reopening it would be.
+    const opened = await request(t.http)
+      .get(link.pathname + link.search)
+      .expect(200);
+    const browser = String(opened.headers['set-cookie']).split(';')[0]!;
+    for (let i = 1; i < 20; i += 1)
       await request(t.http)
         .get(link.pathname + link.search)
+        .set('cookie', browser)
         .expect(200);
     const limited = await request(t.http)
       .get(link.pathname + link.search)
+      .set('cookie', browser)
       .expect(429);
     expect(limited.text).toContain('opened too many times');
+
+    // The page works only while the app session that started the check is signed in.
+    const third = await request(t.http)
+      .post('/v1/agent/application/identity')
+      .set(agent.headers)
+      .send({ consent: true, idType: 'nin' })
+      .expect(200);
+    const signedOut = new URL(third.body.url);
+    await request(t.http).post('/v1/auth/logout').set(agent.headers).expect(204);
+    const gone = await request(t.http)
+      .get(signedOut.pathname + signedOut.search)
+      .expect(410);
+    expect(gone.text).toContain('This check is finished');
     await panel('post', '/identity/active').send({ provider: null }).expect(200);
   });
 });
