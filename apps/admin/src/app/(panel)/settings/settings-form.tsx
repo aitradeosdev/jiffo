@@ -118,11 +118,23 @@ export function SettingsForm({
                         type="checkbox"
                         checked={!!value}
                         onChange={(e) => setValue(f.path, e.currentTarget.checked)}
+                        aria-invalid={problem ? true : undefined}
+                        aria-describedby={f.help || problem ? `${id}-help` : undefined}
                         className="mt-1 size-4 accent-current"
                       />
-                      <span className="text-sm font-semibold">
-                        {f.label}
-                        {changed ? <span className="ml-1.5 text-brand-ink">· changed</span> : null}
+                      <span>
+                        <span className="text-sm font-semibold">
+                          {f.label}
+                          {changed ? <span className="ml-1.5 text-brand-ink">· changed</span> : null}
+                        </span>
+                        {f.help || problem ? (
+                          <span
+                            id={`${id}-help`}
+                            className={`mt-0.5 block text-[13px] ${problem ? 'text-danger' : 'text-ink-3'}`}
+                          >
+                            {problem ?? f.help}
+                          </span>
+                        ) : null}
                       </span>
                     </label>
                   );
