@@ -37,6 +37,7 @@ const ALERT_KINDS: Record<string, string> = {
   payout_rejected: 'Transfer refused by the approval URL',
   payout_unclear: 'Withdrawal in an unclear state',
   transfer_otp_on: 'Transfer OTP is on',
+  revenue_negative: 'Revenue below zero',
 };
 
 const DONE: Record<string, string> = {

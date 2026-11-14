@@ -113,6 +113,13 @@
       "when": 1794649010293,
       "tag": "0015_payout_safety",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794649550205,
+      "tag": "0016_ledger_guards",
+      "breakpoints": true
     }
   ]
 }

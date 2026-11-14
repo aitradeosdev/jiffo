@@ -132,7 +132,12 @@ export const ERRAND_EVENTS = {
   unreachable_timeout: { from: ['unreachable'], to: 'disputed', actors: ['system'] },
 
   open_dispute: { from: IN_PROGRESS, to: 'disputed', actors: ['customer', 'agent'] },
-  admin_intervene: { from: ['item_pending', 'photo_pending', 'unreachable'], to: 'disputed', actors: ['admin'] },
+  // Admin can freeze the escrows at any point while money is held: only admin moves it from disputed.
+  admin_intervene: {
+    from: ['accepted', 'started', 'item_pending', 'items_locked', 'delivered', 'photo_pending', 'unreachable'],
+    to: 'disputed',
+    actors: ['admin'],
+  },
   resolve_complete: { from: ['disputed'], to: 'completed', actors: ['admin'] },
   resolve_cancel: { from: ['disputed'], to: 'cancelled', actors: ['admin'] },
   /** Support closes an errand still waiting for an agent, for example when its customer is suspended. */

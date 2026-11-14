@@ -445,7 +445,9 @@ export const ledgerAccounts = pgTable(
   (t) => [
     uniqueIndex('ledger_accounts_key_uq').on(t.key),
     index('ledger_accounts_owner_idx').on(t.ownerId),
-    check('ledger_accounts_balance_ck', sql`${t.allowNegative} or ${t.balance} >= 0`),
+    // A person's or errand's account can never go below zero, whatever its flags say. Platform accounts keep
+    // their balance in their postings, not in this column.
+    check('ledger_accounts_balance_ck', sql`${t.ownerId} is null or ${t.balance} >= 0`),
   ],
 );
 

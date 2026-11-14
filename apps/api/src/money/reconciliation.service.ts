@@ -134,6 +134,18 @@ export class ReconciliationService {
           data: { runId: run!.id, differenceKobo, baselineKobo },
         });
       }
+      // Revenue is money Jiffo has earned: below zero means more went out of it than came in.
+      const revenueKobo = await this.ledger.balance(this.db, { type: 'platform_revenue' }, country.code);
+      if (revenueKobo < 0) {
+        await this.alerts.raise({
+          countryCode: country.code,
+          kind: 'revenue_negative',
+          message: `Platform revenue is -${formatNaira(-revenueKobo)}: more has been paid out of it (adjustments, refunds) than it has earned.`,
+          data: { revenueKobo },
+        });
+      } else {
+        await this.alerts.settle(country.code, 'revenue_negative', '', 'Revenue is back above zero');
+      }
       results.push(run!);
     }
     return results;
