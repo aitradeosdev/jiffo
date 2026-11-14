@@ -14,6 +14,8 @@ import { AdminController } from './admin.controller';
 import { AdminGuard } from './admin.guard';
 import { AuditService } from './audit.service';
 import { OverviewService } from './overview.service';
+import { ApprovalRequests } from './approval-requests';
+import { ApprovalsService } from './approvals.service';
 import { StaffMail } from './staff-mail';
 import { TeamService } from './team.service';
 
@@ -35,6 +37,8 @@ import { TeamService } from './team.service';
     SettingsAdminService,
     TeamService,
     StaffMail,
+    ApprovalsService,
+    ApprovalRequests,
   ],
   exports: [AdminAuthService, AdminGuard, AuditService],
 })

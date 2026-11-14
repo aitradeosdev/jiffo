@@ -13,7 +13,7 @@ describe("admin: customers' ID checks", () => {
   let finance: Awaited<ReturnType<typeof adminAs>>;
   beforeAll(async () => {
     t = await createTestApp();
-    ops = await adminAs(t, 'operations');
+    ops = await adminAs(t, 'verification');
     finance = await adminAs(t, 'finance');
   });
   afterAll(async () => {

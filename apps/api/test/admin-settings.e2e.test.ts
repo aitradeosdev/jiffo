@@ -30,8 +30,13 @@ describe('admin settings', () => {
   });
 
   const config = async () => (await request(t.http).get('/v1/config/NG').expect(200)).body;
-  const save = (body: Record<string, unknown>, who: Admin = owner) =>
-    request(t.http).post('/v1/admin/settings?country=NG').set(who.headers).send(body);
+  /** A settings change as owners make it: one asks, and another owner approves (docs/security-plan.md, D4). */
+  const save = async (body: Record<string, unknown>, who: Admin = owner) => {
+    const asked = await request(t.http).post('/v1/admin/settings?country=NG').set(who.headers).send(body);
+    if (asked.status !== 202) return asked;
+    const approver = await adminAs(t, 'owner');
+    return request(t.http).post(`/v1/admin/approvals/${asked.body.approval.id}/approve`).set(approver.headers).send({});
+  };
 
   it('saves settings as a new version, with what changed and who changed it', async () => {
     const changed = structuredClone(original.settings) as { timers: Record<string, number> };
@@ -43,7 +48,7 @@ describe('admin settings', () => {
     );
     const res = await save({ basedOn: original.version, settings: changed, note: 'Longer windows for bank transfers' });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({
+    expect(res.body).toMatchObject({
       version: original.version + 1,
       changes: [
         { path: 'timers.depositAccountMinutes', from: 30, to: 45 },
@@ -98,7 +103,7 @@ describe('admin settings', () => {
     // Fixing it saves the next version as usual.
     const fixed = structuredClone(broken);
     fixed.fees.serviceFeeMinKobo = 10_000;
-    await save({ basedOn: now.version + 1, settings: fixed, note: 'Fixing the fee rule' }).expect(200);
+    expect((await save({ basedOn: now.version + 1, settings: fixed, note: 'Fixing the fee rule' })).status).toBe(200);
   });
 
   it('refuses settings that break the rules', async () => {

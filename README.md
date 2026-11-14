@@ -291,12 +291,26 @@ What's in it:
 - **Settings:** prices, fees, commission, timers, limits and identity rules as versioned settings, plus categories and states.
 - **Team and audit log:** who can use the panel, and every change anyone made in it.
 
-| Role       | Can                                                    |
-| ---------- | ------------------------------------------------------ |
-| Owner      | Everything, including the team, settings and audit log |
-| Operations | Errands, disputes, people and agent applications       |
-| Finance    | Money: refunds, wallet adjustments and payouts         |
-| Support    | Look at everything, change nothing                     |
+| Role         | Can                                                                |
+| ------------ | ------------------------------------------------------------------ |
+| Owner        | Everything, including the team, settings, providers and audit log  |
+| Operations   | Errands, disputes, suspending accounts and agent tiers             |
+| Disputes     | Settling disputes                                                  |
+| Verification | Agent applications and customers' ID checks                        |
+| Finance      | Money: refunds, wallet adjustments, payout accounts and the checks |
+| Safety       | Suspending accounts that put people at risk                        |
+| Support      | Look at everything, change nothing                                 |
+
+**Two-person approval.** These changes wait on the Approvals page until a second admin whose role allows them approves:
+
+- every wallet adjustment and refund (finance or an owner)
+- a dispute split paying the agent more than the set amount (Settings, Security; disputes, operations or an owner)
+- every settings change, including fees, timers and limits (an owner)
+- a new teammate, a role change, or giving a disabled teammate their access back (an owner)
+- suspending an agent with at least the set number of completed errands (Settings, Security)
+- switching a provider, or changing the keys of the one in use (an owner); the new keys wait sealed
+
+The person who asked can never approve their own request, and the database refuses it too. An approved change runs as the person who asked, and the audit log shows both. When nobody else holds the permission (a team with a single owner, say), the change goes ahead at once and is marked as approved by the person who asked. Requests lapse after the hours set in Settings, Security (default 72).
 
 Support settles a dispute as complete or cancelled, the standard way or by splitting the money held: the fee between the agent, Jiffo and the customer, the item money between the agent and the customer, and, when the customer never locked the item amount, up to that amount from their wallet for the agent. Every action needs a reason, which stays in the timeline and the audit log and is never shown to the customer or agent.
 

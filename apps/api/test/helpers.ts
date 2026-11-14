@@ -250,6 +250,36 @@ export async function adminAs(t: TestApp, role: AdminRole) {
   return { id: admin!.id, name: admin!.name, headers: { Authorization: `Bearer ${token}` } };
 }
 
+/**
+ * A change that needs a second admin (wallet adjustments, settings, provider switches and so on), done as
+ * the panel does it: one admin of the role asks, another of the same role approves. The answer is the
+ * approval's, which carries the change's own result. A change that ran at once, or was refused, is
+ * returned as it was answered.
+ */
+export async function approved(
+  t: TestApp,
+  role: AdminRole,
+  ask: (headers: { Authorization: string }) => request.Test,
+): Promise<request.Response> {
+  const asker = await adminAs(t, role);
+  const approver = await adminAs(t, role);
+  const asked = await ask(asker.headers);
+  if (asked.status !== 202) return asked;
+  return request(t.http)
+    .post(`/v1/admin/approvals/${asked.body.approval.id}/approve`)
+    .set(approver.headers)
+    .send({ note: 'Checked' });
+}
+
+/** Switches which provider a service uses, as owners do in the panel: asked by one, approved by another. */
+export async function switchProvider(t: TestApp, category: string, provider: string | null): Promise<request.Response> {
+  const res = await approved(t, 'owner', (h) =>
+    request(t.http).post(`/v1/admin/providers/${category}/active`).set(h).send({ provider }),
+  );
+  if (res.status !== 200) throw new Error(`switching ${category}: ${res.status} ${JSON.stringify(res.body)}`);
+  return res;
+}
+
 let serial = 0;
 /**
  * Digits no other call in the run gets: the time to the millisecond and a counter. Test files run one after
@@ -315,19 +345,17 @@ export async function agentWithMoney(t: TestApp, amountKobo = 1_000_000) {
     .set(agent.headers)
     .send({ bankCode: '058', accountNumber })
     .expect(200);
-  const finance = await adminAs(t, 'finance');
-  await request(t.http)
-    .post('/v1/admin/money/adjustments')
-    .set(finance.headers)
-    .send({
+  const done = await approved(t, 'finance', (headers) =>
+    request(t.http).post('/v1/admin/money/adjustments').set(headers).send({
       personId: agent.userId,
       account: 'agent_available',
       direction: 'credit',
       amountKobo,
       note: 'Test earnings to withdraw',
       requestId: randomUUID(),
-    })
-    .expect(200);
+    }),
+  );
+  if (done.status !== 200) throw new Error(`adjustment: ${done.status} ${JSON.stringify(done.body)}`);
   return agent;
 }
 

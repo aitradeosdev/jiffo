@@ -8,10 +8,11 @@ import {
   providerInfo,
   secretHint,
   type ProviderCategory,
+  type ProviderInfo,
   ID_TYPES,
 } from '@jiffo/shared';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
-import { DB, type Db } from '../db/database.module';
+import { DB, type Db, type Tx } from '../db/database.module';
 import { admins, agentApplications, deposits, payouts, providerSettings } from '../db/schema';
 import { badRequest, conflict, notFound } from '../common/errors';
 import { BUILDERS, checkAdapter } from '../providers/builders';
@@ -22,6 +23,8 @@ import { AuditService } from './audit.service';
 import type { AdminContext } from './admin.types';
 
 type Row = typeof providerSettings.$inferSelect;
+/** Settings waiting for approval are sealed apart from the saved ones. */
+const pendingBinding = (category: string, provider: string) => `pending:${category}:${provider}`;
 
 /** Checks the key, then sends a short email to the admin testing, which proves the sender works too. */
 export async function testEmail(email: EmailAdapter, to: string) {
@@ -187,32 +190,106 @@ export class ProvidersAdminService {
         } catch (error) {
           throw buildError(error);
         }
-        const values = {
-          config,
-          secrets: Object.keys(secrets).length ? this.providers.box.seal(JSON.stringify(secrets), binding) : null,
-          secretHints: Object.fromEntries(Object.entries(secrets).map(([k, v]) => [k, secretHint(v)])),
-          // A change means the last test no longer says anything about these settings.
-          lastTestAt: null,
-          lastTestOk: null,
-          lastTestMessage: null,
-          updatedBy: admin.adminId,
-          updatedAt: new Date(),
-        };
-        if (before) {
-          await tx.update(providerSettings).set(values).where(eq(providerSettings.id, before.id));
-        } else {
-          const callbackToken = info.webhookPath?.includes('{token}') ? randomBytes(16).toString('hex') : null;
-          await tx.insert(providerSettings).values({ category, provider, callbackToken, ...values });
+        // Settings of the provider in use take effect at once, so a second admin approves them first
+        // (docs/security-plan.md, D4): the new values wait sealed, never readable in the request.
+        if (before?.active) {
+          return {
+            changed,
+            approval: {
+              sealed: this.providers.box.seal(JSON.stringify({ config, secrets }), pendingBinding(category, provider)),
+              basedOn: before.updatedAt.toISOString(),
+            },
+          };
         }
-        await this.audit.record(tx, admin, {
-          action: 'provider.save',
-          targetType: 'provider',
-          targetId: `${category}:${provider}`,
-          data: { category, provider, name: info.name, changed },
+        await this.write(tx, admin, { category, provider, info, before, config, secrets, changed });
+        return { changed };
+      })
+      .finally(() => this.providers.reload());
+  }
+
+  /** New settings for the provider in use, once a second admin approved them, if nothing changed since. */
+  async applyPending(
+    admin: AdminContext,
+    pending: { category: ProviderCategory; provider: string; sealed: string; basedOn: string },
+  ) {
+    const info = this.info(pending.category, pending.provider);
+    return this.db
+      .transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`providers:${pending.category}`}))`);
+        const [before] = await tx
+          .select()
+          .from(providerSettings)
+          .where(and(eq(providerSettings.category, pending.category), eq(providerSettings.provider, pending.provider)));
+        if (!before || before.updatedAt.toISOString() !== pending.basedOn) {
+          throw conflict('provider_changed', 'These settings changed since this was asked for. Ask again.');
+        }
+        const { config, secrets } = JSON.parse(
+          this.providers.box.open(pending.sealed, pendingBinding(pending.category, pending.provider)),
+        ) as { config: Record<string, string>; secrets: Record<string, string> };
+        try {
+          BUILDERS[pending.category][pending.provider]!({ ...config, ...secrets }, this.providers.context);
+        } catch (error) {
+          throw buildError(error);
+        }
+        const changed = [
+          ...new Set([
+            ...Object.keys({ ...config, ...before.config }).filter((k) => config[k] !== before.config[k]),
+            ...Object.keys(secrets),
+          ]),
+        ];
+        await this.write(tx, admin, {
+          category: pending.category,
+          provider: pending.provider,
+          info,
+          before,
+          config,
+          secrets,
+          changed,
         });
         return { changed };
       })
       .finally(() => this.providers.reload());
+  }
+
+  private async write(
+    tx: Tx,
+    admin: AdminContext,
+    w: {
+      category: ProviderCategory;
+      provider: string;
+      info: ProviderInfo;
+      before: Row | undefined;
+      config: Record<string, string>;
+      secrets: Record<string, string>;
+      changed: string[];
+    },
+  ) {
+    const binding = secretBinding(w.category, w.provider);
+    const values = {
+      config: w.config,
+      secrets: Object.keys(w.secrets).length ? this.providers.box.seal(JSON.stringify(w.secrets), binding) : null,
+      secretHints: Object.fromEntries(Object.entries(w.secrets).map(([k, v]) => [k, secretHint(v)])),
+      // A change means the last test no longer says anything about these settings.
+      lastTestAt: null,
+      lastTestOk: null,
+      lastTestMessage: null,
+      updatedBy: admin.adminId,
+      updatedAt: new Date(),
+    };
+    if (w.before) {
+      await tx.update(providerSettings).set(values).where(eq(providerSettings.id, w.before.id));
+    } else {
+      const callbackToken = w.info.webhookPath?.includes('{token}') ? randomBytes(16).toString('hex') : null;
+      await tx
+        .insert(providerSettings)
+        .values({ category: w.category, provider: w.provider, callbackToken, ...values });
+    }
+    await this.audit.record(tx, admin, {
+      action: 'provider.save',
+      targetType: 'provider',
+      targetId: `${w.category}:${w.provider}`,
+      data: { category: w.category, provider: w.provider, name: w.info.name, changed: w.changed },
+    });
   }
 
   /**
@@ -281,21 +358,16 @@ export class ProvidersAdminService {
    * Switches a provider on for its category, or switches the category back to the environment's choice
    * with null. Only a provider whose saved settings passed the Test can be switched on.
    */
-  async activate(admin: AdminContext, category: ProviderCategory, provider: string | null) {
+  async activate(admin: AdminContext, category: ProviderCategory, provider: string | null, pinnedAt?: string | null) {
     if (provider) this.info(category, provider);
     return this.db
       .transaction(async (tx) => {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`providers:${category}`}))`);
         const rows = await tx.select().from(providerSettings).where(eq(providerSettings.category, category));
-        const from = rows.find((r) => r.active)?.provider ?? null;
-        if (provider) {
-          const row = rows.find((r) => r.provider === provider);
-          if (!this.complete(row, category, provider)) {
-            throw conflict('provider_incomplete', 'Fill in every required field and save first');
-          }
-          if (!row!.lastTestOk || !row!.lastTestAt || row!.lastTestAt < row!.updatedAt) {
-            throw conflict('provider_not_tested', 'Test these settings, and switch on once the test passes');
-          }
+        const { from, row } = this.switchable(rows, category, provider);
+        // Approved for the settings as they were when asked: saved again since, it must be asked for again.
+        if (pinnedAt !== undefined && provider && row?.updatedAt.toISOString() !== pinnedAt) {
+          throw conflict('provider_changed', 'These settings changed since this was asked for. Ask again.');
         }
         if (from === provider) return { active: provider };
         await tx.update(providerSettings).set({ active: false }).where(eq(providerSettings.category, category));
@@ -314,6 +386,31 @@ export class ProvidersAdminService {
         return { active: provider };
       })
       .finally(() => this.providers.reload());
+  }
+
+  /**
+   * Whether a switch can happen, without making it: for asking a second admin first. Says what is in use
+   * now and pins the settings being switched to.
+   */
+  async switchRequest(category: ProviderCategory, provider: string | null) {
+    if (provider) this.info(category, provider);
+    const rows = await this.db.select().from(providerSettings).where(eq(providerSettings.category, category));
+    const { from, row } = this.switchable(rows, category, provider);
+    return { from, settingsAt: row ? row.updatedAt.toISOString() : null };
+  }
+
+  private switchable(rows: Row[], category: ProviderCategory, provider: string | null) {
+    const from = rows.find((r) => r.active)?.provider ?? null;
+    const row = provider ? rows.find((r) => r.provider === provider) : undefined;
+    if (provider) {
+      if (!this.complete(row, category, provider)) {
+        throw conflict('provider_incomplete', 'Fill in every required field and save first');
+      }
+      if (!row!.lastTestOk || !row!.lastTestAt || row!.lastTestAt < row!.updatedAt) {
+        throw conflict('provider_not_tested', 'Test these settings, and switch on once the test passes');
+      }
+    }
+    return { from, row };
   }
 
   /**

@@ -115,3 +115,10 @@ export const IdChecksIcon = () => (
     <path d="M14.5 10h4M14.5 13.5h3" />
   </Icon>
 );
+
+export const ApprovalsIcon = () => (
+  <Icon>
+    <path d="M8 11l3 3 5-6" />
+    <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" />
+  </Icon>
+);

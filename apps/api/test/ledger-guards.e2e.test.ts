@@ -19,6 +19,7 @@ import {
   signIn,
   type Person,
   type TestApp,
+  approved,
 } from './helpers';
 
 /** Fee 250,000 kobo; service fee 10% = 25,000; Bronze commission 15% = 37,500. */
@@ -179,11 +180,23 @@ describe('ledger guards', () => {
         note: 'Goodwill for a late delivery',
         requestId: randomUUID(),
       };
+      // Asked once; then approved by many at once (or one approver's double click): it runs once.
+      const asked = await request(t.http)
+        .post('/v1/admin/money/adjustments')
+        .set(finance.headers)
+        .send(body)
+        .expect(202);
+      const approver = await adminAs(t, 'owner');
       const results = await burst(() =>
-        request(t.http).post('/v1/admin/money/adjustments').set(finance.headers).send(body),
+        request(t.http).post(`/v1/admin/approvals/${asked.body.approval.id}/approve`).set(approver.headers).send({}),
       );
-      expect(results.every((r) => r.status === 200)).toBe(true);
-      expect(results.filter((r) => r.body.posted === true)).toHaveLength(1);
+      expect(succeeded(results)).toBe(1);
+      expect(results.filter((r) => r.status !== 200).every((r) => r.status === 409)).toBe(true);
+      // The same form sent again and approved too still moves the money once.
+      const again = await approved(t, 'finance', (h) =>
+        request(t.http).post('/v1/admin/money/adjustments').set(h).send(body),
+      );
+      expect(again.body).toMatchObject({ posted: false });
       expect((await balanceOf(t, who)).balanceKobo).toBe(70_000);
     });
 
@@ -213,19 +226,24 @@ describe('ledger guards', () => {
       const who = await signIn(t, 'customer');
       const revenue = await t.app.get(LedgerService).balance(t.db, { type: 'platform_revenue' }, 'NG');
       // Goodwill credits bigger than everything earned so far.
-      const adjust = (direction: 'credit' | 'debit') =>
-        request(t.http)
-          .post('/v1/admin/money/adjustments')
-          .set(finance.headers)
-          .send({
-            personId: who.userId,
-            account: 'customer_wallet',
-            direction,
-            amountKobo: Math.max(0, revenue) + 100_000,
-            note: 'Goodwill bigger than revenue',
-            requestId: randomUUID(),
-          })
-          .expect(200);
+      const adjust = async (direction: 'credit' | 'debit') =>
+        expect(
+          (
+            await approved(t, 'finance', (h) =>
+              request(t.http)
+                .post('/v1/admin/money/adjustments')
+                .set(h)
+                .send({
+                  personId: who.userId,
+                  account: 'customer_wallet',
+                  direction,
+                  amountKobo: Math.max(0, revenue) + 100_000,
+                  note: 'Goodwill bigger than revenue',
+                  requestId: randomUUID(),
+                }),
+            )
+          ).status,
+        ).toBe(200);
       const open = async () =>
         (
           (await request(t.http).get('/v1/admin/alerts?country=NG').set(finance.headers).expect(200)).body

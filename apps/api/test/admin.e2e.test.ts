@@ -84,6 +84,12 @@ describe('admin', () => {
   }
 
   /** A teammate who accepted their invite, set up the authenticator app and is signed in. */
+  /** Approves a change that waits; one that ran at once (or was refused) is returned as it was. */
+  const decided = async (asked: request.Response, approver: Admin) =>
+    asked.status === 202
+      ? request(t.http).post(`/v1/admin/approvals/${asked.body.approval.id}/approve`).set(approver.headers).send({})
+      : asked;
+
   async function makeAdmin(role: AdminRole): Promise<Admin> {
     const { id, email, token } = await invite(role);
     await request(t.http).post('/v1/admin/auth/invite/accept').send({ token, password: PASSWORD }).expect(200);
@@ -184,7 +190,11 @@ describe('admin', () => {
       .get('/v1/admin/me')
       .set({ Authorization: `Bearer ${done.body.token}` })
       .expect(200);
-    expect(me.body).toMatchObject({ email, role: 'operations', permissions: ['read', 'operate'] });
+    expect(me.body).toMatchObject({
+      email,
+      role: 'operations',
+      permissions: ['read', 'errands', 'disputes', 'suspend', 'tiers'],
+    });
     expect(me.body.countries.map((c: { code: string }) => c.code)).toContain('NG');
     // Once the app is on, the setup step is closed, so a stolen password can't replace it.
     await request(t.http).post('/v1/admin/auth/setup').send({ challenge: ok.body.challenge }).expect(401);
@@ -324,16 +334,25 @@ describe('admin', () => {
   });
 
   it('runs the team, keeps an owner and records every change', async () => {
-    const res = await request(t.http)
+    // Team changes need a second owner (docs/security-plan.md, D4): this test always has two more.
+    const [second, third] = [await makeAdmin('owner'), await makeAdmin('owner')];
+
+    const asked = await request(t.http)
       .post('/v1/admin/team')
       .set(owner.headers)
       .send({ email: 'New.Person@JiffoApp.com', name: 'New Person', role: 'finance' })
-      .expect(201);
-    // The link goes to the new teammate's email, and never back to the owner who invited them.
+      .expect(202);
+    // Nothing is sent, and nobody is added, until another owner approves.
+    expect(t.email.lastTo('new.person@jiffoapp.com')).toBeUndefined();
+    expect(asked.body.approval).toMatchObject({ kind: 'team_invite', status: 'pending' });
+    await request(t.http).post(`/v1/admin/approvals/${asked.body.approval.id}/approve`).set(owner.headers).expect(403);
+    const res = await decided(asked, second);
+    expect(res.status).toBe(200);
+    // The link goes to the new teammate's email, and never back to either owner.
     expect(res.body).toMatchObject({ emailedTo: 'new.person@jiffoapp.com', expiresInHours: 72 });
     expect(JSON.stringify(res.body)).not.toMatch(/invite#/);
     expect(t.email.lastTo('new.person@jiffoapp.com')?.text).toMatch(
-      /^Hi New Person,[\s\S]*http:\/\/localhost:3001\/invite#/,
+      /^Hi New Person,[\s\S]*Test Admin added you[\s\S]*http:\/\/localhost:3001\/invite#/,
     );
     const dup = await request(t.http)
       .post('/v1/admin/team')
@@ -350,30 +369,34 @@ describe('admin', () => {
 
     // Nobody changes their own access, and the last owner can't be removed.
     await request(t.http).patch(`/v1/admin/team/${owner.id}`).set(owner.headers).send({ role: 'support' }).expect(403);
-    const second = await makeAdmin('owner');
-    const demote = await request(t.http)
-      .patch(`/v1/admin/team/${owner.id}`)
-      .set(second.headers)
-      .send({ role: 'operations' })
-      .expect(200);
+    const demote = await decided(
+      await request(t.http).patch(`/v1/admin/team/${owner.id}`).set(second.headers).send({ role: 'operations' }),
+      third,
+    );
+    expect(demote.status).toBe(200);
     expect(demote.body.role).toBe('operations');
     // Their session ended with the role change.
     await request(t.http).get('/v1/admin/me').set(owner.headers).expect(401);
-    const last = await request(t.http)
-      .patch(`/v1/admin/team/${owner.id}`)
-      .set(second.headers)
-      .send({ role: 'owner' })
-      .expect(200);
+    const last = await decided(
+      await request(t.http).patch(`/v1/admin/team/${owner.id}`).set(second.headers).send({ role: 'owner' }),
+      third,
+    );
+    expect(last.status).toBe(200);
     expect(last.body.role).toBe('owner');
     const again = await signInAgain(owner);
     owner.headers = { Authorization: `Bearer ${again.res.body.token}` };
 
-    // Disabling ends sessions; a reset clears the password and the app and sends a new link.
+    // Disabling ends sessions at once; giving access back waits for a second owner; a reset clears the
+    // password and the app and sends a new link.
     const ops = await makeAdmin('operations');
     await request(t.http).patch(`/v1/admin/team/${ops.id}`).set(owner.headers).send({ status: 'disabled' }).expect(200);
     await request(t.http).get('/v1/admin/me').set(ops.headers).expect(401);
     await request(t.http).post(`/v1/admin/team/${ops.id}/reset`).set(owner.headers).expect(409);
-    await request(t.http).patch(`/v1/admin/team/${ops.id}`).set(owner.headers).send({ status: 'active' }).expect(200);
+    const back = await decided(
+      await request(t.http).patch(`/v1/admin/team/${ops.id}`).set(owner.headers).send({ status: 'active' }),
+      second,
+    );
+    expect(back.status).toBe(200);
     const reset = await request(t.http).post(`/v1/admin/team/${ops.id}/reset`).set(owner.headers).expect(201);
     expect(reset.body).toMatchObject({ emailedTo: ops.email });
     expect(JSON.stringify(reset.body)).not.toMatch(/invite#/);
@@ -403,11 +426,9 @@ describe('admin', () => {
   it("emails invite and reset links only to the teammate, and keeps nothing when the email can't go", async () => {
     const email = `${randomUUID()}@jiffoapp.com`;
     const before = t.email.sent.length;
-    await request(t.http)
-      .post('/v1/admin/team')
-      .set(owner.headers)
-      .send({ email, name: 'Ada Teammate', role: 'support' })
-      .expect(201);
+    const approver = await makeAdmin('owner');
+    const ask = (body: Record<string, unknown>) => request(t.http).post('/v1/admin/team').set(owner.headers).send(body);
+    expect((await decided(await ask({ email, name: 'Ada Teammate', role: 'support' }), approver)).status).toBe(200);
     // One email, to the teammate; the owner who made the link gets nothing.
     expect(t.email.sent.slice(before).map((m) => m.to)).toEqual([email]);
     expect(t.email.lastTo(owner.email)).toBeUndefined();
@@ -424,18 +445,11 @@ describe('admin', () => {
     // An invite whose email can't go is taken back, so it can simply be made again.
     t.email.failNext = new Error('provider down');
     const other = `${randomUUID()}@jiffoapp.com`;
-    const refused = await request(t.http)
-      .post('/v1/admin/team')
-      .set(owner.headers)
-      .send({ email: other, name: 'Not Sent', role: 'support' })
-      .expect(503);
+    const refused = await decided(await ask({ email: other, name: 'Not Sent', role: 'support' }), approver);
+    expect(refused.status).toBe(503);
     expect(refused.body.error.code).toBe('email_failed');
     expect(await t.db.select().from(admins).where(eq(admins.email, other))).toHaveLength(0);
-    await request(t.http)
-      .post('/v1/admin/team')
-      .set(owner.headers)
-      .send({ email: other, name: 'Sent Now', role: 'support' })
-      .expect(201);
+    expect((await decided(await ask({ email: other, name: 'Sent Now', role: 'support' }), approver)).status).toBe(200);
     expect(t.email.lastTo(other)?.text).toMatch(/^Hi Sent Now,/);
 
     // A reset whose email fails still resets, and says so; resetting again sends a fresh link.
