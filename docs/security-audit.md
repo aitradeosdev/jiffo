@@ -38,7 +38,7 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 7. Login: A1, A2 (SMS spend), A8, L9 | aitradeosdev/jiffo#47 | merged |
 | 8a. Server hardening, the API: S3, S5, S9, P4, P11, findings 18, 20, 24 | aitradeosdev/jiffo#48 | merged |
 | 8b. Repository and panel: R7, R11, R14, S2, S8, S10, S11, MB6, C6, finding 25 | aitradeosdev/jiffo#49 | merged |
-| 9a. Admin: invite and reset links emailed only to the teammate (D3, the reset half of finding 10) | to open | open |
+| 9a. Admin: invite and reset links emailed only to the teammate (D3, the reset half of finding 10) | aitradeosdev/jiffo#55 | open |
 
 ## Summary
 

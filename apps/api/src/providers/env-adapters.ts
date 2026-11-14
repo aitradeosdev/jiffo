@@ -88,11 +88,12 @@ export function envAdapters(c: AppConfig): Adapters {
         : live
           ? new NotConfiguredStorage()
           : new MemoryStorageAdapter(c.PUBLIC_API_URL, c.JWT_SECRET),
-    // Email providers are set only in the panel; the environment picks the development stand-in.
-    email: live
-      ? new NotConfiguredEmail()
-      : c.EMAIL_PROVIDER === 'memory'
-        ? new MemoryEmailAdapter()
-        : new ConsoleEmailAdapter(),
+    // Email providers are set only in the panel; the environment picks the development stand-in, or none.
+    email:
+      live || c.EMAIL_PROVIDER === 'none'
+        ? new NotConfiguredEmail()
+        : c.EMAIL_PROVIDER === 'memory'
+          ? new MemoryEmailAdapter()
+          : new ConsoleEmailAdapter(),
   };
 }

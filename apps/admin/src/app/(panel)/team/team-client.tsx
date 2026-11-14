@@ -6,13 +6,12 @@ import { buttonClass, Field, inputClass, Notice } from '@/components/ui';
 import { inviteTeammate, resetTeammate, updateTeammate, type TeamState } from './actions';
 import { ROLES } from './roles';
 
-/** A new invite link, shown once, with a button to copy it. */
 /** Where the link went. It is never shown here, so only the teammate can use it. */
-function Emailed({ to, hours }: { to: string; hours?: number }) {
+function Emailed({ to, hours }: { to: string; hours: number }) {
   return (
     <p className="rounded-xl bg-brand-soft p-3.5 text-sm font-semibold text-brand-ink" role="status">
-      We&apos;ve emailed a link to {to}. It works once, for {hours ?? 72} hours. If it doesn&apos;t arrive, reset their
-      access to send a new one.
+      We&apos;ve emailed a link to {to}. It works once, for {hours} hours. If it doesn&apos;t arrive, reset their access
+      to send a new one.
     </p>
   );
 }
@@ -68,7 +67,7 @@ export function InviteForm() {
         </div>
       </fieldset>
       <Notice>{state.error}</Notice>
-      {state.emailedTo ? <Emailed to={state.emailedTo} hours={state.expiresInHours} /> : null}
+      {state.emailed ? <Emailed to={state.emailed.to} hours={state.emailed.hours} /> : null}
       <SubmitButton pendingLabel="Inviting…">Send invite</SubmitButton>
     </form>
   );
@@ -179,7 +178,7 @@ export function MemberActions({ member }: { member: Member }) {
         </p>
       ) : null}
       <Notice>{error}</Notice>
-      {resetState.emailedTo ? <Emailed to={resetState.emailedTo} hours={resetState.expiresInHours} /> : null}
+      {resetState.emailed ? <Emailed to={resetState.emailed.to} hours={resetState.emailed.hours} /> : null}
     </div>
   );
 }

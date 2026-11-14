@@ -138,8 +138,10 @@ export class SesEmailAdapter implements EmailAdapter {
     this.ses = new SESv2Client({
       region,
       credentials,
-      // A timeout on every call, as for other providers (docs/security-plan.md, S9).
+      // A timeout on every call, as for other providers (docs/security-plan.md, S9), and one attempt: a retry
+      // after a slow answer SES had in fact taken would send the teammate the same email twice.
       requestHandler: { connectionTimeout: 5_000, requestTimeout: 20_000 },
+      maxAttempts: 1,
     });
   }
 

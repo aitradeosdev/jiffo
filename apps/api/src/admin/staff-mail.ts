@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { adminRoleLabel } from '@jiffo/shared';
+import type { EmailAdapter } from '../adapters/email';
 import { unavailable } from '../common/errors';
-import { ProviderNotConfigured } from '../providers/not-configured';
+import { NotConfiguredEmail } from '../providers/not-configured';
 import { ProvidersService } from '../providers/providers.service';
 
 interface Link {
@@ -23,8 +24,30 @@ export class StaffMail {
   private readonly logger = new Logger(StaffMail.name);
   constructor(private readonly providers: ProvidersService) {}
 
-  invite(link: Link & { role: string }) {
-    return this.send(link.to, 'Your invite to Jiffo Admin', [
+  /**
+   * The email provider in use, checked before anything is saved. A provider switched on in the panel is used
+   * or nothing is: its settings failing to load never falls back to the environment's stand-in.
+   */
+  ready(): EmailAdapter {
+    const active = this.providers.activeProvider('email');
+    const adapter = active ? this.providers.fromSettings('email', active) : this.providers.current('email');
+    if (!adapter) {
+      throw unavailable(
+        'email_failed',
+        "The email provider that's switched on can't be used. Check its settings under Settings, Providers.",
+      );
+    }
+    if (adapter instanceof NotConfiguredEmail) {
+      throw unavailable(
+        'email_not_configured',
+        "Email isn't set up yet. Add an email provider under Settings, Providers, then try again.",
+      );
+    }
+    return adapter;
+  }
+
+  invite(email: EmailAdapter, link: Link & { role: string }) {
+    return this.send(email, link.to, 'Your invite to Jiffo Admin', [
       `Hi ${link.name},`,
       '',
       `${link.by} added you to the Jiffo admin team as ${adminRoleLabel(link.role)}.`,
@@ -36,8 +59,8 @@ export class StaffMail {
     ]);
   }
 
-  reset(link: Link) {
-    return this.send(link.to, 'Your Jiffo Admin access was reset', [
+  reset(email: EmailAdapter, link: Link) {
+    return this.send(email, link.to, 'Your Jiffo Admin access was reset', [
       `Hi ${link.name},`,
       '',
       `${link.by} reset your Jiffo Admin access. Your password and authenticator no longer work, and you were signed out everywhere.`,
@@ -48,21 +71,14 @@ export class StaffMail {
     ]);
   }
 
-  private async send(to: string, subject: string, lines: string[]) {
+  /** True when the provider took the email. A failure is logged, without the link, and reported as false. */
+  private async send(email: EmailAdapter, to: string, subject: string, lines: string[]) {
     try {
-      await this.providers.current('email').send({ to, subject, text: lines.join('\n') });
+      await email.send({ to, subject, text: lines.join('\n') });
+      return true;
     } catch (error) {
-      if (error instanceof ProviderNotConfigured) {
-        throw unavailable(
-          'email_not_configured',
-          "Email isn't set up yet. Add an email provider under Settings, Providers, then try again.",
-        );
-      }
-      this.logger.warn(`Staff email failed: ${(error as Error).message}`);
-      throw unavailable(
-        'email_failed',
-        "The email couldn't be sent. Try again, or test the email provider under Settings, Providers.",
-      );
+      this.logger.warn(`Staff email (${subject}) failed: ${(error as Error).message}`);
+      return false;
     }
   }
 }

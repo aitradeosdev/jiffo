@@ -7,9 +7,8 @@ export interface TeamState {
   error?: string;
   /** What was typed, given back after a refusal so the form keeps it. */
   typed?: { name: string; email: string; role: string };
-  /** Where the link went: only ever the teammate's own email. */
-  emailedTo?: string;
-  expiresInHours?: number;
+  /** Where the link went, only ever the teammate's own email, and for how long it works. */
+  emailed?: { to: string; hours: number };
 }
 
 export async function inviteTeammate(_: TeamState, form: FormData): Promise<TeamState> {
@@ -24,7 +23,7 @@ export async function inviteTeammate(_: TeamState, form: FormData): Promise<Team
       body: typed,
     });
     revalidatePath('/team');
-    return { emailedTo: res.emailedTo, expiresInHours: res.expiresInHours };
+    return { emailed: { to: res.emailedTo, hours: res.expiresInHours } };
   } catch (error) {
     return { error: messageOf(error), typed };
   }
@@ -52,7 +51,7 @@ export async function resetTeammate(_: TeamState, form: FormData): Promise<TeamS
       { method: 'POST' },
     );
     revalidatePath('/team');
-    return { emailedTo: res.emailedTo, expiresInHours: res.expiresInHours };
+    return { emailed: { to: res.emailedTo, hours: res.expiresInHours } };
   } catch (error) {
     return { error: messageOf(error) };
   }

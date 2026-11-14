@@ -6,7 +6,6 @@ import { AdminAuthService } from '../src/admin/admin-auth.service';
 import { hashPassword, verifyPassword } from '../src/admin/passwords';
 import { base32Encode, matchTotp, totpCode, totpStep } from '../src/admin/totp';
 import { adminAudit, admins, adminSessions, adminSignInAttempts, type AdminRole } from '../src/db/schema';
-import { ProviderNotConfigured } from '../src/providers/not-configured';
 import { createErrand, createTestApp, fund, randomIp, signIn, type TestApp } from './helpers';
 
 const PANEL = 'test-panel-secret-0123456789abcdef0123';
@@ -422,25 +421,35 @@ describe('admin', () => {
       .send({ token: emailedToken(email), password: PASSWORD })
       .expect(200);
 
-    // With no email provider set up, nothing is kept and the panel says what to do.
-    t.email.failNext = new ProviderNotConfigured('email');
+    // An invite whose email can't go is taken back, so it can simply be made again.
+    t.email.failNext = new Error('provider down');
     const other = `${randomUUID()}@jiffoapp.com`;
     const refused = await request(t.http)
       .post('/v1/admin/team')
       .set(owner.headers)
       .send({ email: other, name: 'Not Sent', role: 'support' })
       .expect(503);
-    expect(refused.body.error.code).toBe('email_not_configured');
+    expect(refused.body.error.code).toBe('email_failed');
     expect(await t.db.select().from(admins).where(eq(admins.email, other))).toHaveLength(0);
+    await request(t.http)
+      .post('/v1/admin/team')
+      .set(owner.headers)
+      .send({ email: other, name: 'Sent Now', role: 'support' })
+      .expect(201);
+    expect(t.email.lastTo(other)?.text).toMatch(/^Hi Sent Now,/);
 
-    // A reset whose email fails changes nothing either: the old password still works.
+    // A reset whose email fails still resets, and says so; resetting again sends a fresh link.
     const [teammate] = await t.db.select().from(admins).where(eq(admins.email, email));
     t.email.failNext = new Error('provider down');
     const failed = await request(t.http).post(`/v1/admin/team/${teammate!.id}/reset`).set(owner.headers).expect(503);
-    expect(failed.body.error.code).toBe('email_failed');
-    const [still] = await t.db.select().from(admins).where(eq(admins.id, teammate!.id));
-    expect(still!.passwordHash).toBe(teammate!.passwordHash);
-    expect(still!.inviteTokenHash).toBe(teammate!.inviteTokenHash);
+    expect(failed.body.error).toMatchObject({ code: 'email_failed', message: expect.stringMatching(/was reset/) });
+    const [after] = await t.db.select().from(admins).where(eq(admins.id, teammate!.id));
+    expect(after).toMatchObject({ status: 'invited', passwordHash: null });
+    await request(t.http).post(`/v1/admin/team/${teammate!.id}/reset`).set(owner.headers).expect(201);
+    await request(t.http)
+      .post('/v1/admin/auth/invite/check')
+      .send({ token: emailedToken(email) })
+      .expect(200);
   });
 
   it('counts the day on the overview', async () => {

@@ -17,10 +17,23 @@ import { badRequest, conflict, notFound } from '../common/errors';
 import { BUILDERS, checkAdapter } from '../providers/builders';
 import { ProvidersService, secretBinding } from '../providers/providers.service';
 import { DEPOSIT_RECHECK_DAYS } from '../money/deposits.service';
+import type { EmailAdapter } from '../adapters/email';
 import { AuditService } from './audit.service';
 import type { AdminContext } from './admin.types';
 
 type Row = typeof providerSettings.$inferSelect;
+
+/** Checks the key, then sends a short email to the admin testing, which proves the sender works too. */
+export async function testEmail(email: EmailAdapter, to: string) {
+  const own = (email as { check?: () => Promise<string> }).check;
+  const checked = typeof own === 'function' ? await own.call(email) : 'Connected.';
+  await email.send({
+    to,
+    subject: 'Jiffo Admin: email test',
+    text: 'This is a test from Settings, Providers in Jiffo Admin. Invites and access resets will arrive like this.',
+  });
+  return `${checked} A test email was sent to ${to}: check it arrived.`;
+}
 
 /** Building an adapter can fail on a malformed value (a JSON key file, say): said without the value. */
 const buildError = (error: unknown) =>
@@ -228,8 +241,11 @@ export class ProvidersAdminService {
       .finally(() => this.providers.reload());
   }
 
-  /** Something read-only with the saved keys (a balance, a bucket), and keeps the answer. */
-  async test(category: ProviderCategory, provider: string) {
+  /**
+   * Something read-only with the saved keys (a balance, a bucket), and keeps the answer. Email is the
+   * exception: a key can work while its sender can't send, so the test sends one email, to whoever tests.
+   */
+  async test(admin: AdminContext, category: ProviderCategory, provider: string) {
     this.info(category, provider);
     await this.providers.reload();
     const [row] = await this.db
@@ -242,7 +258,10 @@ export class ProvidersAdminService {
     try {
       const adapter = this.providers.fromSettings(category, provider);
       if (!adapter) throw new Error('The saved settings could not be read');
-      message = await checkAdapter(category, adapter);
+      message =
+        category === 'email'
+          ? await testEmail(adapter as EmailAdapter, admin.email)
+          : await checkAdapter(category, adapter);
       ok = true;
     } catch (error) {
       message = (error as Error).message || 'The provider refused';

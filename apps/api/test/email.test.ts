@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { PostmarkEmailAdapter, ResendEmailAdapter } from '../src/adapters/email';
+import {
+  ConsoleEmailAdapter,
+  MemoryEmailAdapter,
+  PostmarkEmailAdapter,
+  ResendEmailAdapter,
+} from '../src/adapters/email';
+import { testEmail } from '../src/admin/providers-admin.service';
+import { StaffMail } from '../src/admin/staff-mail';
+import { loadConfig } from '../src/config/app-config';
+import { envAdapters } from '../src/providers/env-adapters';
+import { NotConfiguredEmail } from '../src/providers/not-configured';
+import type { ProvidersService } from '../src/providers/providers.service';
 import { BUILDERS, sender } from '../src/providers/builders';
 
 type Call = { url: string; init: RequestInit };
@@ -83,5 +94,57 @@ describe('email provider settings', () => {
     for (const region of ['evil.example.com', 'eu-west-1.evil', 'eu west 1', '']) {
       expect(() => BUILDERS.email.ses!({ ...ses, region }, ctx), region).toThrow(/AWS region/);
     }
+  });
+});
+
+describe('staff email', () => {
+  const providers = (over: Partial<Record<'activeProvider' | 'fromSettings' | 'current', unknown>>) =>
+    ({
+      activeProvider: () => null,
+      fromSettings: () => null,
+      current: () => new MemoryEmailAdapter(),
+      ...over,
+    }) as unknown as ProvidersService;
+
+  /** The error code ready() refuses with, or null when it gives an adapter. */
+  const refusal = (mail: StaffMail) => {
+    try {
+      mail.ready();
+      return null;
+    } catch (error) {
+      return (error as { getResponse(): { error: { code: string } } }).getResponse().error.code;
+    }
+  };
+
+  it("says email isn't set up before anything is saved", () => {
+    expect(refusal(new StaffMail(providers({ current: () => new NotConfiguredEmail() })))).toBe('email_not_configured');
+  });
+
+  it("never falls back to the stand-in when the provider switched on can't be loaded", () => {
+    const current = () => new ConsoleEmailAdapter();
+    const broken = new StaffMail(providers({ activeProvider: () => 'resend', fromSettings: () => null, current }));
+    expect(refusal(broken)).toBe('email_failed');
+    const resend = new ResendEmailAdapter('k', 'team@jiffoapp.com');
+    const working = new StaffMail(providers({ activeProvider: () => 'resend', fromSettings: () => resend, current }));
+    expect(working.ready()).toBe(resend);
+  });
+
+  it('sends a test email to whoever presses Test, proving the sender works', async () => {
+    const memory = new MemoryEmailAdapter();
+    await expect(testEmail(memory, 'owner@jiffoapp.com')).resolves.toMatch(/sent to owner@jiffoapp.com/);
+    expect(memory.lastTo('owner@jiffoapp.com')?.subject).toBe('Jiffo Admin: email test');
+    memory.failNext = new Error('Resend refused the email (403): domain not verified');
+    await expect(testEmail(memory, 'owner@jiffoapp.com')).rejects.toThrow(/domain not verified/);
+  });
+
+  it('can send nothing outside production, for shared servers such as staging', () => {
+    const base = {
+      DATABASE_URL: 'postgres://x',
+      JWT_SECRET: 'a'.repeat(64),
+      OTP_SECRET: 'b'.repeat(64),
+      PIN_KEY: 'c'.repeat(64),
+    };
+    expect(envAdapters(loadConfig({ ...base, EMAIL_PROVIDER: 'none' })).email).toBeInstanceOf(NotConfiguredEmail);
+    expect(envAdapters(loadConfig(base)).email).toBeInstanceOf(ConsoleEmailAdapter);
   });
 });
