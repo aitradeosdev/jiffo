@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -186,7 +187,7 @@ describe('admin: providers', () => {
     const res = await request(t.http)
       .post('/v1/wallet/withdrawals')
       .set(agent.headers)
-      .send({ amountKobo: 200_000, speed: 'instant' })
+      .send({ requestId: randomUUID(), amountKobo: 200_000, speed: 'instant' })
       .expect(201);
     expect(recipient).toHaveBeenCalledWith({ name: 'TUNDE BAKARE', bankCode: '058', accountNumber: '0222333444' });
     expect(transfer).toHaveBeenCalledWith(expect.objectContaining({ recipientCode: 'RCP_paystack_1' }));

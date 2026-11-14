@@ -21,7 +21,7 @@ import {
   type AdminRole,
 } from '../src/db/schema';
 import { sha256 } from '../src/common/crypto';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { AppName } from '../src/db/schema';
 
 export interface TestApp {
@@ -222,7 +222,7 @@ let serial = 0;
  * Digits no other call in the run gets: the time to the millisecond and a counter. Test files run one after
  * another, so they never share a millisecond.
  */
-const uniqueDigits = (length: number) => {
+export const uniqueDigits = (length: number) => {
   serial = (serial + 1) % 100;
   const stamp = String(Date.now() % 10 ** (length - 2)).padStart(length - 2, '0');
   return `${stamp}${String(serial).padStart(2, '0')}`;
@@ -259,4 +259,41 @@ export async function completeApplication(t: TestApp, agent: Person, nin = uniqu
   await request(t.http).patch('/v1/agent/profile').set(agent.headers).send({ takesPurchases: true }).expect(200);
   await call('post', '/terms', { accepted: true }).expect(200);
   return nin;
+}
+
+/**
+ * A nightly check in a test sees the whole run's ledger but only this file's fake provider, so it reports a
+ * shortfall that would pause instant withdrawals for the files after it. Tests that run one clear it after.
+ */
+export async function clearReconciliationPauses(t: TestApp) {
+  await t.db.execute(
+    sql`update reconciliation_runs set cleared_at = now(), clear_note = 'test' where cleared_at is null`,
+  );
+}
+
+/** An approved agent with a payout account in their own name and money to withdraw, given by an adjustment. */
+export async function agentWithMoney(t: TestApp, amountKobo = 1_000_000) {
+  const agent = await signIn(t, 'agent', { firstName: 'Tunde' });
+  await request(t.http).patch('/v1/me').set(agent.headers).send({ lastName: 'Bakare' }).expect(200);
+  const accountNumber = `0${uniqueDigits(9)}`;
+  t.payments.accounts.set(`058:${accountNumber}`, 'TUNDE BAKARE');
+  await request(t.http)
+    .put('/v1/payout-account')
+    .set(agent.headers)
+    .send({ bankCode: '058', accountNumber })
+    .expect(200);
+  const finance = await adminAs(t, 'finance');
+  await request(t.http)
+    .post('/v1/admin/money/adjustments')
+    .set(finance.headers)
+    .send({
+      personId: agent.userId,
+      account: 'agent_available',
+      direction: 'credit',
+      amountKobo,
+      note: 'Test earnings to withdraw',
+      requestId: randomUUID(),
+    })
+    .expect(200);
+  return agent;
 }

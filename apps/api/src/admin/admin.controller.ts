@@ -312,6 +312,35 @@ export class AdminController {
     return this.money.reconciliation(query.country);
   }
 
+  /** Finance and owners only: clears a nightly check that paused instant withdrawals, saying why. */
+  @Post('money/reconciliation/:id/clear')
+  @HttpCode(200)
+  @Needs('money')
+  clearReconciliation(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodBody(NoteBody)) body: z.infer<typeof NoteBody>,
+  ) {
+    return this.money.clearReconciliation(admin, id, body.note);
+  }
+
+  @Get('alerts')
+  @Needs('read')
+  alerts(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
+    return this.money.alerts(query.country);
+  }
+
+  @Post('alerts/:id/resolve')
+  @HttpCode(200)
+  @Needs('money')
+  resolveAlert(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodBody(NoteBody)) body: z.infer<typeof NoteBody>,
+  ) {
+    return this.money.resolveAlert(admin, id, body.note);
+  }
+
   /** Finance and owners only: a credit or debit on a wallet or agent balance, with a reason. */
   @Post('money/adjustments')
   @HttpCode(200)

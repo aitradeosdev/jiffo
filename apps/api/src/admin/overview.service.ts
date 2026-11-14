@@ -4,13 +4,19 @@ import { AGENT_OUT_STATES } from '@jiffo/shared';
 import { DB, type Db } from '../db/database.module';
 import { countries, reconciliationRuns } from '../db/schema';
 import { notFound } from '../common/errors';
+import { AlertsService } from '../alerts/alerts.service';
+import { PayoutsService } from '../money/payouts.service';
 
 const num = (v: unknown) => Number(v ?? 0);
 
 /** The numbers on the admin overview, for one country. "Today" is the country's own day. */
 @Injectable()
 export class OverviewService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly alerts: AlertsService,
+    private readonly payouts: PayoutsService,
+  ) {}
 
   /** The countries Jiffo runs in, for the panel's country switch. */
   countries() {
@@ -38,6 +44,10 @@ export class OverviewService {
     );
     const one = async (query: SQL) => (await this.db.execute(query)).rows[0] ?? {};
 
+    const [openAlerts, instantPaused] = await Promise.all([
+      this.alerts.openCount(countryCode),
+      this.payouts.instantPaused(countryCode),
+    ]);
     const [errands, agents, money, balances, attention, week, reconciliation] = await Promise.all([
       one(sql`
         select
@@ -157,6 +167,10 @@ export class OverviewService {
         applications: num(attention.applications),
         /** Customers' ID checks the provider sent to support. */
         idChecks: num(attention.id_checks),
+        /** Money alerts nobody has resolved: a check gap, a low provider balance, a refused transfer. */
+        alerts: openAlerts,
+        /** A nightly-check shortfall has paused instant withdrawals until finance clears it. */
+        instantPaused,
       },
       week: week.rows.map((r) => ({
         day: String(r.day),

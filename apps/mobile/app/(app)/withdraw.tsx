@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import * as Crypto from 'expo-crypto';
 import { ActivityIndicator, View } from 'react-native';
 import { router } from 'expo-router';
 import { goBack } from '@/nav';
@@ -22,13 +23,15 @@ export default function Withdraw() {
   const kobo = parseNaira(text);
   const available = wallet.data?.availableKobo ?? null;
   const tooMuch = !!kobo && available !== null && kobo > available;
+  // One key per amount and speed: tapping again, or retrying after a lost answer, makes no second withdrawal.
+  const requestId = useMemo(() => Crypto.randomUUID(), [kobo, speed]);
 
   const submit = async () => {
     if (!kobo) return;
     setBusy(true);
     setError(null);
     try {
-      await api.post('/v1/wallet/withdrawals', { amountKobo: kobo, speed });
+      await api.post('/v1/wallet/withdrawals', { amountKobo: kobo, speed, requestId });
       goBack();
     } catch (e) {
       const remaining = e instanceof ApiError ? e.details.remainingKobo : undefined;

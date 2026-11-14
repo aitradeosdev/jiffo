@@ -167,6 +167,36 @@ export const SECTIONS: Section[] = [
     ],
   },
   {
+    title: 'Security',
+    about: 'Limits that protect the money. Changes here will need a second admin once two-person approval is on.',
+    fields: [
+      {
+        path: 'security.instantWithdrawalAgentDailyKobo',
+        label: 'Instant withdrawals per agent per day, at most',
+        kind: 'naira',
+        help: 'Fee included. Daily withdrawals are not counted.',
+      },
+      {
+        path: 'security.instantWithdrawalPlatformDailyKobo',
+        label: 'Instant withdrawals for all agents per day, at most',
+        kind: 'naira',
+        help: 'Once reached, agents can still choose the daily withdrawal.',
+      },
+      {
+        path: 'security.reconciliationToleranceKobo',
+        label: 'Nightly check: shortfall left alone up to',
+        kind: 'naira',
+        help: 'A larger shortfall at the provider pauses instant withdrawals until finance clears the check.',
+      },
+      {
+        path: 'security.lowProviderBalanceKobo',
+        label: 'Alert when the provider holds less than',
+        kind: 'naira',
+        help: 'Checked every 15 minutes. 0 turns it off.',
+      },
+    ],
+  },
+  {
     title: 'Profiles',
     about: 'What each side sees of the other.',
     fields: [

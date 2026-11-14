@@ -35,5 +35,6 @@ export class MoneyModule implements OnModuleInit {
     this.jobs.register('payouts.daily', this.config.PAYOUT_CRON, () => this.payouts.runDaily());
     this.jobs.register('payouts.retry', this.config.PAYOUT_RETRY_CRON, () => this.payouts.retryPending());
     this.jobs.register('reconcile.daily', this.config.RECONCILE_CRON, () => this.reconciliation.run());
+    this.jobs.register('payouts.balance', this.config.BALANCE_CHECK_CRON, () => this.reconciliation.checkBalances());
   }
 }
