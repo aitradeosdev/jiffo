@@ -1,3 +1,4 @@
+import { providerFetch } from './provider-fetch';
 import { unavailable } from '../common/errors';
 
 export interface PlaceSuggestion {
@@ -69,7 +70,7 @@ export class GoogleMapsAdapter implements MapsAdapter {
 
   constructor(
     private readonly apiKey: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = providerFetch,
   ) {}
 
   /** For the panel's Test button: one place search, with Google's own words if it is refused. */

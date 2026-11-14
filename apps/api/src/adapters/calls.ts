@@ -1,3 +1,4 @@
+import { providerFetch } from './provider-fetch';
 import { Logger } from '@nestjs/common';
 import { africasTalkingCheck, africasTalkingVoice, e164Digits, PROVIDER_TIMEOUT_MS } from './africastalking';
 import { randomUUID } from 'node:crypto';
@@ -68,7 +69,7 @@ export class AfricasTalkingCallsAdapter implements CallsAdapter {
     private readonly apiKey: string,
     /** Jiffo's voice number with Africa's Talking, in +234… form. */
     private readonly phoneNumber: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = providerFetch,
   ) {}
 
   async bridge(input: { reference: string; from: string; to: string }) {
@@ -123,7 +124,7 @@ export class TwilioCallsAdapter implements CallsAdapter {
     private readonly authToken: string,
     /** Jiffo's Twilio number, in +… form. */
     private readonly fromNumber: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = providerFetch,
   ) {}
 
   private auth() {

@@ -168,6 +168,20 @@ Every balance lives in a double-entry ledger (`ledger_accounts`, `journal_entrie
     - Chat pushes never quote the message.
     - Stored webhook bodies have account numbers, phone numbers, emails and names masked.
     - Every log line passes through the same masking. Production logs are JSON.
+- **Server defences:**
+  - **Rate limits:**
+    - Every route is limited a minute, per signed-in person or else per network address, counted in Redis so every server shares the counts.
+    - Paid lookups (places, quotes), the board, chat, presence, sign-in and webhooks have their own limits, and every request also counts towards its address's overall limit.
+    - Live connections are limited per address too. Set them with `RATE_LIMITS` (for example `paid=20,auth=10`).
+  - **Headers:**
+    - Every answer says not to sniff, frame or refer, with a content policy that lets nothing load. HTTPS is insisted on in production.
+    - Identity widget pages run only their own scripts, by a fresh nonce.
+  - **Provider calls:**
+    - Every call to a provider has a timeout and never follows a redirect.
+    - Provider addresses typed in the panel must be the provider's own https hosts.
+    - Live payment keys are refused outside production, and test keys in it.
+  - **Paystack:** with `PAYSTACK_WEBHOOK_IPS` set, Paystack's calls are taken only from those addresses.
+  - **Development storage:** serves only photos as images. Anything else comes down as a file.
 - **Signing in:**
   - **Codes:** each number and each phone may ask for 3 codes in 15 minutes and 10 in a day (Settings, Limits). A phone already signed in to the number isn't held to the number's limits, so a stranger asking for codes to it can't lock the owner out.
   - **Network addresses:** limited too (`OTP_PER_IP_PER_HOUR`, `OTP_PER_IP_PER_DAY`), but higher, since mobile networks put many customers behind one address.

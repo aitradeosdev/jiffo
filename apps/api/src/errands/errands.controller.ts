@@ -1,3 +1,4 @@
+import { RateLimit } from '../common/rate-limit';
 import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import type { z } from 'zod';
 import { Apps, AuthGuard, CurrentAuth } from '../auth/auth.guard';
@@ -23,6 +24,7 @@ export class ErrandsController {
 
   /** The suggested fee for a route, with the distance and time it is based on. */
   @Post('quote')
+  @RateLimit('paid')
   @Apps('customer')
   @HttpCode(200)
   quote(@CurrentAuth() auth: AuthContext, @Body(new ZodBody(QuoteBody)) body: z.infer<typeof QuoteBody>) {
@@ -35,6 +37,7 @@ export class ErrandsController {
   }
 
   @Get('board')
+  @RateLimit('board')
   @Apps('agent')
   board(@CurrentAuth() auth: AuthContext, @Query(new ZodBody(BoardQuery)) q: z.infer<typeof BoardQuery>) {
     return this.errands.board(auth, q);

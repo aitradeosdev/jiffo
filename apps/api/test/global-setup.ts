@@ -29,6 +29,9 @@ export default async function setup() {
     TIMER_PROVIDER: 'memory',
     TRUST_PROXY_HOPS: '1',
     ADMIN_PANEL_SECRET: 'test-panel-secret-0123456789abcdef0123',
+    // Tests share one address and sign many people in a minute; the rate-limit test sets its own.
+    RATE_LIMITS:
+      'default=100000,paid=100000,board=100000,chat=100000,presence=100000,auth=100000,webhook=100000,socket=100000,ip=1000000',
   });
 
   return async () => {

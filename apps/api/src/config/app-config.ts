@@ -35,6 +35,16 @@ const EnvSchema = z
     REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
     /** However often it is refreshed, a session ends this many days after sign-in, and the person signs in again. */
     SESSION_MAX_DAYS: z.coerce.number().int().positive().default(90),
+    /**
+     * Optional: the addresses Paystack sends webhooks and approval requests from, comma-separated (see
+     * Paystack's docs). When set, calls from any other address are refused, on top of the signature check.
+     */
+    PAYSTACK_WEBHOOK_IPS: z.string().optional(),
+    /**
+     * Requests a minute for each class of route, over the defaults in common/rate-limit.ts, as
+     * "class=number,…"; for example "paid=20,auth=10".
+     */
+    RATE_LIMITS: z.string().optional(),
     DEFAULT_COUNTRY: z.string().length(2).default('NG'),
     MESSAGING_PROVIDER: z.enum(['console', 'memory', 'termii']).default('console'),
     TERMII_API_KEY: z.string().optional(),

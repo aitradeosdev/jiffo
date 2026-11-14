@@ -166,7 +166,7 @@ describe('admin: providers', () => {
       .expect(200);
 
     await api('put', '/payments/paystack')
-      .send({ secrets: { secretKey: 'sk_live_abcdefgh1234' } })
+      .send({ secrets: { secretKey: 'sk_test_abcdefgh1234' } })
       .expect(200);
     vi.spyOn(PaystackPaymentsAdapter.prototype, 'balance').mockResolvedValue(1_000_000);
     await api('post', '/payments/paystack/test').expect(200);
@@ -215,7 +215,7 @@ describe('admin: providers', () => {
 
   it('takes a Flutterwave top-up from its webhook, checked with the secret hash', async () => {
     await api('put', '/payments/flutterwave')
-      .send({ config: { businessName: 'Jiffo' }, secrets: { secretKey: 'FLWSECK-x', secretHash: 'hash-abc-123' } })
+      .send({ config: { businessName: 'Jiffo' }, secrets: { secretKey: 'FLWSECK_TEST-x', secretHash: 'hash-abc-123' } })
       .expect(200);
     vi.spyOn(FlutterwavePaymentsAdapter.prototype, 'balance').mockResolvedValue(0);
     await api('post', '/payments/flutterwave/test').expect(200);

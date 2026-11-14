@@ -25,6 +25,50 @@ const sandboxMode = (v: string | undefined, ctx: ProviderContext) => {
   return sandbox;
 };
 const optional = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
+
+/**
+ * A provider address typed in the panel, only if it is https on one of the provider's own hosts
+ * (docs/security-plan.md, finding 18): a stolen owner session can't point a provider, and its keys, elsewhere.
+ */
+const providerUrl = (v: string | undefined, hosts: (host: string) => boolean, name: string) => {
+  const text = optional(v);
+  if (!text) return undefined;
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    throw new Error(`The ${name} address isn't a web address`);
+  }
+  if (url.protocol !== 'https:' || !hosts(url.hostname.toLowerCase())) {
+    throw new Error(`The ${name} address must be one of ${name}'s own, starting with https://`);
+  }
+  return url.toString().replace(/\/$/, '');
+};
+
+/** A storage endpoint: https, and in production a public host rather than this machine or a private network. */
+const storageEndpoint = (v: string | undefined, ctx: ProviderContext) => {
+  const text = optional(v);
+  if (!text) return undefined;
+  const url = new URL(text);
+  const host = url.hostname.toLowerCase();
+  const local =
+    host === 'localhost' || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.|\[)/.test(host);
+  if (ctx.production && (url.protocol !== 'https:' || local)) {
+    throw new Error('In production the storage endpoint must be a public https address');
+  }
+  return text;
+};
+
+/**
+ * Live keys move real money, so they are for production only, and production refuses test keys
+ * (docs/security-plan.md, P11). Tells them apart by the prefix each provider gives its keys.
+ */
+const moneyKey = (key: string, ctx: ProviderContext, test: (k: string) => boolean, name: string) => {
+  const isTest = test(key);
+  if (ctx.production && isTest) throw new Error(`This is a ${name} test key. Production needs a live key.`);
+  if (!ctx.production && !isTest) throw new Error(`This is a ${name} live key. Live keys are for production only.`);
+  return key;
+};
 /** A fee admin typed in naira, as kobo; empty is none. Anything else is refused when the settings are saved. */
 const nairaFee = (v: string | undefined) => {
   const text = optional(v)?.replace(/[₦,\s]/g, '');
@@ -42,19 +86,19 @@ export const BUILDERS: {
   [C in ProviderCategory]: Record<string, (v: Values, ctx: ProviderContext) => Adapters[C]>;
 } = {
   payments: {
-    flutterwave: (v) =>
+    flutterwave: (v, ctx) =>
       new FlutterwavePaymentsAdapter(
-        v.secretKey!,
+        moneyKey(v.secretKey!, ctx, (k) => k.includes('_TEST'), 'Flutterwave'),
         v.secretHash!,
         v.businessName!,
         undefined,
         undefined,
         nairaFee(v.fixedAccountFee),
       ),
-    paystack: (v) =>
+    paystack: (v, ctx) =>
       new PaystackPaymentsAdapter(
-        v.secretKey!,
-        optional(v.baseUrl),
+        moneyKey(v.secretKey!, ctx, (k) => k.startsWith('sk_test_'), 'Paystack'),
+        providerUrl(v.baseUrl, (h) => h === 'api.paystack.co', 'Paystack'),
         undefined,
         optional(v.dedicatedBank),
         nairaFee(v.fixedAccountFee),
@@ -63,7 +107,12 @@ export const BUILDERS: {
   sms: {
     africastalking: (v) => new AfricasTalkingMessagingAdapter(v.username!, v.apiKey!, optional(v.senderId)),
     termii: (v) =>
-      new TermiiMessagingAdapter(v.apiKey!, v.senderId!, optional(v.baseUrl) ?? 'https://api.ng.termii.com'),
+      new TermiiMessagingAdapter(
+        v.apiKey!,
+        v.senderId!,
+        providerUrl(v.baseUrl, (h) => h === 'termii.com' || h.endsWith('.termii.com'), 'Termii') ??
+          'https://api.ng.termii.com',
+      ),
   },
   identity: {
     smileid: (v, ctx) =>
@@ -93,8 +142,8 @@ export const BUILDERS: {
     google: (v) => new GoogleMapsAdapter(v.apiKey!),
   },
   storage: {
-    s3: (v) =>
-      new S3StorageAdapter(v.bucket!, v.region!, optional(v.endpoint), {
+    s3: (v, ctx) =>
+      new S3StorageAdapter(v.bucket!, v.region!, storageEndpoint(v.endpoint, ctx), {
         accessKeyId: v.accessKeyId!,
         secretAccessKey: v.secretAccessKey!,
       }),

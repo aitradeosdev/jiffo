@@ -85,6 +85,7 @@ export async function signIn(
   const code = t.messaging.lastCodeFor(phone);
   const res = await request(t.http)
     .post('/v1/auth/otp/verify')
+    .set('x-forwarded-for', ip)
     .send({ phone, code, app, device: { key: randomUUID(), platform: 'android', name: 'Test phone' } })
     .expect(200);
   const person: Person = {
