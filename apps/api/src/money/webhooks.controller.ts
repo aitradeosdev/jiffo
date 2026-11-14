@@ -8,6 +8,8 @@ import { badRequest, notFound, unauthorized } from '../common/errors';
 import { ProvidersService } from '../providers/providers.service';
 import { DepositsService } from './deposits.service';
 import { FixedAccountsService } from './fixed-accounts.service';
+import { AlertsService } from '../alerts/alerts.service';
+import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { PayoutsService } from './payouts.service';
 
 /**
@@ -25,6 +27,8 @@ export class WebhooksController {
     private readonly deposits: DepositsService,
     private readonly payouts: PayoutsService,
     private readonly fixedAccounts: FixedAccountsService,
+    private readonly alerts: AlertsService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   /**
@@ -72,6 +76,16 @@ export class WebhooksController {
     try {
       if (event.kind === 'deposit') {
         const deposit = await this.deposits.sync(event.reference);
+        // Paid, by the provider's word, for a reference nobody here knows: money arrived with no customer.
+        if (!deposit) {
+          await this.alerts.raise({
+            countryCode: this.config.DEFAULT_COUNTRY,
+            kind: 'deposit_unknown',
+            dedupeKey: event.reference,
+            message: `${provider} reported a payment for ${event.reference}, which matches no top-up. Find whose money it is before crediting anyone.`,
+            data: { provider, reference: event.reference, eventKey: event.eventKey },
+          });
+        }
         // Told it was paid, but the provider's API doesn't show it yet: answered as not done, so the
         // provider delivers the webhook again later instead of it being kept as handled.
         if (deposit?.status === 'pending') throw new Error(`Deposit ${event.reference} not visible as paid yet`);

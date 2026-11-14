@@ -3,6 +3,7 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { goBack } from '@/nav';
 import * as Clipboard from 'expo-clipboard';
+import * as Crypto from 'expo-crypto';
 import { useSession } from '@/auth/session';
 import { ApiError, errorMessage } from '@/api/client';
 import { useCustomerIdentity } from '@/identity/customer';
@@ -84,6 +85,8 @@ export default function TopUp() {
   // phone clock that is off doesn't matter.
   const known = useRef<Set<string> | null>(null);
   const kobo = parseNaira(text);
+  // One key per amount: a repeated tap, or a retry after a lost answer, opens one top-up.
+  const requestId = useMemo(() => Crypto.randomUUID(), [kobo]);
   const valid = kobo !== null && kobo >= min && (max === null || kobo <= max);
   const fixed = options.data?.fixedAccount;
   const own = fixed?.account ?? null;
@@ -151,7 +154,7 @@ export default function TopUp() {
     setBusy(true);
     setError(null);
     try {
-      setDeposit(await api.post<Deposit>('/v1/wallet/deposits', { amountKobo: kobo }));
+      setDeposit(await api.post<Deposit>('/v1/wallet/deposits', { amountKobo: kobo, requestId }));
     } catch (e) {
       // Money comes in only from verified customers: the check comes first.
       if (e instanceof ApiError && e.code === 'identity_required') {

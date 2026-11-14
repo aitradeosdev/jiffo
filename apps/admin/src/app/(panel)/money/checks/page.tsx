@@ -38,6 +38,7 @@ const ALERT_KINDS: Record<string, string> = {
   payout_unclear: 'Withdrawal in an unclear state',
   transfer_otp_on: 'Transfer OTP is on',
   revenue_negative: 'Revenue below zero',
+  deposit_unknown: 'Payment for an unknown top-up',
 };
 
 const DONE: Record<string, string> = {

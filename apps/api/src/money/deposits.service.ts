@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, count, desc, eq, gt, lt } from 'drizzle-orm';
+import { and, count, desc, eq, gt, lt, sql } from 'drizzle-orm';
 import { formatNaira } from '@jiffo/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
@@ -81,7 +81,11 @@ export class DepositsService {
     }
   }
 
-  async create(auth: AuthContext, amountKobo: number) {
+  /**
+   * A one-time account number for a top-up. `requestKey`, when the app sends one, makes a repeated tap
+   * return the same top-up. One request at a time per customer, so the open top-up limit can't be raced.
+   */
+  async create(auth: AuthContext, amountKobo: number, requestKey?: string) {
     // Money comes in only from verified customers.
     await this.customerIdentity.assertVerified(auth.userId);
     const { settings, oneTime } = await this.fixedAccounts.offer(auth.countryCode);
@@ -95,38 +99,57 @@ export class DepositsService {
         maxDepositKobo,
       });
     }
-    const [open] = await this.db
-      .select({ n: count() })
-      .from(deposits)
-      .where(and(eq(deposits.userId, auth.userId), eq(deposits.status, 'pending'), gt(deposits.expiresAt, new Date())));
-    if ((open?.n ?? 0) >= MAX_OPEN_DEPOSITS) {
-      throw tooMany('too_many_open_deposits', 'Finish or wait out your open top-ups first');
-    }
-    const reference = `jd-${randomUUID()}`;
-    const expiresAt = new Date(Date.now() + settings.timers.depositAccountMinutes * MINUTE_MS);
-    // One provider for the whole step: a switch in between must not record another than the one used.
-    const payments = this.providers.current('payments');
-    const account = await payments.createTransferDeposit({
-      reference,
-      amountKobo,
-      email: `${auth.userId}@${this.config.PAYMENT_EMAIL_DOMAIN}`,
-      expiresAt,
-    });
-    const [row] = await this.db
-      .insert(deposits)
-      .values({
-        userId: auth.userId,
-        countryCode: auth.countryCode,
-        provider: payments.name,
+    const row = await this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'deposit:' + auth.userId}))`);
+      if (requestKey) {
+        const [same] = await tx
+          .select()
+          .from(deposits)
+          .where(and(eq(deposits.userId, auth.userId), eq(deposits.requestKey, requestKey)));
+        if (same) {
+          if (same.amountKobo !== amountKobo) {
+            throw conflict('request_reused', 'This request was already used for another top-up');
+          }
+          return same;
+        }
+      }
+      const [open] = await tx
+        .select({ n: count() })
+        .from(deposits)
+        .where(
+          and(eq(deposits.userId, auth.userId), eq(deposits.status, 'pending'), gt(deposits.expiresAt, new Date())),
+        );
+      if ((open?.n ?? 0) >= MAX_OPEN_DEPOSITS) {
+        throw tooMany('too_many_open_deposits', 'Finish or wait out your open top-ups first');
+      }
+      const reference = `jd-${randomUUID()}`;
+      const expiresAt = new Date(Date.now() + settings.timers.depositAccountMinutes * MINUTE_MS);
+      // One provider for the whole step: a switch in between must not record another than the one used.
+      const payments = this.providers.current('payments');
+      const account = await payments.createTransferDeposit({
         reference,
         amountKobo,
-        accountNumber: account.accountNumber,
-        accountName: account.accountName,
-        bankName: account.bankName,
-        expiresAt: account.expiresAt,
-      })
-      .returning();
-    return depositView(row!);
+        email: `${auth.userId}@${this.config.PAYMENT_EMAIL_DOMAIN}`,
+        expiresAt,
+      });
+      const [created] = await tx
+        .insert(deposits)
+        .values({
+          userId: auth.userId,
+          countryCode: auth.countryCode,
+          provider: payments.name,
+          reference,
+          requestKey,
+          amountKobo,
+          accountNumber: account.accountNumber,
+          accountName: account.accountName,
+          bankName: account.bankName,
+          expiresAt: account.expiresAt,
+        })
+        .returning();
+      return created!;
+    });
+    return depositView(row);
   }
 
   async list(auth: AuthContext, limit: number) {
@@ -224,6 +247,11 @@ export class DepositsService {
    */
   async recordFixedPayment(provider: string, paymentRef: string): Promise<DepositRow | null> {
     const reference = `${provider}:${paymentRef}`;
+    // Our own one-time references are never transfers into an own account: such an event is misrouted.
+    if (paymentRef.startsWith('jd-')) {
+      this.logger.warn(`Event for ${paymentRef} routed as an own-account transfer: not credited that way`);
+      return null;
+    }
     const [seen] = await this.db.select().from(deposits).where(eq(deposits.reference, reference));
     if (seen) return seen;
 

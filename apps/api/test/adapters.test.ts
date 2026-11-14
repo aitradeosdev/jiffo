@@ -391,6 +391,14 @@ describe('Paystack payments', () => {
     ).toMatchObject({ kind: 'fixed_account', providerRef: 'CUS_7' });
   });
 
+  it("doesn't take a charge Paystack shows another way as a transfer into a dedicated account", async () => {
+    const { impl } = fakeFetch(() =>
+      ok({ status: 'success', amount: 500_000, fees: 0, currency: 'NGN', channel: 'bank_transfer' }),
+    );
+    const payment = await new PaystackPaymentsAdapter('sk', 'https://api.example.test', impl).verifyFixedPayment('T1');
+    expect(payment.status).toBe('failed');
+  });
+
   it('confirms a transfer into a dedicated account with whose it was', async () => {
     const { impl, calls } = fakeFetch(() =>
       ok({
