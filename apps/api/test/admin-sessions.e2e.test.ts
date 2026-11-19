@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AdminAuthService } from '../src/admin/admin-auth.service';
 import { totpCode, totpStep } from '../src/admin/totp';
 import { admins, adminSessions } from '../src/db/schema';
-import { adminAs, createTestApp, randomIp, signIn, type TestApp } from './helpers';
+import { adminAs, createTestApp, randomIp, signIn, type TestApp, staffPhone } from './helpers';
 import { SoftPasskey } from './soft-passkey';
 
 const PASSWORD = 'a long enough password';
@@ -28,7 +28,7 @@ describe('admin sessions and passkeys', () => {
     const email = `${randomUUID()}@jiffoapp.com`;
     const [row] = await t.db
       .insert(admins)
-      .values({ email, name: `New ${role}`, role })
+      .values({ email, name: `New ${role}`, role, phone: staffPhone() })
       .returning({ id: admins.id });
     const { inviteUrl } = await t.app.get(AdminAuthService).issueInvite(t.db, row!.id);
     const token = inviteUrl.split('#')[1]!;

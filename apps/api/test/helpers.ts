@@ -234,13 +234,20 @@ export async function photo(
   return res.body.key as string;
 }
 
-/** A signed-in admin of the given role, made directly in the database (the sign-in itself is tested in admin.e2e). */
-export async function adminAs(t: TestApp, role: AdminRole) {
+/** A staff member's own phone number: unlike randomPhone, never one a test's app user has. */
+export const staffPhone = () => `+234909${randomInt(0, 10_000_000).toString().padStart(7, '0')}`;
+
+/**
+ * A signed-in admin of the given role, made directly in the database (the sign-in itself is tested in
+ * admin.e2e). Their phone links them to their own app account (D3): by default one nobody in the apps has.
+ */
+export async function adminAs(t: TestApp, role: AdminRole, options: { phone?: string | null } = {}) {
   const [admin] = await t.db
     .insert(admins)
     .values({
       email: `${randomUUID()}@jiffoapp.com`,
       name: `Test ${role}`,
+      phone: options.phone === undefined ? staffPhone() : options.phone,
       role,
       status: 'active',
       totpEnabledAt: new Date(),

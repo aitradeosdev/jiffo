@@ -86,8 +86,13 @@ export interface PersonRef {
 export const nameOf = (p: PersonRef | null) =>
   p ? [p.firstName, p.lastName].filter(Boolean).join(' ') || 'No name yet' : '—';
 
-/** The country's categories, for their names. Public settings, read once per request. */
+/**
+ * The country's categories, for their names, read once per request. From the admin API, which in production
+ * answers on its own port, where the apps' routes don't (docs/security-plan.md, D1).
+ */
 export const getCategories = cache(async (country: string) => {
-  const config = await api<{ categories: Array<{ key: string; name: string }> }>(`/config/${country}`);
-  return new Map(config.categories.map((c) => [c.key, c.name]));
+  const categories = await api<Array<{ key: string; name: string }>>(
+    `/admin/categories?country=${encodeURIComponent(country)}`,
+  );
+  return new Map(categories.map((c) => [c.key, c.name]));
 });

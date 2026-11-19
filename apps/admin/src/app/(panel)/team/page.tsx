@@ -17,6 +17,8 @@ interface Teammate {
   twoStep: boolean;
   inviteExpired: boolean;
   lastSignInAt: string | null;
+  /** Their own phone number, masked: it links the app account they can't change (D3). */
+  phone: string | null;
 }
 
 export default async function TeamPage() {
@@ -29,6 +31,7 @@ export default async function TeamPage() {
     );
   }
   const [team, country] = await Promise.all([api<Teammate[]>('/admin/team'), getCountry()]);
+  const noPhone = team.filter((t) => !t.phone && t.status !== 'disabled');
 
   return (
     <>
@@ -38,6 +41,14 @@ export default async function TeamPage() {
           <div className="max-w-xl">
             <ReasonBox />
           </div>
+          {noPhone.length ? (
+            <p className="rounded-xl bg-warn-soft p-3.5 text-sm font-semibold text-warn" role="status">
+              {noPhone.length === 1 ? '1 teammate has' : `${noPhone.length} teammates have`} no phone number yet, so
+              they can&apos;t change people&apos;s accounts. Each person&apos;s number links their own Jiffo app
+              account, which nobody can change for themselves. Another owner adds yours, or run{' '}
+              <code>pnpm admin phone</code> on the server.
+            </p>
+          ) : null}
           <Card title={`${team.length} ${team.length === 1 ? 'person' : 'people'}`} padded={false}>
             <div className="overflow-x-auto">
               <table className={tableClass}>
@@ -60,6 +71,9 @@ export default async function TeamPage() {
                           {t.id === me.id ? <span className="ml-1.5 font-medium text-ink-3">(you)</span> : null}
                         </div>
                         <div className="text-[13px] text-ink-3">{t.email}</div>
+                        <div className="text-[13px] text-ink-3">
+                          {t.phone ? <span className="num">{t.phone}</span> : 'No phone number'}
+                        </div>
                       </td>
                       <td className={tdClass}>
                         <div className="flex flex-wrap gap-1.5">

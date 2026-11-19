@@ -4,7 +4,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AuditService } from '../src/admin/audit.service';
 import { adminAudit } from '../src/db/schema';
-import { adminAs, approved, createTestApp, fund, signIn, type TestApp } from './helpers';
+import { adminAs, approved, createTestApp, fund, signIn, staffPhone, type TestApp } from './helpers';
 
 /**
  * The audit log and personal details (docs/security-plan.md, D5, D7): every change says why and from which
@@ -87,7 +87,7 @@ describe('admin audit log and personal details', () => {
     const asked = await request(t.http)
       .post('/v1/admin/team')
       .set({ ...asker.headers, 'x-jiffo-reason': 'Hiring for the Abuja launch', 'user-agent': 'AskerBrowser/1.0' })
-      .send({ email, name: 'Abuja Hire', role: 'support' })
+      .send({ email, name: 'Abuja Hire', role: 'support', phone: staffPhone() })
       .expect(202);
     await request(t.http)
       .post(`/v1/admin/approvals/${asked.body.approval.id}/approve`)

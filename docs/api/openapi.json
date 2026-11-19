@@ -3425,12 +3425,18 @@
                       "safety",
                       "support"
                     ]
+                  },
+                  "phone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 30
                   }
                 },
                 "required": [
                   "email",
                   "name",
-                  "role"
+                  "role",
+                  "phone"
                 ],
                 "additionalProperties": false
               }
@@ -3498,6 +3504,11 @@
                       "active",
                       "disabled"
                     ]
+                  },
+                  "phone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 30
                   }
                 },
                 "additionalProperties": false

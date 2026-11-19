@@ -158,13 +158,16 @@ const PayoutAccountDecisionBody = z.object({ decision: z.enum(['approve', 'decli
 /** The note is shown to the agent when their application is declined. */
 const DecisionBody = z.object({ decision: z.enum(['approve', 'reject', 'reopen']), note: Note });
 const IdDecisionBody = z.object({ decision: z.enum(['verify', 'decline', 'reopen']), note: Note });
+/** A teammate's own phone number, which links their app account (D3); checked to be a mobile number. */
+const StaffPhone = z.string().trim().min(1).max(30);
 const InviteBody = z.object({
   email: z.string().email().max(200),
   name: z.string().trim().min(1).max(80),
   role: z.enum(ADMIN_ROLES),
+  phone: StaffPhone,
 });
 const UpdateBody = z
-  .object({ role: z.enum(ADMIN_ROLES), status: z.enum(['active', 'disabled']) })
+  .object({ role: z.enum(ADMIN_ROLES), status: z.enum(['active', 'disabled']), phone: StaffPhone })
   .partial()
   .refine((b) => Object.keys(b).length > 0, 'Nothing to update');
 const AuditQuery = z.object({

@@ -184,12 +184,14 @@ It opens on port 3001. Set `ADMIN_PANEL_SECRET` to the same value in both `apps/
 Admins join by invite only. Make the first owner from the API's folder, with the API's environment loaded:
 
 ```bash
-pnpm admin invite --email you@jiffoapp.com --name "Your Name" --role owner --reason "First owner"
+pnpm admin invite --email you@jiffoapp.com --name "Your Name" --role owner --phone "0803 123 4567" --reason "First owner"
 ```
 
 Open the printed link to choose a password. The first sign-in sets up an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password), and every sign-in after that needs its code.
 
-In production the panel must sit behind a load balancer (`TRUST_PROXY_HOPS` of at least 1), and the API needs `ADMIN_URL` set to the panel's address for invite links.
+The phone number is the owner's own: it links the Jiffo app account they hold, which they then can't change from the panel.
+
+In production the panel must sit behind a load balancer (`TRUST_PROXY_HOPS` of at least 1), and the API needs `ADMIN_URL` set to the panel's address for invite links. The API also needs `ADMIN_API_PORT`: admin routes answer only on that port and the apps' routes only on the public one, so the admin port can sit behind the team's access control (single sign-on, such as Cloudflare Access or Google IAP) and off the open internet. Point the panel's `API_URL` at it.
 
 Roles, passkeys, sessions, two-person approval, the audit log and personal details are covered in [docs/admin-panel.md](docs/admin-panel.md).
 

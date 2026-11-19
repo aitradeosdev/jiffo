@@ -183,6 +183,13 @@
       "when": 1794680817580,
       "tag": "0025_admin_audit_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794682412460,
+      "tag": "0026_admin_phone",
+      "breakpoints": true
     }
   ]
 }

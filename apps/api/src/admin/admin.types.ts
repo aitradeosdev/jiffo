@@ -13,6 +13,8 @@ export interface AdminContext {
   email: string;
   name: string;
   role: string;
+  /** Their own phone number, which links them to their app account (D3); none yet for some teammates. */
+  phone: string | null;
   ip: string | null;
   /** The admin's browser, as the panel passes it on. */
   userAgent: string | null;

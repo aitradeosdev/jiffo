@@ -1013,6 +1013,11 @@ export const admins = pgTable(
     /** Always stored in lower case. */
     email: text('email').notNull(),
     name: text('name').notNull(),
+    /**
+     * Their own phone number, in E.164: the customer or agent account they hold in the apps (one account per
+     * number). They can't change that account, or an errand it is part of (docs/security-plan.md, D3).
+     */
+    phone: text('phone'),
     role: text('role', { enum: ADMIN_ROLES }).notNull(),
     status: text('status', { enum: ['invited', 'active', 'disabled'] })
       .notNull()

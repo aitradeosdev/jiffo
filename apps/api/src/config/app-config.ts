@@ -16,6 +16,11 @@ const EnvSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().int().positive().default(3000),
+    /**
+     * The admin API's own port (docs/security-plan.md, D1). When set, admin routes answer only there and
+     * every other route only on PORT, so the admin port can sit behind the team's access control.
+     */
+    ADMIN_API_PORT: z.coerce.number().int().positive().optional(),
     DATABASE_URL: z.string().url(),
     JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
     OTP_SECRET: z.string().min(32, 'OTP_SECRET must be at least 32 characters'),
@@ -157,6 +162,7 @@ const EnvSchema = z
     const need = (ok: boolean, path: string, message: string) => {
       if (!ok) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
     };
+    need(env.ADMIN_API_PORT !== env.PORT, 'ADMIN_API_PORT', 'must differ from PORT');
     if (env.MESSAGING_PROVIDER === 'termii') {
       need(!!env.TERMII_API_KEY, 'TERMII_API_KEY', 'required when MESSAGING_PROVIDER is termii');
       need(!!env.TERMII_SENDER_ID, 'TERMII_SENDER_ID', 'required when MESSAGING_PROVIDER is termii');
@@ -184,6 +190,11 @@ const EnvSchema = z
         'must be set in production (load balancers in front)',
       );
       need(!!env.ADMIN_PANEL_SECRET, 'ADMIN_PANEL_SECRET', 'must be set in production');
+      need(
+        !!env.ADMIN_API_PORT,
+        'ADMIN_API_PORT',
+        "must be set in production: the admin API answers only there, behind the team's access control",
+      );
       need(env.CORS_ORIGINS !== '*', 'CORS_ORIGINS', 'must list the allowed origins in production, not *');
       need(!!env.SECRETS_KEY, 'SECRETS_KEY', "must be set in production, to encrypt providers' keys");
       for (const name of ['ID_FINGERPRINT_KEY', 'ADMIN_TOTP_KEY', 'FIELD_KEY', 'ADMIN_TOKEN_SECRET'] as const) {

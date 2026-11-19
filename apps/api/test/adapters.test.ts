@@ -569,8 +569,12 @@ describe('config', () => {
       ADMIN_TOKEN_SECRET: 'w'.repeat(32),
       SECURITY_CONTACT: 'mailto:security@jiffoapp.com',
       PUBLIC_API_URL: 'https://api.jiffoapp.com',
+      ADMIN_API_PORT: '3002',
     };
     expect(loadConfig(ready).TRUST_PROXY_HOPS).toBe(1);
+    // The admin API answers on its own port in production, behind the team's access control (D1).
+    expect(() => loadConfig({ ...ready, ADMIN_API_PORT: undefined })).toThrow(/ADMIN_API_PORT/);
+    expect(() => loadConfig({ ...ready, ADMIN_API_PORT: '3000', PORT: '3000' })).toThrow(/ADMIN_API_PORT/);
     // security.txt needs somewhere to send reports.
     expect(() => loadConfig({ ...ready, SECURITY_CONTACT: undefined })).toThrow(/SECURITY_CONTACT/);
     expect(() => loadConfig({ ...ready, SECURITY_CONTACT: ' , ' })).toThrow(/SECURITY_CONTACT/);

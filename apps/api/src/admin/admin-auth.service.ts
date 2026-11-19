@@ -82,13 +82,16 @@ export class AdminAuthService {
   }
 
   /** Adds a teammate and makes their invite link. Used by the panel and the command-line tool alike. */
-  async addAdmin(tx: Tx, input: { email: string; name: string; role: AdminRole; invitedBy: string | null }) {
+  async addAdmin(
+    tx: Tx,
+    input: { email: string; name: string; role: AdminRole; phone: string | null; invitedBy: string | null },
+  ) {
     const email = normaliseEmail(input.email);
     const [existing] = await tx.select({ id: admins.id }).from(admins).where(eq(admins.email, email));
     if (existing) throw conflict('admin_exists', 'Someone on the team already uses this email');
     const [admin] = await tx
       .insert(admins)
-      .values({ email, name: input.name.trim(), role: input.role, invitedBy: input.invitedBy })
+      .values({ email, name: input.name.trim(), role: input.role, phone: input.phone, invitedBy: input.invitedBy })
       .returning({ id: admins.id, name: admins.name });
     return { id: admin!.id, email, name: admin!.name, ...(await this.issueInvite(tx, admin!.id)) };
   }
@@ -392,6 +395,7 @@ export class AdminAuthService {
       email: row.admin.email,
       name: row.admin.name,
       role: row.admin.role,
+      phone: row.admin.phone,
       ip: client.ip,
       userAgent: client.userAgent,
       confirmedAt: row.session.confirmedAt,

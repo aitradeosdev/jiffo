@@ -185,6 +185,23 @@ export class ApprovalsService {
     if (found.requestedBy === admin.adminId && !how.self) {
       throw forbidden('own_request', 'Someone else must approve your own request');
     }
+    // Nor anyone whose own app account it is about (D3), the approver or the person it would run as. Checked
+    // before it is claimed: the decision's own entry is written after the change, too late to stop it, and a
+    // refusal once running would spend the request.
+    await this.audit.refuseOwnAccount(this.db, admin, found.targetType, found.targetId);
+    if (how.approve) {
+      const [asker] = await this.db
+        .select({ phone: admins.phone })
+        .from(admins)
+        .where(eq(admins.id, found.requestedBy));
+      await this.audit.refuseOwnAccount(
+        this.db,
+        { phone: asker?.phone ?? null },
+        found.targetType,
+        found.targetId,
+        true,
+      );
+    }
 
     // Claimed once: two approvers at the same moment can't both run it.
     const [claimed] = await this.db
@@ -264,6 +281,7 @@ export class ApprovalsService {
       email: who.email,
       name: who.name,
       role: who.role,
+      phone: who.phone,
       // The asker's network and browser: the approver's are in the approval's own entry.
       ip: row.requestedIp,
       userAgent: row.requestedUserAgent,
