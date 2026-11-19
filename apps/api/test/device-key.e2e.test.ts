@@ -155,6 +155,17 @@ describe("money actions need the phone's key and the app PIN", () => {
     const publicKey = replacement.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
     // Not on a session from a while ago...
     await ageSession(agent);
+    // ...though the key it already has, sent again, is fine.
+    await request(t.http)
+      .put('/v1/devices/current/key')
+      .set(agent.headers)
+      .send({
+        publicKey: (await import('node:crypto'))
+          .createPublicKey(agent.deviceKey!)
+          .export({ type: 'spki', format: 'der' })
+          .toString('base64'),
+      })
+      .expect(204);
     refused(
       await request(t.http).put('/v1/devices/current/key').set(agent.headers).send({ publicKey }),
       'sign_in_again',

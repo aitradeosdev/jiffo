@@ -95,6 +95,12 @@ export class DeviceSecurityService {
     } catch {
       throw badRequest('key_invalid', "This phone's key isn't one Jiffo can use");
     }
+    // The key this phone already has, sent again, changes nothing and needs no fresh sign-in.
+    const [current] = await this.db
+      .select({ key: devices.publicKey })
+      .from(devices)
+      .where(eq(devices.id, auth.deviceId));
+    if (current?.key === spki) return;
     if (!(await this.fresh(auth))) {
       throw forbidden('sign_in_again', 'Sign in again on this phone to set it up for money actions');
     }
