@@ -20,4 +20,5 @@ EXCEPTION
 END $$;
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "device_challenges_nonce_uq" ON "device_challenges" USING btree ("nonce_hash");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "device_challenges_device_idx" ON "device_challenges" USING btree ("device_id");
+CREATE INDEX IF NOT EXISTS "device_challenges_device_idx" ON "device_challenges" USING btree ("device_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "device_challenges_expires_idx" ON "device_challenges" USING btree ("expires_at");

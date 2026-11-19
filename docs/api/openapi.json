@@ -4428,7 +4428,10 @@
             "description": "An error"
           }
         },
-        "x-rate-limit": "default"
+        "x-rate-limit": "default",
+        "x-apps": [
+          "agent"
+        ]
       }
     },
     "/v1/devices/current/key": {
@@ -4471,7 +4474,10 @@
             "description": "An error"
           }
         },
-        "x-rate-limit": "default"
+        "x-rate-limit": "default",
+        "x-apps": [
+          "agent"
+        ]
       }
     },
     "/v1/devices/current/push-token": {
@@ -5611,6 +5617,9 @@
           }
         },
         "x-rate-limit": "default",
+        "x-apps": [
+          "agent"
+        ],
         "x-guards": [
           "SignedGuard"
         ]
@@ -5635,7 +5644,10 @@
             "description": "An error"
           }
         },
-        "x-rate-limit": "default"
+        "x-rate-limit": "default",
+        "x-apps": [
+          "agent"
+        ]
       }
     },
     "/v1/me/stats": {

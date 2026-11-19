@@ -1,8 +1,8 @@
 import { generateKeyPairSync, randomUUID, sign as signWith } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { sessions, users } from '../src/db/schema';
+import { otpChallenges, sessions, users } from '../src/db/schema';
 import { SIGNED_HEADERS, signedPayload } from '../src/auth/device-security.service';
 import {
   agentWithMoney,
@@ -42,7 +42,6 @@ describe("money actions need the phone's key and the app PIN", () => {
   it('refuses a withdrawal with only the session: no signature, no PIN, or no key on the phone', async () => {
     const agent = await agentWithMoney(t);
     refused(await request(t.http).post('/v1/wallet/withdrawals').set(agent.headers).send(body()), 'signature_needed');
-    refused(await signed(t, agent, { pin: null }).post('/v1/wallet/withdrawals').send(body()), 'pin_missing');
 
     const bare = await signIn(t, 'agent', { unsecured: true });
     refused(await request(t.http).post('/v1/wallet/withdrawals').set(bare.headers).send(body()), 'device_key_needed');
@@ -143,12 +142,75 @@ describe("money actions need the phone's key and the app PIN", () => {
 
     const fresh = await signIn(t, 'agent', { unsecured: true });
     const secured = await secureDevice(t, fresh);
-    refused(await register(secured, p256()), 'key_exists');
     expect((await request(t.http).get('/v1/me/security').set(secured.headers).expect(200)).body).toEqual({
       deviceKey: true,
       hasPin: true,
       pinLocked: false,
     });
+  });
+
+  it('takes a new key for a phone that lost its own, just after signing in, and pauses withdrawals', async () => {
+    const agent = await agentWithMoney(t);
+    const replacement = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const publicKey = replacement.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+    // Not on a session from a while ago...
+    await ageSession(agent);
+    refused(
+      await request(t.http).put('/v1/devices/current/key').set(agent.headers).send({ publicKey }),
+      'sign_in_again',
+    );
+    // ...but just after signing in again, as after restoring the phone: as good as a new phone (A6).
+    await t.db.update(sessions).set({ createdAt: new Date() }).where(eq(sessions.userId, agent.userId));
+    await request(t.http).put('/v1/devices/current/key').set(agent.headers).send({ publicKey }).expect(204);
+    refused(await signed(t, agent).post('/v1/wallet/withdrawals').send(body()), 'signature_invalid');
+    refused(
+      await signed(t, agent, { key: replacement.privateKey }).post('/v1/wallet/withdrawals').send(body()),
+      'withdrawals_held',
+    );
+  });
+
+  it("can't be set up, or the PIN changed or locked, from the customer app", async () => {
+    const agent = await agentWithMoney(t);
+    await t.db
+      .update(otpChallenges)
+      .set({ createdAt: sql`${otpChallenges.createdAt} - interval '1 hour'` })
+      .where(eq(otpChallenges.phone, agent.phone));
+    const asCustomer = await signIn(t, 'customer', { phone: agent.phone, firstName: null });
+    const publicKey = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+      .publicKey.export({ type: 'spki', format: 'der' })
+      .toString('base64');
+    expect(
+      (await request(t.http).put('/v1/devices/current/key').set(asCustomer.headers).send({ publicKey })).status,
+    ).toBe(403);
+    expect((await request(t.http).post('/v1/devices/current/challenge').set(asCustomer.headers)).status).toBe(403);
+    expect((await request(t.http).put('/v1/me/pin').set(asCustomer.headers).send({ pin: '4826' })).status).toBe(403);
+    await signed(t, agent).post('/v1/wallet/withdrawals').send(body()).expect(201);
+  });
+
+  it('asks for the PIN before using up the code, and clears old codes', async () => {
+    const agent = await agentWithMoney(t);
+    const usedCodes = async () =>
+      (
+        (
+          await t.db.execute(
+            sql`select count(*)::int as used from device_challenges c join devices d on d.id = c.device_id where d.user_id = ${agent.userId} and c.used_at is not null`,
+          )
+        ).rows[0] as { used: number }
+      ).used;
+    const before = await usedCodes();
+    const missing = await signed(t, agent, { pin: null }).post('/v1/wallet/withdrawals').send(body());
+    expect(missing.status).toBe(403);
+    expect(missing.body.error.code).toBe('pin_missing');
+    // Its code wasn't used up.
+    expect(await usedCodes()).toBe(before);
+    // Long-expired codes go, whichever phone they were for.
+    await t.db.execute(sql`update device_challenges set expires_at = now() - interval '1 hour'`);
+    await request(t.http).post('/v1/devices/current/challenge').set(agent.headers).expect(200);
+    const stale = (
+      (await t.db.execute(sql`select count(*)::int as stale from device_challenges where expires_at < now()`))
+        .rows[0] as { stale: number }
+    ).stale;
+    expect(stale).toBe(0);
   });
 
   it('protects changing the payout account the same way', async () => {

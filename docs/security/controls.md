@@ -108,7 +108,7 @@ How Jiffo protects people, money and data, area by area. What is required is in 
 
 ## Money actions on the phone
 
-- **The phone's own key:** after signing in, the agent app makes a P-256 key in the phone's secure hardware (the Secure Enclave or Android Keystore), which can't be copied off it, and registers the public half: once per phone, and only in the first 10 minutes after a fresh sign-in, so a stolen session can't add a key of its own.
+- **The phone's own key:** after signing in, the agent app makes a P-256 key in the phone's secure hardware (the Secure Enclave or Android Keystore), which can't be copied off it, and registers the public half, only in the first 10 minutes after a fresh sign-in, so a stolen session can't add a key of its own. A phone that lost its key registers a new one the same way, which pauses withdrawals like a new phone. The agent app only: a customer-app session can't set up a key, a code or the PIN.
 - **Signed requests:** a withdrawal and a payout account change are each signed with that key over a single-use code from the server (`POST /v1/devices/current/challenge`, good for 2 minutes), the method, the path and a hash of the body. A code works once and only for the phone it was given to; a changed body or another key is refused.
 - **The app PIN:** 4 digits, not a run or one digit repeated, kept as a keyed hash. Money actions carry it and the server checks it after the signature, so guessing it needs the phone. Fingerprint or face can fill it in from the phone's locked storage.
 - **Wrong PINs:** counted; at the limit in Settings, Security (default 5) it locks, even for the right PIN, until reset by signing in again on the phone. Changing it needs the current PIN.

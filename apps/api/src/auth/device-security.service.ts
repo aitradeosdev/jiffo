@@ -2,7 +2,7 @@ import { createHash, createHmac, createPublicKey, randomBytes, timingSafeEqual, 
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, gt, isNull, lt } from 'drizzle-orm';
 import { DEFAULT_SECURITY_SETTINGS } from '@jiffo/shared';
-import { badRequest, conflict, forbidden } from '../common/errors';
+import { badRequest, forbidden } from '../common/errors';
 import { subKey } from '../common/keys';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { CountriesService } from '../countries/countries.service';
@@ -82,8 +82,9 @@ export class DeviceSecurityService {
   }
 
   /**
-   * Keeps this phone's public key. Once per phone, and only just after signing in: a stolen session can't
-   * swap in a key of its own. A new install is a new phone, with a new sign-in.
+   * Keeps this phone's public key, only just after signing in: a stolen session can't swap in a key of its
+   * own. A phone that lost its key (restored, or the key wiped) registers a new one the same way, and that
+   * pauses withdrawals, as a new phone does (A6).
    */
   async registerKey(auth: AuthContext, publicKey: string) {
     let spki: string;
@@ -97,12 +98,17 @@ export class DeviceSecurityService {
     if (!(await this.fresh(auth))) {
       throw forbidden('sign_in_again', 'Sign in again on this phone to set it up for money actions');
     }
-    const [set] = await this.db
-      .update(devices)
-      .set({ publicKey: spki, keyAddedAt: new Date() })
-      .where(and(eq(devices.id, auth.deviceId), isNull(devices.publicKey)))
-      .returning({ id: devices.id });
-    if (!set) throw conflict('key_exists', 'This phone is already set up');
+    const until = await this.db.transaction(async (tx) => {
+      const [device] = await tx
+        .select({ key: devices.publicKey })
+        .from(devices)
+        .where(eq(devices.id, auth.deviceId))
+        .for('update');
+      if (device?.key === spki) return null;
+      await tx.update(devices).set({ publicKey: spki, keyAddedAt: new Date() }).where(eq(devices.id, auth.deviceId));
+      return device?.key ? this.holds.start(tx, auth.userId, 'new_device') : null;
+    });
+    if (until) await this.holds.tell(auth.userId, 'new_device', until);
   }
 
   /** A single-use code for the phone to sign a money request over. */
@@ -114,10 +120,8 @@ export class DeviceSecurityService {
       nonceHash: sha256(nonce),
       expiresAt: new Date(now + CHALLENGE_TTL_MS),
     });
-    // Old codes for this phone go, so the table stays small.
-    await this.db
-      .delete(deviceChallenges)
-      .where(and(eq(deviceChallenges.deviceId, auth.deviceId), lt(deviceChallenges.expiresAt, new Date(now - 60_000))));
+    // Codes long past their time go, whichever phone they were for, so the table stays small.
+    await this.db.delete(deviceChallenges).where(lt(deviceChallenges.expiresAt, new Date(now - 60_000)));
     return { nonce, expiresInSeconds: CHALLENGE_TTL_MS / 1000 };
   }
 
@@ -136,6 +140,8 @@ export class DeviceSecurityService {
       .where(eq(devices.id, auth.deviceId));
     if (!device?.key) throw forbidden('device_key_needed', 'Set up this phone for money actions first');
     if (!request.nonce || !request.signature) throw forbidden('signature_needed', 'Confirm this on your phone');
+    // Asked for before the code is used up, so the app can ask for the PIN and send the same code.
+    if (pin !== false && !pin) throw forbidden('pin_missing', 'Enter your app PIN');
     // Used up whether or not the rest passes: a code is good for one try.
     const [used] = await this.db
       .update(deviceChallenges)
@@ -202,7 +208,7 @@ export class DeviceSecurityService {
         .for('update');
       if (!user?.hash) return { error: forbidden('pin_needed', 'Set your app PIN first') };
       if (user.locked) return { error: pinLocked() };
-      if (!pin) return { error: badRequest('pin_missing', 'Enter your app PIN') };
+      if (!pin) return { error: forbidden('pin_missing', 'Enter your app PIN') };
       if (this.pinMatches(user.hash, pin)) {
         if (user.failures) await tx.update(users).set({ appPinFailures: 0 }).where(eq(users.id, auth.userId));
         return { error: null };
@@ -224,33 +230,57 @@ export class DeviceSecurityService {
   /**
    * Sets the app PIN. The first needs nothing more. Changing one needs the current PIN; without it, as when it
    * is forgotten or locked, only just after a fresh sign-in on this phone. Either change pauses withdrawals
-   * (A6), since a new PIN is how someone who took the number over would get in.
+   * (A6), since a new PIN is how someone who took the number over would get in. Decided and written under
+   * one lock, so two at once can't both pass as the first.
    */
   async setPin(auth: AuthContext, input: { pin: string; currentPin?: string }) {
     if (!/^\d{4}$/.test(input.pin)) throw badRequest('pin_invalid', 'Your PIN is 4 digits');
     if (weakPin(input.pin)) throw badRequest('pin_weak', 'Choose a PIN that is harder to guess');
-    const [user] = await this.db
-      .select({ hash: users.appPinHash, locked: users.appPinLockedAt })
-      .from(users)
-      .where(eq(users.id, auth.userId));
-    if (user?.hash) {
-      if (input.currentPin !== undefined) {
-        if (user.locked) throw pinLocked();
-        await this.checkPin(auth, input.currentPin);
-      } else if (!(await this.fresh(auth))) {
-        throw forbidden('sign_in_again', 'Sign in again on this phone to set a new PIN');
+    const fresh = await this.fresh(auth);
+    const outcome = await this.db.transaction(async (tx) => {
+      const [user] = await tx
+        .select({
+          hash: users.appPinHash,
+          failures: users.appPinFailures,
+          locked: users.appPinLockedAt,
+          countryCode: users.countryCode,
+        })
+        .from(users)
+        .where(eq(users.id, auth.userId))
+        .for('update');
+      if (!user) throw new Error(`No user ${auth.userId}`);
+      if (user.hash) {
+        if (input.currentPin !== undefined) {
+          if (user.locked) return { error: pinLocked(), until: null };
+          if (!this.pinMatches(user.hash, input.currentPin)) {
+            const failures = user.failures + 1;
+            const tries = await this.pinTries(user.countryCode);
+            const locks = failures >= tries;
+            await tx
+              .update(users)
+              .set({ appPinFailures: failures, ...(locks ? { appPinLockedAt: new Date() } : {}) })
+              .where(eq(users.id, auth.userId));
+            return {
+              error: locks ? pinLocked() : forbidden('pin_wrong', 'Wrong PIN', { triesLeft: tries - failures }),
+              until: null,
+            };
+          }
+        } else if (!fresh) {
+          return {
+            error: forbidden('sign_in_again', 'Sign in again on this phone to set a new PIN'),
+            until: null,
+          };
+        }
       }
-    }
-    const changed = !!user?.hash;
-    const until = await this.db.transaction(async (tx) => {
       await tx
         .update(users)
         .set({ appPinHash: this.hashPin(input.pin), appPinSetAt: new Date(), appPinFailures: 0, appPinLockedAt: null })
         .where(eq(users.id, auth.userId));
-      return changed ? this.holds.start(tx, auth.userId, 'pin') : null;
+      return { error: null, until: user.hash ? await this.holds.start(tx, auth.userId, 'pin') : null };
     });
-    if (until) await this.holds.tell(auth.userId, 'pin', until);
-    return { set: true, withdrawalsHeldUntil: until?.toISOString() ?? null };
+    if (outcome.error) throw outcome.error;
+    if (outcome.until) await this.holds.tell(auth.userId, 'pin', outcome.until);
+    return { set: true, withdrawalsHeldUntil: outcome.until?.toISOString() ?? null };
   }
 }
 

@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Post, Put, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { ZodBody } from '../common/zod-body';
-import { AuthGuard, CurrentAuth } from './auth.guard';
+import { Apps, AuthGuard, CurrentAuth } from './auth.guard';
 import type { AuthContext } from './auth.types';
 import { DeviceSecurityService } from './device-security.service';
 import { Signed } from './signed.guard';
@@ -9,9 +9,13 @@ import { Signed } from './signed.guard';
 const KeyBody = z.object({ publicKey: z.string().trim().min(60).max(400) });
 const PinBody = z.object({ pin: z.string(), currentPin: z.string().optional() });
 
-/** The phone's own key and the app PIN, which money actions need (docs/security-plan.md, A3, A7). */
+/**
+ * The phone's own key and the app PIN, which agents' money actions need (docs/security-plan.md, A3, A7). The
+ * agent app only: the PIN is the person's, and a customer-app session must not be able to set or lock it.
+ */
 @Controller()
 @UseGuards(AuthGuard)
+@Apps('agent')
 export class DeviceSecurityController {
   constructor(private readonly security: DeviceSecurityService) {}
 

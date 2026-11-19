@@ -192,6 +192,8 @@ export const deviceChallenges = pgTable(
   (t) => [
     uniqueIndex('device_challenges_nonce_uq').on(t.nonceHash),
     index('device_challenges_device_idx').on(t.deviceId),
+    // Clearing old codes, for every phone.
+    index('device_challenges_expires_idx').on(t.expiresAt),
   ],
 );
 

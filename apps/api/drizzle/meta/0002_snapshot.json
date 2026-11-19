@@ -109,13 +109,9 @@
         "categories_country_code_countries_code_fk": {
           "name": "categories_country_code_countries_code_fk",
           "tableFrom": "categories",
-          "columnsFrom": [
-            "country_code"
-          ],
+          "columnsFrom": ["country_code"],
           "tableTo": "countries",
-          "columnsTo": [
-            "code"
-          ],
+          "columnsTo": ["code"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -196,39 +192,27 @@
         "conversations_errand_id_errands_id_fk": {
           "name": "conversations_errand_id_errands_id_fk",
           "tableFrom": "conversations",
-          "columnsFrom": [
-            "errand_id"
-          ],
+          "columnsFrom": ["errand_id"],
           "tableTo": "errands",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "conversations_customer_id_users_id_fk": {
           "name": "conversations_customer_id_users_id_fk",
           "tableFrom": "conversations",
-          "columnsFrom": [
-            "customer_id"
-          ],
+          "columnsFrom": ["customer_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "conversations_agent_id_users_id_fk": {
           "name": "conversations_agent_id_users_id_fk",
           "tableFrom": "conversations",
-          "columnsFrom": [
-            "agent_id"
-          ],
+          "columnsFrom": ["agent_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -390,13 +374,9 @@
         "devices_user_id_users_id_fk": {
           "name": "devices_user_id_users_id_fk",
           "tableFrom": "devices",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -495,13 +475,9 @@
         "errand_events_errand_id_errands_id_fk": {
           "name": "errand_events_errand_id_errands_id_fk",
           "tableFrom": "errand_events",
-          "columnsFrom": [
-            "errand_id"
-          ],
+          "columnsFrom": ["errand_id"],
           "tableTo": "errands",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -614,13 +590,9 @@
         "errand_stops_errand_id_errands_id_fk": {
           "name": "errand_stops_errand_id_errands_id_fk",
           "tableFrom": "errand_stops",
-          "columnsFrom": [
-            "errand_id"
-          ],
+          "columnsFrom": ["errand_id"],
           "tableTo": "errands",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -855,39 +827,27 @@
         "errands_country_code_countries_code_fk": {
           "name": "errands_country_code_countries_code_fk",
           "tableFrom": "errands",
-          "columnsFrom": [
-            "country_code"
-          ],
+          "columnsFrom": ["country_code"],
           "tableTo": "countries",
-          "columnsTo": [
-            "code"
-          ],
+          "columnsTo": ["code"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "errands_customer_id_users_id_fk": {
           "name": "errands_customer_id_users_id_fk",
           "tableFrom": "errands",
-          "columnsFrom": [
-            "customer_id"
-          ],
+          "columnsFrom": ["customer_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "errands_agent_id_users_id_fk": {
           "name": "errands_agent_id_users_id_fk",
           "tableFrom": "errands",
-          "columnsFrom": [
-            "agent_id"
-          ],
+          "columnsFrom": ["agent_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1013,26 +973,18 @@
         "messages_conversation_id_conversations_id_fk": {
           "name": "messages_conversation_id_conversations_id_fk",
           "tableFrom": "messages",
-          "columnsFrom": [
-            "conversation_id"
-          ],
+          "columnsFrom": ["conversation_id"],
           "tableTo": "conversations",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "messages_sender_id_users_id_fk": {
           "name": "messages_sender_id_users_id_fk",
           "tableFrom": "messages",
-          "columnsFrom": [
-            "sender_id"
-          ],
+          "columnsFrom": ["sender_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1229,13 +1181,9 @@
         "refresh_tokens_session_id_sessions_id_fk": {
           "name": "refresh_tokens_session_id_sessions_id_fk",
           "tableFrom": "refresh_tokens",
-          "columnsFrom": [
-            "session_id"
-          ],
+          "columnsFrom": ["session_id"],
           "tableTo": "sessions",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1322,26 +1270,18 @@
         "sessions_user_id_users_id_fk": {
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         },
         "sessions_device_id_devices_id_fk": {
           "name": "sessions_device_id_devices_id_fk",
           "tableFrom": "sessions",
-          "columnsFrom": [
-            "device_id"
-          ],
+          "columnsFrom": ["device_id"],
           "tableTo": "devices",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1422,13 +1362,9 @@
         "settings_versions_country_code_countries_code_fk": {
           "name": "settings_versions_country_code_countries_code_fk",
           "tableFrom": "settings_versions",
-          "columnsFrom": [
-            "country_code"
-          ],
+          "columnsFrom": ["country_code"],
           "tableTo": "countries",
-          "columnsTo": [
-            "code"
-          ],
+          "columnsTo": ["code"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1510,13 +1446,9 @@
         "states_country_code_countries_code_fk": {
           "name": "states_country_code_countries_code_fk",
           "tableFrom": "states",
-          "columnsFrom": [
-            "country_code"
-          ],
+          "columnsFrom": ["country_code"],
           "tableTo": "countries",
-          "columnsTo": [
-            "code"
-          ],
+          "columnsTo": ["code"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1595,13 +1527,9 @@
         "users_country_code_countries_code_fk": {
           "name": "users_country_code_countries_code_fk",
           "tableFrom": "users",
-          "columnsFrom": [
-            "country_code"
-          ],
+          "columnsFrom": ["country_code"],
           "tableTo": "countries",
-          "columnsTo": [
-            "code"
-          ],
+          "columnsTo": ["code"],
           "onUpdate": "no action",
           "onDelete": "no action"
         }
@@ -1610,9 +1538,7 @@
       "uniqueConstraints": {
         "users_phone_unique": {
           "name": "users_phone_unique",
-          "columns": [
-            "phone"
-          ],
+          "columns": ["phone"],
           "nullsNotDistinct": false
         }
       },
