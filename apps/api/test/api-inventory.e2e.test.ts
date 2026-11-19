@@ -27,8 +27,6 @@ const PUBLIC = new Set([
   'POST /v1/admin/auth/invite/check',
   'POST /v1/admin/auth/invite/accept',
   'GET /v1/identity/done',
-  'GET /v1/identity/hosted/{provider}',
-  'POST /v1/identity/hosted/{provider}/submit',
   'POST /v1/webhooks/{provider}',
   'POST /v1/webhooks/{provider}/transfer-approval',
   'POST /v1/webhooks/identity/{provider}',

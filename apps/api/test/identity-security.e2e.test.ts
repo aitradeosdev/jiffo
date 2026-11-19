@@ -136,11 +136,16 @@ describe('identity checks', () => {
 
   describe('identity providers', () => {
     it('can’t be put in sandbox mode in production', () => {
-      const ctx = { publicApiUrl: 'https://api.jiffo.test', sign: () => 'x', hostedLink: () => 'x', production: true };
-      const values = { secretKey: 'sk', publicMerchantKey: 'pk', mode: 'sandbox' };
-      expect(() => BUILDERS.identity.youverify!(values, ctx)).toThrow(/Sandbox mode is for testing/);
-      expect(() => BUILDERS.identity.youverify!({ ...values, mode: 'live' }, ctx)).not.toThrow();
-      expect(() => BUILDERS.identity.youverify!(values, { ...ctx, production: false })).not.toThrow();
+      const ctx = { publicApiUrl: 'https://api.jiffo.test', production: true };
+      const values = {
+        partnerId: '1234',
+        apiKey: 'k',
+        privacyPolicyUrl: 'https://jiffo.test/privacy',
+        mode: 'sandbox',
+      };
+      expect(() => BUILDERS.identity.smileid!(values, ctx)).toThrow(/Sandbox mode is for testing/);
+      expect(() => BUILDERS.identity.smileid!({ ...values, mode: 'live' }, ctx)).not.toThrow();
+      expect(() => BUILDERS.identity.smileid!(values, { ...ctx, production: false })).not.toThrow();
     });
   });
 });

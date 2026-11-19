@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { and, eq, gt, lt, sql } from 'drizzle-orm';
 import { ID_TYPES, normaliseIdNumber, providerInfo, type CountrySettings, type IdType } from '@jiffo/shared';
 import {
@@ -10,14 +10,14 @@ import {
   type IdentityPerson,
   type IdentityRequest,
   type IdentityResult,
-  type PageInput,
   REFERENCE_PREFIX,
+  RETIRED_IDENTITY_PROVIDERS,
+  RetiredIdentityAdapter,
 } from '../adapters/identity';
-import { IdentityPageError, IdentityProviderError } from '../adapters/identity-providers';
-import { SessionVerifier } from '../auth/auth.guard';
-import { safeEqual, sha256 } from '../common/crypto';
+import { IdentityProviderError } from '../adapters/identity-providers';
+import { sha256 } from '../common/crypto';
 import { keyFor } from '../common/keys';
-import { ApiError, badRequest, conflict, gone, tooMany, unavailable } from '../common/errors';
+import { badRequest, tooMany, unavailable } from '../common/errors';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
 import { identityAttempts, webhookSignatures } from '../db/schema';
@@ -32,15 +32,6 @@ export interface PendingCheck {
   provider: string;
   reference: string;
   request: IdentityRequest;
-  /** The app session it was started from; null for checks started before this was kept. */
-  sessionId: string | null;
-}
-
-/** A hosted page as the controller serves it: the HTML, and the cookie its browser keeps it with. */
-export interface HostedPage {
-  html: string;
-  /** Set on the first open: the browser the link now works in. */
-  binding?: string;
 }
 
 /** A finished check, judged: its checks filed under the ID's type, and the ID's fingerprint. */
@@ -72,48 +63,29 @@ export const ID_CHECK_LABELS: Record<string, string> = {
   drivers_licence: "Driver's licence matches your details",
   voters_card: "Voter's card matches your details",
   passport: 'Passport matches your details',
+  // No longer given to new checks, but checks saved before may have it.
   id_type: 'An ID we accept',
   selfie: 'Selfie matches your ID photo',
   age: 'Age 18 or older',
 };
-/** How many times an hour one check's page may be opened: each may start a paid session. */
-const PAGE_OPENS_PER_HOUR = 20;
-const HOUR_MS = 3_600_000;
-const DAY_MS = 24 * HOUR_MS;
+const DAY_MS = 24 * 3_600_000;
 /** Attempts and webhook signatures are kept this long: well past any limit or provider's age check. */
 const KEPT_MS = 2 * DAY_MS;
-const OPENED_ELSEWHERE = 'This link was opened on another device. Start the check again from the app.';
-
-/**
- * A hosted page couldn't be made (the provider down, or opened too often). The browser still gets the cookie
- * if this was the open that bound the link to it.
- */
-export class HostedPageFailure extends Error {
-  constructor(
-    readonly error: ApiError,
-    readonly binding?: string,
-  ) {
-    super(error.message);
-  }
-}
 
 /**
  * Identity checks with the provider switched on in the panel, for customers and agents alike: which IDs a
- * check can use, starting it, reading its result, and what providers send back (webhooks, and the pages
- * Jiffo serves for them). Each account keeps its own check; this finds it by the reference.
+ * check can use, starting it, reading its result, and the results providers send to their webhooks. Each
+ * account keeps its own check; this finds it by the reference.
  */
 @Injectable()
 export class IdentityChecksService {
   private readonly logger = new Logger(IdentityChecksService.name);
   private readonly owners = new Map<string, IdentityOwner>();
-  /** Checks whose page is being sent now, in this process. */
-  private readonly submitting = new Set<string>();
   /** Its own key, used only to fingerprint IDs (ID_FINGERPRINT_KEY). */
   private readonly idKey: Buffer;
 
   constructor(
     private readonly providers: ProvidersService,
-    private readonly sessions: SessionVerifier,
     @Inject(DB) private readonly db: Db,
     @Inject(APP_CONFIG) config: AppConfig,
   ) {
@@ -149,6 +121,8 @@ export class IdentityChecksService {
    * that is said as identity checks being unavailable, and support can look at it.
    */
   startedWith(name: string | null): IdentityAdapter {
+    // What was left running with a provider Jiffo no longer has finishes, rather than waiting for ever.
+    if (name && RETIRED_IDENTITY_PROVIDERS.includes(name)) return new RetiredIdentityAdapter(name);
     return (name ? this.providers.named('identity', name) : null) ?? new UnconfiguredIdentityAdapter();
   }
 
@@ -185,28 +159,14 @@ export class IdentityChecksService {
     const withBvn = role === 'agent' && settings.requireBvnForAgents;
     let idTypes = accepted.filter((t) => adapter.idTypes.includes(t));
     if (withBvn && !adapter.bvnAlongside) idTypes = adapter.idTypes.includes('bvn') ? ['bvn'] : [];
-    // The IDs a result may be for: those admin accepts, and the BVN when the BVN rule made it the ID.
-    const acceptedIds = this.accepted(role, settings, adapter.name);
     return {
       adapter,
       idTypes,
-      acceptedIds,
       withBvn,
       flow: adapter.flow,
-      idChosenOnPage: adapter.idChosenOnPage,
       /** The provider's name as people read it; none for the development stand-in. */
       providerName: providerInfo('identity', adapter.name)?.name ?? null,
     };
-  }
-
-  /**
-   * The IDs a finished check may be for, with the provider it was started with: those admin accepts, and the
-   * BVN when the BVN rule made it an agent's ID because that provider can't check it alongside another.
-   */
-  accepted(role: IdentityRole, settings: CountrySettings['identity'], provider: string): IdType[] {
-    const accepted: readonly IdType[] = role === 'customer' ? settings.customerIdTypes : settings.agentIdTypes;
-    const forced = role === 'agent' && settings.requireBvnForAgents && !this.startedWith(provider).bvnAlongside;
-    return forced && !accepted.includes('bvn') ? [...accepted, 'bvn'] : [...accepted];
   }
 
   /**
@@ -228,17 +188,15 @@ export class IdentityChecksService {
         "Checks for the IDs we accept aren't available yet. We'll text you when they are.",
       );
     }
-    // On a provider whose page offers the IDs, the person picks there; the first accepted one stands in.
     // Earlier versions of the apps send no ID type: they meant the NIN, or the only ID on offer.
     const wanted =
       input.idType ??
       (options.idTypes.includes('nin') ? 'nin' : options.idTypes.length === 1 ? options.idTypes[0] : undefined);
-    const idType = options.idChosenOnPage
-      ? options.idTypes[0]!
-      : (options.idTypes.find((t) => t === wanted) ??
-        (() => {
-          throw badRequest('invalid_id_type', 'Choose one of the IDs we accept');
-        })());
+    const idType =
+      options.idTypes.find((t) => t === wanted) ??
+      (() => {
+        throw badRequest('invalid_id_type', 'Choose one of the IDs we accept');
+      })();
     const request: IdentityRequest = { role, idType, withBvn: options.withBvn };
     let idNumber: string | undefined;
     let bvn: string | undefined;
@@ -327,25 +285,16 @@ export class IdentityChecksService {
 
   /**
    * A provider's finished result, judged against what the check asked for: its checks filed under the ID's
-   * type, any check asked for and not answered sent to review, and an ID the person chose on the provider's
-   * page that admin doesn't accept sent to review too.
+   * type, and any check asked for and not answered sent to review. The ID was on offer when the check
+   * started, so it stands even if admin has stopped accepting it since.
    */
-  judge(request: IdentityRequest, result: IdentityResult, accepted: readonly IdType[]): JudgedResult {
-    const idType = result.idType ?? request.idType;
+  judge(request: IdentityRequest, result: IdentityResult): JudgedResult {
+    const { idType } = request;
     const checks: Check[] = result.checks.map((c) => ({ ...c, key: c.key === 'id' ? idType : c.key }));
     const asked = [idType, 'selfie', ...(request.withBvn && idType !== 'bvn' ? ['bvn'] : [])];
     for (const key of asked) {
       if (!checks.some((c) => c.key === key))
         checks.push({ key, outcome: 'review', note: 'No result from the provider' });
-    }
-    // The ID a check started with was on offer then; only one the person chose on the provider's page is
-    // held against what admin accepts now.
-    if (result.idType && !accepted.includes(idType)) {
-      checks.push({
-        key: 'id_type',
-        outcome: 'review',
-        note: `${ID_TYPES[idType].name} isn't one of the IDs we accept`,
-      });
     }
     let outcome: CheckOutcome = result.outcome ?? 'review';
     if (outcome === 'passed' && checks.some((c) => c.outcome !== 'passed')) {
@@ -367,41 +316,6 @@ export class IdentityChecksService {
     };
   }
 
-  /** Whether a link to a provider's page is one this API made: "ok", "expired", or "bad" for any other. */
-  private linkState(provider: string, reference: string, expires: string, signature: string) {
-    if (!safeEqual(signature, this.providers.context.sign(`${provider}:${reference}:${expires}`))) return 'bad';
-    const at = Number(expires);
-    return Number.isFinite(at) && at > Date.now() ? 'ok' : 'expired';
-  }
-
-  /** Whether a send from a provider's page carries the signature that page was given. */
-  private signedSubmit(provider: string, reference: string, signature: string) {
-    return safeEqual(signature, this.providers.context.sign(`${provider}:${reference}`));
-  }
-
-  /** Whether the app session a check was started from is still signed in, on an active account. */
-  private async sessionLive(check: PendingCheck) {
-    if (!check.sessionId) return true;
-    return (await this.sessions.liveSessions([check.sessionId])).has(check.sessionId);
-  }
-
-  /** Whether this browser is the one the check's page was first opened in. */
-  private async boundHere(reference: string, cookie: string | undefined) {
-    if (!cookie) return false;
-    const [row] = await this.db
-      .select({ id: identityAttempts.id })
-      .from(identityAttempts)
-      .where(
-        and(
-          eq(identityAttempts.kind, 'page_open'),
-          eq(identityAttempts.reference, reference),
-          eq(identityAttempts.binding, sha256(cookie)),
-        ),
-      )
-      .limit(1);
-    return !!row;
-  }
-
   private async waitingOn(provider: string, reference: string) {
     const owner = this.ownerOf(reference);
     const check = owner ? await owner.waiting(provider, reference) : null;
@@ -410,11 +324,13 @@ export class IdentityChecksService {
 
   /**
    * A provider sending a result for a check started on its page: once its signature shows it came from them,
-   * the check it belongs to is settled with it straight away. Null when unsigned.
+   * the check it belongs to is settled with it straight away. Null when unsigned. A provider that isn't set
+   * up here, or that Jiffo no longer has, is refused as not found.
    */
   async recordWebhook(provider: string, rawBody: Buffer, headers: Record<string, string | string[] | undefined>) {
     const adapter = this.providers.named('identity', provider);
     const parse = adapter?.parseWebhook?.bind(adapter);
+    // Answered as an unsigned call is, so the answer doesn't tell a stranger which providers are set up.
     if (!parse) return null;
     // A provider that can't be reached to confirm the result answers 503, so it sends the result again.
     const parsed = await this.call(() => parse(rawBody, headers));
@@ -443,116 +359,5 @@ export class IdentityChecksService {
     if (seen?.bodyHash === bodyHash) return true;
     this.logger.warn(`A ${provider} webhook signature came again with a different body; refused`);
     return false;
-  }
-
-  /**
-   * The page a provider's widget runs in, for a link this API made and a check still waiting on it: null for
-   * any other link, "expired" for one past its time, "finished" for a check that is done or was started
-   * again.
-   * - The page works only while the app session that started the check is signed in.
-   * - The first browser to open it keeps it: the link opened anywhere else is refused, so a forwarded link
-   *   can't be used by someone else.
-   * - Opening one may start a paid session with the provider, so each check's page opens a limited number of
-   *   times an hour, counted across every server.
-   * The binding and the count are decided in one step per check, so two browsers opening at once can't both
-   * keep it.
-   */
-  async hostedPage(
-    provider: string,
-    link: { reference: string; expires: string; signature: string },
-    cookie: string | undefined,
-  ): Promise<HostedPage | 'expired' | 'finished' | null> {
-    const adapter = this.providers.named('identity', provider);
-    const { reference } = link;
-    if (!adapter?.page) return null;
-    const state = this.linkState(provider, reference, link.expires, link.signature);
-    if (state !== 'ok') return state === 'expired' ? 'expired' : null;
-    const found = await this.waitingOn(provider, reference);
-    if (!found || !(await this.sessionLive(found.check))) return 'finished';
-    const binding = await this.db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'identity-page:' + reference}))`);
-      const [opens] = await tx
-        .select({
-          bound: sql<number>`count(*) filter (where ${identityAttempts.binding} is not null)::int`,
-          here: sql<number>`count(*) filter (where ${identityAttempts.binding} = ${cookie ? sha256(cookie) : ''})::int`,
-          recent: sql<number>`count(*) filter (where ${identityAttempts.createdAt} > ${new Date(Date.now() - HOUR_MS)})::int`,
-        })
-        .from(identityAttempts)
-        .where(and(eq(identityAttempts.kind, 'page_open'), eq(identityAttempts.reference, reference)));
-      if ((opens?.bound ?? 0) > 0 && !(opens?.here ?? 0)) throw gone('identity_opened_elsewhere', OPENED_ELSEWHERE);
-      if ((opens?.recent ?? 0) >= PAGE_OPENS_PER_HOUR) {
-        throw tooMany('identity_page_limit', 'This page was opened too many times. Try again in an hour.');
-      }
-      // The first open binds the link to this browser, before the page is made, as making it may start a
-      // paid session; later opens from the same browser are counted too.
-      const first = (opens?.bound ?? 0) === 0;
-      const token = first ? (cookie ?? randomBytes(32).toString('hex')) : undefined;
-      await tx.insert(identityAttempts).values({
-        kind: 'page_open',
-        userId: found.check.userId,
-        reference,
-        binding: token ? sha256(token) : null,
-      });
-      return token && token !== cookie ? token : undefined;
-    });
-    const page = adapter.page.bind(adapter);
-    try {
-      const html = await this.call(async () => page(reference, found.check.request));
-      return binding ? { html, binding } : { html };
-    } catch (error) {
-      if (error instanceof ApiError) throw new HostedPageFailure(error, binding);
-      throw error;
-    }
-  }
-
-  /**
-   * What the person sent from a provider's page that Jiffo serves: the check runs with it, and its result
-   * settles the check at once. The numbers are passed to the provider and never kept. One at a time per
-   * check, so a second send can't start a second paid check.
-   */
-  async submitPage(provider: string, input: PageInput & { ref: string; sig: string }, cookie: string | undefined) {
-    const adapter = this.providers.named('identity', provider);
-    if (!adapter?.submitPage || !this.signedSubmit(provider, input.ref, input.sig)) return null;
-    const finished = () =>
-      conflict('identity_changed', 'This check is finished or was started again. Go back to the app.');
-    const found = await this.waitingOn(provider, input.ref);
-    if (!found || !(await this.sessionLive(found.check))) throw finished();
-    // Only from the browser the page was opened in.
-    if (!(await this.boundHere(input.ref, cookie))) {
-      throw gone('identity_opened_elsewhere', OPENED_ELSEWHERE);
-    }
-    const { idType, withBvn } = found.check.request;
-    const idNumber = normaliseIdNumber(idType, input.idNumber);
-    if (!idNumber) throw badRequest('invalid_id', `Check your ${ID_TYPES[idType].name} number`);
-    const bvn = withBvn && idType !== 'bvn' ? normaliseIdNumber('bvn', input.bvn ?? '') : undefined;
-    if (bvn === null) throw badRequest('invalid_id', 'A BVN is 11 digits');
-    if (this.submitting.has(input.ref)) throw conflict('identity_busy', 'This check is already being sent.');
-    this.submitting.add(input.ref);
-    try {
-      let result: IdentityResult;
-      try {
-        result = await adapter.submitPage(input.ref, found.check.request, {
-          idNumber,
-          bvn: bvn ?? undefined,
-          session: input.session,
-          sessionSig: input.sessionSig,
-        });
-      } catch (error) {
-        if (error instanceof IdentityPageError) throw badRequest('identity_page', error.message);
-        if (error instanceof IdentityProviderError) {
-          this.logger.warn(`Identity provider: ${error.message}`);
-          throw unavailable('identity_failed', `The check didn't go through. Send it again in a moment.`);
-        }
-        if (error instanceof IdentityUnavailable) {
-          throw unavailable('identity_unavailable', "Identity checks aren't available yet.");
-        }
-        throw error;
-      }
-      const settled = await found.owner.settle(found.check, result);
-      if (!settled) throw finished();
-      return { status: 'done' as const, outcome: settled.outcome };
-    } finally {
-      this.submitting.delete(input.ref);
-    }
   }
 }

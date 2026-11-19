@@ -5,7 +5,7 @@ import { useSession } from '@/auth/session';
 import { errorMessage } from '@/api/client';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { formatNational, nationalDigits, plausibleNumber, toE164 } from '@/auth/phone';
-import { ProviderName, useApplication, type Application } from '@/agent/application';
+import { useApplication, type Application } from '@/agent/application';
 import { FieldGroup, Waiting } from '@/agent/apply-parts';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
@@ -15,7 +15,7 @@ import { Chip } from '@/ui/parts';
 
 const RELATIONSHIPS = ['Parent', 'Sibling', 'Spouse', 'Friend', 'Other'];
 
-/** Where the agent lives, which the provider confirms, and who to call in an emergency. */
+/** Where the agent lives, which our team confirms, and who to call in an emergency. */
 export default function Address() {
   const c = useColors();
   const { api } = useSession();
@@ -74,8 +74,8 @@ export default function Address() {
       </FieldGroup>
       <Waiting
         icon="shield"
-        title={`${ProviderName(app)} confirms this address`}
-        sub="When you submit. They may send a field agent to visit."
+        title="Our team confirms this address"
+        sub="When you submit, with the rest of your application."
       />
       <View style={{ gap: 4, marginTop: 4 }}>
         <Text variant="sec">Emergency contact</Text>

@@ -34,7 +34,6 @@ How Jiffo protects people, money and data, area by area. What is required is in 
   - Set them with `RATE_LIMITS` (for example `paid=20,auth=60`).
 - **Headers:**
   - Every answer says not to sniff, frame or refer, with a content policy that lets nothing load. HTTPS is insisted on in production.
-  - Identity widget pages run only their own scripts, by a fresh nonce.
 - **Provider calls:**
   - Every call to a provider has a timeout and never follows a redirect.
   - Provider addresses typed in the panel must be the provider's own https hosts.
@@ -63,11 +62,6 @@ How Jiffo protects people, money and data, area by area. What is required is in 
   - Kept only for a check that didn't fail, so a failed selfie can't turn a check into a way to look up whose ID a number is.
   - Shown to the person only once they are verified, or for agents approved.
 - **Starting checks:** each account may start a set number a day (default 3, Settings, Identity), whatever the results, since each is a paid check.
-- **Pages Jiffo serves for a provider:**
-  - Links expire after an hour.
-  - They work only while the app session that started the check is signed in.
-  - They work only in the browser that first opened them, so a forwarded link doesn't open.
-  - Opens are limited per check each hour, counted across all servers.
 - **Smile ID:** its callback signature covers only a timestamp. The verdict is re-read from Smile ID, and a signature is accepted with one body only, so it can't be replayed with another.
 - **Sandbox mode:** refused for identity providers in production.
 - **Approving an agent:** never takes an ID away from another account that proved it with its own checks.

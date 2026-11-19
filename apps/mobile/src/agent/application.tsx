@@ -26,8 +26,6 @@ export interface Application {
   idTypes: Array<{ key: IdType; name: string }>;
   /** Their BVN is checked as well. */
   withBvn: boolean;
-  /** The agent picks the ID on the provider's page rather than in the app. */
-  idChosenOnPage: boolean;
   /** The ID the current or last check used, whether it checked the BVN too, and how it ran. */
   identityIdType: IdType | null;
   identityWithBvn: boolean;

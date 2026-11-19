@@ -1,16 +1,20 @@
 import { createHmac } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import {
-  DojahIdentityAdapter,
-  IdentityProviderError,
-  SmileIdIdentityAdapter,
-  YouverifyIdentityAdapter,
-} from '../src/adapters/identity-providers';
-import { agentApplications, providerSettings } from '../src/db/schema';
+import { SmileIdIdentityAdapter } from '../src/adapters/identity-providers';
+import { agentApplications, customerVerifications, providerSettings } from '../src/db/schema';
 import { ProvidersService } from '../src/providers/providers.service';
-import { adminAs, createTestApp, signIn, uniqueNin, type Person, type TestApp, switchProvider } from './helpers';
+import {
+  adminAs,
+  completeApplication,
+  createTestApp,
+  signIn,
+  uniqueNin,
+  type Person,
+  type TestApp,
+  switchProvider,
+} from './helpers';
 
 describe("identity checks on the provider's own page", () => {
   let t: TestApp;
@@ -28,6 +32,19 @@ describe("identity checks on the provider's own page", () => {
     await t.close();
   });
 
+  /** Smile ID's settings saved and tested in the panel, and switched on. */
+  async function smileIdOn() {
+    await panel('put', '/identity/smileid')
+      .send({
+        config: { partnerId: '1234', privacyPolicyUrl: 'https://jiffo.test/privacy', mode: 'sandbox' },
+        secrets: { apiKey: 'smile-key' },
+      })
+      .expect(200);
+    vi.spyOn(SmileIdIdentityAdapter.prototype, 'check').mockResolvedValue('Connected');
+    await panel('post', '/identity/smileid/test').expect(200);
+    await switchProvider(t, 'identity', 'smileid');
+  }
+
   async function newAgent(): Promise<Person> {
     const agent = await signIn(t, 'agent', { unapproved: true });
     await request(t.http).patch('/v1/me').set(agent.headers).send({ lastName: 'Bakare' }).expect(200);
@@ -40,15 +57,7 @@ describe("identity checks on the provider's own page", () => {
   }
 
   it('starts Smile ID without the numbers, and finishes from its signed result', async () => {
-    await panel('put', '/identity/smileid')
-      .send({
-        config: { partnerId: '1234', privacyPolicyUrl: 'https://jiffo.test/privacy', mode: 'sandbox' },
-        secrets: { apiKey: 'smile-key' },
-      })
-      .expect(200);
-    vi.spyOn(SmileIdIdentityAdapter.prototype, 'check').mockResolvedValue('Connected');
-    await panel('post', '/identity/smileid/test').expect(200);
-    await switchProvider(t, 'identity', 'smileid');
+    await smileIdOn();
 
     const agent = await newAgent();
     const view = await request(t.http).get('/v1/agent/application').set(agent.headers).expect(200);
@@ -115,6 +124,11 @@ describe("identity checks on the provider's own page", () => {
     expect(JSON.stringify(row)).not.toContain(nin);
     const done = await request(t.http).post('/v1/agent/application/identity/finish').set(agent.headers).expect(200);
     expect(done.body).toMatchObject({ status: 'done', outcome: 'passed' });
+    // Smile ID's page sends the agent to this page, which opens the agent app.
+    await request(t.http)
+      .get('/v1/identity/done')
+      .expect(200)
+      .expect(/jiffo-agent:\/\/identity-done/);
 
     // A second account on the same NIN goes to support, with the NIN waiting so approval can't take it twice.
     const second = await newAgent();
@@ -165,203 +179,78 @@ describe("identity checks on the provider's own page", () => {
     await switchProvider(t, 'identity', null);
   });
 
-  it("serves Dojah's widget page only for a link the API signed", async () => {
-    await panel('put', '/identity/dojah')
-      .send({
-        config: { appId: 'app-1', publicKey: 'pk-1', widgetId: 'widget-1' },
-        secrets: { secretKey: 'sk-1', webhookSecret: 'hook-1' },
-      })
-      .expect(200);
-    vi.spyOn(DojahIdentityAdapter.prototype, 'check').mockResolvedValue('Connected');
-    await panel('post', '/identity/dojah/test').expect(200);
-    await switchProvider(t, 'identity', 'dojah');
-
-    const agent = await newAgent();
-    const started = await request(t.http)
-      .post('/v1/agent/application/identity')
-      .set(agent.headers)
-      .send({ consent: true })
-      .expect(200);
-    const url = new URL(started.body.url);
-    const page = await request(t.http)
-      .get(url.pathname + url.search)
-      .expect(200);
-    expect(page.headers['content-type']).toMatch(/html/);
-    expect(page.text).toContain('"widget_id":"widget-1"');
-    expect(page.text).not.toContain('sk-1');
-    url.searchParams.set('sig', '0'.repeat(32));
-    await request(t.http)
-      .get(url.pathname + url.search)
-      .expect(404);
-    await request(t.http)
-      .get('/v1/identity/done')
-      .expect(200)
-      .expect(/jiffo-agent:\/\/identity-done/);
+  it("leaves addresses to our team with Smile ID, which doesn't check them", async () => {
+    // The ID checked earlier with the development stand-in; then Smile ID is switched on before sending.
+    const agent = await signIn(t, 'agent', { unapproved: true });
+    await request(t.http).patch('/v1/me').set(agent.headers).send({ lastName: 'Bakare' }).expect(200);
+    await completeApplication(t, agent);
+    await smileIdOn();
+    const sent = await request(t.http).post('/v1/agent/application/submit').set(agent.headers).expect(200);
+    expect(sent.body.status).toBe('review');
+    expect(sent.body.checks).toContainEqual(expect.objectContaining({ key: 'address', outcome: 'review' }));
+    const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
+    expect(row).toMatchObject({ addressProvider: 'smileid', addressOutcome: 'review' });
     await switchProvider(t, 'identity', null);
   });
 
-  it("runs Youverify's page: the NIN and liveness session it sends settle the check", async () => {
-    await panel('put', '/identity/youverify')
-      .send({ config: { publicMerchantKey: 'pmk-1', mode: 'sandbox' }, secrets: { secretKey: 'yv-secret' } })
-      .expect(200);
-    vi.spyOn(YouverifyIdentityAdapter.prototype, 'check').mockResolvedValue('Connected');
-    await panel('post', '/identity/youverify/test').expect(200);
-    await switchProvider(t, 'identity', 'youverify');
+  it('ignores settings saved for an identity provider Jiffo no longer has, and finishes what was left running', async () => {
+    // Saved and switched on by an owner before Dojah was taken out of Jiffo.
+    await t.db.insert(providerSettings).values({
+      category: 'identity',
+      provider: 'dojah',
+      active: true,
+      config: { appId: 'app-1' },
+      secretHints: { secretKey: '••••ab12' },
+    });
+    const providers = t.app.get(ProvidersService);
+    await providers.reload();
+    // It counts as not set up: the environment's choice is used, and the panel neither lists it nor shows it on.
+    expect(providers.current('identity').name).toBe('fake');
+    const listed = await request(t.http).get('/v1/admin/providers').set(owner.headers).expect(200);
+    const identity = listed.body.categories.find((c: { category: string }) => c.category === 'identity');
+    expect(identity).toMatchObject({ active: null, fallback: 'fake' });
+    expect(identity.providers.map((p: { key: string }) => p.key)).toEqual(['smileid']);
 
+    // An identity check left running with it ends as failed, so the agent checks again with the provider in use.
     const agent = await newAgent();
-    const started = await request(t.http)
-      .post('/v1/agent/application/identity')
-      .set(agent.headers)
-      .send({ consent: true, idType: 'nin' })
-      .expect(200);
-    const url = new URL(started.body.url);
-    const ref = url.searchParams.get('ref')!;
-    type Session = { newSession: () => Promise<{ sessionId: string; sessionToken: string }> };
-    const session = vi.spyOn(YouverifyIdentityAdapter.prototype as unknown as Session, 'newSession');
-    // Youverify down: a page that says so, not an error in JSON.
-    session.mockRejectedValueOnce(new IdentityProviderError('down'));
-    const down = await request(t.http)
-      .get(url.pathname + url.search)
-      .expect(503);
-    expect(down.headers['content-type']).toMatch(/html/);
-    // The first browser to open it keeps it, even when that open failed: the cookie it was given.
-    const cookie = String(down.headers['set-cookie']).split(';')[0]!;
-    expect(cookie).toMatch(/^jiffo_check=[0-9a-f]{64}$/);
-    session.mockResolvedValue({ sessionId: 'sess-1', sessionToken: 'tok-1' });
-    const page = await request(t.http)
-      .get(url.pathname + url.search)
-      .set('cookie', cookie)
-      .expect(200);
-    expect(page.text).toContain('National Identification Number');
-    expect(page.text).not.toContain('yv-secret');
-    expect(page.headers['set-cookie']).toBeUndefined();
-    // The page sends with its own signature, not the link's.
-    const sig = /"sig":"([0-9a-f]{32})"/.exec(page.text)![1]!;
-    expect(sig).not.toBe(url.searchParams.get('sig'));
+    await t.db
+      .update(agentApplications)
+      .set({ identityProvider: 'dojah', identityReference: 'jid-retired-1', identityIdType: 'nin' })
+      .where(eq(agentApplications.userId, agent.userId));
+    await request(t.http).post('/v1/agent/application/identity/finish').set(agent.headers).expect(200);
+    const [ended] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
+    expect(ended!.identityOutcome).toBe('failed');
+    // Its results are refused the way an unsigned call is: nothing tells a stranger what is set up.
     await request(t.http)
-      .get(url.pathname + url.search)
-      .set('cookie', cookie)
-      .expect(200);
-    // The same link forwarded to anyone else, or with its time changed, doesn't open.
-    expect((await request(t.http).get(url.pathname + url.search)).status).toBe(410);
-    const later = new URL(url);
-    later.searchParams.set('exp', String(Date.now() + 10 * 3_600_000));
-    await request(t.http)
-      .get(later.pathname + later.search)
-      .set('cookie', cookie)
-      .expect(404);
-    // An hour after it was made, the link says it has expired and to start again.
-    const now = Date.now;
-    vi.spyOn(Date, 'now').mockImplementation(() => now() + 61 * 60_000);
-    try {
-      const expired = await request(t.http)
-        .get(url.pathname + url.search)
-        .set('cookie', cookie)
-        .expect(410);
-      expect(expired.text).toContain('This link has expired');
-    } finally {
-      vi.mocked(Date.now).mockRestore();
-    }
-
-    const nin = uniqueNin();
-    const submit = (body: object, from = cookie) =>
-      request(t.http).post('/v1/identity/hosted/youverify/submit').set('cookie', from).send(body);
-    await submit({ ref, sig: '0'.repeat(32), idNumber: nin }).expect(404);
-    // Sent from another browser: refused, even with the right signature.
-    expect((await submit({ ref, sig, idNumber: nin }, 'jiffo_check=' + 'a'.repeat(64))).status).toBe(410);
-    // A page served before ID types sends the NIN under its old name.
-    await submit({ ref, sig, nin: '123' })
-      .expect(400)
-      .expect(/invalid_id/);
-    const run = vi.spyOn(YouverifyIdentityAdapter.prototype, 'submitPage').mockResolvedValue({
-      status: 'done',
-      outcome: 'passed',
-      legalName: 'TUNDE BAKARE',
-      dateOfBirth: '1995-04-12',
-      checks: [
-        { key: 'id', outcome: 'passed' },
-        { key: 'bvn', outcome: 'passed' },
-        { key: 'selfie', outcome: 'passed' },
-      ],
-      idNumber: nin,
-    });
-    const body = {
-      ref,
-      sig,
-      idNumber: nin,
-      bvn: '22212345678',
-      session: 'sess-1',
-      sessionSig: 'whatever-youverify-checks',
-    };
-    // Sent twice at once: the second waits its turn rather than starting a second paid check.
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => (release = resolve));
-    const runResult = run.getMockImplementation()!;
-    run.mockImplementationOnce(async (...args) => {
-      await held;
-      return runResult(...args);
-    });
-    const first = submit(body).then((res) => res);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await submit(body)
-      .expect(409)
-      .expect(/identity_busy/);
-    release();
-    expect((await first).body).toEqual({ status: 'done', outcome: 'passed' });
-    expect(run).toHaveBeenCalledWith(
-      ref,
-      { role: 'agent', idType: 'nin', withBvn: true },
-      { idNumber: nin, bvn: '22212345678', session: 'sess-1', sessionSig: 'whatever-youverify-checks' },
-    );
-    const [row] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
-    expect(row).toMatchObject({ identityProvider: 'youverify', legalName: 'TUNDE BAKARE', identityOutcome: 'passed' });
-    expect(row!.idFingerprint).toMatch(/^[0-9a-f]{64}$/);
-    expect(JSON.stringify(row)).not.toContain(nin);
-    const done = await request(t.http).post('/v1/agent/application/identity/finish').set(agent.headers).expect(200);
-    expect(done.body).toMatchObject({ status: 'done', outcome: 'passed' });
-    // Once settled, the page can't run the check again, nor open.
-    await submit(body).expect(409);
-    expect(run).toHaveBeenCalledTimes(1);
-    const finished = await request(t.http)
-      .get(url.pathname + url.search)
-      .expect(410);
-    expect(finished.text).toContain('This check is finished');
-
-    // Each check's page opens a limited number of times an hour: each open may start a paid session.
+      .post('/v1/webhooks/identity/dojah')
+      .set('content-type', 'application/json')
+      .send(JSON.stringify({ reference_id: 'jid-retired-1', verification_status: 'Completed' }))
+      .expect(401);
     const again = await request(t.http)
       .post('/v1/agent/application/identity')
       .set(agent.headers)
-      .send({ consent: true, idType: 'nin' })
+      .send({ consent: true, idType: 'nin', idNumber: uniqueNin(), bvn: '22212345678' })
       .expect(200);
-    const link = new URL(again.body.url);
-    // Two browsers opening it at the same moment: only one keeps it.
-    const both = await Promise.all([0, 1].map(() => request(t.http).get(link.pathname + link.search)));
-    expect(both.map((r) => r.status).sort()).toEqual([200, 410]);
-    const opened = both.find((r) => r.status === 200)!;
-    const browser = String(opened.headers['set-cookie']).split(';')[0]!;
-    for (let i = 1; i < 20; i += 1)
-      await request(t.http)
-        .get(link.pathname + link.search)
-        .set('cookie', browser)
-        .expect(200);
-    const limited = await request(t.http)
-      .get(link.pathname + link.search)
-      .set('cookie', browser)
-      .expect(429);
-    expect(limited.text).toContain('opened too many times');
+    expect(again.body.provider).toBe('fake');
 
-    // The page works only while the app session that started the check is signed in.
-    const third = await request(t.http)
-      .post('/v1/agent/application/identity')
-      .set(agent.headers)
-      .send({ consent: true, idType: 'nin' })
-      .expect(200);
-    const signedOut = new URL(third.body.url);
-    await request(t.http).post('/v1/auth/logout').set(agent.headers).expect(204);
-    const gone = await request(t.http)
-      .get(signedOut.pathname + signedOut.search)
-      .expect(410);
-    expect(gone.text).toContain('This check is finished');
+    // A customer's check left running with Youverify ends as failed, so the app offers a new one.
+    const customer = await signIn(t, 'customer', { unverified: true });
+    await t.db.insert(customerVerifications).values({
+      userId: customer.userId,
+      status: 'checking',
+      provider: 'youverify',
+      reference: `cid-${uniqueNin()}`,
+      idType: 'nin',
+      updatedAt: new Date(Date.now() - 3_600_000),
+    });
+    const seen = await request(t.http).get('/v1/me/identity').set(customer.headers).expect(200);
+    expect(seen.body.status).toBe('failed');
+
+    // Switching in the panel still works; the old row stays ignored (the migration deletes such rows).
     await switchProvider(t, 'identity', null);
+    expect(providers.current('identity').name).toBe('fake');
+    await t.db
+      .delete(providerSettings)
+      .where(and(eq(providerSettings.category, 'identity'), eq(providerSettings.provider, 'dojah')));
   });
 });

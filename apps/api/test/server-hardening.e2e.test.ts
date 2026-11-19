@@ -4,7 +4,6 @@ import { io, type Socket } from 'socket.io-client';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { providerFetch } from '../src/adapters/provider-fetch';
-import { withNonce } from '../src/common/security-headers';
 import { BUILDERS } from '../src/providers/builders';
 import { randomUUID } from 'node:crypto';
 import { MemoryStorageAdapter } from '../src/adapters/storage';
@@ -131,15 +130,6 @@ describe('server hardening', () => {
       expect(res.headers['content-security-policy']).toContain("default-src 'none'");
       expect(res.headers['x-powered-by']).toBeUndefined();
     });
-
-    it('let only a widget page’s own scripts run', () => {
-      const { html, csp } = withNonce('<script src="https://widget.example/w.js"></script><script>go()</script>');
-      const nonce = /nonce-([^']+)'/.exec(csp)![1]!;
-      expect(html.match(/<script nonce="([^"]+)"/g)).toHaveLength(2);
-      expect(html).toContain(`nonce="${nonce}"`);
-      expect(csp).toContain("'strict-dynamic'");
-      expect(csp).toContain("frame-ancestors 'none'");
-    });
   });
 
   it('serves an uploaded file that isn’t a photo only as a download', async () => {
@@ -180,12 +170,7 @@ describe('server hardening', () => {
   });
 
   describe('providers', () => {
-    const ctx = (production: boolean) => ({
-      publicApiUrl: 'https://api.jiffo.test',
-      sign: () => 'x',
-      hostedLink: () => 'x',
-      production,
-    });
+    const ctx = (production: boolean) => ({ publicApiUrl: 'https://api.jiffo.test', production });
 
     it('take live keys only in production, and test keys only outside it', () => {
       const paystack = BUILDERS.payments.paystack!;

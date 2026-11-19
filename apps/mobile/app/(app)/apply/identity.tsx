@@ -12,6 +12,7 @@ function savedOutcome(app: Application): CheckOutcome | 'pending' | null {
   if (app.identityChecking) return 'pending';
   if (!app.steps.identity) return null;
   const id = app.identityIdType ?? 'nin';
+  // id_type only on checks saved before it was dropped.
   const keys = [id, 'bvn', 'selfie', 'duplicate', 'id_type'];
   const own = app.checks.filter((c) => keys.includes(c.key));
   if (own.some((c) => c.outcome === 'failed')) return 'failed';
@@ -54,7 +55,6 @@ export default function Identity() {
           idTypes: app.idTypes,
           withBvn: app.withBvn,
           flow: app.identityFlow,
-          idChosenOnPage: app.idChosenOnPage,
           provider: app.provider,
         }}
         paths={{ start: '/v1/agent/application/identity', finish: '/v1/agent/application/identity/finish' }}

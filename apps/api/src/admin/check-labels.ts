@@ -8,6 +8,7 @@ export const SUPPORT_CHECK_LABELS: Record<string, string> = {
   drivers_licence: "Driver's licence matches their details",
   voters_card: "Voter's card matches their details",
   passport: 'Passport matches their details',
+  // No longer given to new checks, but checks saved before may have it.
   id_type: 'An ID we accept',
   selfie: 'Selfie matches the ID photo',
   age: '18 or older',

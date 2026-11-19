@@ -1,11 +1,10 @@
-import { createHmac, hkdfSync } from 'node:crypto';
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import type { ProviderContext } from '../adapters/identity-providers';
 import { PROVIDER_CATEGORIES, type ProviderCategory } from '@jiffo/shared';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
 import { providerSettings } from '../db/schema';
-import { BUILDERS } from './builders';
+import { BUILDERS, hasBuilder } from './builders';
 import { ENV_ADAPTERS, type Adapters } from './env-adapters';
 import { SecretBox, secretsKeyFrom } from './secret-box';
 
@@ -22,9 +21,6 @@ export const secretBinding = (category: string, provider: string) => `provider:$
  * every 30 seconds (and at once after a change here), so choosing an adapter never waits on the database.
  * A category with no provider switched on uses the environment's choice.
  */
-/** How long a link to a provider's page that this API serves works after the check starts. */
-export const HOSTED_LINK_TTL_MS = 60 * 60_000;
-
 @Injectable()
 export class ProvidersService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ProvidersService.name);
@@ -40,28 +36,14 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
     @Inject(APP_CONFIG) config: AppConfig,
     @Inject(ENV_ADAPTERS) private readonly env: Adapters,
   ) {
-    const master = secretsKeyFrom(config);
-    this.box = new SecretBox(master);
-    const linkKey = Buffer.from(hkdfSync('sha256', Buffer.from(master, 'hex'), Buffer.alloc(0), 'jiffo links', 32));
-    const publicApiUrl = config.PUBLIC_API_URL.replace(/\/$/, '');
-    const sign = (text: string) => createHmac('sha256', linkKey).update(text).digest('hex').slice(0, 32);
+    this.box = new SecretBox(secretsKeyFrom(config));
     this.context = {
-      publicApiUrl,
-      sign,
-      hostedLink: (provider, reference) => {
-        const expires = String(Date.now() + HOSTED_LINK_TTL_MS);
-        const query = new URLSearchParams({
-          ref: reference,
-          exp: expires,
-          sig: sign(`${provider}:${reference}:${expires}`),
-        });
-        return `${publicApiUrl}/v1/identity/hosted/${provider}?${query.toString()}`;
-      },
+      publicApiUrl: config.PUBLIC_API_URL.replace(/\/$/, ''),
       production: config.NODE_ENV === 'production',
     };
   }
 
-  /** What adapters get from the API: its public address, and signing for the links they hand out. */
+  /** What adapters get from the API: its public address, and whether it runs in production. */
   readonly context: ProviderContext;
 
   async onModuleInit() {
@@ -77,7 +59,8 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
   }
 
   async reload() {
-    const rows = await this.db.select().from(providerSettings);
+    // Settings saved for a provider Jiffo no longer has are left out, so it counts as not set up.
+    const rows = (await this.db.select().from(providerSettings)).filter((r) => hasBuilder(r.category, r.provider));
     this.rows = new Map(rows.map((r) => [`${r.category}:${r.provider}`, r]));
     this.active = new Map(
       rows.filter((r) => r.active).map((r) => [r.category as ProviderCategory, r.provider] as const),

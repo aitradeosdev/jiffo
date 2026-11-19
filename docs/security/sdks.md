@@ -52,13 +52,3 @@ aren't followed, and only their own hosts are allowed.
 | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | Photo storage, with links that expire |
 | `@aws-sdk/client-sesv2` | Admin team emails through Amazon SES, when that's the email provider chosen in the panel |
 | `@jiffo/shared` | Jiffo's own shared rules and types |
-
-## Scripts loaded from providers
-
-The identity pages the API serves load one provider script each, and only scripts with that response's nonce can
-run (`common/security-headers.ts`).
-
-| Script | Checked how |
-| --- | --- |
-| `https://unpkg.com/youverify-liveness-web@1.2.3/…` (Youverify liveness) | Pinned version and an integrity hash |
-| `https://widget.dojah.io/widget.js` (Dojah) | Served from Dojah's own host. Dojah updates it in place and publishes no hash, so it can't be pinned. |

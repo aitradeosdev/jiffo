@@ -23,7 +23,7 @@ const STEPS: Array<{ key: StepKey; title: string; sub: (app: Application) => str
     key: 'identity',
     title: 'Identity',
     sub: (app) => {
-      const only = app.idTypes.length === 1 && !app.idChosenOnPage ? app.idTypes[0]!.key : null;
+      const only = app.idTypes.length === 1 ? app.idTypes[0]!.key : null;
       const id = only ? ID_COPY[only].short : 'Your ID';
       const bvn = app.withBvn && only !== 'bvn' ? ', BVN' : '';
       return `${id.charAt(0).toUpperCase()}${id.slice(1)}${bvn} and a selfie, checked by ${providerName(app)}`;
@@ -34,7 +34,7 @@ const STEPS: Array<{ key: StepKey; title: string; sub: (app: Application) => str
   {
     key: 'address',
     title: 'Address and emergency contact',
-    sub: (app) => `Confirmed by ${providerName(app)}, plus who to call`,
+    sub: () => 'Confirmed by our team, plus who to call',
     icon: 'home',
     href: '/apply/address',
   },
@@ -190,7 +190,7 @@ function Checking({ app }: { app: Application }) {
     <ObScreen>
       <Question
         title="Checking your application"
-        sub={`${ProviderName(app)} is running the checks. Usually under a minute; an address visit can take longer. You can leave the app, we'll let you know.`}
+        sub={`${ProviderName(app)} is running the checks. Usually under a minute. You can leave the app, we'll let you know.`}
       />
       <CheckList app={app} />
     </ObScreen>

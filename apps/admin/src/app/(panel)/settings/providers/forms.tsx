@@ -30,7 +30,6 @@ export interface ProviderView {
   /** Identity providers: the IDs it checks with a selfie match, and how it takes an agent's BVN. */
   idTypes: string[] | null;
   bvnAlongside: boolean | null;
-  idChosenOnPage: boolean | null;
   /** Payments providers: whether it issues customers their own account number, and what the customer gives. */
   fixedAccounts: 'nothing' | 'bvn' | 'bvn_and_bank' | 'unsupported' | null;
   webhookUrl: string | null;
@@ -110,7 +109,6 @@ export function ProviderCard({
           {p.bvnAlongside
             ? "An agent's BVN can be checked alongside their ID."
             : "Can't check a BVN alongside another ID, so when agents must give their BVN, it is their ID."}
-          {p.idChosenOnPage ? ' People pick their ID on its page, from those set up in its dashboard.' : ''}
         </p>
       ) : null}
       {p.fixedAccounts ? (

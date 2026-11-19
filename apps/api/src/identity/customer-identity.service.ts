@@ -82,14 +82,13 @@ export class CustomerIdentityService implements IdentityOwner {
       /** For a new check: the IDs the customer can use now, and how the check runs. */
       idTypes: options.idTypes.map((key) => ({ key, name: ID_TYPES[key].name })),
       flow: options.flow,
-      idChosenOnPage: options.idChosenOnPage,
       provider: options.providerName,
       reviewHours: settings.identity.reviewTargetHours,
     };
   }
 
   /** Starts a check with the ID the customer chose. Any number goes to the provider and is not kept. */
-  async start(userId: string, input: { idType?: string; idNumber?: string }, sessionId: string) {
+  async start(userId: string, input: { idType?: string; idNumber?: string }) {
     const row = await this.load(userId);
     if (row?.status === 'verified') throw conflict('already_verified', "You're already verified");
     if (row?.status === 'declined') {
@@ -111,7 +110,6 @@ export class CustomerIdentityService implements IdentityOwner {
       status: 'checking' as const,
       provider: started.provider,
       reference: started.reference,
-      sessionId,
       idType: started.request.idType,
       outcome: null,
       checks: [],
@@ -176,7 +174,6 @@ export class CustomerIdentityService implements IdentityOwner {
           provider,
           reference,
           request: { role: 'customer', idType: row.idType as IdType, withBvn: false },
-          sessionId: row.sessionId,
         }
       : null;
   }
@@ -193,12 +190,7 @@ export class CustomerIdentityService implements IdentityOwner {
    * else goes to support.
    */
   private async apply(row: Verification, result: IdentityResult) {
-    const settings = await this.settingsFor(row.userId);
-    const judged = this.checks.judge(
-      { role: 'customer', idType: row.idType as IdType, withBvn: false },
-      result,
-      this.checks.accepted('customer', settings.identity, row.provider),
-    );
+    const judged = this.checks.judge({ role: 'customer', idType: row.idType as IdType, withBvn: false }, result);
     const fingerprint = judged.fingerprint ?? row.pendingIdFingerprint;
     return this.db.transaction(async (tx) => {
       const checks: Check[] = [...judged.checks];
