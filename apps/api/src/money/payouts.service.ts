@@ -18,6 +18,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { AuthContext } from '../auth/auth.types';
 import { conflict, unprocessable } from '../common/errors';
 import { AlertsService } from '../alerts/alerts.service';
+import { hoursFrom, WithdrawalHoldsService } from './withdrawal-holds.service';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { nameWords, plainName } from '../common/names';
 import { LedgerService, transfer } from './ledger.service';
@@ -72,6 +73,9 @@ export const payoutView = (p: PayoutRow) => ({
 });
 
 /** Agents' payout accounts and withdrawals. Customers never withdraw in the app. */
+/** Agents whose withdrawals aren't on hold: the rest wait, and aren't tried on every run (A6). */
+const notHeld = () => or(isNull(users.withdrawalsHeldUntil), lt(users.withdrawalsHeldUntil, new Date()));
+
 @Injectable()
 export class PayoutsService {
   private readonly logger = new Logger(PayoutsService.name);
@@ -90,6 +94,7 @@ export class PayoutsService {
     private readonly realtime: RealtimeGateway,
     private readonly providers: ProvidersService,
     private readonly alerts: AlertsService,
+    private readonly holds: WithdrawalHoldsService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -173,7 +178,11 @@ export class PayoutsService {
       // One change at a time per agent.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payout-account:' + auth.userId}))`);
       const [before] = await tx
-        .select({ id: payoutAccounts.id })
+        .select({
+          id: payoutAccounts.id,
+          bankCode: payoutAccounts.bankCode,
+          accountNumber: payoutAccounts.accountNumber,
+        })
         .from(payoutAccounts)
         .where(
           and(
@@ -204,16 +213,23 @@ export class PayoutsService {
         recipientCode,
         reviewStatus: review ? 'pending' : 'approved',
       });
-      return before ?? null;
+      // A new account in place of one in use pauses withdrawals (A6, P8). The first account doesn't: there is
+      // nothing yet to redirect. One waiting for support pauses them when it is approved.
+      // The same account saved again redirects nothing, so it doesn't.
+      const redirected = !!before && (before.bankCode !== bankCode || before.accountNumber !== accountNumber);
+      const until = redirected && !review ? await this.holds.start(tx, auth.userId, 'payout_account') : null;
+      return { before: before ?? null, until };
     });
+    // By SMS and email too (A6); the push below says it.
+    if (earlier.until) await this.holds.tell(auth.userId, 'payout_account', earlier.until, { push: false });
     // Told on every change, so a change they didn't make doesn't go unnoticed.
-    if (earlier || review) {
+    if (earlier.before || review) {
       await this.push
         .notifyUser(auth.userId, 'agent', {
           title: review ? 'We are checking your new account' : 'Payout account changed',
           body: review
             ? `The name on the account ending ${accountNumber.slice(-4)} is close to the name on your ID, but not the same, so support will check it. Your withdrawals keep going to your current account meanwhile.`
-            : `Withdrawals now go to your account ending ${accountNumber.slice(-4)}. If you didn't change it, contact support now.`,
+            : `Withdrawals now go to your account ending ${accountNumber.slice(-4)}${earlier.until ? `, and are paused for ${hoursFrom(earlier.until)} hours for your safety` : ''}. If you didn't change it, contact support now.`,
           data: { type: 'wallet.payout_account' },
         })
         .catch(() => undefined);
@@ -239,8 +255,9 @@ export class PayoutsService {
       throw conflict('not_in_review', 'This account is not waiting for a decision');
     }
     const decided = { reviewedBy: input.adminId, reviewedAt: new Date(), reviewNote: input.note };
+    let holdUntil: Date | null = null;
     if (input.decision === 'approve') {
-      await tx
+      const replaced = await tx
         .update(payoutAccounts)
         .set({ replacedAt: new Date() })
         .where(
@@ -249,29 +266,36 @@ export class PayoutsService {
             isNull(payoutAccounts.replacedAt),
             eq(payoutAccounts.reviewStatus, 'approved'),
           ),
-        );
+        )
+        .returning({ id: payoutAccounts.id });
       await tx
         .update(payoutAccounts)
         .set({ reviewStatus: 'approved', ...decided })
         .where(eq(payoutAccounts.id, account.id));
+      // In place of one in use, it pauses withdrawals from now (A6, P8).
+      if (replaced.length) holdUntil = await this.holds.start(tx, account.userId, 'payout_account');
     } else {
       await tx
         .update(payoutAccounts)
         .set({ reviewStatus: 'declined', replacedAt: new Date(), ...decided })
         .where(eq(payoutAccounts.id, account.id));
     }
-    return account;
+    return { ...account, holdUntil };
   }
 
   /** Tells the agent what support decided about their account. */
-  async accountDecided(account: { userId: string; accountLast4: string | null }, decision: 'approve' | 'decline') {
+  async accountDecided(
+    account: { userId: string; accountLast4: string | null; holdUntil?: Date | null },
+    decision: 'approve' | 'decline',
+  ) {
+    if (account.holdUntil) await this.holds.tell(account.userId, 'payout_account', account.holdUntil, { push: false });
     const last4 = account.accountLast4 ?? '';
     await this.push
       .notifyUser(account.userId, 'agent', {
         title: decision === 'approve' ? 'New account approved' : 'New account not approved',
         body:
           decision === 'approve'
-            ? `Withdrawals now go to your account ending ${last4}.`
+            ? `Withdrawals now go to your account ending ${last4}${account.holdUntil ? `, and are paused for ${hoursFrom(account.holdUntil)} hours for your safety` : ''}.`
             : `Support couldn't approve the account ending ${last4}. Your withdrawals keep going to your current account.`,
         data: { type: 'wallet.payout_account' },
       })
@@ -326,6 +350,15 @@ export class PayoutsService {
       if (same) return { payout: same, repeat: true };
       const now = await liveAccounts(tx, auth.userId);
       if (!now.approved) throw noAccount(now);
+      // Read under the payout account lock, so an account change that starts a hold can't slip between (A6).
+      const hold = await this.holds.current(auth.userId, tx);
+      if (hold) {
+        throw conflict(
+          'withdrawals_held',
+          `For your safety, withdrawals are paused after ${hold.reason === 'new_device' ? 'a sign-in on a new phone' : 'a change to your account'}. They open again soon.`,
+          { heldUntil: hold.until.toISOString(), reason: hold.reason },
+        );
+      }
       const account = now.approved;
       if (speed === 'scheduled') {
         const [queued] = await tx
@@ -486,9 +519,17 @@ export class PayoutsService {
 
   private async sendClaimed(payout: PayoutRow): Promise<PayoutRow | null> {
     // A suspended agent's withdrawals wait: they go out if support reactivates them.
-    const [owner] = await this.db.select({ status: users.status }).from(users).where(eq(users.id, payout.userId));
+    const [owner] = await this.db
+      .select({ status: users.status, heldUntil: users.withdrawalsHeldUntil })
+      .from(users)
+      .where(eq(users.id, payout.userId));
     if (owner?.status !== 'active') {
       this.logger.warn(`Payout ${payout.id} waits: its agent is suspended`);
+      return payout;
+    }
+    // One asked for before a hold began waits for it to end, then goes as asked (A6).
+    if (owner.heldUntil && owner.heldUntil > new Date()) {
+      this.logger.warn(`Payout ${payout.id} waits: its agent's withdrawals are on hold`);
       return payout;
     }
     if (payout.speed === 'instant' && (await this.instantPaused(payout.countryCode))) return payout;
@@ -593,7 +634,12 @@ export class PayoutsService {
    */
   async approve(provider: string, ask: TransferApprovalRequest) {
     const [row] = await this.db
-      .select({ payout: payouts, recipientCode: payoutAccounts.recipientCode, owner: users.status })
+      .select({
+        payout: payouts,
+        recipientCode: payoutAccounts.recipientCode,
+        owner: users.status,
+        heldUntil: users.withdrawalsHeldUntil,
+      })
       .from(payouts)
       .innerJoin(payoutAccounts, eq(payoutAccounts.id, payouts.payoutAccountId))
       .innerJoin(users, eq(users.id, payouts.userId))
@@ -613,7 +659,7 @@ export class PayoutsService {
   private async approvalProblem(
     provider: string,
     ask: TransferApprovalRequest,
-    row: { payout: PayoutRow; recipientCode: string; owner: string } | undefined,
+    row: { payout: PayoutRow; recipientCode: string; owner: string; heldUntil: Date | null } | undefined,
   ) {
     if (!row) return 'no such withdrawal';
     const { payout } = row;
@@ -627,6 +673,8 @@ export class PayoutsService {
     if (payout.sendKobo !== ask.amountKobo) return `the amount is ${ask.amountKobo}, not ${payout.sendKobo}`;
     if (ask.recipientCode && ask.recipientCode !== row.recipientCode) return "the recipient isn't the agent's account";
     if (row.owner !== 'active') return 'the agent is suspended';
+    if (row.heldUntil && row.heldUntil > new Date())
+      return "the agent's withdrawals are on hold after an account change";
     if (payout.speed === 'instant' && (await this.instantPaused(payout.countryCode))) {
       return 'instant withdrawals are paused';
     }
@@ -760,7 +808,8 @@ export class PayoutsService {
     const scheduled = await this.db
       .select({ id: payouts.id })
       .from(payouts)
-      .where(and(eq(payouts.status, 'requested'), eq(payouts.speed, 'scheduled')))
+      .innerJoin(users, eq(users.id, payouts.userId))
+      .where(and(eq(payouts.status, 'requested'), eq(payouts.speed, 'scheduled'), notHeld()))
       .limit(5_000);
     for (const p of scheduled) await this.send(p.id);
     return { scheduled: scheduled.length, ...(await this.retryPending()) };
@@ -775,11 +824,13 @@ export class PayoutsService {
     const instant = await this.db
       .select({ id: payouts.id })
       .from(payouts)
+      .innerJoin(users, eq(users.id, payouts.userId))
       .where(
         and(
           eq(payouts.status, 'requested'),
           eq(payouts.speed, 'instant'),
           lt(payouts.createdAt, new Date(Date.now() - RETRY_AFTER_MS)),
+          notHeld(),
         ),
       )
       .limit(1_000);

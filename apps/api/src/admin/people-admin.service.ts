@@ -283,6 +283,11 @@ export class PeopleAdminService {
             lastLocatedAt: presence[0]?.locatedAt ?? null,
             availableKobo: balance('agent_available'),
             heldKobo: balance('agent_held'),
+            /** Withdrawals wait until then after an account change, and why (docs/security-plan.md, A6). */
+            withdrawalsHeld:
+              user.withdrawalsHeldUntil && user.withdrawalsHeldUntil > new Date()
+                ? { until: user.withdrawalsHeldUntil, reason: user.withdrawalsHeldFor }
+                : null,
             rating: avg('customer'),
             stats: asAgent,
             /** Their application: the provider's results and support's decision, never their documents. */

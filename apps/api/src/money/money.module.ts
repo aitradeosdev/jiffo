@@ -9,6 +9,7 @@ import { PayoutsService } from './payouts.service';
 import { ReconciliationService } from './reconciliation.service';
 import { WalletService } from './wallet.service';
 import { WebhooksController } from './webhooks.controller';
+import { WithdrawalHoldsService } from './withdrawal-holds.service';
 
 @Global()
 @Module({
@@ -20,8 +21,17 @@ import { WebhooksController } from './webhooks.controller';
     FixedAccountsService,
     PayoutsService,
     ReconciliationService,
+    WithdrawalHoldsService,
   ],
-  exports: [LedgerService, WalletService, DepositsService, FixedAccountsService, PayoutsService, ReconciliationService],
+  exports: [
+    LedgerService,
+    WalletService,
+    DepositsService,
+    FixedAccountsService,
+    PayoutsService,
+    ReconciliationService,
+    WithdrawalHoldsService,
+  ],
 })
 export class MoneyModule implements OnModuleInit {
   constructor(

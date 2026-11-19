@@ -35,6 +35,7 @@ export const DEFAULT_SECURITY_SETTINGS = {
   busyAgentErrands: 50,
   approvalExpiryHours: 72,
   dailyIdReveals: 20,
+  withdrawalHoldHours: 48,
 };
 
 /**
@@ -177,6 +178,16 @@ export const CountrySettingsSchema = z.object({
         .default(72),
       /** How many people's personal details one staff member may reveal in a day (D5). */
       dailyIdReveals: z.number().int().min(0).max(500).default(20),
+      /**
+       * How long an agent's withdrawals wait after a new payout account or a sign-in on a new phone (A6). It
+       * can't be switched off.
+       */
+      withdrawalHoldHours: z
+        .number()
+        .int()
+        .min(1)
+        .max(24 * 7)
+        .default(48),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
 });

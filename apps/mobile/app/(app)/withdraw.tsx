@@ -14,7 +14,7 @@ import { Chip, Row } from '@/ui/parts';
 /** Withdraw to the agent's own bank account: free once a day, or now for a small fee. */
 export default function Withdraw() {
   const { api } = useSession();
-  const wallet = useResource<{ availableKobo: number }>('/v1/wallet');
+  const wallet = useResource<{ availableKobo: number; withdrawalsHeldUntil?: string | null }>('/v1/wallet');
   const account = useResource<{ bankName: string; accountNumber: string; inReview?: boolean } | null>(
     '/v1/payout-account',
   );
@@ -63,6 +63,29 @@ export default function Withdraw() {
       <Screen footer={<Button label="Add bank account" onPress={() => router.replace('/payout-account')} />}>
         <Text variant="title">Add your bank account first</Text>
         <Text tone="ink2">Withdrawals go only to an account in your own name.</Text>
+      </Screen>
+    );
+  }
+
+  // Paused for a while after a new payout account or a sign-in on a new phone (docs/security-plan.md, A6).
+  const heldUntil = wallet.data?.withdrawalsHeldUntil ? new Date(wallet.data.withdrawalsHeldUntil) : null;
+  if (heldUntil && heldUntil.getTime() > Date.now()) {
+    return (
+      <Screen footer={<Button label="Go back" onPress={goBack} />}>
+        <Text variant="title">Withdrawals are paused for now</Text>
+        <Text tone="ink2">
+          Your account changed recently: a new bank account, or a sign-in on a new phone. To keep your earnings safe if
+          someone else made that change, withdrawals open again on{' '}
+          {heldUntil.toLocaleString(undefined, {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+            hour: 'numeric',
+            minute: '2-digit',
+          })}
+          . You can keep working as usual.
+        </Text>
+        <Text tone="ink2">If you didn&apos;t make a change, contact support now.</Text>
       </Screen>
     );
   }

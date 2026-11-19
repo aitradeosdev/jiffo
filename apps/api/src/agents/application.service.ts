@@ -15,6 +15,7 @@ import {
   type PendingCheck,
 } from '../identity/identity-checks.service';
 import { PushService } from '../push/push.service';
+import { WithdrawalHoldsService } from '../money/withdrawal-holds.service';
 import { CountriesService } from '../countries/countries.service';
 
 type Application = typeof agentApplications.$inferSelect;
@@ -52,6 +53,7 @@ export class AgentApplicationService implements IdentityOwner {
     private readonly checks: IdentityChecksService,
     private readonly push: PushService,
     private readonly countries: CountriesService,
+    private readonly holds: WithdrawalHoldsService,
   ) {
     checks.register('agent', this);
   }
@@ -625,16 +627,19 @@ export class AgentApplicationService implements IdentityOwner {
     // approving one approves the other: support decides once.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payout-account:' + input.userId}))`);
     const { approved, pending } = await liveAccounts(tx, input.userId);
+    let holdUntil: Date | null = null;
     if (pending) {
       if (approved) {
         await tx.update(payoutAccounts).set({ replacedAt: new Date() }).where(eq(payoutAccounts.id, approved.id));
+        // In place of one in use, it pauses withdrawals, as any new account does (A6, P8).
+        holdUntil = await this.holds.start(tx, input.userId, 'payout_account');
       }
       await tx
         .update(payoutAccounts)
         .set({ reviewStatus: 'approved', reviewedBy: input.adminId, reviewedAt: new Date(), reviewNote: input.note })
         .where(eq(payoutAccounts.id, pending.id));
     }
-    return { before: app, after: row! };
+    return { before: app, after: row!, holdUntil };
   }
 
   /**

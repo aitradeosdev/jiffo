@@ -19,6 +19,7 @@ const refuse = (category: string) => () => Promise.reject(new ProviderNotConfigu
 export class NotConfiguredMessaging implements MessagingAdapter {
   readonly name = 'none';
   sendOtp = refuse('sms');
+  sendText = refuse('sms');
 }
 
 export class NotConfiguredPush implements PushAdapter {

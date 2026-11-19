@@ -7,6 +7,7 @@ import { CountriesService } from '../countries/countries.service';
 import { sha256 } from '../common/crypto';
 import { forbidden, unauthorized } from '../common/errors';
 import { PushService } from '../push/push.service';
+import { WithdrawalHoldsService } from '../money/withdrawal-holds.service';
 import { normalisePhone } from './phone';
 import { OtpService } from './otp.service';
 import { TokensService } from './tokens.service';
@@ -48,6 +49,7 @@ export class AuthService {
     private readonly otp: OtpService,
     private readonly tokens: TokensService,
     private readonly push: PushService,
+    private readonly holds: WithdrawalHoldsService,
   ) {}
 
   /** How long a session lasts from now, never past its absolute end (SESSION_MAX_DAYS after sign-in). */
@@ -79,6 +81,19 @@ export class AuthService {
         .returning();
       const user = inserted[0] ?? (await tx.select().from(users).where(eq(users.phone, phone)))[0]!;
       if (user.status !== 'active') throw forbidden('account_suspended', 'This account is suspended. Contact support.');
+
+      // A phone the agent app has never seen on this account, when it has seen others: whoever has the number
+      // now may not be the agent, so their withdrawals wait (docs/security-plan.md, A6, X4). An agent's first
+      // phone, and the customer app, don't count.
+      const known =
+        app === 'agent'
+          ? await tx
+              .select({ key: devices.deviceKey })
+              .from(devices)
+              .where(and(eq(devices.userId, user.id), eq(devices.app, 'agent')))
+          : [];
+      const newPhone = known.length > 0 && !known.some((d) => d.key === device.key);
+      const heldUntil = newPhone ? await this.holds.start(tx, user.id, 'new_device') : null;
 
       const [deviceRow] = await tx
         .insert(devices)
@@ -128,18 +143,33 @@ export class AuthService {
         /** Sessions this sign-in ended; their open sockets must be dropped too. */
         replacedSessionIds: [...replaced, ...elsewhere].map((r) => r.id),
         signedOutDevices: [...new Set(elsewhere.map((r) => r.deviceId))],
+        /** Set when this sign-in started a hold on withdrawals, to tell the agent once it is saved. */
+        heldUntil: heldUntil ? { userId: user.id, until: heldUntil } : null,
       };
     });
   }
 
+  /**
+   * Tells the agent a new phone's sign-in paused their withdrawals, by SMS and email; the push goes to their
+   * other phones with the signed-out notice. Not waited for, and it never throws.
+   */
+  tellHeld(held: { userId: string; until: Date } | null) {
+    if (held) void this.holds.tell(held.userId, 'new_device', held.until, { push: false });
+  }
+
   /** Tells the phones a new sign-in signed out, so a sign-in the owner didn't make doesn't go unnoticed. */
-  tellSignedOut(deviceIds: string[]) {
+  tellSignedOut(deviceIds: string[], held: { userId: string; until: Date } | null = null) {
     // Not waited for: the new phone's sign-in shouldn't wait on the push provider.
-    void this.push.notifyDevices(deviceIds, {
-      title: 'Signed in on another phone',
-      body: "Your Jiffo account was just signed in on another phone, so this one was signed out. If that wasn't you, sign in again and contact support.",
-      data: { type: 'auth.signed_out' },
-    });
+    void (async () => {
+      // A hold it started is said here too: these are the phones the owner had, where the number someone
+      // may have taken over doesn't reach (docs/security-plan.md, A6).
+      const hold = held ? ` ${await this.holds.sentence(held.userId, held.until)}` : '';
+      await this.push.notifyDevices(deviceIds, {
+        title: 'Signed in on another phone',
+        body: `Your Jiffo account was just signed in on another phone, so this one was signed out.${hold} If that wasn't you, sign in again and contact support.`,
+        data: { type: 'auth.signed_out' },
+      });
+    })().catch(() => undefined);
   }
 
   /** Swaps a refresh token for a new pair. A token that was already used revokes the whole session. */
