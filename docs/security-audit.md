@@ -44,7 +44,8 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 9d. Admin: the audit log (reasons, browser, before and after, append-only, the command line) and masked personal details (D5, D7) | aitradeosdev/jiffo#58 | merged |
 | 9e. Admin: staff linked to their own app accounts (D3) and the admin API on its own port (D1) | aitradeosdev/jiffo#60 | merged |
 | 10a. Agents: withdrawals held after a new payout account or a sign-in on a new phone (A6, P8, X4) | aitradeosdev/jiffo#61 | merged |
-| 10b. Agents: the phone's key, signed money requests and the app PIN, server side (A3, A5, A7) | this pull request | open |
+| 10b. Agents: the phone's key, signed money requests and the app PIN, server side (A3, A5, A7) | aitradeosdev/jiffo#62 | open |
+| 10b. Agents: the phone's key, signed money requests and the app PIN, in the agent app | this pull request | open |
 
 ## Summary
 

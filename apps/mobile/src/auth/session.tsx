@@ -5,6 +5,7 @@ import * as Device from 'expo-device';
 import { API_URL, VARIANT } from '../config';
 import { secureStorage } from '../storage';
 import { ApiError, createApiClient, toTokens, type ApiClient, type Tokens } from '../api/client';
+import { setUpPhone } from './device-security';
 import type { CodeSent, SignedIn, User } from '../api/types';
 
 const TOKENS_KEY = `jiffo.${VARIANT}.tokens`;
@@ -128,6 +129,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         },
       });
       await tokenStore.set(toTokens(res, Date.now()));
+      // The agent app registers this phone's key now: the server takes one only just after signing in (A3).
+      if (VARIANT === 'agent') void setUpPhone(api).catch(() => undefined);
       setUser(res.user);
       setStatus('signedIn');
       return res.user;

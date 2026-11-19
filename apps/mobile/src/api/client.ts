@@ -63,7 +63,13 @@ export function createApiClient(options: ApiOptions) {
   const now = options.now ?? Date.now;
   let refreshing: Promise<Tokens | null> | null = null;
 
-  async function send(method: Method, path: string, body: unknown, token: string | null) {
+  async function send(
+    method: Method,
+    path: string,
+    body: unknown,
+    token: string | null,
+    headers: Record<string, string> = {},
+  ) {
     let res: Response;
     try {
       res = await fetchImpl(`${options.baseUrl}${path}`, {
@@ -72,6 +78,7 @@ export function createApiClient(options: ApiOptions) {
           accept: 'application/json',
           ...(body === undefined ? {} : { 'content-type': 'application/json' }),
           ...(token ? { authorization: `Bearer ${token}` } : {}),
+          ...headers,
         },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
@@ -121,15 +128,21 @@ export function createApiClient(options: ApiOptions) {
     return tokens.accessExpiresAt - REFRESH_EARLY_MS > now() ? tokens : refresh(tokens);
   }
 
-  async function request<T>(method: Method, path: string, body?: unknown, auth = true): Promise<T> {
+  async function request<T>(
+    method: Method,
+    path: string,
+    body?: unknown,
+    auth = true,
+    headers: Record<string, string> = {},
+  ): Promise<T> {
     const tokens = auth ? await validToken() : null;
     if (auth && !tokens) throw new ApiError(401, 'signed_out', 'Sign in to continue');
-    let { res, json } = await send(method, path, body, tokens?.accessToken ?? null);
+    let { res, json } = await send(method, path, body, tokens?.accessToken ?? null, headers);
     // The token can still be refused (revoked, clock skew): refresh once and try again.
     if (auth && res.status === 401 && tokens) {
       const fresh = await refresh(tokens);
       if (!fresh) throw new ApiError(401, 'signed_out', 'Sign in to continue');
-      ({ res, json } = await send(method, path, body, fresh.accessToken));
+      ({ res, json } = await send(method, path, body, fresh.accessToken, headers));
     }
     if (!res.ok) throw toError(res.status, json);
     return json as T;
@@ -140,6 +153,9 @@ export function createApiClient(options: ApiOptions) {
     post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
     put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
     patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
+    /** With headers of its own: a signed money request (src/auth/signing.ts). */
+    withHeaders: <T>(method: Method, path: string, body: unknown, headers: Record<string, string>) =>
+      request<T>(method, path, body, true, headers),
     /** For sign-in and public routes. */
     public: <T>(method: Method, path: string, body?: unknown) => request<T>(method, path, body, false),
     /** The current access token, refreshed if needed. For the realtime socket. */

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, View } from 'react-native';
 import { goBack } from '@/nav';
 import { useSession } from '@/auth/session';
+import { moneyErrorMessage, useMoneyAction } from '@/auth/use-money-action';
 import { ApiError, errorMessage } from '@/api/client';
 import { useResource } from '@/api/useResource';
 import { useOptionalApplication } from '@/agent/application';
@@ -15,7 +16,9 @@ interface Bank {
 
 /** The agent's own-name bank account. The bank's name for it must match the agent's name on their NIN. */
 export default function PayoutAccount() {
-  const { api, user } = useSession();
+  const { user } = useSession();
+  // Signed by this phone's key, with the app PIN (docs/security-plan.md, A3, A7).
+  const money = useMoneyAction();
   // Once the provider has checked the NIN, the account must be in the name on it; before, the name in the app.
   const legalName = useOptionalApplication()?.legalName ?? null;
   const banks = useResource<Bank[]>('/v1/banks');
@@ -34,10 +37,14 @@ export default function PayoutAccount() {
     setBusy(true);
     setError(null);
     try {
-      const saved = await api.put<{ inReview?: boolean; pending?: object | null } | null>('/v1/payout-account', {
-        bankCode: bank.code,
-        accountNumber: number,
-      });
+      const saved = await money.run<{ inReview?: boolean; pending?: object | null } | null>(
+        'PUT',
+        '/v1/payout-account',
+        { bankCode: bank.code, accountNumber: number },
+        '/payout-account',
+      );
+      // Gone to set a PIN, or the PIN was cancelled.
+      if (saved === null) return;
       // The bank's name is close to the one on the ID but not the same: support checks it first.
       if (saved?.inReview || saved?.pending) {
         const message =
@@ -51,7 +58,7 @@ export default function PayoutAccount() {
       setError(
         typeof held === 'string'
           ? `The bank has this account as ${held}. It must be in your own name, ${legalName ?? `${user?.firstName} ${user?.lastName}`}.`
-          : errorMessage(e),
+          : moneyErrorMessage(e, errorMessage),
       );
     } finally {
       setBusy(false);
@@ -89,6 +96,7 @@ export default function PayoutAccount() {
         maxLength={10}
         error={error}
       />
+      {money.sheet}
     </Screen>
   );
 }

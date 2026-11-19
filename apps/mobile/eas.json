@@ -1,0 +1,25 @@
+{
+  "cli": { "version": ">= 16.0.0", "appVersionSource": "remote" },
+  "build": {
+    "development-agent": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": { "APP_VARIANT": "agent" }
+    },
+    "development-customer": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": { "APP_VARIANT": "customer" }
+    },
+    "preview-agent": {
+      "distribution": "internal",
+      "env": { "APP_VARIANT": "agent" }
+    },
+    "production-agent": {
+      "env": { "APP_VARIANT": "agent" }
+    },
+    "production-customer": {
+      "env": { "APP_VARIANT": "customer" }
+    }
+  }
+}

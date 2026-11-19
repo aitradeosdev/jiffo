@@ -46,7 +46,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     web: { favicon: `./assets/${variant}/favicon.png`, output: 'single' },
     plugins: [
       'expo-router',
-      'expo-secure-store',
+      [
+        'expo-secure-store',
+        // Face ID fills in the app PIN for money actions, when the agent turns it on (docs/security-plan.md, A7).
+        { faceIDPermission: 'Jiffo uses Face ID to confirm money actions instead of typing your PIN.' },
+      ],
       'expo-font',
       ['expo-splash-screen', { image: `./assets/${variant}/icon.png`, imageWidth: 120, backgroundColor: v.background }],
       'expo-notifications',

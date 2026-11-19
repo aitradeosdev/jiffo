@@ -13,8 +13,10 @@ aren't followed, and only their own hosts are allowed.
 | --- | --- | --- |
 | `expo`, `expo-router`, `@expo/metro-runtime`, `expo-constants`, `expo-status-bar`, `expo-splash-screen`, `expo-font`, `@expo-google-fonts/figtree` | The app itself: screens, navigation, start-up, fonts | Nothing beyond the app |
 | `react`, `react-native`, `react-native-screens`, `react-native-safe-area-context`, `react-native-svg`, `react-dom`, `react-native-web` | Drawing the screens | Nothing beyond the app |
-| `expo-secure-store` | Keeping the sign-in tokens in the phone's keychain or keystore | The keychain |
-| `expo-crypto` | The random key that names this install as a device | Nothing beyond the app |
+| `expo-secure-store` | Keeping the sign-in tokens in the phone's keychain or keystore, and the agent's app PIN behind their fingerprint or face when they turn that on | The keychain, Face ID or fingerprint |
+| `expo-crypto` | The random key that names this install as a device, and the hash of a signed money request's body | Nothing beyond the app |
+| `modules/device-key` (Jiffo's own) | The agent app's signing key in the Secure Enclave or Android Keystore, for money requests (A3). No third party | The secure hardware |
+| `expo-dev-client` | Development builds only, to try the native key before a store build; the store builds don't include its launcher | Nothing beyond the app |
 | `expo-device` | The phone's model, for the list of signed-in devices, and whether it's a real phone before asking for push | Device model |
 | `expo-location`, `expo-task-manager` | An agent's live location while on a job, and the customer's own location when they choose it | Location, with the person's permission |
 | `react-native-maps` | Maps for errands and live tracking | The platform's map service |
