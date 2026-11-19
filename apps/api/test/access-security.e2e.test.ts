@@ -19,6 +19,7 @@ import {
   signIn,
   type Person,
   type TestApp,
+  signed,
 } from './helpers';
 
 const PICKUP = { lat: LAGOS_STOPS[0]!.lat, lng: LAGOS_STOPS[0]!.lng };
@@ -261,9 +262,8 @@ describe('access rules', () => {
     it("tell agents the bank refused a withdrawal without the provider's words", async () => {
       const agent = await agentWithMoney(t, 300_000);
       t.payments.rejectNextTransfer = 'Recipient RCP_058_0123 account 0123456789 is not valid';
-      const res = await request(t.http)
+      const res = await signed(t, agent)
         .post('/v1/wallet/withdrawals')
-        .set(agent.headers)
         .send({ amountKobo: 100_000, speed: 'instant', requestId: crypto.randomUUID() })
         .expect(201);
       expect(res.body.status).toBe('failed');
@@ -274,9 +274,8 @@ describe('access rules', () => {
     it('don’t send agents to change good bank details when the failure is on the provider’s side', async () => {
       const agent = await agentWithMoney(t, 300_000);
       t.payments.rejectNextTransfer = 'Insufficient balance in your Paystack balance';
-      const res = await request(t.http)
+      const res = await signed(t, agent)
         .post('/v1/wallet/withdrawals')
-        .set(agent.headers)
         .send({ amountKobo: 100_000, speed: 'instant', requestId: crypto.randomUUID() })
         .expect(201);
       expect(res.body.status).toBe('failed');

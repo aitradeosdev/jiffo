@@ -260,6 +260,12 @@ export const SECTIONS: Section[] = [
         help: "Hours. They are told by push, SMS and email, so a change they didn't make is noticed before money can leave. It can't be switched off.",
       },
       {
+        path: 'security.appPinTries',
+        label: 'Wrong app PINs before it locks',
+        kind: 'count',
+        help: 'Between 3 and 10. A locked PIN is reset by signing in again on the phone, which pauses withdrawals.',
+      },
+      {
         path: 'security.dailyIdReveals',
         label: "People's details one staff member may reveal in a day",
         kind: 'count',

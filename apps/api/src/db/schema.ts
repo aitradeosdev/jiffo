@@ -130,6 +130,15 @@ export const users = pgTable(
     withdrawalsHeldUntil: timestamp('withdrawals_held_until', { withTimezone: true }),
     /** What started the hold, for the agent and support. */
     withdrawalsHeldFor: text('withdrawals_held_for', { enum: WITHDRAWAL_HOLD_REASONS }),
+    /**
+     * The app PIN money actions need (docs/security-plan.md, A7): "salt:hash", a keyed hash, never the PIN.
+     * Checked by the server alongside the phone's signature, so guessing it needs the phone.
+     */
+    appPinHash: text('app_pin_hash'),
+    appPinSetAt: timestamp('app_pin_set_at', { withTimezone: true }),
+    /** Wrong PINs in a row; at the limit in Settings, Security, it locks until reset by a fresh sign-in. */
+    appPinFailures: integer('app_pin_failures').notNull().default(0),
+    appPinLockedAt: timestamp('app_pin_locked_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -154,10 +163,38 @@ export const devices = pgTable(
     name: text('name'),
     pushToken: text('push_token'),
     pushUpdatedAt: timestamp('push_updated_at', { withTimezone: true }),
+    /**
+     * The phone's own key (docs/security-plan.md, A3): the public half of a P-256 key made in the Secure
+     * Enclave or Android Keystore, as base64 SPKI. Money requests from this phone are signed with it.
+     */
+    publicKey: text('public_key'),
+    keyAddedAt: timestamp('key_added_at', { withTimezone: true }),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('devices_user_key_app_uq').on(t.userId, t.deviceKey, t.app)],
+);
+
+/** Single-use codes a phone signs a money request over (A3): issued by the server, used once, short-lived. */
+export const deviceChallenges = pgTable(
+  'device_challenges',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    deviceId: uuid('device_id')
+      .notNull()
+      .references(() => devices.id),
+    /** Only the hash of the code is kept. */
+    nonceHash: text('nonce_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('device_challenges_nonce_uq').on(t.nonceHash),
+    index('device_challenges_device_idx').on(t.deviceId),
+    // Clearing old codes, for every phone.
+    index('device_challenges_expires_idx').on(t.expiresAt),
+  ],
 );
 
 export const sessions = pgTable(

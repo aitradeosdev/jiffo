@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { Apps, AuthGuard, CurrentAuth } from '../auth/auth.guard';
+import { Signed } from '../auth/signed.guard';
 import type { AuthContext } from '../auth/auth.types';
 import { ZodBody } from '../common/zod-body';
 import { ErrandId } from '../common/params';
@@ -103,6 +104,8 @@ export class MoneyController {
     return this.fixedAccounts.issue(auth, body);
   }
 
+  // Signed by the agent's phone, with their app PIN (docs/security-plan.md, A3, A5, A7).
+  @Signed()
   @Post('wallet/withdrawals')
   @Apps('agent')
   withdraw(@CurrentAuth() auth: AuthContext, @Body(new ZodBody(WithdrawalBody)) body: z.infer<typeof WithdrawalBody>) {
@@ -127,6 +130,7 @@ export class MoneyController {
     return this.payouts.getAccount(auth);
   }
 
+  @Signed()
   @Put('payout-account')
   @Apps('agent')
   setPayoutAccount(

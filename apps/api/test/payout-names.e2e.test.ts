@@ -14,6 +14,7 @@ import {
   uniqueDigits,
   type Person,
   type TestApp,
+  signed,
 } from './helpers';
 
 describe('payout account names', () => {
@@ -64,7 +65,7 @@ describe('changing a payout account', () => {
   const save = (who: Person, bankName: string) => {
     const accountNumber = `0${uniqueDigits(9)}`;
     t.payments.accounts.set(`058:${accountNumber}`, bankName);
-    return request(t.http).put('/v1/payout-account').set(who.headers).send({ bankCode: '058', accountNumber });
+    return signed(t, who).put('/v1/payout-account').send({ bankCode: '058', accountNumber });
   };
   const inUse = async (who: Person) =>
     (
@@ -97,9 +98,8 @@ describe('changing a payout account', () => {
     expect(pushesTo(token).at(-1)).toMatchObject({ title: 'We are checking your new account' });
     expect((await inUse(who)).id).toBe(before.id);
 
-    const withdrawal = await request(t.http)
+    const withdrawal = await signed(t, who)
       .post('/v1/wallet/withdrawals')
-      .set(who.headers)
       .send({ amountKobo: 100_000, speed: 'scheduled', requestId: randomUUID() })
       .expect(201);
     const [payout] = await t.db.select().from(payouts).where(eq(payouts.id, withdrawal.body.id));
@@ -167,9 +167,8 @@ describe('changing a payout account', () => {
     await save(who, 'T BAKARE').expect(200);
     const detail = (await request(t.http).get(`/v1/admin/people/${who.userId}`).set(finance.headers).expect(200)).body;
     expect(detail.agent.payoutAccount).toMatchObject({ accountName: 'T BAKARE', inReview: true });
-    const withdraw = await request(t.http)
+    const withdraw = await signed(t, who)
       .post('/v1/wallet/withdrawals')
-      .set(who.headers)
       .send({ amountKobo: 100_000, speed: 'scheduled', requestId: randomUUID() });
     expect(withdraw.body.error.code).toBe('payout_account_in_review');
   });

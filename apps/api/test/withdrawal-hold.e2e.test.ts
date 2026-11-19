@@ -5,7 +5,17 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { agentApplications, devices, otpChallenges, payoutAccounts, payouts, users } from '../src/db/schema';
 import { nameIndex } from '../src/db/fields';
 import { PayoutsService } from '../src/money/payouts.service';
-import { adminAs, agentWithMoney, createTestApp, randomIp, uniqueDigits, type Person, type TestApp } from './helpers';
+import {
+  adminAs,
+  agentWithMoney,
+  createTestApp,
+  randomIp,
+  uniqueDigits,
+  type Person,
+  type TestApp,
+  secureDevice,
+  signed,
+} from './helpers';
 
 const HOUR_MS = 3_600_000;
 
@@ -21,10 +31,7 @@ describe('the withdrawal hold after an account change', () => {
   afterAll(() => t.close());
 
   const withdraw = (agent: Person, speed: 'scheduled' | 'instant' = 'scheduled') =>
-    request(t.http)
-      .post('/v1/wallet/withdrawals')
-      .set(agent.headers)
-      .send({ amountKobo: 100_000, speed, requestId: randomUUID() });
+    signed(t, agent).post('/v1/wallet/withdrawals').send({ amountKobo: 100_000, speed, requestId: randomUUID() });
   const heldUntil = async (agent: Person) =>
     (await t.db.select({ until: users.withdrawalsHeldUntil }).from(users).where(eq(users.id, agent.userId)))[0]!.until;
   const endHold = (agent: Person) =>
@@ -63,11 +70,15 @@ describe('the withdrawal hold after an account change', () => {
         device: { key: deviceKey, platform: 'android', name: 'Test phone' },
       })
       .expect(200);
-    return {
+    const person: Person = {
       ...agent,
       accessToken: res.body.accessToken,
       headers: { Authorization: `Bearer ${res.body.accessToken}` },
     };
+    if (app !== 'agent') return person;
+    // A phone already set up keeps its key; a new one is set up, as the app does after signing in.
+    const status = (await request(t.http).get('/v1/me/security').set(person.headers).expect(200)).body;
+    return status.deviceKey ? person : secureDevice(t, person);
   }
   const deviceKeyOf = async (agent: Person) =>
     (
@@ -79,7 +90,7 @@ describe('the withdrawal hold after an account change', () => {
   const newAccount = (agent: Person, name = 'TUNDE BAKARE') => {
     const accountNumber = `0${uniqueDigits(9)}`;
     t.payments.accounts.set(`058:${accountNumber}`, name);
-    return request(t.http).put('/v1/payout-account').set(agent.headers).send({ bankCode: '058', accountNumber });
+    return signed(t, agent).put('/v1/payout-account').send({ bankCode: '058', accountNumber });
   };
 
   it("doesn't hold a new agent's first account or first phone", async () => {
@@ -97,9 +108,8 @@ describe('the withdrawal hold after an account change', () => {
 
     await newAccount(agent).expect(200);
     await expectHeld(agent);
-    await request(t.http)
+    await signed(t, agent)
       .post('/v1/wallet/withdrawals')
-      .set(agent.headers)
       .send({ amountKobo: 100_000, speed: 'instant', requestId: randomUUID() })
       .expect(409);
 
@@ -183,7 +193,7 @@ describe('the withdrawal hold after an account change', () => {
       .select({ bankCode: payoutAccounts.bankCode, accountNumber: payoutAccounts.accountNumber })
       .from(payoutAccounts)
       .where(and(eq(payoutAccounts.userId, agent.userId), isNull(payoutAccounts.replacedAt)));
-    await request(t.http).put('/v1/payout-account').set(agent.headers).send(current!).expect(200);
+    await signed(t, agent).put('/v1/payout-account').send(current!).expect(200);
     expect(await heldUntil(agent)).toBeNull();
   });
 

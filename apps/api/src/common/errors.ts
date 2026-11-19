@@ -14,7 +14,8 @@ export const badRequest = (code: string, message: string, details?: Record<strin
   new ApiError(HttpStatus.BAD_REQUEST, code, message, details);
 export const unauthorized = (code: string, message: string, details?: Record<string, unknown>) =>
   new ApiError(HttpStatus.UNAUTHORIZED, code, message, details);
-export const forbidden = (code: string, message: string) => new ApiError(HttpStatus.FORBIDDEN, code, message);
+export const forbidden = (code: string, message: string, details?: Record<string, unknown>) =>
+  new ApiError(HttpStatus.FORBIDDEN, code, message, details);
 export const notFound = (code: string, message: string) => new ApiError(HttpStatus.NOT_FOUND, code, message);
 export const conflict = (code: string, message: string, details?: Record<string, unknown>) =>
   new ApiError(HttpStatus.CONFLICT, code, message, details);

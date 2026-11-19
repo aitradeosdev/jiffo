@@ -17,6 +17,7 @@ import {
   signIn,
   type TestApp,
   switchProvider,
+  signed,
 } from './helpers';
 
 describe('admin: providers', () => {
@@ -156,11 +157,7 @@ describe('admin: providers', () => {
     const agent = await signIn(t, 'agent');
     await request(t.http).patch('/v1/me').set(agent.headers).send({ lastName: 'Bakare' }).expect(200);
     t.payments.accounts.set('058:0222333444', 'TUNDE BAKARE');
-    await request(t.http)
-      .put('/v1/payout-account')
-      .set(agent.headers)
-      .send({ bankCode: '058', accountNumber: '0222333444' })
-      .expect(200);
+    await signed(t, agent).put('/v1/payout-account').send({ bankCode: '058', accountNumber: '0222333444' }).expect(200);
     const credited = await approved(t, 'finance', (h) =>
       request(t.http).post('/v1/admin/money/adjustments').set(h).send({
         personId: agent.userId,
@@ -192,9 +189,8 @@ describe('admin: providers', () => {
     const transfer = vi
       .spyOn(PaystackPaymentsAdapter.prototype, 'transfer')
       .mockResolvedValue({ status: 'pending', transferCode: 'TRF_1', reason: '', feeKobo: undefined });
-    const res = await request(t.http)
+    const res = await signed(t, agent)
       .post('/v1/wallet/withdrawals')
-      .set(agent.headers)
       .send({ requestId: randomUUID(), amountKobo: 200_000, speed: 'instant' })
       .expect(201);
     expect(recipient).toHaveBeenCalledWith({ name: 'TUNDE BAKARE', bankCode: '058', accountNumber: '0222333444' });
