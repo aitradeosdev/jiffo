@@ -113,6 +113,7 @@ How Jiffo protects people, money and data, area by area. What is required is in 
 - **The app PIN:** 4 digits, not a run or one digit repeated, kept as a keyed hash. Money actions carry it and the server checks it after the signature, so guessing it needs the phone. Fingerprint or face can fill it in from the phone's locked storage.
 - **Wrong PINs:** counted; at the limit in Settings, Security (default 5) it locks, even for the right PIN, until reset by signing in again on the phone. Changing it needs the current PIN.
 - **A new PIN pauses withdrawals** for 48 hours, like a new account or phone: whoever took the number over would reset it that way.
+- **Handing a phone on:** a plain log-out keeps the phone known, so the agent can sign back in on it without a hold. "Log out and forget this phone" drops its key from the account and deletes it from the phone: signing in on it again counts as a new phone, with the 48-hour hold, even if it was the agent's only one.
 - So an SMS code alone never moves money (A5): it gets a session, but not the key on the owner's phone or their PIN.
 
 ## Withdrawals

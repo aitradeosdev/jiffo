@@ -85,14 +85,16 @@ export class AuthService {
       // A phone the agent app has never seen on this account, when it has seen others: whoever has the number
       // now may not be the agent, so their withdrawals wait (docs/security-plan.md, A6, X4). An agent's first
       // phone, and the customer app, don't count.
+      // A phone its owner asked to forget counts as new, and a forgotten one still counts as having had a phone:
+      // whoever kept it can't skip the hold, even on the agent's only phone.
       const known =
         app === 'agent'
           ? await tx
-              .select({ key: devices.deviceKey })
+              .select({ key: devices.deviceKey, forgottenAt: devices.forgottenAt })
               .from(devices)
               .where(and(eq(devices.userId, user.id), eq(devices.app, 'agent')))
           : [];
-      const newPhone = known.length > 0 && !known.some((d) => d.key === device.key);
+      const newPhone = known.length > 0 && !known.some((d) => d.key === device.key && !d.forgottenAt);
       const heldUntil = newPhone ? await this.holds.start(tx, user.id, 'new_device') : null;
 
       const [deviceRow] = await tx
@@ -100,7 +102,7 @@ export class AuthService {
         .values({ userId: user.id, deviceKey: device.key, app, platform: device.platform, name: device.name ?? null })
         .onConflictDoUpdate({
           target: [devices.userId, devices.deviceKey, devices.app],
-          set: { platform: device.platform, name: device.name ?? null, lastSeenAt: new Date() },
+          set: { platform: device.platform, name: device.name ?? null, lastSeenAt: new Date(), forgottenAt: null },
         })
         .returning();
 
@@ -250,14 +252,24 @@ export class AuthService {
     throw unauthorized('invalid_refresh_token', 'Sign in again');
   }
 
-  /** Ends this session and stops push notifications to this phone. */
-  async logout(auth: AuthContext) {
+  /**
+   * Signs this phone out. Forgetting it too, for a phone being handed on, drops its key from the account and
+   * makes the next sign-in on it count as a new phone, with the withdrawal hold (docs/security-plan.md, A6).
+   */
+  async logout(auth: AuthContext, options: { forgetPhone?: boolean } = {}) {
     await this.db.transaction(async (tx) => {
       await tx
         .update(sessions)
-        .set({ revokedAt: new Date(), revokedReason: 'logout' })
+        .set({ revokedAt: new Date(), revokedReason: options.forgetPhone ? 'logout_forget_phone' : 'logout' })
         .where(and(eq(sessions.id, auth.sessionId), isNull(sessions.revokedAt)));
-      await tx.update(devices).set({ pushToken: null, pushUpdatedAt: new Date() }).where(eq(devices.id, auth.deviceId));
+      await tx
+        .update(devices)
+        .set({
+          pushToken: null,
+          pushUpdatedAt: new Date(),
+          ...(options.forgetPhone ? { publicKey: null, keyAddedAt: null, forgottenAt: new Date() } : {}),
+        })
+        .where(eq(devices.id, auth.deviceId));
     });
   }
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import Constants from 'expo-constants';
 import { useSession } from '@/auth/session';
@@ -29,22 +29,40 @@ export default function Account() {
   const { config } = useCountryConfig();
   const stats = useResource<Stats>('/v1/me/stats');
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<'out' | 'others' | null>(null);
+  const [busy, setBusy] = useState<'out' | 'forget' | 'others' | null>(null);
   const [othersDone, setOthersDone] = useState(false);
   const agent = VARIANT === 'agent';
   const name = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Your account';
 
-  const leave = async () => {
-    setBusy('out');
+  const leave = async (forgetPhone = false) => {
+    // One at a time: a plain log-out ending the session first would leave the phone unforgotten.
+    if (busy) return;
+    setBusy(forgetPhone ? 'forget' : 'out');
     setError(null);
     try {
-      await signOut();
+      await signOut({ forgetPhone });
     } catch (e) {
       setError(errorMessage(e));
       setBusy(null);
     }
   };
+  // For a phone being handed on (docs/security-plan.md, A6): asks first, since signing in on it again pauses
+  // withdrawals for a while.
+  const forgetPhone = () => {
+    if (busy) return;
+    const message =
+      'Use this if someone else will use this phone. Your account forgets it: signing in on it again counts as a new phone, and withdrawals pause for a while, for your safety.';
+    if (Platform.OS === 'web') {
+      if (window.confirm(message)) void leave(true);
+      return;
+    }
+    Alert.alert('Log out and forget this phone?', message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log out and forget', style: 'destructive', onPress: () => void leave(true) },
+    ]);
+  };
   const leaveOthers = async () => {
+    if (busy) return;
     setBusy('others');
     setError(null);
     try {
@@ -102,7 +120,10 @@ export default function Account() {
           onPress={othersDone ? undefined : leaveOthers}
           busy={busy === 'others'}
         />
-        <MinorRow label="Log out" onPress={leave} busy={busy === 'out'} />
+        <MinorRow label="Log out" onPress={() => void leave()} busy={busy === 'out'} />
+        {agent ? (
+          <MinorRow label="Log out and forget this phone" onPress={forgetPhone} busy={busy === 'forget'} />
+        ) : null}
       </View>
       {error ? (
         <Text tone="danger" accessibilityLiveRegion="polite">

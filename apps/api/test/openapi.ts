@@ -195,7 +195,12 @@ export function openApiDocument(app: INestApplication) {
               }
             }
             if (arg.type === RouteParamtypes.BODY && schema) {
-              requestBody = { required: true, content: { 'application/json': { schema: jsonSchema(schema) } } };
+              // A body with a default (or optional) can be left out: logout's forgetPhone, say.
+              const optional = schema.isOptional();
+              requestBody = {
+                required: !optional,
+                content: { 'application/json': { schema: jsonSchema(schema) } },
+              };
             }
           }
 

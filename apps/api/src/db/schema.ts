@@ -169,6 +169,11 @@ export const devices = pgTable(
      */
     publicKey: text('public_key'),
     keyAddedAt: timestamp('key_added_at', { withTimezone: true }),
+    /**
+     * Set when its owner signed out and asked to forget it, handing it on: signing in on it again counts as a
+     * new phone, with the withdrawal hold (A6). Cleared by that sign-in.
+     */
+    forgottenAt: timestamp('forgotten_at', { withTimezone: true }),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: createdAt(),
   },

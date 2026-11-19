@@ -44,8 +44,9 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 9d. Admin: the audit log (reasons, browser, before and after, append-only, the command line) and masked personal details (D5, D7) | aitradeosdev/jiffo#58 | merged |
 | 9e. Admin: staff linked to their own app accounts (D3) and the admin API on its own port (D1) | aitradeosdev/jiffo#60 | merged |
 | 10a. Agents: withdrawals held after a new payout account or a sign-in on a new phone (A6, P8, X4) | aitradeosdev/jiffo#61 | merged |
-| 10b. Agents: the phone's key, signed money requests and the app PIN, server side (A3, A5, A7) | aitradeosdev/jiffo#62 | open |
-| 10b. Agents: the phone's key, signed money requests and the app PIN, in the agent app | this pull request | open |
+| 10b. Agents: the phone's key, signed money requests and the app PIN, server side (A3, A5, A7) | aitradeosdev/jiffo#62 | merged |
+| 10b. Agents: the phone's key, signed money requests and the app PIN, in the agent app | aitradeosdev/jiffo#63 | merged |
+| 10b. Agents: "log out and forget this phone", for a phone being handed on (A3, A6) | this pull request | open |
 
 ## Summary
 
@@ -421,7 +422,7 @@ One area per pull request, abuse tests first. Every one that touches login, mone
     - GPS trail with fake-GPS checks and 90-day deletion
     - chat warning flags
     - upload byte checks, re-encoding and location stripping
-    - face and shared-account flags
+    - face and shared-account flags, including one phone's key registered on two agent accounts
     - tier counts without flagged errands
 
     Covers X1–X3, E5, E6, E8, E9, C1, C3, G1, G4, I3, F3.
