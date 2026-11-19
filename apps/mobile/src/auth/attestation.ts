@@ -118,10 +118,19 @@ export async function attestationHeaders(
 ): Promise<Record<string, string>> {
   const native = deps.native;
   if (!native || deps.platform === 'web') return {};
-  // Sent whether or not a check can be made: the app's own word, which adds to Google's and Apple's.
-  const signals = await native.riskSignals?.().catch(() => []);
-  const risk: Record<string, string> = signals?.length ? { [ATTEST_HEADERS.risk]: signals.join(',') } : {};
-  return { ...risk, ...(await check(deps, native, method, path, body)) };
+  // Sent whether or not a check can be made: the app's own word, which adds to Google's and Apple's. A build
+  // that can't look for them sends none.
+  let signals: string[] = [];
+  try {
+    signals = (await native.riskSignals?.()) ?? [];
+  } catch {
+    signals = [];
+  }
+  const risk = [...new Set(signals)].sort().join(',');
+  return {
+    ...(risk ? { [ATTEST_HEADERS.risk]: risk } : {}),
+    ...(await check(deps, native, method, path, body, risk)),
+  };
 }
 
 async function check(
@@ -130,6 +139,8 @@ async function check(
   method: 'POST' | 'PUT',
   path: string,
   body: unknown,
+  /** The risk header as sent, which the check covers, as the server hashes it. */
+  risk: string,
 ): Promise<Record<string, string>> {
   if (native.ready?.() === false) return {};
   try {
@@ -137,7 +148,8 @@ async function check(
     // An iPhone needs its key first; without one, no code is asked for.
     if (deps.platform === 'ios' && !(await appleKeyId(deps, native, deviceKey))) return {};
     const { nonce } = await challenge(deps, deviceKey);
-    const hash = await deps.sha256Hex(await signedPayload(nonce, method, path, JSON.stringify(body), deps.sha256Hex));
+    const payload = await signedPayload(nonce, method, path, JSON.stringify(body), deps.sha256Hex);
+    const hash = await deps.sha256Hex(`${payload}\nrisk:${risk}`);
     if (deps.platform === 'ios') {
       const signed = await appleAssertion(deps, native, deviceKey, hash);
       if (!signed) return {};

@@ -111,26 +111,38 @@ object RiskChecks {
     "/data/local/bin/su", "/system/sd/xbin/su", "/system/bin/failsafe/su", "/data/local/su", "/su/bin/su",
     "/system/bin/.ext/su", "/system/usr/we-need-root/su", "/cache/su", "/data/adb/magisk",
   )
-  private val hookNames = listOf("frida", "gum-js-loop", "gmain", "linjector", "xposed", "lsposed", "substrate")
+  private val hookLibraries = listOf("frida", "linjector", "xposed", "lsposed", "substrate")
+  /** Frida's own threads, by the names they run under. */
+  private val hookThreads = setOf("gum-js-loop", "gmain", "gdbus", "pool-frida", "frida-main")
 
   fun rooted(): Boolean =
     Build.TAGS?.contains("test-keys") == true || suPaths.any { File(it).exists() }
 
+  /**
+   * Google's emulator and the usual others, by the markers they are known by, not loose matches a real
+   * phone's build could share.
+   */
   fun emulator(): Boolean {
-    val fingerprint = Build.FINGERPRINT.lowercase()
-    val model = Build.MODEL.lowercase()
-    val hardware = Build.HARDWARE.lowercase()
-    val product = Build.PRODUCT.lowercase()
-    return fingerprint.startsWith("generic") || fingerprint.contains("emulator") ||
-      model.contains("emulator") || model.contains("android sdk built for") || model.contains("sdk_gphone") ||
-      hardware.contains("goldfish") || hardware.contains("ranchu") ||
-      product.contains("sdk") || product.contains("emulator") || product.contains("simulator")
+    val product = Build.PRODUCT
+    return Build.HARDWARE in setOf("goldfish", "ranchu", "vbox86") ||
+      product == "sdk" || product == "google_sdk" || product.startsWith("sdk_gphone") ||
+      product.startsWith("sdk_x86") || product == "vbox86p" ||
+      Build.FINGERPRINT.startsWith("generic/sdk") || Build.FINGERPRINT.startsWith("google/sdk_gphone") ||
+      Build.MODEL.startsWith("Android SDK built for") || Build.MANUFACTURER.contains("Genymotion") ||
+      File("/dev/qemu_pipe").exists() || File("/dev/socket/qemud").exists()
   }
 
-  /** A hooking library loaded into the app, the Xposed bridge, or Frida's server listening on the phone. */
+  /**
+   * A hooking library loaded into the app, Frida's threads in it, the Xposed bridge, or Frida's server
+   * listening on the phone.
+   */
   fun hooked(): Boolean {
     val maps = runCatching { File("/proc/self/maps").readText().lowercase() }.getOrDefault("")
-    if (hookNames.any { maps.contains(it) }) return true
+    if (hookLibraries.any { maps.contains(it) }) return true
+    val threads = runCatching {
+      File("/proc/self/task").listFiles().orEmpty().map { File(it, "comm").readText().trim().lowercase() }
+    }.getOrDefault(emptyList())
+    if (threads.any { it in hookThreads }) return true
     if (runCatching { Class.forName("de.robv.android.xposed.XposedBridge") }.isSuccess) return true
     return runCatching {
       Socket().use { it.connect(InetSocketAddress("127.0.0.1", 27042), 150) }

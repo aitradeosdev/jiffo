@@ -165,10 +165,13 @@ export class AttestationService {
           reasons: [...judged.reasons, ...signals.map((s) => RISK_LABELS[s])],
         }
       : judged;
-    await this.db
-      .update(devices)
-      .set({ riskSignals: signals, riskSignalsAt: new Date() })
-      .where(and(eq(devices.deviceKey, ctx.deviceKey), eq(devices.app, ctx.app)));
+    // Kept for this account's own device only; at sign-in, the device row takes them as it is made.
+    if (ctx.userId) {
+      await this.db
+        .update(devices)
+        .set({ riskSignals: signals, riskSignalsAt: new Date() })
+        .where(and(eq(devices.userId, ctx.userId), eq(devices.deviceKey, ctx.deviceKey), eq(devices.app, ctx.app)));
+    }
     await this.db.insert(deviceAttestations).values({
       signals,
       deviceKey: ctx.deviceKey,
@@ -226,7 +229,7 @@ export class AttestationService {
     const { nonce, token, keyId } = ctx.evidence;
     if (!nonce || !token) return { verdict: 'missing', reasons: [] };
     if (!(await this.consume(ctx.deviceKey, nonce))) return { verdict: 'failed', reasons: ['Expired or used code'] };
-    const hash = attestedHash(nonce, ctx.request.method, ctx.request.path, ctx.request.body);
+    const hash = attestedHash(nonce, ctx.request.method, ctx.request.path, ctx.request.body, ctx.evidence.risk ?? '');
 
     // Development and tests: a stand-in that says what it's told, never in production.
     if (!this.production() && token.startsWith('fake:')) {

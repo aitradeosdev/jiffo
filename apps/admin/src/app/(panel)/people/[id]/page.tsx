@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { agentTierLabel, WITHDRAWAL_HOLD_INFO } from '@jiffo/shared';
+import { agentTierLabel, RISK_LABELS, WITHDRAWAL_HOLD_INFO, type RiskSignal } from '@jiffo/shared';
 import { birth } from './birth';
 import { RevealCard } from './reveal';
 import { notFound } from 'next/navigation';
@@ -154,14 +154,6 @@ const HISTORY: Record<string, string> = {
   payout_reversed: 'Withdrawal returned',
   hold_release: 'Earnings now available',
   settle: 'Errand paid out',
-};
-
-/** What the app reports finding on a phone (docs/security-plan.md, MB4). */
-const RISK_LABELS: Record<string, string> = {
-  rooted: 'rooted or jailbroken',
-  emulator: 'an emulator',
-  hooking: 'a hooking tool',
-  debugger: 'a debugger',
 };
 
 export default async function PersonPage({
@@ -419,7 +411,7 @@ export default async function PersonPage({
                     </p>
                     {dev.riskSignals.length ? (
                       <p className="text-[13px] font-semibold text-danger">
-                        The app found: {dev.riskSignals.map((s) => RISK_LABELS[s] ?? s).join(', ')}
+                        The app found: {dev.riskSignals.map((s) => RISK_LABELS[s as RiskSignal] ?? s).join('; ')}
                         {dev.riskSignalsAt ? ` (${ago(dev.riskSignalsAt, country.timezone)})` : ''}
                       </p>
                     ) : null}

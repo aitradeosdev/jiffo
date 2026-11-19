@@ -82,10 +82,10 @@ Google Play Integrity on Android and Apple App Attest on iOS show that a request
   - a hooking tool (Frida's libraries or server, Xposed, Substrate);
   - an attached debugger.
 
-  They send what they find with each app check (`x-jiffo-risk`), even when no check can be made.
-- **On the server:** a phone with signals counts as doubtful. On Enforce, that means a selfie first, as for a phone Google or Apple doubts. Each check keeps the signals (`device_attestations.signals`), the device keeps the latest, and staff see them on the person's page under Devices.
-- **Mock locations:** the agent app sends the phone's own word that a position is mocked (Android). A mocked position can't place an agent at a drop-off: marking an errand delivered, the hand-off PIN and the drop-off photo are refused until a real position comes in.
-- **Limits:** these are the app's own word, so a changed app could leave them out. They add to Google's and Apple's checks (MB3), which run outside the app. Virtual cameras are for Smile ID's liveness and injection checks to catch (I2).
+  They send what they find with each app check (`x-jiffo-risk`), even when no check can be made. The check covers what is sent, so it can be neither dropped nor changed on the way.
+- **On the server:** a phone with signals counts as doubtful. On Enforce, that means a selfie first, as for a phone Google or Apple doubts. Each check keeps the signals (`device_attestations.signals`), the account's device keeps the latest, and staff see them on the person's page under Devices.
+- **Mock locations:** the agent app sends the phone's own word that a position is mocked (Android). A mocked position can't place an agent at a drop-off: marking an errand delivered, the hand-off PIN and the drop-off photo are refused until a real position comes in. It isn't shown or sent to the customer, isn't counted among agents nearby, and doesn't open the board.
+- **Limits:** these are the app's own word, so a changed app could leave them out (though not without failing the check, which covers them). They add to Google's and Apple's checks (MB3), which run outside the app. Virtual cameras are for Smile ID's liveness and injection checks to catch (I2).
 
 ## The apps on the phone
 

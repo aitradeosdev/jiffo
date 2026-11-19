@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { RiskSignal } from '@jiffo/shared';
 import { signedPayload } from '../auth/device-security.service';
 
 /**
@@ -32,38 +33,31 @@ export const ATTEST_HEADERS = {
   risk: 'x-jiffo-risk',
 } as const;
 
-/**
- * What the app looks for on the phone (docs/security-plan.md, MB4). It is the app's own word, so it adds to
- * Google's and Apple's checks rather than standing in for them: a changed app could leave it out.
- */
-export const RISK_SIGNALS = ['rooted', 'emulator', 'hooking', 'debugger'] as const;
-export type RiskSignal = (typeof RISK_SIGNALS)[number];
-export const RISK_LABELS: Record<RiskSignal, string> = {
-  rooted: 'A rooted or jailbroken phone',
-  emulator: 'An emulator',
-  hooking: 'A hooking tool such as Frida',
-  debugger: 'A debugger attached',
-};
-
-/** The known signals in a header's comma-separated list, each once; anything else is dropped. */
-export const riskSignalsOf = (header: string | undefined): RiskSignal[] =>
-  [...new Set((header ?? '').split(',').map((s) => s.trim()))].filter((s): s is RiskSignal =>
-    (RISK_SIGNALS as readonly string[]).includes(s),
-  );
+export { RISK_LABELS, RISK_SIGNALS, riskSignalsOf, type RiskSignal } from '@jiffo/shared';
 
 export interface AttestEvidence {
   nonce?: string;
   token?: string;
   keyId?: string;
   signals?: RiskSignal[];
+  /** The risk header as sent, which the check covers. */
+  risk?: string;
 }
 
 /**
- * What an attestation covers: the server's single-use code, the method and path, and the body's hash, as a
- * signed money request does. As hex for Play Integrity's request hash; the raw bytes for App Attest.
+ * What an attestation covers: the server's single-use code, the method and path, the body's hash, as a
+ * signed money request does, and the risk signals sent with it. As hex for Play Integrity's request hash; the
+ * raw bytes for App Attest.
  */
-export function attestedHash(nonce: string, method: string, path: string, body: Buffer | string | undefined) {
+export function attestedHash(
+  nonce: string,
+  method: string,
+  path: string,
+  body: Buffer | string | undefined,
+  /** The risk signals' header as sent (MB4), so they can be neither dropped nor changed on the way. */
+  risk = '',
+) {
   return createHash('sha256')
-    .update(signedPayload(nonce, method, path, body))
+    .update(`${signedPayload(nonce, method, path, body)}\nrisk:${risk}`)
     .digest();
 }

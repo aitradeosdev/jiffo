@@ -216,9 +216,15 @@ export class ErrandsService implements OnModuleInit {
     const [, current, { rows: positions }] = await Promise.all([
       this.applications.assertApproved(auth.userId),
       this.countries.currentSettingsIfAny(auth.countryCode),
-      this.db.execute<{ at: Date | string | null; lat: number | null; lng: number | null; km: number | string | null }>(
+      this.db.execute<{
+        at: Date | string | null;
+        lat: number | null;
+        lng: number | null;
+        km: number | string | null;
+        mocked: boolean;
+      }>(
         sql`
-          select located_at as at, lat, lng,
+          select located_at as at, lat, lng, mocked,
             ST_Distance(location, ST_SetSRID(ST_MakePoint(${q.lng}, ${q.lat}), 4326)::geography) / 1000 as km
           from agent_presence where user_id = ${auth.userId} and location is not null`,
       ),
@@ -229,6 +235,8 @@ export class ErrandsService implements OnModuleInit {
     if (!at || at.lat === null || at.lng === null || !freshWithin(at.at, security.positionFreshMinutes)) {
       throw conflict('location_needed', 'Turn on location to see errands near you');
     }
+    // A mocked position (MB4) shows no errands: it says nothing about where the agent is.
+    if (at.mocked) throw unprocessable('mock_location', 'Turn off mock location to see errands near you');
     if (Number(at.km) > security.boardNearKm) {
       throw unprocessable('not_here', 'The board shows errands near where you are');
     }

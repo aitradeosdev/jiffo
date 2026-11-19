@@ -123,7 +123,8 @@ export class PresenceService {
     // An errand may have ended while this was being written: if the agent is offline and now idle,
     // forget the position again rather than keep it.
     if (!body.online && sharing) await this.forgetIfIdle(auth.userId);
-    if (located) {
+    // A mocked position (MB4) isn't sent on: it says nothing about where the agent is.
+    if (located && !body.mocked) {
       for (const e of sharedWith(running)) {
         this.realtime.toUser(e.customerId, 'customer', 'agent.location', {
           errandId: e.id,
@@ -193,10 +194,15 @@ export class PresenceService {
   /** The agent's last position, if recent enough to show the customer. */
   private async locationOf(agentId: string) {
     const [row] = await this.db
-      .select({ lat: agentPresence.lat, lng: agentPresence.lng, at: agentPresence.locatedAt })
+      .select({
+        lat: agentPresence.lat,
+        lng: agentPresence.lng,
+        at: agentPresence.locatedAt,
+        mocked: agentPresence.mocked,
+      })
       .from(agentPresence)
       .where(eq(agentPresence.userId, agentId));
-    if (!row?.at || row.lat === null || row.lng === null) return null;
+    if (!row?.at || row.lat === null || row.lng === null || row.mocked) return null;
     if (Date.now() - row.at.getTime() > SHOW_FOR_MS) return null;
     return { lat: row.lat, lng: row.lng, at: row.at };
   }
@@ -210,6 +216,7 @@ export class PresenceService {
         and(
           eq(agentPresence.countryCode, countryCode),
           eq(agentPresence.online, true),
+          eq(agentPresence.mocked, false),
           ne(agentPresence.userId, excludeUserId),
           gt(agentPresence.locatedAt, new Date(Date.now() - ONLINE_FOR_MS)),
           sql`ST_DWithin(${agentPresence.location}, ${point(lat, lng)}, ${radiusMeters})`,

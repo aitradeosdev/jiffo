@@ -4,9 +4,9 @@ import { ATTEST_HEADERS, attestationHeaders, type AttestDeps, type AttestNative 
 
 const sha256Hex = async (text: string) => createHash('sha256').update(text).digest('hex');
 /** The API's own hash of a checked request (apps/api/src/attestation/attestation.types.ts), written out. */
-const serverHash = (nonce: string, method: string, path: string, body: string) =>
+const serverHash = (nonce: string, method: string, path: string, body: string, risk = '') =>
   createHash('sha256')
-    .update([nonce, method, path, createHash('sha256').update(body).digest('hex')].join('\n'))
+    .update([nonce, method, path, createHash('sha256').update(body).digest('hex'), `risk:${risk}`].join('\n'))
     .digest('hex');
 
 function deps(platform: 'ios' | 'android', native: Partial<AttestNative> = {}) {
@@ -136,7 +136,13 @@ describe('app checks from the phone (MB3)', () => {
   it('sends what the app finds on the phone with the check, and even when no check can be made', async () => {
     const { d } = deps('android', { riskSignals: async () => ['rooted', 'hooking'] });
     const headers = await attestationHeaders(d, 'POST', '/v1/wallet/withdrawals', BODY);
-    expect(headers).toMatchObject({ [ATTEST_HEADERS.risk]: 'rooted,hooking', [ATTEST_HEADERS.nonce]: 'nonce-1' });
+    // The check covers the signals, so they can be neither dropped nor changed on the way.
+    const hash = serverHash('nonce-1', 'POST', '/v1/wallet/withdrawals', JSON.stringify(BODY), 'hooking,rooted');
+    expect(headers).toEqual({
+      [ATTEST_HEADERS.risk]: 'hooking,rooted',
+      [ATTEST_HEADERS.nonce]: 'nonce-1',
+      [ATTEST_HEADERS.token]: `play:${hash}`,
+    });
     const failing = deps('android', {
       riskSignals: async () => ['emulator'],
       integrityToken: async () => Promise.reject(new Error('no Play')),
@@ -144,5 +150,16 @@ describe('app checks from the phone (MB3)', () => {
     expect(await attestationHeaders(failing.d, 'POST', '/v1/wallet/withdrawals', BODY)).toEqual({
       [ATTEST_HEADERS.risk]: 'emulator',
     });
+  });
+
+  it("makes the check without signals when the phone's build can't look for them", async () => {
+    const { d } = deps('android', {
+      riskSignals: (() => {
+        throw new TypeError('riskSignals is not a function');
+      }) as unknown as AttestNative['riskSignals'],
+    });
+    const headers = await attestationHeaders(d, 'POST', '/v1/wallet/withdrawals', BODY);
+    expect(headers[ATTEST_HEADERS.token]).toMatch(/^play:/);
+    expect(headers[ATTEST_HEADERS.risk]).toBeUndefined();
   });
 });

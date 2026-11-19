@@ -4,7 +4,7 @@ import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ATTEST_HEADERS } from '../src/attestation/attestation.types';
 import { CountriesService } from '../src/countries/countries.service';
-import { agentSelfieChecks, deviceAttestations, errandStops } from '../src/db/schema';
+import { agentSelfieChecks, deviceAttestations, devices, errandStops } from '../src/db/schema';
 import {
   act,
   adminAs,
@@ -101,5 +101,47 @@ describe('risk signals', () => {
     expect(refused.body.error.code).toBe('mock_location');
     await report(false);
     expect((await deliver()).status).toBe(200);
+  });
+
+  it("keeps each account's signals to itself on a phone two accounts use", async () => {
+    const first = await signIn(t, 'agent');
+    // A second account signs in on the same install.
+    const phone = `+234803${String(Date.now()).slice(-7)}`;
+    await request(t.http).post('/v1/auth/otp/request').send({ phone }).expect(200);
+    await request(t.http)
+      .post('/v1/auth/otp/verify')
+      .set(ATTEST_HEADERS.risk, 'emulator')
+      .send({
+        phone,
+        code: t.messaging.lastCodeFor(phone),
+        app: 'agent',
+        device: { key: first.installKey, platform: 'android' },
+      })
+      .expect(200);
+    const rows = await t.db
+      .select({ userId: devices.userId, riskSignals: devices.riskSignals })
+      .from(devices)
+      .where(eq(devices.deviceKey, first.installKey!));
+    expect(rows.find((r) => r.userId === first.userId)?.riskSignals).toEqual([]);
+    expect(rows.find((r) => r.userId !== first.userId)?.riskSignals).toEqual(['emulator']);
+  });
+
+  it("doesn't show a mocked position to the customer, or search the board around it", async () => {
+    const agent = await signIn(t, 'agent');
+    const customer = await signIn(t, 'customer');
+    await fund(t, customer);
+    const errand = await createErrand(t, customer);
+    await act(t, agent, errand.id, 'accept');
+    await act(t, agent, errand.id, 'start');
+    await request(t.http)
+      .put('/v1/agent/presence')
+      .set(agent.headers)
+      .send({ online: true, lat: 6.448, lng: 3.47, mocked: true })
+      .expect(200);
+    const view = (await request(t.http).get(`/v1/errands/${errand.id}`).set(customer.headers).expect(200)).body;
+    expect(view.agentLocation ?? null).toBeNull();
+    const board = await request(t.http).get('/v1/errands/board?lat=6.4480&lng=3.4700&radiusKm=5').set(agent.headers);
+    expect(board.status).toBe(422);
+    expect(board.body.error.code).toBe('mock_location');
   });
 });

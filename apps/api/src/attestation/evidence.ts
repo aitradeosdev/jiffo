@@ -8,6 +8,7 @@ export function evidenceOf(req: Request & { rawBody?: Buffer }) {
     token: req.header(ATTEST_HEADERS.token) || undefined,
     keyId: req.header(ATTEST_HEADERS.keyId) || undefined,
     signals: riskSignalsOf(req.header(ATTEST_HEADERS.risk)),
+    risk: req.header(ATTEST_HEADERS.risk)?.trim() ?? '',
   };
   return { evidence, request: { method: req.method, path: req.originalUrl, body: req.rawBody } };
 }
