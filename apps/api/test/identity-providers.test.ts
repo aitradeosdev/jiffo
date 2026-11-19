@@ -175,6 +175,7 @@ describe('Smile ID selfie checks, for agents (I8)', () => {
       token: 'jwt-scoped',
       partnerId: '1234',
       sandbox: true,
+      privacyPolicyUrl: 'https://jiffo.test/privacy',
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe('https://testapi.smileidentity.com/v3/token');

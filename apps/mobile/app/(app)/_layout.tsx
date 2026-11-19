@@ -5,6 +5,7 @@ import { useSession } from '@/auth/session';
 import { Connecting } from '@/ui/connecting';
 import { DraftProvider } from '@/errands/draft';
 import { AgentPresenceProvider } from '@/agent/presence';
+import { SelfieProvider } from '@/agent/selfie-gate';
 import { ApplicationProvider, useApplication } from '@/agent/application';
 import { VARIANT } from '@/config';
 import { Button } from '@/ui/kit';
@@ -34,12 +35,14 @@ export default function AppLayout() {
       </Stack>
     </DraftProvider>
   );
-  // The agent app knows whether its agent is online and where they are, for the board and errands, and
-  // keeps agents on their application until it is approved.
+  // The agent app knows whether its agent is online and where they are, for the board and errands, asks
+  // for selfie checks where the server wants one, and keeps agents on their application until it is approved.
   return VARIANT === 'agent' ? (
     <ApplicationProvider>
       <ApplicationGate>
-        <AgentPresenceProvider>{app}</AgentPresenceProvider>
+        <SelfieProvider>
+          <AgentPresenceProvider>{app}</AgentPresenceProvider>
+        </SelfieProvider>
       </ApplicationGate>
     </ApplicationProvider>
   ) : (

@@ -3,7 +3,7 @@ import { AppState, Linking, View } from 'react-native';
 import * as Location from 'expo-location';
 import { useSession } from '../auth/session';
 import { useRealtimeEvent } from '../realtime/realtime';
-import { errorMessage } from '../api/client';
+import { ApiError, errorMessage } from '../api/client';
 import type { Coords } from '../location';
 import { Button, Text } from '../ui/kit';
 import { ModalSheet } from '../ui/modal-sheet';
@@ -15,6 +15,8 @@ import {
   stopBackgroundLocation,
 } from './background-location';
 import { lastSent, markSent, REPORT_EVERY_MS } from './background-rules';
+import { selfieNeeded, withSelfie, type SelfieReason } from './selfie';
+import { useSelfie } from './selfie-gate';
 
 /** Sent this often even when the agent isn't moving, so a parked agent stays visible and online. */
 const HEARTBEAT_MS = 60_000;
@@ -43,6 +45,7 @@ const PresenceContext = createContext<Presence | null>(null);
  */
 export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   const { api, user } = useSession();
+  const selfie = useSelfie();
   const [online, setOnlineState] = useState(false);
   const [coords, setCoords] = useState<Coords | null>(null);
   const [switching, setSwitching] = useState(false);
@@ -63,7 +66,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   const send = useCallback(
     async (next: { online: boolean; lat?: number; lng?: number }) => {
       markSent();
-      await api.put('/v1/agent/presence', next);
+      return api.put<{ online: boolean; selfieNeeded?: SelfieReason }>('/v1/agent/presence', next);
     },
     [api],
   );
@@ -97,9 +100,13 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
       }
       const here = { lat: position.coords.latitude, lng: position.coords.longitude };
       // Report the position first: the board answers only around a recent one.
-      await send({ online: true, ...here }).catch(() => undefined);
+      const res = await send({ online: true, ...here }).catch((e: unknown) =>
+        selfieNeeded(e) ? { online: false } : null,
+      );
       if (switched.current) return;
       setCoords(here);
+      // Taken offline since (the sweep, or support): going online again asks for today's selfie.
+      if (res && !res.online) return;
       setOnlineState(true);
     })();
   }, [api, refresh, send]);
@@ -138,7 +145,17 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
           }
           const here = { lat: position.coords.latitude, lng: position.coords.longitude };
           setCoords(here);
-          await send({ online: true, ...here });
+          // Going online the first time each day needs a selfie (docs/security-plan.md, I8). An agent on an
+          // errand is kept sharing their position, offline, until it passes.
+          const sent = await withSelfie(async () => {
+            const res = await send({ online: true, ...here });
+            if (res.selfieNeeded) {
+              throw new ApiError(403, 'selfie_needed', 'Take your selfie to go online.', { reason: res.selfieNeeded });
+            }
+            return res;
+          }, selfie.take);
+          // Not passed: the selfie screen has said why.
+          if (!sent) return;
         } else {
           await send({ online: false });
         }
@@ -150,7 +167,29 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
         setSwitching(false);
       }
     },
-    [permit, send],
+    [permit, send, selfie.take],
+  );
+
+  /**
+   * What the server answered a position sent while online: an agent it had taken offline (the sweep, or
+   * support) needs today's selfie to be online again, so the app shows them offline and says why.
+   */
+  const wentOffline = useCallback(() => {
+    if (!onlineRef.current) return;
+    setOnlineState(false);
+    setError('You went offline. Go online again to take your selfie.');
+  }, []);
+  const followServer = useCallback(
+    (res: { online: boolean; selfieNeeded?: SelfieReason }) => {
+      if (!res.online) wentOffline();
+    },
+    [wentOffline],
+  );
+  const followServerError = useCallback(
+    (e: unknown) => {
+      if (selfieNeeded(e)) wentOffline();
+    },
+    [wentOffline],
   );
 
   // Follow the agent while online or out on an errand, sending at most every few seconds.
@@ -168,7 +207,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
           const here = { lat: position.coords.latitude, lng: position.coords.longitude };
           setCoords(here);
           if (Date.now() - lastSent() < REPORT_EVERY_MS) return;
-          send({ online: onlineRef.current, ...here }).catch(() => undefined);
+          send({ online: onlineRef.current, ...here }).then(followServer, followServerError);
         },
       );
       if (stopped) watch.remove();
@@ -177,7 +216,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
     const heartbeat = setInterval(() => {
       const here = coordsRef.current;
       if (here && Date.now() - lastSent() >= HEARTBEAT_MS) {
-        send({ online: onlineRef.current, ...here }).catch(() => undefined);
+        send({ online: onlineRef.current, ...here }).then(followServer, followServerError);
       }
     }, HEARTBEAT_MS / 4);
     return () => {
@@ -185,7 +224,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
       watch?.remove();
       clearInterval(heartbeat);
     };
-  }, [tracking, send]);
+  }, [tracking, send, followServer, followServerError]);
 
   // In the background, the phone carries on while there is something to share, if the agent allowed it.
   // Nothing changes before the server has said where things stand: a task left running stays running.
