@@ -9,6 +9,7 @@ import { capitalised, idName, providerLabel } from '@/identity/ids';
 import { Button, Text } from '@/ui/kit';
 import { ObScreen, Question } from '@/ui/onboarding';
 import { List, Row } from '@/ui/parts';
+import { useNoScreenCapture } from '@/ui/no-screen-capture';
 
 /** Where the provider's page sends the customer back to (see the API's identity/done page). */
 const RETURN_URL = 'jiffo://identity-done';
@@ -18,6 +19,8 @@ const RETURN_URL = 'jiffo://identity-done';
  * a selfie, checked by the identity provider. Adding money and requesting errands open once verified.
  */
 export default function Verify() {
+  // Money, ID or a PIN on screen: no screenshots or screen recording (docs/security-plan.md, A9).
+  useNoScreenCapture('verify');
   const { user } = useSession();
   const { identity, error, reload } = useCustomerIdentity();
   const [checking, setChecking] = useState<false | 'new' | 'resume'>(false);

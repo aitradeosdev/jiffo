@@ -13,6 +13,7 @@ import { Button, Text } from '@/ui/kit';
 import { Empty, Icon, List, Row } from '@/ui/parts';
 import { ModalSheet } from '@/ui/modal-sheet';
 import { TabPage } from '@/ui/tab-page';
+import { useNoScreenCapture } from '@/ui/no-screen-capture';
 
 interface Movement {
   id: number;
@@ -26,6 +27,8 @@ interface Movement {
 }
 
 export default function WalletTab() {
+  // Money, ID or a PIN on screen: no screenshots or screen recording (docs/security-plan.md, A9).
+  useNoScreenCapture('wallet');
   return VARIANT === 'agent' ? <AgentEarnings /> : <Wallet />;
 }
 

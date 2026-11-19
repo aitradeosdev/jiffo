@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { goBack } from '@/nav';
 import { useErrand } from '@/errands/use-errand';
@@ -10,12 +10,16 @@ import { fonts } from '@/theme/tokens';
 import { Text } from '@/ui/kit';
 import { Icon } from '@/ui/parts';
 import { PageHeader } from '@/ui/floating';
+import { useErrandId } from '@/errands/use-errand-id';
+import { useNoScreenCapture } from '@/ui/no-screen-capture';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'back'];
 
 /** The hand-off PIN on a keypad, after the prototype. Four digits send it; a wrong one clears to retry. */
 export default function Handoff() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // Money, ID or a PIN on screen: no screenshots or screen recording (docs/security-plan.md, A9).
+  useNoScreenCapture('handoff');
+  const id = useErrandId();
   const c = useColors();
   const { errand, act, busy, actionError } = useErrand(id);
   const [pin, setPin] = useState('');

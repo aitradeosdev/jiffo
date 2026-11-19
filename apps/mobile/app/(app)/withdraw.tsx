@@ -10,9 +10,12 @@ import { space } from '@/theme/tokens';
 import { Button, Field, Screen, Text } from '@/ui/kit';
 import { moneyErrorMessage, useMoneyAction } from '@/auth/use-money-action';
 import { Chip, Row } from '@/ui/parts';
+import { useNoScreenCapture } from '@/ui/no-screen-capture';
 
 /** Withdraw to the agent's own bank account: free once a day, or now for a small fee. */
 export default function Withdraw() {
+  // Money, ID or a PIN on screen: no screenshots or screen recording (docs/security-plan.md, A9).
+  useNoScreenCapture('withdraw');
   // Signed by this phone's key, with the app PIN (docs/security-plan.md, A3, A7).
   const money = useMoneyAction();
   const wallet = useResource<{ availableKobo: number; withdrawalsHeldUntil?: string | null }>('/v1/wallet');

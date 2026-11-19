@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Linking, Modal, View } from 'react-native';
+import { useNoScreenCapture } from '@/ui/no-screen-capture';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { errorMessage } from '@/api/client';
 import { useSession } from '@/auth/session';
@@ -49,6 +50,12 @@ export function SelfieHost() {
   useEffect(() => register?.(id), [register, id]);
   if (!hosts || hosts.hosts[hosts.hosts.length - 1] !== id) return null;
   return hosts.view;
+}
+
+/** The selfie screens: no screenshots or screen recording while open (docs/security-plan.md, A9). */
+function NoScreenCapture() {
+  useNoScreenCapture('selfie');
+  return null;
 }
 
 type Step =
@@ -185,6 +192,7 @@ export function SelfieProvider({ children }: { children: ReactNode }) {
       presentationStyle="fullScreen"
       onRequestClose={() => close(false)}
     >
+      {step.kind !== 'closed' ? <NoScreenCapture /> : null}
       {step.kind === 'capture' && Capture ? (
         <Capture
           session={step.started.session}

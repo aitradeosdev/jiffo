@@ -55,6 +55,13 @@ How Jiffo protects people, money and data, area by area. What is required is in 
   - A refresh token used twice ends every session of the account, in both apps.
   - The one exception is the app sending it again within a minute while the token it got back is unused, which means the answer was lost on the way.
 - **Session length:** however often it is refreshed, a session ends `SESSION_MAX_DAYS` (default 90) after sign-in.
+- **Where tokens live (MB2):** in the phone's keychain or keystore, readable after the first unlock and only on that phone. They are never in an iCloud or iTunes backup, and the Android app is left out of backups, so a session is never restored onto another phone. The apps' web builds, which keep tokens in the browser, are for development: in production the API refuses their sign-in.
+
+## The apps on the phone
+
+- **No screenshots (A9):** the PIN, wallet, top-up, withdrawal, payout account, ID check and hand-off PIN screens, and the selfie check, block screenshots and screen recording while open (Android also hides them in the app switcher).
+- **Links into the apps (MB5):** a link from another app, a web page or a QR code opens only the start or the identity check's way back (`identity-done`), with no parameters; anything else opens the start, which asks a signed-out visitor to sign in. Screens check the parameters they read: an errand's id must be an id before it goes into an API path, and the others must be one of their own values.
+- **Logs:** the apps log nothing (MB2).
 
 ## Identity checks
 

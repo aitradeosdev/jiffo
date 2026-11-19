@@ -48,6 +48,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       package: v.bundleId,
       adaptiveIcon: { foregroundImage: `./assets/${variant}/icon.png`, backgroundColor: v.background },
       predictiveBackGestureEnabled: false,
+      // Nothing of the app's goes into Android's backups, so no session or key is restored onto another phone
+      // (docs/security-plan.md, MB2).
+      allowBackup: false,
     },
     web: { favicon: `./assets/${variant}/favicon.png`, output: 'single' },
     plugins: [

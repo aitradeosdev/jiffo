@@ -70,6 +70,11 @@ export class AuthService {
 
   /** Signs in with a code. The same phone number is one account across both apps. */
   async verifyCode(phoneInput: string, code: string, app: AppName, device: DeviceInfo) {
+    // The apps' web builds keep tokens in the browser's storage, not the phone's keychain (docs/security-plan.md,
+    // MB2): they are for development only. Refused before the code is checked, so it still works in the app.
+    if (device.platform === 'web' && this.config.NODE_ENV === 'production') {
+      throw forbidden('web_sign_in_off', 'Sign in with the Jiffo app from the App Store or Google Play');
+    }
     const { phone, country } = await this.resolvePhone(phoneInput);
     await this.otp.verify(phone, country, code);
 

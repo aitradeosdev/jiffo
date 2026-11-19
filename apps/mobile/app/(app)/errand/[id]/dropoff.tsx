@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { goBack } from '@/nav';
 import { useSession } from '@/auth/session';
@@ -10,12 +10,13 @@ import { useErrand } from '@/errands/use-errand';
 import { fonts } from '@/theme/tokens';
 import { Button, Text } from '@/ui/kit';
 import { Icon } from '@/ui/parts';
+import { useErrandId } from '@/errands/use-errand-id';
 
 type Shot = { uri: string; mimeType: string };
 
 /** A no-contact drop-off: a photo of where the items were left, which the customer approves. */
 export default function DropoffPhoto() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const id = useErrandId();
   const { api } = useSession();
   const { errand, act, actionError } = useErrand(id);
   const [shot, setShot] = useState<Shot | null>(null);

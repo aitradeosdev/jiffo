@@ -11,7 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Crypto from 'expo-crypto';
 import { goBack } from '@/nav';
@@ -30,6 +30,7 @@ import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
 import { noWebOutline, Text } from '@/ui/kit';
 import { Avatar, Icon } from '@/ui/parts';
+import { useErrandId } from '@/errands/use-errand-id';
 
 export interface ChatMessage {
   id: number;
@@ -61,7 +62,7 @@ const HINTS =
  * drop-off photo) shows as cards at the end of the thread.
  */
 export default function Chat() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const id = useErrandId();
   const c = useColors();
   const { api, user } = useSession();
   const errandState = useErrand(id);
