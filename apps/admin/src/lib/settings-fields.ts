@@ -263,7 +263,7 @@ export const SECTIONS: Section[] = [
         path: 'security.dailySelfie',
         label: 'Agents take a selfie before going online each day',
         kind: 'bool',
-        help: 'Compared with the face Smile ID kept from their ID check, so the person working is the agent who was verified. Three failures in a row (Identity, Selfie tries) suspend the account.',
+        help: 'Compared with the face the identity provider kept from their ID check, so the person working is the agent who was verified. Three failures in a row (Identity, Selfie tries) suspend the account.',
       },
       {
         path: 'security.randomSelfiePercent',
@@ -329,6 +329,18 @@ export const SECTIONS: Section[] = [
         path: 'risk.repeatPairingDays',
         label: 'Days the errands above are counted over',
         kind: 'count',
+      },
+      {
+        path: 'risk.sharedNetworkDays',
+        label: 'A network both used counts as shared within',
+        kind: 'count',
+        help: "Days. The customer's and agent's phones on one Wi-Fi network or address. Phone networks and VPNs aren't counted: thousands share their addresses.",
+      },
+      {
+        path: 'risk.busyNetworkAccounts',
+        label: 'Ignore an address used by more accounts than',
+        kind: 'count',
+        help: "Over the same days. A shop's, an office's or a campus's Wi-Fi is used by many.",
       },
       {
         path: 'risk.fastHighValueKobo',

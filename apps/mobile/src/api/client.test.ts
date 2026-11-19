@@ -34,6 +34,21 @@ describe('api client', () => {
     expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe('Bearer a1');
   });
 
+  it('sends the headers the app adds to every request, such as the connection kind', async () => {
+    const { impl, calls } = fakeFetch(() => json({ id: 'u1' }));
+    const api = createApiClient({
+      baseUrl: '',
+      store: memoryStore(fresh),
+      fetchImpl: impl,
+      now: () => NOW,
+      headers: async () => ({ 'x-jiffo-network': 'wifi' }),
+    });
+    await api.get('/v1/me');
+    await api.withHeaders('POST', '/v1/wallet/withdrawals', {}, { 'x-jiffo-pin': '1234' });
+    expect(calls.map((c) => (c.init.headers as Record<string, string>)['x-jiffo-network'])).toEqual(['wifi', 'wifi']);
+    expect((calls[1]!.init.headers as Record<string, string>)['x-jiffo-pin']).toBe('1234');
+  });
+
   it('refreshes a token about to expire, once for many requests at the same time', async () => {
     const store = memoryStore(stale);
     let refreshes = 0;

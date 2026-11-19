@@ -41,6 +41,12 @@ export interface IdentityResult {
    * the fingerprint that stops a second account on the same ID; never stored.
    */
   idNumber?: string;
+  /**
+   * Earlier checks the provider found to be of the same person, by the references we gave them: the same
+   * face, the same ID number, or both (docs/security-plan.md, I3). Only a provider that compares each check
+   * with the others it has done gives it; Jiffo flags a face found under another ID for verification.
+   */
+  related?: Array<{ reference: string; face: boolean; idNumber: boolean }>;
 }
 
 /** passed, failed, or retry: unclear, to be taken again without counting as a failure. */

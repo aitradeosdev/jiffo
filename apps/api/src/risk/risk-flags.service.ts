@@ -27,6 +27,7 @@ import {
   users,
 } from '../db/schema';
 import { moderate } from './moderation';
+import { NetworksService } from './networks.service';
 
 type ErrandRow = typeof errands.$inferSelect;
 type Stop = { kind: string; lat: number; lng: number };
@@ -88,6 +89,7 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
     @Inject(DB) private readonly db: Db,
     private readonly countries: CountriesService,
     @Inject(APP_CONFIG) config: AppConfig,
+    private readonly networks: NetworksService,
   ) {
     const base = keyFor(config, 'idFingerprint');
     this.phoneKey = subKey(base, 'jiffo phone fingerprint');
@@ -157,6 +159,14 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
     });
   }
 
+  /**
+   * The identity provider found this person on other checks (I3): a face on another account's check, under
+   * another ID, is flagged for verification. The same ID number is the one-account-per-ID check's to stop.
+   */
+  relatedChecks(userId: string, related: Array<{ reference: string; face: boolean; idNumber: boolean }>) {
+    this.later(`checks related to ${userId}`, () => this.checkSameFace(userId, related));
+  }
+
   /** A payout account saved: another agent may have saved the same one (I3). */
   payoutAccountSaved(userId: string, fingerprint: string) {
     this.later(`payout account of ${userId}`, () => this.checkSharedAccount(userId, fingerprint));
@@ -192,6 +202,14 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
     const by = await this.sharedPhone(pair.customerId, pair.agentId);
     if (by.length) await this.raisePair('pair_shared_phone', errand, { by });
     if (await this.toppedUpFromAgent(pair.customerId, pair.agentId)) await this.raisePair('pair_shared_bank', errand);
+    const { sharedNetworkDays, busyNetworkAccounts } = await this.risk(errand.countryCode);
+    const networks = await this.networks.sharedBetween(
+      pair.customerId,
+      pair.agentId,
+      sharedNetworkDays,
+      busyNetworkAccounts,
+    );
+    if (networks.length) await this.raisePair('pair_shared_network', errand, { by: networks });
     await this.checkRepeats(errand);
   }
 
@@ -200,7 +218,7 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
    * pair a reviewer cleared isn't flagged for it again.
    */
   private async raisePair(
-    kind: 'pair_shared_phone' | 'pair_shared_bank',
+    kind: 'pair_shared_phone' | 'pair_shared_bank' | 'pair_shared_network',
     errand: ErrandRow & { agentId: string },
     details: Record<string, unknown> = {},
   ) {
@@ -370,6 +388,35 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
         userId,
         otherUserId: other.userId,
         details: { by },
+      });
+    }
+  }
+
+  private async checkSameFace(userId: string, related: Array<{ reference: string; face: boolean; idNumber: boolean }>) {
+    const faces = related.filter((r) => r.face).slice(0, 50);
+    if (!faces.length) return;
+    const [me] = await this.db.select({ countryCode: users.countryCode }).from(users).where(eq(users.id, userId));
+    if (!me) return;
+    const references = faces.map((r) => r.reference);
+    // Whose checks they were: customers' and agents' current checks, and every check started lately.
+    const { rows } = await this.db.execute<{ user_id: string; reference: string }>(sql`
+      select user_id, reference from customer_verifications where reference in ${references}
+      union select user_id, identity_reference from agent_applications where identity_reference in ${references}
+      union select user_id, reference from identity_attempts where kind = 'start' and reference in ${references}`);
+    const owners = new Map<string, boolean>();
+    for (const row of rows) {
+      if (row.user_id === userId) continue;
+      const match = faces.find((f) => f.reference === row.reference)!;
+      owners.set(row.user_id, (owners.get(row.user_id) ?? false) || match.idNumber);
+    }
+    for (const [other, sameIdNumber] of owners) {
+      await this.raise({
+        countryCode: me.countryCode,
+        kind: 'same_face',
+        dedupeKey: pairKey(userId, other),
+        userId,
+        otherUserId: other,
+        details: { sameIdNumber },
       });
     }
   }

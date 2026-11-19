@@ -49,6 +49,8 @@ export const DEFAULT_RISK_SETTINGS = {
   repeatPairingDays: 30,
   fastHighValueKobo: 5_000_000,
   fastErrandMinutes: 10,
+  sharedNetworkDays: 30,
+  busyNetworkAccounts: 10,
 };
 
 /**
@@ -230,6 +232,13 @@ export const CountrySettingsSchema = z.object({
       /** The same customer and agent pairing this many times within repeatPairingDays is flagged. */
       repeatPairingErrands: z.number().int().min(2).max(1_000).default(5),
       repeatPairingDays: z.number().int().min(1).max(365).default(30),
+      /** A Wi-Fi network or address both used within this many days counts as shared. */
+      sharedNetworkDays: z.number().int().min(1).max(90).default(30),
+      /**
+       * An address more accounts than this used in those days is a busy one, such as a shop's or an office's
+       * Wi-Fi, and isn't counted.
+       */
+      busyNetworkAccounts: z.number().int().min(2).max(1_000).default(10),
       /** Errands worth at least this (fee and items) finished unusually fast are flagged. */
       fastHighValueKobo: kobo.default(5_000_000),
       /**

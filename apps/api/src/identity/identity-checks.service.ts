@@ -23,6 +23,7 @@ import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
 import { identityAttempts, webhookSignatures } from '../db/schema';
 import { ProvidersService } from '../providers/providers.service';
+import { RiskFlagsService } from '../risk/risk-flags.service';
 
 export type IdentityRole = 'customer' | 'agent';
 export type Check = { key: string; outcome: string; note?: string };
@@ -99,6 +100,7 @@ export class IdentityChecksService {
     private readonly providers: ProvidersService,
     @Inject(DB) private readonly db: Db,
     @Inject(APP_CONFIG) config: AppConfig,
+    private readonly risk: RiskFlagsService,
   ) {
     this.idKey = keyFor(config, 'idFingerprint');
   }
@@ -291,11 +293,18 @@ export class IdentityChecksService {
   }
 
   /** Asks the provider a check was started with for its result. */
-  result(check: Pick<PendingCheck, 'provider' | 'reference'>) {
-    return this.call(
+  async result(check: Pick<PendingCheck, 'provider' | 'reference' | 'userId'>) {
+    const result = await this.call(
       () => this.startedWith(check.provider).identityResult(check.reference),
       "The identity check couldn't be read. Try again in a moment.",
     );
+    this.relatedFound(check.userId, result);
+    return result;
+  }
+
+  /** The provider found this person's face on other checks: flagged for verification beside this (I3). */
+  private relatedFound(userId: string, result: IdentityResult) {
+    if (result.status === 'done' && result.related?.length) this.risk.relatedChecks(userId, result.related);
   }
 
   /**
@@ -363,6 +372,7 @@ export class IdentityChecksService {
     // A check started again since, or already settled: this result is no longer wanted.
     const found = await this.waitingOn(provider, reference);
     if (!found) return { reference, settled: false };
+    this.relatedFound(found.check.userId, result);
     return { reference, settled: (await found.owner.settle(found.check, result)) !== null };
   }
 

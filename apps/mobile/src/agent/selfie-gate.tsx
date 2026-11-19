@@ -17,7 +17,14 @@ import { useSession } from '@/auth/session';
 import { useColors } from '@/theme/theme';
 import { space } from '@/theme/tokens';
 import { Button, Text } from '@/ui/kit';
-import { SELFIE_WHY, waitForVerdict, type SelfieAnswer, type SelfieReason, type StartedSelfie } from './selfie';
+import {
+  checkerName,
+  SELFIE_WHY,
+  waitForVerdict,
+  type SelfieAnswer,
+  type SelfieReason,
+  type StartedSelfie,
+} from './selfie';
 import { captureFor } from './selfie-capture';
 import { DECIDED_BY_SERVER, type CaptureEnd } from './selfie-capture.types';
 
@@ -62,7 +69,8 @@ type Step =
 
 /**
  * Agents' selfie checks (docs/security-plan.md, A4, I2, I8, P8, X4): says why one is asked for, with the
- * privacy notice, takes it in Smile ID's own SDK, and waits for the verdict the server got from Smile ID.
+ * privacy notice, takes it in the identity provider's own SDK (selfie-capture), and waits for the verdict the
+ * server got from the provider.
  * Only the outcome is kept. Each request is its own: closing it drops whatever it was still doing.
  */
 export function SelfieProvider({ children }: { children: ReactNode }) {
@@ -210,7 +218,8 @@ export function SelfieProvider({ children }: { children: ReactNode }) {
                 </Text>
                 <Text tone="ink2">{SELFIE_WHY[reason]}</Text>
                 <Text variant="small" tone="ink3">
-                  Smile ID compares it with the photo from your ID check. Jiffo keeps only the result, never the photo.
+                  {checkerName(step.kind === 'intro' ? step.started?.provider : undefined)} compares it with the photo
+                  from your ID check. Jiffo keeps only the result, never the photo.
                 </Text>
                 {step.kind === 'intro' && step.started?.session.privacyPolicyUrl ? (
                   <Button
@@ -246,6 +255,7 @@ export function SelfieProvider({ children }: { children: ReactNode }) {
             ) : step.kind === 'answer' ? (
               <Answer
                 answer={step.answer}
+                checker={checkerName(step.started.provider)}
                 error={step.error}
                 again={() => void start(reason)}
                 recheck={() => void check(step.started)}
@@ -276,6 +286,7 @@ export function SelfieProvider({ children }: { children: ReactNode }) {
 
 function Answer({
   answer,
+  checker,
   error,
   again,
   recheck,
@@ -283,6 +294,8 @@ function Answer({
   signOut,
 }: {
   answer: SelfieAnswer;
+  /** The identity provider's name. */
+  checker: string;
   error?: string;
   again: () => void;
   recheck: () => void;
@@ -311,7 +324,7 @@ function Answer({
         <Text tone="ink2">
           {error
             ? `Your selfie was sent, but we couldn't get the answer: ${error}`
-            : "Smile ID hasn't answered yet. Check again in a minute."}
+            : `${checker} hasn't answered yet. Check again in a minute.`}
         </Text>
         <Button label="Check again" onPress={recheck} />
         <Button label="Not now" kind="plain" onPress={leave} />

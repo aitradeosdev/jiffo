@@ -1,5 +1,8 @@
 package com.jiffo.appattest
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Debug
 import android.provider.Settings
@@ -77,6 +80,24 @@ class AppAttestModule : Module() {
     AsyncFunction("phoneId") {
       val context = appContext.reactContext?.applicationContext ?: return@AsyncFunction null
       Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+    }
+
+    /**
+     * What the connection is (docs/security-plan.md, E6): wifi, cellular, ethernet, vpn, or none. Sent with
+     * requests, so a phone network's or a VPN's address, which thousands share, isn't taken for a home's.
+     */
+    AsyncFunction("networkType") {
+      val context = appContext.reactContext?.applicationContext ?: return@AsyncFunction null
+      val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        ?: return@AsyncFunction null
+      val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return@AsyncFunction "none"
+      when {
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "vpn"
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+        else -> "other"
+      }
     }
 
     AsyncFunction("newAppleKey") { -> throw AppAttestException("App Attest is for iPhones") }
