@@ -139,6 +139,10 @@ export const users = pgTable(
     /** Wrong PINs in a row; at the limit in Settings, Security, it locks until reset by a fresh sign-in. */
     appPinFailures: integer('app_pin_failures').notNull().default(0),
     appPinLockedAt: timestamp('app_pin_locked_at', { withTimezone: true }),
+    /** Agents' selfie checks failed in a row; at identity.selfieTries the account is suspended for review (I8). */
+    selfieFailures: integer('selfie_failures').notNull().default(0),
+    /** A selfie check asked for at random when going online, until one passes (I8). */
+    selfieDue: boolean('selfie_due').notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -174,6 +178,11 @@ export const devices = pgTable(
      * new phone, with the withdrawal hold (A6). Cleared by that sign-in.
      */
     forgottenAt: timestamp('forgotten_at', { withTimezone: true }),
+    /**
+     * A phone the agent signed in on that isn't the one they signed up on: money actions on it need a passed
+     * selfie check there first (docs/security-plan.md, A4, X4).
+     */
+    selfieNeeded: boolean('selfie_needed').notNull().default(false),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: createdAt(),
   },
@@ -199,6 +208,49 @@ export const deviceChallenges = pgTable(
     index('device_challenges_device_idx').on(t.deviceId),
     // Clearing old codes, for every phone.
     index('device_challenges_expires_idx').on(t.expiresAt),
+  ],
+);
+
+/** What asks an agent for a selfie: the day's first time online, a random check, a new phone, a payout change. */
+export const SELFIE_REASONS = ['daily', 'random', 'new_device', 'payout_change'] as const;
+export type SelfieReason = (typeof SELFIE_REASONS)[number];
+
+/**
+ * An agent's selfie check against the face their identity provider kept from their first check (Smile ID's
+ * SmartSelfie Authentication): once a day before going online, now and then at random, and on a new phone
+ * before money actions, and just before a payout account changes (docs/security-plan.md, A4, I8, P8). Only the
+ * outcome is kept, never the selfie.
+ */
+export const agentSelfieChecks = pgTable(
+  'agent_selfie_checks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    /** The phone it was taken on. */
+    deviceId: uuid('device_id')
+      .notNull()
+      .references(() => devices.id),
+    /** What asked for it; any pass counts for all of them. */
+    reason: text('reason', { enum: SELFIE_REASONS }).notNull(),
+    provider: text('provider').notNull(),
+    /** Ours, sel-…, which the provider's job carries back. */
+    reference: text('reference').notNull(),
+    /** The provider's job that decided it; each counts once. */
+    jobId: text('job_id'),
+    /** unclear: the provider couldn't tell (a poor photo), so it is taken again without counting as a failure. */
+    status: text('status', { enum: ['pending', 'passed', 'failed', 'unclear'] })
+      .notNull()
+      .default('pending'),
+    note: text('note'),
+    createdAt: createdAt(),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('agent_selfie_checks_reference_uq').on(t.reference),
+    uniqueIndex('agent_selfie_checks_job_uq').on(t.provider, t.jobId),
+    index('agent_selfie_checks_user_idx').on(t.userId, t.decidedAt),
   ],
 );
 

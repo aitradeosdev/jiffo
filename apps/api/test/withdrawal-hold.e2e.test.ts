@@ -13,6 +13,7 @@ import {
   uniqueDigits,
   type Person,
   type TestApp,
+  passSelfie,
   secureDevice,
   signed,
 } from './helpers';
@@ -167,6 +168,9 @@ describe('the withdrawal hold after an account change', () => {
     await withdraw(same).expect(201);
 
     const fresh = await signInOn(agent, 'agent', randomUUID());
+    // A selfie first, as on any new phone (X4), then the hold.
+    expect((await withdraw(fresh)).body.error.code).toBe('selfie_needed');
+    await passSelfie(t, fresh);
     await expectHeld(fresh);
     // Told after the sign-in answers, so it doesn't wait on the SMS provider.
     await vi.waitFor(() =>

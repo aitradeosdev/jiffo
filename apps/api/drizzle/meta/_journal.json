@@ -218,6 +218,13 @@
       "when": 1795113532981,
       "tag": "0030_remove_retired_identity_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795114820580,
+      "tag": "0031_agent_selfie",
+      "breakpoints": true
     }
   ]
 }

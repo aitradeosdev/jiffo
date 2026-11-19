@@ -111,8 +111,17 @@ export class DeviceSecurityService {
         .where(eq(devices.id, auth.deviceId))
         .for('update');
       if (device?.key === spki) return null;
-      await tx.update(devices).set({ publicKey: spki, keyAddedAt: new Date() }).where(eq(devices.id, auth.deviceId));
-      return device?.key ? this.holds.start(tx, auth.userId, 'new_device') : null;
+      // A key replaced on an agent's phone is treated as a new phone: a selfie before money actions too (X4).
+      const replaced = !!device?.key;
+      await tx
+        .update(devices)
+        .set({
+          publicKey: spki,
+          keyAddedAt: new Date(),
+          ...(replaced && auth.app === 'agent' ? { selfieNeeded: true } : {}),
+        })
+        .where(eq(devices.id, auth.deviceId));
+      return replaced ? this.holds.start(tx, auth.userId, 'new_device') : null;
     });
     if (until) await this.holds.tell(auth.userId, 'new_device', until);
   }
@@ -141,10 +150,14 @@ export class DeviceSecurityService {
     pin: string | undefined | false,
   ) {
     const [device] = await this.db
-      .select({ key: devices.publicKey })
+      .select({ key: devices.publicKey, selfieNeeded: devices.selfieNeeded })
       .from(devices)
       .where(eq(devices.id, auth.deviceId));
     if (!device?.key) throw forbidden('device_key_needed', 'Set up this phone for money actions first');
+    // A new phone first shows it's the agent holding it (A4, X4). Before the code is used, so it can be sent again.
+    if (device.selfieNeeded && auth.app === 'agent') {
+      throw forbidden('selfie_needed', 'Take a quick selfie to use money on this phone', { reason: 'new_device' });
+    }
     if (!request.nonce || !request.signature) throw forbidden('signature_needed', 'Confirm this on your phone');
     // Asked for before the code is used up, so the app can ask for the PIN and send the same code.
     if (pin !== false && !pin) throw forbidden('pin_missing', 'Enter your app PIN');

@@ -19,16 +19,19 @@ import {
   admins,
   adminSessions,
   agentApplications,
+  agentSelfieChecks,
   customerVerifications,
   deposits,
+  devices,
   errands,
   errandStops,
   type AdminRole,
   adminPasskeys,
+  sessions,
 } from '../src/db/schema';
 import { sha256 } from '../src/common/crypto';
 import { SIGNED_HEADERS, signedPayload } from '../src/auth/device-security.service';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { AppName } from '../src/db/schema';
 
 export interface TestApp {
@@ -170,6 +173,8 @@ export async function signIn(
     unverified?: boolean;
     /** Leaves an agent's phone without its key and PIN, for tests of setting them up. */
     unsecured?: boolean;
+    /** Leaves the agent without today's selfie, and a new phone still needing one, for tests of them (I8). */
+    noSelfie?: boolean;
   } = {},
 ): Promise<Person> {
   const phone = options.phone ?? randomPhone();
@@ -192,8 +197,33 @@ export async function signIn(
   if (app === 'agent' && !options.unapproved) {
     await t.db
       .insert(agentApplications)
-      .values({ userId: person.userId, countryCode: 'NG', status: 'approved', decidedAt: new Date() })
+      .values({
+        userId: person.userId,
+        countryCode: 'NG',
+        status: 'approved',
+        decidedAt: new Date(),
+        // Checked with the development provider, which keeps the face for selfie checks.
+        identityProvider: 'fake',
+        identityReference: `jid-${randomUUID()}`,
+      })
       .onConflictDoNothing();
+  }
+  // Test agents took today's selfie on this phone, as the agent app asks, unless a test says otherwise.
+  if (app === 'agent' && !options.noSelfie) {
+    const [session] = await t.db
+      .select({ deviceId: sessions.deviceId })
+      .from(sessions)
+      .where(and(eq(sessions.userId, person.userId), eq(sessions.app, 'agent'), isNull(sessions.revokedAt)));
+    await t.db.update(devices).set({ selfieNeeded: false }).where(eq(devices.id, session!.deviceId));
+    await t.db.insert(agentSelfieChecks).values({
+      userId: person.userId,
+      deviceId: session!.deviceId,
+      reason: 'daily',
+      provider: 'fake',
+      reference: `sel-${randomUUID()}`,
+      status: 'passed',
+      decidedAt: new Date(),
+    });
   }
   // Test customers are verified, as if they had checked their ID, unless a test says otherwise.
   if (app === 'customer' && !options.unverified) {
@@ -213,6 +243,13 @@ export async function signIn(
   // Test agents' phones are set up for money actions, as the agent app does at sign-in (A3, A7).
   if (app === 'agent' && !options.unsecured) return secureDevice(t, person);
   return person;
+}
+
+/** Takes a selfie check in the agent app, which the development provider passes (I8, X4). */
+export async function passSelfie(t: TestApp, who: Person) {
+  const started = await request(t.http).post('/v1/agent/selfie').set(who.headers).send({}).expect(200);
+  const done = await request(t.http).post(`/v1/agent/selfie/${started.body.id}/finish`).set(who.headers).expect(200);
+  if (done.body.status !== 'passed') throw new Error(`selfie: ${JSON.stringify(done.body)}`);
 }
 
 /** Lekki to Victoria Island, Lagos. */

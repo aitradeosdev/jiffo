@@ -13,6 +13,7 @@ import {
   REFERENCE_PREFIX,
   RETIRED_IDENTITY_PROVIDERS,
   RetiredIdentityAdapter,
+  type SelfieVerdict,
 } from '../adapters/identity';
 import { IdentityProviderError } from '../adapters/identity-providers';
 import { sha256 } from '../common/crypto';
@@ -45,6 +46,12 @@ export interface JudgedResult {
   fingerprint: string | null;
   /** The NIN, BVN or other ID and the selfie all passed: the ID is shown to be this person's. */
   own: boolean;
+}
+
+/** Agents' selfie checks, which a provider's webhook may decide (docs/security-plan.md, I8). */
+export interface SelfieOwner {
+  /** Decides the selfie check with this reference, if it is still waited on; false when it isn't. */
+  settleSelfie(provider: string, reference: string, verdict: SelfieVerdict): Promise<boolean>;
 }
 
 /** Customers' and agents' checks, each kept where its account keeps it. */
@@ -81,6 +88,7 @@ const KEPT_MS = 2 * DAY_MS;
 export class IdentityChecksService {
   private readonly logger = new Logger(IdentityChecksService.name);
   private readonly owners = new Map<string, IdentityOwner>();
+  private selfieOwner: SelfieOwner | null = null;
   /** Its own key, used only to fingerprint IDs (ID_FINGERPRINT_KEY). */
   private readonly idKey: Buffer;
 
@@ -94,6 +102,10 @@ export class IdentityChecksService {
 
   register(role: IdentityRole, owner: IdentityOwner) {
     this.owners.set(PREFIX[role], owner);
+  }
+
+  registerSelfie(owner: SelfieOwner) {
+    this.selfieOwner = owner;
   }
 
   private ownerOf(reference: string) {
@@ -336,6 +348,11 @@ export class IdentityChecksService {
     const parsed = await this.call(() => parse(rawBody, headers));
     if (!parsed) return null;
     if (parsed.replayKey && !(await this.firstUse(provider, parsed.replayKey, rawBody))) return null;
+    if (parsed.kind === 'selfie') {
+      const { reference, verdict } = parsed;
+      if (verdict.status !== 'done' || !this.selfieOwner) return { reference, settled: false };
+      return { reference, settled: await this.selfieOwner.settleSelfie(provider, reference, verdict) };
+    }
     const { reference, result } = parsed;
     if (result.status !== 'done') return { reference, settled: false };
     // A check started again since, or already settled: this result is no longer wanted.

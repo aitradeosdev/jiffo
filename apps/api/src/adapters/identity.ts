@@ -43,6 +43,40 @@ export interface IdentityResult {
   idNumber?: string;
 }
 
+/** passed, failed, or retry: unclear, to be taken again without counting as a failure. */
+export interface SelfieResult {
+  status: 'pending' | 'done';
+  outcome?: 'passed' | 'failed' | 'retry';
+  note?: string;
+}
+
+/**
+ * What the agent app's copy of the provider's SDK needs to take a selfie for one check: whose enrolled face
+ * it is compared with, our reference for the check, and for Smile ID a short-lived token Smile ID issued for
+ * that person and that product only.
+ */
+export interface SelfieSession {
+  enrolledId: string;
+  reference: string;
+  token?: string;
+  partnerId?: string;
+  sandbox?: boolean;
+}
+
+/** A selfie verdict the provider sent to its webhook, confirmed with it: for which enrolled person. */
+export interface SelfieVerdict extends SelfieResult {
+  enrolledId: string;
+  /** The provider's id for the job, used once. */
+  jobId: string;
+  /** When the provider says the job was made, to refuse one older than the check. */
+  createdAt?: Date;
+}
+
+/** A signed result from a provider's webhook: an identity check's, or an agent's selfie check's. */
+export type ParsedWebhook =
+  | { kind?: 'identity'; reference: string; result: IdentityResult; replayKey?: string }
+  | { kind: 'selfie'; reference: string; verdict: SelfieVerdict; replayKey?: string };
+
 export interface AddressResult {
   status: 'pending' | 'done';
   outcome?: CheckOutcome;
@@ -74,6 +108,17 @@ export interface IdentityAdapter {
   startAddress(input: { person: IdentityPerson; address: string; state: string }): Promise<{ reference: string }>;
   addressResult(reference: string): Promise<AddressResult>;
   /**
+   * Starts an agent's selfie check, taken in the agent app with the provider's own SDK and compared with the
+   * face the provider kept from the person's first check (docs/security-plan.md, I2, I8). `enrolledId` is
+   * that first check's reference. Only a provider that keeps the face has it: Smile ID.
+   */
+  startSelfie?(input: { enrolledId: string; reference: string }): Promise<SelfieSession>;
+  /**
+   * A selfie check's verdict, for a provider that gives it when asked. Smile ID's comes only to its webhook,
+   * which says what kind of job it was; its status API doesn't, so it isn't asked.
+   */
+  selfieResult?(input: { enrolledId: string; reference: string }): Promise<SelfieResult>;
+  /**
    * A result the provider sent us, once its signature shows it came from them; null when it doesn't. May ask
    * the provider to confirm it, and throws IdentityProviderError when it can't, so the provider sends it again.
    */
@@ -81,14 +126,13 @@ export interface IdentityAdapter {
    * A signed result from the provider. A provider whose signature doesn't cover the body gives a replay key
    * (its signature and the job), so the API can make sure it never vouches for a second, different body.
    */
-  parseWebhook?(
-    rawBody: Buffer,
-    headers: Headers,
-  ): Promise<{ reference: string; result: IdentityResult; replayKey?: string } | null>;
+  parseWebhook?(rawBody: Buffer, headers: Headers): Promise<ParsedWebhook | null>;
 }
 
 /** References say whose check it is: customers' start with cid-, agents' with jid-. */
 export const REFERENCE_PREFIX = { customer: 'cid', agent: 'jid' } as const;
+/** An agent's selfie check, after their identity check. */
+export const SELFIE_PREFIX = 'sel';
 
 export type Headers = Record<string, string | string[] | undefined>;
 export const headerOf = (headers: Headers, name: string) => {
@@ -174,6 +218,17 @@ export class FakeIdentityAdapter implements IdentityAdapter {
 
   async addressResult(reference: string): Promise<AddressResult> {
     return this.addresses.get(reference) ?? { status: 'pending' };
+  }
+  /** Selfie checks' outcomes for tests to queue; each check takes the next, and passes when there is none. */
+  /** The verdicts the next selfie checks get, in order; passed once these run out. */
+  readonly selfieOutcomes: Array<'passed' | 'failed' | 'retry'> = [];
+
+  async startSelfie(input: { enrolledId: string; reference: string }): Promise<SelfieSession> {
+    return { enrolledId: input.enrolledId, reference: input.reference };
+  }
+
+  async selfieResult(): Promise<SelfieResult> {
+    return { status: 'done', outcome: this.selfieOutcomes.shift() ?? 'passed' };
   }
 }
 
