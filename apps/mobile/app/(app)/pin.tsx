@@ -15,7 +15,7 @@ import {
   type SecurityStatus,
 } from '@/auth/device-security';
 import { withSelfie } from '@/agent/selfie';
-import { useSelfie } from '@/agent/selfie-gate';
+import { SelfieHost, useSelfie } from '@/agent/selfie-gate';
 import { moneyErrorMessage } from '@/auth/use-money-action';
 import { space } from '@/theme/tokens';
 import { Button, Field, Screen, Text } from '@/ui/kit';
@@ -123,6 +123,7 @@ export default function PinScreen() {
   const ready = pin.length === 4 && again.length === 4 && (!changing || current.length === 4);
   return (
     <Screen footer={<Button label="Save PIN" onPress={save} disabled={!ready} loading={busy} />}>
+      <SelfieHost />
       <Text variant="title">
         {changing ? 'Change your app PIN' : status.data?.hasPin ? 'Set a new app PIN' : 'Create your app PIN'}
       </Text>

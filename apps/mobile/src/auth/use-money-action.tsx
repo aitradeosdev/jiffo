@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { ApiError } from '@/api/client';
 import { useSession } from '@/auth/session';
 import { withSelfie } from '@/agent/selfie';
-import { useSelfie } from '@/agent/selfie-gate';
+import { SelfieHost, useSelfie } from '@/agent/selfie-gate';
 import { space } from '@/theme/tokens';
 import { Button, Field, Text } from '@/ui/kit';
 import { ModalSheet } from '@/ui/modal-sheet';
@@ -84,22 +84,27 @@ export function useMoneyAction() {
     [api, askPin, userId, selfie.take],
   );
 
+  // The selfie screens are drawn here too: Withdraw and Payout account are native modals, which on iOS only
+  // a screen of their own can show another modal over.
   const sheet = (
-    <ModalSheet visible={asking} onClose={() => finish(null)} label="Enter your app PIN">
-      <Text variant="title">Enter your app PIN</Text>
-      <View style={{ gap: space.md }}>
-        <Field
-          label="App PIN"
-          value={typed}
-          onChangeText={(t) => setTyped(t.replace(/\D/g, '').slice(0, 4))}
-          keyboardType="number-pad"
-          secureTextEntry
-          maxLength={4}
-          autoFocus
-        />
-        <Button label="Confirm" onPress={() => finish(typed)} disabled={typed.length !== 4} />
-      </View>
-    </ModalSheet>
+    <>
+      <SelfieHost />
+      <ModalSheet visible={asking} onClose={() => finish(null)} label="Enter your app PIN">
+        <Text variant="title">Enter your app PIN</Text>
+        <View style={{ gap: space.md }}>
+          <Field
+            label="App PIN"
+            value={typed}
+            onChangeText={(t) => setTyped(t.replace(/\D/g, '').slice(0, 4))}
+            keyboardType="number-pad"
+            secureTextEntry
+            maxLength={4}
+            autoFocus
+          />
+          <Button label="Confirm" onPress={() => finish(typed)} disabled={typed.length !== 4} />
+        </View>
+      </ModalSheet>
+    </>
   );
 
   return { run, sheet };
