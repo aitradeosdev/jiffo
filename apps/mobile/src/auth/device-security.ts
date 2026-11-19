@@ -23,15 +23,23 @@ export const canSign = () => Platform.OS !== 'web' && deviceKeyAvailable();
  * right after signing in to the agent app, since the server takes a key only in the first few minutes. The
  * same key again changes nothing; a new one, after a restore, pauses withdrawals on the server.
  */
-export async function setUpPhone(api: ApiClient): Promise<'ready' | 'unsupported' | 'sign_in_again'> {
-  if (!canSign()) return 'unsupported';
-  try {
-    await api.put('/v1/devices/current/key', { publicKey: await devicePublicKey() });
-    return 'ready';
-  } catch (error) {
-    if (error instanceof ApiError && error.code === 'sign_in_again') return 'sign_in_again';
-    throw error;
-  }
+let settingUp: Promise<'ready' | 'unsupported' | 'sign_in_again'> | null = null;
+
+export function setUpPhone(api: ApiClient): Promise<'ready' | 'unsupported' | 'sign_in_again'> {
+  // One at a time: sign-in and a money screen asking together would otherwise race to make the key.
+  settingUp ??= (async () => {
+    if (!canSign()) return 'unsupported' as const;
+    try {
+      await api.put('/v1/devices/current/key', { publicKey: await devicePublicKey() });
+      return 'ready' as const;
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'sign_in_again') return 'sign_in_again' as const;
+      throw error;
+    }
+  })().finally(() => {
+    settingUp = null;
+  });
+  return settingUp;
 }
 
 /** A withdrawal or payout account change: signed by this phone's key, with the app PIN (A3, A7). */
@@ -39,9 +47,12 @@ export function moneyRequest<T>(api: ApiClient, method: 'POST' | 'PUT', path: st
   return signedRequest<T>({ api, sign: deviceSign, sha256Hex }, method, path, body, pin);
 }
 
-/* The PIN, kept behind the phone's fingerprint or face so they can be used instead of typing it. */
+/*
+ * The PIN, kept behind the phone's fingerprint or face so they can be used instead of typing it. Kept per
+ * person, and forgotten when they sign out: another agent on the same phone never gets it.
+ */
 
-const PIN_ITEM = 'jiffo.appPin';
+const pinItem = (userId: string) => `jiffo.appPin.${userId}`;
 const LOCKED: SecureStore.SecureStoreOptions = {
   requireAuthentication: true,
   // Only on this phone, only while it has a screen lock: never in a backup or on another phone.
@@ -59,17 +70,18 @@ export const canUseBiometrics = () => {
 };
 
 /** Keeps the PIN behind the fingerprint or face. */
-export const rememberPin = (pin: string) => SecureStore.setItemAsync(PIN_ITEM, pin, LOCKED);
+export const rememberPin = (userId: string, pin: string) => SecureStore.setItemAsync(pinItem(userId), pin, LOCKED);
 
 /** The PIN, after the fingerprint or face; null if none is kept, or the person cancels. */
-export async function recallPin(): Promise<string | null> {
+export async function recallPin(userId: string): Promise<string | null> {
   if (!canUseBiometrics()) return null;
   try {
-    return await SecureStore.getItemAsync(PIN_ITEM, LOCKED);
+    return await SecureStore.getItemAsync(pinItem(userId), LOCKED);
   } catch {
     return null;
   }
 }
 
-/** Forgets the kept PIN: after a change, or when the server says it's wrong. */
-export const forgetPin = () => SecureStore.deleteItemAsync(PIN_ITEM, LOCKED).catch(() => undefined);
+/** Forgets the kept PIN: when they turn it off, sign out, or the server says it's no longer right. */
+export const forgetPin = (userId: string) =>
+  SecureStore.deleteItemAsync(pinItem(userId), LOCKED).catch(() => undefined);

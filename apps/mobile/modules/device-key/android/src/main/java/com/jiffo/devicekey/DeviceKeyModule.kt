@@ -11,6 +11,7 @@ import expo.modules.kotlin.modules.ModuleDefinition
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.PrivateKey
+import java.security.ProviderException
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 
@@ -26,7 +27,10 @@ class DeviceKeyModule : Module() {
     /** The public half, as base64 SPKI; the key is made the first time. */
     AsyncFunction("publicKey") { alias: String ->
       val store = keyStore()
-      if (!store.containsAlias(name(alias))) makeKey(name(alias))
+      // One at a time: two callers finding no key would otherwise each make one, the second replacing the first.
+      synchronized(lock) {
+        if (!store.containsAlias(name(alias))) makeKey(name(alias))
+      }
       val certificate = store.getCertificate(name(alias)) ?: throw DeviceKeyException("Couldn't read this phone's key")
       Base64.encodeToString(certificate.publicKey.encoded, Base64.NO_WRAP)
     }
@@ -49,6 +53,8 @@ class DeviceKeyModule : Module() {
     }
   }
 
+  private val lock = Any()
+
   private fun name(alias: String) = "com.jiffo.devicekey.$alias"
 
   private fun keyStore() = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -64,8 +70,10 @@ class DeviceKeyModule : Module() {
     try {
       generator.initialize(spec(strongBox = true))
       generator.generateKeyPair()
-    } catch (e: StrongBoxUnavailableException) {
-      // Most phones have no StrongBox: the Keystore's trusted environment holds the key instead.
+    } catch (e: Exception) {
+      if (e !is StrongBoxUnavailableException && e !is ProviderException) throw e
+      // Most phones have no StrongBox, and some refuse EC keys there: the Keystore's trusted environment
+      // holds the key instead.
       generator.initialize(spec(strongBox = false))
       generator.generateKeyPair()
     }

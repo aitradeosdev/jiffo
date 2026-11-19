@@ -37,12 +37,11 @@ export default function Withdraw() {
     try {
       const intent = `${kobo}:${speed}`;
       if (requestKey.current?.for !== intent) requestKey.current = { for: intent, id: Crypto.randomUUID() };
-      const done = await money.run(
-        'POST',
-        '/v1/wallet/withdrawals',
-        { amountKobo: kobo, speed, requestId: requestKey.current.id },
-        '/withdraw',
-      );
+      const done = await money.run('POST', '/v1/wallet/withdrawals', {
+        amountKobo: kobo,
+        speed,
+        requestId: requestKey.current.id,
+      });
       if (done) goBack();
     } catch (e) {
       const remaining = e instanceof ApiError ? e.details.remainingKobo : undefined;

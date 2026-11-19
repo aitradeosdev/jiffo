@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Platform, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { goBack } from '@/nav';
 import { ApiError, errorMessage } from '@/api/client';
@@ -26,13 +26,14 @@ const digits = (t: string) => t.replace(/\D/g, '').slice(0, 4);
  * the current one, or set a new one just after signing in again when it's forgotten or locked.
  */
 export default function PinScreen() {
-  const { api, signOut } = useSession();
-  const { next, reset } = useLocalSearchParams<{ next?: string; reset?: string }>();
+  const { api, user, signOut } = useSession();
+  const { reset } = useLocalSearchParams<{ reset?: string }>();
   const status = useResource<SecurityStatus>('/v1/me/security');
   const [current, setCurrent] = useState('');
   const [pin, setPin] = useState('');
   const [again, setAgain] = useState('');
-  const [biometrics, setBiometrics] = useState(canUseBiometrics());
+  // Off until the agent turns it on.
+  const [biometrics, setBiometrics] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signInAgain, setSignInAgain] = useState(false);
@@ -56,16 +57,23 @@ export default function PinScreen() {
         changing ? { pin, currentPin: current } : { pin },
         '',
       );
-      if (biometrics) await rememberPin(pin);
-      else await forgetPin();
+      // The PIN is saved on the server; keeping it behind the fingerprint is a convenience, and a cancelled
+      // prompt there mustn't look like the save failed.
+      try {
+        if (biometrics) await rememberPin(user!.id, pin);
+        else await forgetPin(user!.id);
+      } catch {
+        if (Platform.OS !== 'web')
+          Alert.alert('PIN saved', "Your fingerprint or face wasn't set up for it. Try again later.");
+      }
       if (res.withdrawalsHeldUntil) {
         const message =
           'For your safety, withdrawals are paused for 48 hours after a PIN change. You can keep working as usual.';
         if (Platform.OS === 'web') window.alert(message);
         else Alert.alert('PIN changed', message);
       }
-      if (next) router.replace(next as never);
-      else goBack();
+      // Back to the screen that asked for it, or the menu.
+      goBack();
     } catch (e) {
       if (e instanceof ApiError && e.code === 'sign_in_again') setSignInAgain(true);
       else setError(moneyErrorMessage(e, errorMessage));
@@ -82,6 +90,15 @@ export default function PinScreen() {
           For your safety, a forgotten or locked PIN is set again only just after signing in on this phone. Sign out,
           sign in with the code we text you, then set your new PIN straight away. Withdrawals pause for 48 hours after.
         </Text>
+      </Screen>
+    );
+  }
+
+  // Nothing is sent before the server says what's set up: a PIN could otherwise be reset without the old one.
+  if (!status.data) {
+    return (
+      <Screen footer={status.error ? <Button label="Try again" onPress={() => void status.reload()} /> : undefined}>
+        {status.error ? <Text tone="ink2">{status.error}</Text> : <ActivityIndicator />}
       </Screen>
     );
   }

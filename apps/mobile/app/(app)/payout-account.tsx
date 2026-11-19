@@ -41,7 +41,6 @@ export default function PayoutAccount() {
         'PUT',
         '/v1/payout-account',
         { bankCode: bank.code, accountNumber: number },
-        '/payout-account',
       );
       // Gone to set a PIN, or the PIN was cancelled.
       if (saved === null) return;

@@ -15,6 +15,9 @@ public class DeviceKeyModule: Module {
 
     /// The public half, as base64 SPKI; the key is made the first time.
     AsyncFunction("publicKey") { (alias: String) -> String in
+      // One at a time: two callers finding no key would otherwise make two under the same tag.
+      self.lock.lock()
+      defer { self.lock.unlock() }
       let key = try self.privateKey(alias) ?? self.makeKey(alias)
       guard let pub = SecKeyCopyPublicKey(key),
         let raw = SecKeyCopyExternalRepresentation(pub, nil) as Data?
@@ -38,6 +41,8 @@ public class DeviceKeyModule: Module {
     }
   }
 
+  private let lock = NSLock()
+
   private func tag(_ alias: String) -> Data { Data("com.jiffo.devicekey.\(alias)".utf8) }
 
   private func query(_ alias: String) -> [String: Any] {
@@ -59,9 +64,15 @@ public class DeviceKeyModule: Module {
   }
 
   private func makeKey(_ alias: String) throws -> SecKey {
-    // Usable only while the phone is unlocked, never backed up or moved to another phone.
+    // Usable only while the phone is unlocked, never backed up or moved to another phone. The usage flag is
+    // for Secure Enclave keys, which the simulator can't make.
+    #if targetEnvironment(simulator)
+      let flags: SecAccessControlCreateFlags = []
+    #else
+      let flags: SecAccessControlCreateFlags = .privateKeyUsage
+    #endif
     guard let access = SecAccessControlCreateWithFlags(
-      nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, .privateKeyUsage, nil)
+      nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, flags, nil)
     else { throw DeviceKeyError("Couldn't set up this phone's key") }
     var attributes: [String: Any] = [
       kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,

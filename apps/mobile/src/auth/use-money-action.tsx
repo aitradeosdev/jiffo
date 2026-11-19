@@ -24,20 +24,23 @@ export function moneyErrorMessage(error: unknown, fallback: (e: unknown) => stri
  * person went to set a PIN or cancelled.
  */
 export function useMoneyAction() {
-  const { api } = useSession();
+  const { api, user } = useSession();
+  const userId = user?.id ?? '';
   const [asking, setAsking] = useState(false);
   const [typed, setTyped] = useState('');
   const answer = useRef<((pin: string | null) => void) | null>(null);
 
-  const askPin = useCallback(async (): Promise<string | null> => {
-    const kept = await recallPin();
-    if (kept) return kept;
+  /** The PIN, and whether it came from behind the fingerprint (so a wrong one there is forgotten). */
+  const askPin = useCallback(async (): Promise<{ pin: string; kept: boolean } | null> => {
+    const kept = await recallPin(userId);
+    if (kept) return { pin: kept, kept: true };
     setTyped('');
     setAsking(true);
-    return new Promise((resolve) => {
+    const typedPin = await new Promise<string | null>((resolve) => {
       answer.current = resolve;
     });
-  }, []);
+    return typedPin ? { pin: typedPin, kept: false } : null;
+  }, [userId]);
 
   const finish = (pin: string | null) => {
     setAsking(false);
@@ -46,7 +49,7 @@ export function useMoneyAction() {
   };
 
   const run = useCallback(
-    async <T,>(method: 'POST' | 'PUT', path: string, body: unknown, backTo: string): Promise<T | null> => {
+    async <T,>(method: 'POST' | 'PUT', path: string, body: unknown): Promise<T | null> => {
       if (!canSign()) {
         throw new ApiError(0, 'unsupported', 'This needs the Jiffo Agent app from the App Store or Google Play.');
       }
@@ -54,24 +57,27 @@ export function useMoneyAction() {
       if (!status.deviceKey && (await setUpPhone(api)) === 'sign_in_again') {
         throw new ApiError(403, 'sign_in_again', 'Sign out and in again on this phone to set it up for money.');
       }
+      // The PIN screen comes back here when it's done.
       if (!status.hasPin || status.pinLocked) {
-        router.push({ pathname: '/pin', params: { next: backTo, ...(status.pinLocked ? { reset: '1' } : {}) } });
+        router.push({ pathname: '/pin', params: status.pinLocked ? { reset: '1' } : {} });
         return null;
       }
-      const pin = await askPin();
-      if (!pin) return null;
+      const asked = await askPin();
+      if (!asked) return null;
       try {
-        return await moneyRequest<T>(api, method, path, body, pin);
+        return await moneyRequest<T>(api, method, path, body, asked.pin);
       } catch (error) {
-        if (error instanceof ApiError && (error.code === 'pin_wrong' || error.code === 'pin_locked')) {
-          // A kept PIN that no longer works is forgotten, so the next try asks for it.
-          await forgetPin();
-          if (error.code === 'pin_locked') router.push({ pathname: '/pin', params: { next: backTo, reset: '1' } });
+        // Only a kept PIN the server turned down is forgotten: a typed slip leaves the fingerprint on.
+        if (asked.kept && error instanceof ApiError && (error.code === 'pin_wrong' || error.code === 'pin_locked')) {
+          await forgetPin(userId);
+        }
+        if (error instanceof ApiError && error.code === 'pin_locked') {
+          router.push({ pathname: '/pin', params: { reset: '1' } });
         }
         throw error;
       }
     },
-    [api, askPin],
+    [api, askPin, userId],
   );
 
   const sheet = (
