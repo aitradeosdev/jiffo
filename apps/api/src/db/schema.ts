@@ -183,6 +183,9 @@ export const devices = pgTable(
      * selfie check there first (docs/security-plan.md, A4, X4).
      */
     selfieNeeded: boolean('selfie_needed').notNull().default(false),
+    /** What the app last found on this phone (MB4): root, an emulator, hooking tools, a debugger. */
+    riskSignals: jsonb('risk_signals').$type<string[]>().notNull().default([]),
+    riskSignalsAt: timestamp('risk_signals_at', { withTimezone: true }),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: createdAt(),
   },
@@ -270,6 +273,8 @@ export const deviceAttestations = pgTable(
     purpose: text('purpose', { enum: ['sign_in', 'withdrawal', 'payout_account', 'go_online'] }).notNull(),
     verdict: text('verdict', { enum: ['trusted', 'doubtful', 'failed', 'missing', 'unavailable'] }).notNull(),
     reasons: jsonb('reasons').$type<string[]>().notNull().default([]),
+    /** What the app found on the phone (MB4). */
+    signals: jsonb('signals').$type<string[]>().notNull().default([]),
     createdAt: createdAt(),
   },
   (t) => [
@@ -425,6 +430,8 @@ export const agentPresence = pgTable(
     lng: doublePrecision('lng'),
     location: geographyPoint('location'),
     locatedAt: timestamp('located_at', { withTimezone: true }),
+    /** The phone said the position was mocked (MB4): it can't place the agent at a drop-off. */
+    mocked: boolean('mocked').notNull().default(false),
     updatedAt: updatedAt(),
   },
   (t) => [index('agent_presence_location_gix').using('gist', t.location)],

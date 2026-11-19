@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { RiskSignal } from '@jiffo/shared';
 import { signedPayload } from '../auth/device-security.service';
 
 /**
@@ -28,20 +29,35 @@ export const ATTEST_HEADERS = {
   token: 'x-jiffo-attest',
   /** iOS: the attested key's id, base64. */
   keyId: 'x-jiffo-attest-key',
+  /** What the app found on the phone (MB4), comma-separated: one of RISK_SIGNALS each. */
+  risk: 'x-jiffo-risk',
 } as const;
+
+export { RISK_LABELS, RISK_SIGNALS, riskSignalsOf, type RiskSignal } from '@jiffo/shared';
 
 export interface AttestEvidence {
   nonce?: string;
   token?: string;
   keyId?: string;
+  signals?: RiskSignal[];
+  /** The risk header as sent, which the check covers. */
+  risk?: string;
 }
 
 /**
- * What an attestation covers: the server's single-use code, the method and path, and the body's hash, as a
- * signed money request does. As hex for Play Integrity's request hash; the raw bytes for App Attest.
+ * What an attestation covers: the server's single-use code, the method and path, the body's hash, as a
+ * signed money request does, and the risk signals sent with it. As hex for Play Integrity's request hash; the
+ * raw bytes for App Attest.
  */
-export function attestedHash(nonce: string, method: string, path: string, body: Buffer | string | undefined) {
+export function attestedHash(
+  nonce: string,
+  method: string,
+  path: string,
+  body: Buffer | string | undefined,
+  /** The risk signals' header as sent (MB4), so they can be neither dropped nor changed on the way. */
+  risk = '',
+) {
   return createHash('sha256')
-    .update(signedPayload(nonce, method, path, body))
+    .update(`${signedPayload(nonce, method, path, body)}\nrisk:${risk}`)
     .digest();
 }

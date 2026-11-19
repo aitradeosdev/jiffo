@@ -232,6 +232,13 @@
       "when": 1795121661048,
       "tag": "0032_app_attestation",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795124205729,
+      "tag": "0033_risk_signals",
+      "breakpoints": true
     }
   ]
 }

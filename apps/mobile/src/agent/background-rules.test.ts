@@ -21,4 +21,16 @@ describe('background location', () => {
       ]),
     ).toEqual({ lat: 6.5, lng: 3.5 });
   });
+
+  it('says when the phone reports a position as mocked (MB4)', () => {
+    expect(latestPosition([{ timestamp: 1, coords: { latitude: 6.4, longitude: 3.4 }, mocked: true }])).toEqual({
+      lat: 6.4,
+      lng: 3.4,
+      mocked: true,
+    });
+    expect(latestPosition([{ timestamp: 1, coords: { latitude: 6.4, longitude: 3.4 }, mocked: false }])).toEqual({
+      lat: 6.4,
+      lng: 3.4,
+    });
+  });
 });

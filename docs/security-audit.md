@@ -52,7 +52,8 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 10c. Agents: selfie checks in the agent app, with Smile ID's SDK (I2) | aitradeosdev/jiffo#67 | merged |
 | 10d. The apps: no screenshots on PIN, money and ID screens, tokens kept on the phone only, no web sign-in in production, links checked (A9, MB2, MB5) | aitradeosdev/jiffo#68 | merged |
 | 10d. App checks, server side: Play Integrity and App Attest at sign-in, withdrawals, payout changes and going online; recorded, or enforced with a selfie for a doubtful phone (MB3) | aitradeosdev/jiffo#69 | merged |
-| 10d. App checks in the apps: the native module and the checked requests (MB3) | aitradeosdev/jiffo#70 | open |
+| 10d. App checks in the apps: the native module and the checked requests (MB3) | aitradeosdev/jiffo#70 | merged |
+| 10d. Risk signals: root, emulators, hooking tools and debuggers sent and kept, counted as doubtful and shown to staff; mocked positions refused at the drop-off (MB4) | this pull request | open |
 
 ## Summary
 

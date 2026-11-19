@@ -8,6 +8,7 @@ import type { AttestNative } from '@/auth/attestation';
  * Integrity on Android, App Attest on iOS. Absent in Expo Go and on the web, where no check can be made.
  */
 interface AppAttestNative {
+  riskSignals(): Promise<string[]>;
   prepareIntegrity(cloudProjectNumber: string): Promise<void>;
   integrityToken(requestHash: string, cloudProjectNumber: string): Promise<string>;
   newAppleKey(): Promise<string>;
@@ -29,6 +30,7 @@ export const appAttest: AttestNative | null = native
           native.prepareIntegrity(cloudProjectNumber).catch(() => undefined);
         }
       },
+      riskSignals: () => native.riskSignals(),
       integrityToken: (requestHash) => native.integrityToken(requestHash, cloudProjectNumber),
       newAppleKey: () => native.newAppleKey(),
       attestAppleKey: (keyId, hash) => native.attestAppleKey(keyId, hash),

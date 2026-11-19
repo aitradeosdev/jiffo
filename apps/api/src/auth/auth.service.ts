@@ -138,6 +138,9 @@ export class AuthService {
           name: device.name ?? null,
           // A new phone, or one the app check doubts, needs a selfie before money actions (A4, X4, MB3).
           selfieNeeded: newPhone || doubtful,
+          // What the app found on the phone (MB4), as it said at this sign-in.
+          riskSignals: attest.evidence.signals ?? [],
+          riskSignalsAt: new Date(),
         })
         .onConflictDoUpdate({
           target: [devices.userId, devices.deviceKey, devices.app],
@@ -147,6 +150,8 @@ export class AuthService {
             lastSeenAt: new Date(),
             forgottenAt: null,
             ...(newPhone || doubtful ? { selfieNeeded: true } : {}),
+            riskSignals: attest.evidence.signals ?? [],
+            riskSignalsAt: new Date(),
           },
         })
         .returning();

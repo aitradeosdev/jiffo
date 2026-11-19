@@ -15,7 +15,7 @@ import {
   startBackgroundLocation,
   stopBackgroundLocation,
 } from './background-location';
-import { lastSent, markSent, REPORT_EVERY_MS } from './background-rules';
+import { lastSent, markSent, REPORT_EVERY_MS, reported } from './background-rules';
 import { selfieNeeded, withSelfie, type SelfieReason } from './selfie';
 import { useSelfie } from './selfie-gate';
 
@@ -65,7 +65,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   const switched = useRef(false);
 
   const send = useCallback(
-    async (next: { online: boolean; lat?: number; lng?: number }, goingOnline = false) => {
+    async (next: { online: boolean; lat?: number; lng?: number; mocked?: boolean }, goingOnline = false) => {
       markSent();
       // Going online carries the app check (MB3), made fresh each time; staying online needs none.
       const checked = goingOnline ? await appCheck('PUT', '/v1/agent/presence', next) : {};
@@ -106,7 +106,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
         await api.put('/v1/agent/presence', { online: false }).catch(() => undefined);
         return;
       }
-      const here = { lat: position.coords.latitude, lng: position.coords.longitude };
+      const here = reported(position);
       // Report the position first: the board answers only around a recent one.
       const res = await send({ online: true, ...here }).catch((e: unknown) =>
         selfieNeeded(e) || (e instanceof ApiError && e.code === 'attestation_failed') ? { online: false } : null,
@@ -151,7 +151,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
             setError("Couldn't get your location. Check that location is on, then try again.");
             return;
           }
-          const here = { lat: position.coords.latitude, lng: position.coords.longitude };
+          const here = reported(position);
           setCoords(here);
           // Going online the first time each day needs a selfie (docs/security-plan.md, I8). An agent on an
           // errand is kept sharing their position, offline, until it passes.
@@ -213,7 +213,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
       watch = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, timeInterval: REPORT_EVERY_MS, distanceInterval: 25 },
         (position) => {
-          const here = { lat: position.coords.latitude, lng: position.coords.longitude };
+          const here = reported(position);
           setCoords(here);
           if (Date.now() - lastSent() < REPORT_EVERY_MS) return;
           send({ online: onlineRef.current, ...here }).then(followServer, followServerError);

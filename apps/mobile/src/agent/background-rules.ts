@@ -9,13 +9,29 @@ export function shouldSendFromBackground(appState: string | null | undefined, no
   return appState !== 'active' && now - lastSent >= REPORT_EVERY_MS;
 }
 
+interface PhonePosition {
+  timestamp: number;
+  coords: { latitude: number; longitude: number };
+  /** Android: the phone says a mock-location app made this position. */
+  mocked?: boolean;
+}
+
+/**
+ * A position as the app reports it: where, and whether the phone says it is mocked (docs/security-plan.md,
+ * MB4), which can't place the agent at a drop-off.
+ */
+export function reported(position: PhonePosition) {
+  return {
+    lat: position.coords.latitude,
+    lng: position.coords.longitude,
+    ...(position.mocked ? { mocked: true } : {}),
+  };
+}
+
 /** The newest of the positions the phone hands the task at once, or null when there are none. */
-export function latestPosition(
-  locations: ReadonlyArray<{ timestamp: number; coords: { latitude: number; longitude: number } }> | undefined,
-) {
+export function latestPosition(locations: ReadonlyArray<PhonePosition> | undefined) {
   if (!locations?.length) return null;
-  const newest = locations.reduce((a, b) => (b.timestamp > a.timestamp ? b : a));
-  return { lat: newest.coords.latitude, lng: newest.coords.longitude };
+  return reported(locations.reduce((a, b) => (b.timestamp > a.timestamp ? b : a)));
 }
 
 /**

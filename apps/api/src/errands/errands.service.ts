@@ -216,9 +216,15 @@ export class ErrandsService implements OnModuleInit {
     const [, current, { rows: positions }] = await Promise.all([
       this.applications.assertApproved(auth.userId),
       this.countries.currentSettingsIfAny(auth.countryCode),
-      this.db.execute<{ at: Date | string | null; lat: number | null; lng: number | null; km: number | string | null }>(
+      this.db.execute<{
+        at: Date | string | null;
+        lat: number | null;
+        lng: number | null;
+        km: number | string | null;
+        mocked: boolean;
+      }>(
         sql`
-          select located_at as at, lat, lng,
+          select located_at as at, lat, lng, mocked,
             ST_Distance(location, ST_SetSRID(ST_MakePoint(${q.lng}, ${q.lat}), 4326)::geography) / 1000 as km
           from agent_presence where user_id = ${auth.userId} and location is not null`,
       ),
@@ -229,6 +235,8 @@ export class ErrandsService implements OnModuleInit {
     if (!at || at.lat === null || at.lng === null || !freshWithin(at.at, security.positionFreshMinutes)) {
       throw conflict('location_needed', 'Turn on location to see errands near you');
     }
+    // A mocked position (MB4) shows no errands: it says nothing about where the agent is.
+    if (at.mocked) throw unprocessable('mock_location', 'Turn off mock location to see errands near you');
     if (Number(at.km) > security.boardNearKm) {
       throw unprocessable('not_here', 'The board shows errands near where you are');
     }
@@ -351,8 +359,12 @@ export class ErrandsService implements OnModuleInit {
   private async assertAtDropoff(tx: Tx, errand: ErrandRow, settings: CountrySettings) {
     const meters = settings.security.handoffDistanceMeters;
     if (!meters) return;
-    const { rows } = await tx.execute<{ locatedAt: Date | string | null; distance: number | string | null }>(sql`
-      select p.located_at as "locatedAt", ST_Distance(p.location, s.location) as distance
+    const { rows } = await tx.execute<{
+      locatedAt: Date | string | null;
+      distance: number | string | null;
+      mocked: boolean;
+    }>(sql`
+      select p.located_at as "locatedAt", ST_Distance(p.location, s.location) as distance, p.mocked
       from agent_presence p, errand_stops s
       where p.user_id = ${errand.agentId} and s.errand_id = ${errand.id} and s.kind = 'dropoff'
         and p.location is not null
@@ -360,6 +372,10 @@ export class ErrandsService implements OnModuleInit {
     const at = rows[0];
     if (!at || !freshWithin(at.locatedAt, settings.security.positionFreshMinutes)) {
       throw unprocessable('location_needed', 'Turn on location: Jiffo checks you are at the drop-off');
+    }
+    // A position the phone says is mocked (MB4) says nothing about where the agent is.
+    if (at.mocked) {
+      throw unprocessable('mock_location', 'Turn off mock location: Jiffo checks you are really at the drop-off');
     }
     const distance = Number(at.distance);
     if (distance > meters) {

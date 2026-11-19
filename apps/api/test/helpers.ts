@@ -73,7 +73,44 @@ export async function createTestApp(): Promise<TestApp> {
 }
 
 /** A valid Nigerian mobile number nobody else in the run is using. */
-export const randomPhone = () => `+234803${randomInt(0, 10_000_000).toString().padStart(7, '0')}`;
+/**
+ * Nigerian mobile prefixes, one per test worker. Test files run in parallel against one database, and a number
+ * asked for twice within the resend wait is refused, so each worker draws its numbers from its own prefix
+ * (+234909 is left to staff phones).
+ */
+const PHONE_PREFIXES = [
+  '803',
+  '806',
+  '813',
+  '816',
+  '810',
+  '814',
+  '903',
+  '906',
+  '703',
+  '706',
+  '701',
+  '708',
+  '802',
+  '808',
+  '812',
+  '901',
+  '902',
+  '904',
+  '907',
+  '915',
+  '805',
+  '807',
+  '815',
+  '811',
+  '905',
+  '809',
+  '817',
+  '818',
+  '908',
+];
+const PHONE_PREFIX = PHONE_PREFIXES[Number(process.env.VITEST_POOL_ID ?? 0) % PHONE_PREFIXES.length]!;
+export const randomPhone = () => `+234${PHONE_PREFIX}${randomInt(0, 10_000_000).toString().padStart(7, '0')}`;
 /** Each test gets its own client IP, so per-IP limits in one test never affect another. */
 export const randomIp = () => `10.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 255)}`;
 

@@ -74,6 +74,19 @@ Google Play Integrity on Android and Apple App Attest on iOS show that a request
 - **Development:** builds and tests use a stand-in (`fake:<verdict>`), which production never accepts.
 - **In the apps:** `modules/app-attest` asks Google or Apple for the check, and `src/auth/attestation.ts` builds it over the request, as the server hashes it. It is sent at sign-in, with withdrawals and payout account changes, and when going online, made fresh for each attempt. An iPhone makes its App Attest key and registers it once. Expo Go and the web build can't make a check and send none.
 
+## Risk signals (MB4)
+
+- **What the apps look for:**
+  - a rooted or jailbroken phone (su binaries, Magisk, jailbreak files, writing outside the sandbox);
+  - an emulator or simulator;
+  - a hooking tool (Frida's libraries or server, Xposed, Substrate);
+  - an attached debugger.
+
+  They send what they find with each app check (`x-jiffo-risk`), even when no check can be made. The check covers what is sent, so it can be neither dropped nor changed on the way.
+- **On the server:** a phone with signals counts as doubtful. On Enforce, that means a selfie first, as for a phone Google or Apple doubts. Each check keeps the signals (`device_attestations.signals`), the account's device keeps the latest, and staff see them on the person's page under Devices.
+- **Mock locations:** the agent app sends the phone's own word that a position is mocked (Android). A mocked position can't place an agent at a drop-off: marking an errand delivered, the hand-off PIN and the drop-off photo are refused until a real position comes in. It isn't shown or sent to the customer, isn't counted among agents nearby, and doesn't open the board.
+- **Limits:** these are the app's own word, so a changed app could leave them out (though not without failing the check, which covers them). They add to Google's and Apple's checks (MB3), which run outside the app. Virtual cameras are for Smile ID's liveness and injection checks to catch (I2).
+
 ## The apps on the phone
 
 - **No screenshots (A9):** the PIN, wallet, top-up, withdrawal, payout account and ID check screens, the hand-off PIN (the customer's and the agent's), and the selfie check block screenshots and screen recording while they are in front (Android also hides them in the app switcher). An identity provider's own page opens in the phone's browser, outside the app, so the app can't block it there.
