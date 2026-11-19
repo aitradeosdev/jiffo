@@ -20,6 +20,7 @@ import { moneyErrorMessage } from '@/auth/use-money-action';
 import { space } from '@/theme/tokens';
 import { Button, Field, Screen, Text } from '@/ui/kit';
 import { Chip, Row } from '@/ui/parts';
+import { useNoScreenCapture } from '@/ui/no-screen-capture';
 
 const digits = (t: string) => t.replace(/\D/g, '').slice(0, 4);
 
@@ -28,9 +29,11 @@ const digits = (t: string) => t.replace(/\D/g, '').slice(0, 4);
  * the current one, or set a new one just after signing in again when it's forgotten or locked.
  */
 export default function PinScreen() {
+  // Money, ID or a PIN on screen: no screenshots or screen recording (docs/security-plan.md, A9).
+  useNoScreenCapture('pin');
   const { api, user, signOut } = useSession();
   const selfie = useSelfie();
-  const { reset } = useLocalSearchParams<{ reset?: string }>();
+  const reset = useLocalSearchParams<{ reset?: string }>().reset === '1';
   const status = useResource<SecurityStatus>('/v1/me/security');
   const [current, setCurrent] = useState('');
   const [pin, setPin] = useState('');

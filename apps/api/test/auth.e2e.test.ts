@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OtpService } from '../src/auth/otp.service';
+import { APP_CONFIG, type AppConfig } from '../src/config/app-config';
 import { sha256 } from '../src/common/crypto';
 import { devices, otpChallenges, refreshTokens, sessions } from '../src/db/schema';
 import { adminAs, createTestApp, randomIp, randomPhone, signIn, type TestApp, approved } from './helpers';
@@ -39,6 +40,38 @@ describe('phone sign-in', () => {
 
     const me = await request(t.http).get('/v1/me').set('Authorization', `Bearer ${res.body.accessToken}`).expect(200);
     expect(me.body).toMatchObject({ id: res.body.user.id, countryCode: 'NG', firstName: null });
+  });
+
+  it("refuses sign-in from the apps' web builds in production, whose tokens would sit in the browser", async () => {
+    const phone = randomPhone();
+    await requestCode(phone).expect(200);
+    const code = t.messaging.lastCodeFor(phone)!;
+    const config = t.app.get<AppConfig>(APP_CONFIG);
+    const before = config.NODE_ENV;
+    try {
+      config.NODE_ENV = 'production';
+      const web = await request(t.http)
+        .post('/v1/auth/otp/verify')
+        .send({ phone, code, app: 'customer', device: { key: randomUUID(), platform: 'web' } })
+        .expect(403);
+      expect(web.body.error.code).toBe('web_sign_in_off');
+      // Refused before the code is checked, so it still works in the phone app.
+      await verify(phone, code).expect(200);
+    } finally {
+      config.NODE_ENV = before;
+    }
+    // Development and test builds still sign in on the web.
+    const dev = randomPhone();
+    await requestCode(dev).expect(200);
+    await request(t.http)
+      .post('/v1/auth/otp/verify')
+      .send({
+        phone: dev,
+        code: t.messaging.lastCodeFor(dev)!,
+        app: 'customer',
+        device: { key: randomUUID(), platform: 'web' },
+      })
+      .expect(200);
   });
 
   it('stores only a hash of the code', async () => {

@@ -1,7 +1,8 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 import type { PlacePick } from './types';
 
-export type StopField = 'pickup' | 'stop' | 'dropoff';
+export const STOP_FIELDS = ['pickup', 'stop', 'dropoff'] as const;
+export type StopField = (typeof STOP_FIELDS)[number];
 
 export interface Draft {
   categoryKey: string | null;

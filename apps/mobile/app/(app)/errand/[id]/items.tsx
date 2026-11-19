@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { goBack } from '@/nav';
 import { useSession } from '@/auth/session';
@@ -13,6 +13,7 @@ import { fonts } from '@/theme/tokens';
 import { Button, Field, Text } from '@/ui/kit';
 import { Icon, Toggle } from '@/ui/parts';
 import { PageFooter, PageHeader } from '@/ui/floating';
+import { useErrandId } from '@/errands/use-errand-id';
 
 type Shot = { uri: string; mimeType: string };
 
@@ -21,7 +22,7 @@ type Shot = { uri: string; mimeType: string };
  * and of the items, and the total, sent together for the customer to lock.
  */
 export default function ItemAmount() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const id = useErrandId();
   const c = useColors();
   const { api } = useSession();
   const { errand, act, busy, actionError } = useErrand(id);

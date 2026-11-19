@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { wholeNumber } from '@/links';
 import { goBack } from '@/nav';
 import * as Clipboard from 'expo-clipboard';
 import * as Crypto from 'expo-crypto';
@@ -16,6 +17,7 @@ import { useColors } from '@/theme/theme';
 import { fonts, space } from '@/theme/tokens';
 import { Button, Field, Screen, Text } from '@/ui/kit';
 import { Chip, Icon, List, Row } from '@/ui/parts';
+import { useNoScreenCapture } from '@/ui/no-screen-capture';
 
 interface Deposit {
   id: string;
@@ -62,6 +64,8 @@ const OWN_POLL_MS = 20_000;
  * time), or to a one-time account number made for an amount. Which ways are on offer is admin's choice.
  */
 export default function TopUp() {
+  // Money, ID or a PIN on screen: no screenshots or screen recording (docs/security-plan.md, A9).
+  useNoScreenCapture('topup');
   const c = useColors();
   const { amount } = useLocalSearchParams<{ amount?: string }>();
   const { api } = useSession();
@@ -69,7 +73,8 @@ export default function TopUp() {
   const min = config?.settings.wallet.minDepositKobo ?? 10_000;
   const max = config?.settings.wallet.maxDepositKobo ?? null;
   // Whole naira, as in the amount field.
-  const suggested = amount ? Math.ceil(Math.max(Number(amount), min) / 100) * 100 : null;
+  const asked = wholeNumber(amount, { max: 100_000_000_000 });
+  const suggested = asked !== null ? Math.ceil(Math.max(asked, min) / 100) * 100 : null;
   const [text, setText] = useState(suggested ? String(suggested / 100) : '');
   const [deposit, setDeposit] = useState<Deposit | null>(null);
   const [error, setError] = useState<string | null>(null);

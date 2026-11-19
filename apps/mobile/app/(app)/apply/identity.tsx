@@ -6,6 +6,7 @@ import { Confirmed, Waiting } from '@/agent/apply-parts';
 import { IdentityCheck, type FinishResult } from '@/identity/check';
 import { Button, Text } from '@/ui/kit';
 import { ObScreen, Question } from '@/ui/onboarding';
+import { useNoScreenCapture } from '@/ui/no-screen-capture';
 
 /** The identity result already on the application, as this screen shows it. */
 function savedOutcome(app: Application): CheckOutcome | 'pending' | null {
@@ -30,6 +31,8 @@ const RETURN_URL = 'jiffo-agent://identity-done';
  * IdentityCheck). Opened again after a check, it shows the result, so it isn't replaced by accident.
  */
 export default function Identity() {
+  // Money, ID or a PIN on screen: no screenshots or screen recording (docs/security-plan.md, A9).
+  useNoScreenCapture('apply-identity');
   const { app, reload } = useApplication();
   const [checking, setChecking] = useState<false | 'new' | 'resume'>(
     app && (app.steps.identity || app.identityChecking) ? false : 'new',

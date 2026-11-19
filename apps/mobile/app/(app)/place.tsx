@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
+import { oneOf } from '@/links';
 import { goBack } from '@/nav';
 import * as Crypto from 'expo-crypto';
 import { useSession } from '@/auth/session';
 import { errorMessage } from '@/api/client';
-import { useDraft, type StopField } from '@/errands/draft';
+import { STOP_FIELDS, useDraft, type StopField } from '@/errands/draft';
 import type { PlacePick } from '@/errands/types';
 import { Field, Screen, Text } from '@/ui/kit';
 import { Row } from '@/ui/parts';
@@ -24,7 +25,7 @@ const TITLES: Record<StopField, string> = {
 
 /** Address search for one stop. A search session token groups the typing and the pick for billing. */
 export default function PlaceSearch() {
-  const { field = 'pickup' } = useLocalSearchParams<{ field: StopField }>();
+  const field = oneOf(useLocalSearchParams<{ field?: string }>().field, STOP_FIELDS, 'pickup');
   const { api } = useSession();
   const { update } = useDraft();
   const session = useMemo(() => Crypto.randomUUID(), []);

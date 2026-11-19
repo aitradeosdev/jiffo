@@ -8,6 +8,7 @@ import { useResource } from '@/api/useResource';
 import { useOptionalApplication } from '@/agent/application';
 import { Button, Field, Screen, Text } from '@/ui/kit';
 import { Icon, Row } from '@/ui/parts';
+import { useNoScreenCapture } from '@/ui/no-screen-capture';
 
 interface Bank {
   code: string;
@@ -16,6 +17,8 @@ interface Bank {
 
 /** The agent's own-name bank account. The bank's name for it must match the agent's name on their NIN. */
 export default function PayoutAccount() {
+  // Money, ID or a PIN on screen: no screenshots or screen recording (docs/security-plan.md, A9).
+  useNoScreenCapture('payout-account');
   const { user } = useSession();
   // Signed by this phone's key, with the app PIN (docs/security-plan.md, A3, A7).
   const money = useMoneyAction();

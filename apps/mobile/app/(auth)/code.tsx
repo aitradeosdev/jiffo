@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ComponentRef } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { wholeNumber } from '@/links';
 import { useSession } from '@/auth/session';
 import { ApiError, errorMessage } from '@/api/client';
 import { formatE164 } from '@/auth/phone';
@@ -25,7 +26,7 @@ export default function Code() {
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [left, setLeft] = useState(Number(resend) || 60);
+  const [left, setLeft] = useState(wholeNumber(resend, { max: 3600 }) ?? 60);
 
   useEffect(() => {
     if (left <= 0) return;

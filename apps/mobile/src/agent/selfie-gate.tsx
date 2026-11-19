@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Linking, Modal, View } from 'react-native';
+import { allowScreenCapture, blockScreenCapture } from '@/ui/no-screen-capture';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { errorMessage } from '@/api/client';
 import { useSession } from '@/auth/session';
@@ -77,6 +78,7 @@ export function SelfieProvider({ children }: { children: ReactNode }) {
   const close = useCallback((passed: boolean) => {
     run.current += 1;
     setStep({ kind: 'closed' });
+    void allowScreenCapture('selfie');
     pending.current?.resolve(passed);
     pending.current = null;
   }, []);
@@ -115,8 +117,13 @@ export function SelfieProvider({ children }: { children: ReactNode }) {
       });
       pending.current = { promise, resolve };
       run.current += 1;
+      const token = run.current;
       setReason(why);
-      void start(why);
+      // No screenshots or screen recording of the selfie screens (docs/security-plan.md, A9), blocked before
+      // they open: on Android the modal's own window takes the block only when it is made.
+      void blockScreenCapture('selfie').then(() => {
+        if (run.current === token) void start(why);
+      });
       return promise;
     },
     [reason, start],
