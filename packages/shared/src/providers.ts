@@ -67,8 +67,6 @@ export interface ProviderInfo {
   idTypes?: IdType[];
   /** Identity providers: whether it can check a BVN in the same check as another ID. */
   bvnAlongside?: boolean;
-  /** Identity providers: the person picks their ID on the provider's own page, set up in its dashboard. */
-  idChosenOnPage?: boolean;
   /**
    * Payments providers that can give each customer their own fixed account number, and what the customer
    * gives for it (passed to the provider, never kept).
@@ -283,86 +281,6 @@ export const PROVIDERS: ProviderInfo[] = [
         required: false,
         placeholder: 'live',
         hint: "Type sandbox to use Smile ID's test environment, with its test keys.",
-      },
-    ],
-  },
-  {
-    key: 'dojah',
-    category: 'identity',
-    name: 'Dojah',
-    idTypes: ['nin', 'bvn', 'drivers_licence', 'passport'],
-    bvnAlongside: true,
-    idChosenOnPage: true,
-    about:
-      "Dojah's EasyOnboard widget, with the steps you set up in the Dojah dashboard: for customers the NIN or BVN and a selfie; for agents the IDs you accept from them (add BVN to the government data step) and a selfie. Dojah's agent visits addresses.",
-    webhookPath: '/v1/webhooks/identity/dojah',
-    webhookHint: 'Subscribe it for the kyc_widget service under Developers, Webhooks in the Dojah dashboard.',
-    fields: [
-      { key: 'appId', label: 'App ID', secret: false, required: true },
-      { key: 'secretKey', label: 'Secret key', secret: true, required: true },
-      {
-        key: 'publicKey',
-        label: 'Public key',
-        secret: false,
-        required: true,
-        hint: 'Used by the widget in the browser; Dojah makes it public by design.',
-      },
-      {
-        key: 'widgetId',
-        label: 'Widget ID for agents',
-        secret: false,
-        required: true,
-        hint: 'The EasyOnboard flow agents use: the IDs you accept from them, and the selfie.',
-      },
-      {
-        key: 'customerWidgetId',
-        label: 'Widget ID for customers',
-        secret: false,
-        required: false,
-        hint: "A flow with only the government data step (NIN or BVN) and the selfie: customers don't photograph a document. Without it customers use the agents' flow, and one who picks a document there goes to our team.",
-      },
-      {
-        key: 'webhookSecret',
-        label: 'Webhook secret',
-        secret: true,
-        required: true,
-        hint: 'The Secret shown for the webhook under Developers, Webhooks. Not the secret key.',
-      },
-      {
-        key: 'mode',
-        label: 'Mode',
-        secret: false,
-        required: false,
-        placeholder: 'live',
-        hint: "Type sandbox to use Dojah's sandbox, with its test keys.",
-      },
-    ],
-  },
-  {
-    key: 'youverify',
-    category: 'identity',
-    name: 'Youverify',
-    // Youverify documents a face match for the NIN; the licence's is to be confirmed with them.
-    idTypes: ['nin', 'drivers_licence'],
-    bvnAlongside: true,
-    about:
-      "Youverify's liveness check and ID check with face match, on a page Jiffo serves, with the BVN looked up alongside when needed. Addresses are checked by our team.",
-    fields: [
-      { key: 'secretKey', label: 'API secret key', secret: true, required: true },
-      {
-        key: 'publicMerchantKey',
-        label: 'Public merchant key',
-        secret: false,
-        required: true,
-        hint: 'Starts the liveness check in the browser; Youverify makes it public by design.',
-      },
-      {
-        key: 'mode',
-        label: 'Mode',
-        secret: false,
-        required: false,
-        placeholder: 'live',
-        hint: "Type sandbox to use Youverify's sandbox, with its sandbox keys.",
       },
     ],
   },

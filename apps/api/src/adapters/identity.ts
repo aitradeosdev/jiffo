@@ -41,8 +41,6 @@ export interface IdentityResult {
    * the fingerprint that stops a second account on the same ID; never stored.
    */
   idNumber?: string;
-  /** The ID the person used, from a provider whose page lets them choose (Dojah). */
-  idType?: IdType;
 }
 
 export interface AddressResult {
@@ -51,28 +49,18 @@ export interface AddressResult {
   note?: string;
 }
 
-/** What a page Jiffo serves for a provider sends back: the numbers the person typed, and the provider's session. */
-export interface PageInput {
-  idNumber: string;
-  bvn?: string;
-  session?: string;
-  sessionSig?: string;
-}
-
 export interface IdentityAdapter {
   readonly name: string;
   /**
    * How the person takes part. "numbers": the app asks for the ID number and runs the provider's screens
-   * (the development stand-in). "hosted": a web page (the provider's, or one Jiffo serves for it) asks for
-   * everything, and the app opens it at `url`.
+   * (the development stand-in). "hosted": the provider's own web page asks for everything, and the app opens
+   * it at `url`.
    */
   readonly flow: 'numbers' | 'hosted';
   /** The IDs it checks, each with a selfie matched to the ID's photo (from the shared catalogue). */
   readonly idTypes: readonly IdType[];
   /** Whether it can check a BVN in the same check as another ID. */
   readonly bvnAlongside: boolean;
-  /** Whether the person picks their ID on the provider's page, as set up in its dashboard. */
-  readonly idChosenOnPage: boolean;
   /** Starts the identity check under our reference. The numbers come only in the "numbers" flow. */
   startIdentity(input: {
     person: IdentityPerson;
@@ -82,13 +70,8 @@ export interface IdentityAdapter {
     bvn?: string;
   }): Promise<{ reference: string; sdkToken?: string; url?: string }>;
   identityResult(reference: string): Promise<IdentityResult>;
-  /** Starts the address check; a provider may send someone to visit. */
-  startAddress(input: {
-    person: IdentityPerson;
-    address: string;
-    state: string;
-    area?: string;
-  }): Promise<{ reference: string }>;
+  /** Starts the address check, or hands it to our team for a provider that doesn't check addresses. */
+  startAddress(input: { person: IdentityPerson; address: string; state: string }): Promise<{ reference: string }>;
   addressResult(reference: string): Promise<AddressResult>;
   /**
    * A result the provider sent us, once its signature shows it came from them; null when it doesn't. May ask
@@ -102,19 +85,10 @@ export interface IdentityAdapter {
     rawBody: Buffer,
     headers: Headers,
   ): Promise<{ reference: string; result: IdentityResult; replayKey?: string } | null>;
-  /** For providers whose widget runs in a page Jiffo serves: that page, for the check as started. */
-  page?(reference: string, request: IdentityRequest): string | Promise<string>;
-  /**
-   * For a page Jiffo serves that sends what the person entered back to the API (Youverify's): runs the check
-   * with it and gives the result. The numbers are passed on, never kept.
-   */
-  submitPage?(reference: string, request: IdentityRequest, input: PageInput): Promise<IdentityResult>;
 }
 
 /** References say whose check it is: customers' start with cid-, agents' with jid-. */
 export const REFERENCE_PREFIX = { customer: 'cid', agent: 'jid' } as const;
-export const referenceRole = (reference: string | undefined): 'customer' | 'agent' =>
-  reference?.startsWith(`${REFERENCE_PREFIX.customer}-`) ? 'customer' : 'agent';
 
 export type Headers = Record<string, string | string[] | undefined>;
 export const headerOf = (headers: Headers, name: string) => {
@@ -135,7 +109,6 @@ export class FakeIdentityAdapter implements IdentityAdapter {
   readonly flow = 'numbers' as const;
   readonly idTypes = ID_TYPE_KEYS;
   readonly bvnAlongside = true;
-  readonly idChosenOnPage = false;
   private readonly identities = new Map<string, IdentityResult>();
   private readonly addresses = new Map<string, AddressResult>();
 
@@ -213,7 +186,6 @@ export class UnconfiguredIdentityAdapter implements IdentityAdapter {
   readonly flow = 'numbers' as const;
   readonly idTypes: readonly IdType[] = [];
   readonly bvnAlongside = false;
-  readonly idChosenOnPage = false;
   private refuse(): never {
     throw new IdentityUnavailable();
   }

@@ -17,8 +17,6 @@ export interface IdentityOptions {
   /** An agent's BVN is checked as well. */
   withBvn: boolean;
   flow: 'numbers' | 'hosted';
-  /** The person picks their ID on the provider's page. */
-  idChosenOnPage: boolean;
   /** The provider's name, when one is switched on. */
   provider: string | null;
 }
@@ -71,7 +69,7 @@ export function IdentityCheck(props: IdentityCheckProps) {
   const { api } = useSession();
   const { options } = props;
   const only = options.idTypes.length === 1 ? options.idTypes[0]!.key : null;
-  const first: Phase = options.idChosenOnPage || only ? (options.flow === 'hosted' ? 'intro' : 'number') : 'choose';
+  const first: Phase = only ? (options.flow === 'hosted' ? 'intro' : 'number') : 'choose';
   const [phase, setPhase] = useState<Phase>(props.resume ? 'finishing' : first);
   const [idType, setIdType] = useState<IdType | null>(only ?? options.idTypes[0]?.key ?? null);
   const [idNumber, setIdNumber] = useState('');
@@ -262,10 +260,10 @@ export function IdentityCheck(props: IdentityCheckProps) {
     );
   }
 
-  const backToStart = only || options.idChosenOnPage ? props.onBack : () => setPhase('choose');
+  const backToStart = only ? props.onBack : () => setPhase('choose');
 
   if (phase === 'intro' || !idType) {
-    const chosen = idType && !options.idChosenOnPage ? ID_COPY[idType].short : 'ID';
+    const chosen = idType ? ID_COPY[idType].short : 'ID';
     return (
       <ObScreen
         onBack={backToStart}

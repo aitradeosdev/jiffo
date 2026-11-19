@@ -2,7 +2,8 @@ import { createHmac, hkdfSync } from 'node:crypto';
 import { and, eq, gt } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { SmileIdIdentityAdapter, YouverifyIdentityAdapter } from '../src/adapters/identity-providers';
+import { SmileIdIdentityAdapter } from '../src/adapters/identity-providers';
+import type { IdType } from '@jiffo/shared';
 import { agentApplications, customerVerifications, providerSettings, settingsVersions } from '../src/db/schema';
 import { ProvidersService } from '../src/providers/providers.service';
 import { APP_CONFIG, type AppConfig } from '../src/config/app-config';
@@ -197,21 +198,18 @@ describe('identity checks: ID types, and customers', () => {
     expect(docs.status).toBe(400);
     expect(docs.body.error.issues[0]).toMatchObject({ path: 'identity.customerIdTypes' });
     expect(docs.body.error.issues[0].message).toMatch(/ID documents are for agents/);
-    // With Smile ID and the BVN rule on, agents verify with their BVN; without BVN accepted from customers too.
-    const panel = (method: 'put' | 'post', path: string) =>
-      request(t.http)[method](`/v1/admin/providers${path}`).set(owner.headers);
-    await panel('put', '/identity/youverify')
-      .send({ config: { publicMerchantKey: 'pmk-1', mode: 'sandbox' }, secrets: { secretKey: 'yv-secret' } })
-      .expect(200);
-    vi.spyOn(YouverifyIdentityAdapter.prototype, 'check').mockResolvedValue('Connected');
-    await panel('post', '/identity/youverify/test').expect(200);
-    await switchProvider(t, 'identity', 'youverify');
-    // Youverify checks the NIN (and a licence) with a selfie, not the BVN: customers left with only the BVN
-    // couldn't verify.
-    const none = await save({ customerIdTypes: ['bvn'] });
-    expect(none.status).toBe(400);
-    expect(none.body.error.issues[0].message).toMatch(/Youverify checks NIN slip or card/);
-    await switchProvider(t, 'identity', null);
+    // A provider that doesn't check the BVN (the stand-in, made to check only the NIN and a licence):
+    // customers left with only the BVN couldn't verify.
+    const stand = t.app.get(ProvidersService).current('identity') as { idTypes: readonly IdType[] };
+    const all = stand.idTypes;
+    stand.idTypes = ['nin', 'drivers_licence'];
+    try {
+      const none = await save({ customerIdTypes: ['bvn'] });
+      expect(none.status).toBe(400);
+      expect(none.body.error.issues[0].message).toMatch(/The identity provider in use checks NIN slip or card/);
+    } finally {
+      stand.idTypes = all;
+    }
   });
 
   it('still knows NINs fingerprinted before other IDs, so a second account on one is caught', async () => {

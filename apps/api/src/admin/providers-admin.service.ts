@@ -15,7 +15,7 @@ import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { admins, agentApplications, deposits, payouts, providerSettings } from '../db/schema';
 import { badRequest, conflict, notFound } from '../common/errors';
-import { BUILDERS, checkAdapter } from '../providers/builders';
+import { BUILDERS, checkAdapter, hasBuilder } from '../providers/builders';
 import { ProvidersService, secretBinding } from '../providers/providers.service';
 import { DEPOSIT_RECHECK_DAYS } from '../money/deposits.service';
 import type { EmailAdapter } from '../adapters/email';
@@ -80,7 +80,10 @@ export class ProvidersAdminService {
       categories: PROVIDER_CATEGORIES.map((category) => ({
         category,
         ...PROVIDER_CATEGORY_INFO[category],
-        active: rows.find((r) => r.row.category === category && r.row.active)?.row.provider ?? null,
+        // Settings left from a provider Jiffo no longer has don't count, even if it was switched on.
+        active:
+          rows.find((r) => r.row.category === category && r.row.active && hasBuilder(category, r.row.provider))?.row
+            .provider ?? null,
         /** Used while none is switched on: the environment's choice, a stand-in, or "none". */
         fallback: fallback[category],
         providers: PROVIDERS.filter((p) => p.category === category && BUILDERS[category][p.key]).map((p) => {
@@ -94,7 +97,6 @@ export class ProvidersAdminService {
             /** Identity providers: the IDs it checks with a selfie match, and how it takes a BVN. */
             idTypes: p.idTypes ? p.idTypes.map((t) => ID_TYPES[t].name) : null,
             bvnAlongside: p.bvnAlongside ?? null,
-            idChosenOnPage: p.idChosenOnPage ?? null,
             /** Payments providers: whether it issues customers their own account number, and what it needs for one. */
             fixedAccounts: category === 'payments' ? (p.fixedAccounts ?? 'unsupported') : null,
             // A callback address with a token exists once the settings are saved.

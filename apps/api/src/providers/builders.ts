@@ -1,4 +1,4 @@
-import type { ProviderCategory } from '@jiffo/shared';
+import { isProviderCategory, type ProviderCategory } from '@jiffo/shared';
 import { PostmarkEmailAdapter, ResendEmailAdapter, SesEmailAdapter } from '../adapters/email';
 import { GoogleMapsAdapter } from '../adapters/maps';
 import { AfricasTalkingMessagingAdapter, TermiiMessagingAdapter } from '../adapters/messaging';
@@ -7,12 +7,7 @@ import { FlutterwavePaymentsAdapter, PaystackPaymentsAdapter } from '../adapters
 import { FcmPushAdapter } from '../adapters/push';
 import { S3StorageAdapter } from '../adapters/storage';
 import type { Adapters } from './env-adapters';
-import {
-  DojahIdentityAdapter,
-  SmileIdIdentityAdapter,
-  YouverifyIdentityAdapter,
-  type ProviderContext,
-} from '../adapters/identity-providers';
+import { SmileIdIdentityAdapter, type ProviderContext } from '../adapters/identity-providers';
 
 type Values = Record<string, string>;
 /**
@@ -140,19 +135,6 @@ export const BUILDERS: {
   identity: {
     smileid: (v, ctx) =>
       new SmileIdIdentityAdapter(v.partnerId!, v.apiKey!, sandboxMode(v.mode, ctx), v.privacyPolicyUrl!, ctx),
-    dojah: (v, ctx) =>
-      new DojahIdentityAdapter(
-        v.appId!,
-        v.secretKey!,
-        v.publicKey!,
-        v.widgetId!,
-        v.webhookSecret!,
-        optional(v.customerWidgetId),
-        sandboxMode(v.mode, ctx),
-        ctx,
-      ),
-    youverify: (v, ctx) =>
-      new YouverifyIdentityAdapter(v.secretKey!, v.publicMerchantKey!, sandboxMode(v.mode, ctx), ctx),
   },
   calls: {
     africastalking: (v) => new AfricasTalkingCallsAdapter(v.username!, v.apiKey!, v.phoneNumber!),
@@ -182,6 +164,13 @@ export const BUILDERS: {
       ),
   },
 };
+
+/**
+ * Whether Jiffo has this provider. Settings saved for a provider since removed from Jiffo stay in the database
+ * but are ignored: that provider counts as not set up.
+ */
+export const hasBuilder = (category: string, provider: string) =>
+  isProviderCategory(category) && Object.hasOwn(BUILDERS[category], provider);
 
 /**
  * What the panel's Test button does for each kind of adapter: something read-only that proves the keys

@@ -29,7 +29,7 @@ export const CHECK_LABELS: Record<string, string> = {
   bank: 'Bank account name matches your ID',
   duplicate: 'No other agent account on this ID',
 };
-/** The checks that come from the identity check, whichever ID it used. */
+/** The checks that come from the identity check, whichever ID it used (id_type only on checks saved before). */
 const IDENTITY_CHECKS: string[] = [...ID_TYPE_KEYS, 'selfie', 'id_type', 'duplicate'];
 /** The check an application started, as the identity service takes it. */
 const requestOf = (app: Application): IdentityRequest => ({
@@ -141,8 +141,6 @@ export class AgentApplicationService implements IdentityOwner {
       /** The IDs the agent can verify with now, and whether their BVN is checked as well. */
       idTypes: options.idTypes.map((key) => ({ key, name: ID_TYPES[key].name })),
       withBvn: options.withBvn,
-      /** The agent picks the ID on the provider's page rather than in the app. */
-      idChosenOnPage: options.idChosenOnPage,
       /** The ID the current or last check used, whether it checked the BVN too, and how it ran. */
       identityIdType: app.identityIdType,
       identityWithBvn: app.identityWithBvn,
@@ -187,11 +185,7 @@ export class AgentApplicationService implements IdentityOwner {
    * required). Any numbers go to the provider and are not kept; the ID's fingerprint waits as pending until
    * the provider shows the ID is theirs.
    */
-  async startIdentity(
-    userId: string,
-    input: { idType?: string; idNumber?: string; nin?: string; bvn?: string },
-    sessionId: string,
-  ) {
+  async startIdentity(userId: string, input: { idType?: string; idNumber?: string; nin?: string; bvn?: string }) {
     const app = await this.load(userId);
     if (app.status !== 'draft') {
       throw conflict('application_submitted', 'Your application is already sent. We will text you when it is checked.');
@@ -215,7 +209,6 @@ export class AgentApplicationService implements IdentityOwner {
       pendingIdFingerprint: started.pendingFingerprint,
       identityProvider: started.provider,
       identityReference: started.reference,
-      identitySessionId: sessionId,
       identityIdType: started.request.idType,
       identityWithBvn: started.request.withBvn,
       identityOutcome: null,
@@ -237,9 +230,7 @@ export class AgentApplicationService implements IdentityOwner {
           isNull(agentApplications.identityOutcome),
         ),
       );
-    return app
-      ? { userId: app.userId, provider, reference, request: requestOf(app), sessionId: app.identitySessionId }
-      : null;
+    return app ? { userId: app.userId, provider, reference, request: requestOf(app) } : null;
   }
 
   /** A provider's result for a check still waited on, as the identity service hands it over. */
@@ -298,12 +289,7 @@ export class AgentApplicationService implements IdentityOwner {
    */
   private async applyIdentity(app: Application, result: IdentityResult) {
     const userId = app.userId;
-    const { settings } = await this.countries.currentSettings(app.countryCode);
-    const judged = this.checks.judge(
-      requestOf(app),
-      result,
-      this.checks.accepted('agent', settings.identity, app.identityProvider ?? 'none'),
-    );
+    const judged = this.checks.judge(requestOf(app), result);
     // The ID's fingerprint: of the ID the provider read, when its own page asked; else of what the app sent.
     const fingerprint = judged.fingerprint ?? app.pendingIdFingerprint;
     return this.db.transaction(async (tx) => {
@@ -403,7 +389,6 @@ export class AgentApplicationService implements IdentityOwner {
       ({ reference } = await this.checks.call(() =>
         identity.startAddress({
           person,
-          area: claimed.area ?? undefined,
           address: claimed.address!,
           state: before.stateName ?? claimed.stateCode ?? '',
         }),

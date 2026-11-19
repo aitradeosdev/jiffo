@@ -785,8 +785,9 @@ export const providerEvents = pgTable(
 );
 
 /**
- * Identity checks started, and their pages opened, for the limits on both (docs/security-plan.md, I1): each
- * may cost a paid check with the provider. A page open also records the browser it was first opened in.
+ * Identity checks started, for the daily limit (docs/security-plan.md, I1): each may cost a paid check with
+ * the provider. Page opens (and their binding) are from the pages Jiffo once served for a provider: nothing
+ * writes them now, and the daily prune clears the old rows.
  */
 export const identityAttempts = pgTable(
   'identity_attempts',
@@ -795,7 +796,7 @@ export const identityAttempts = pgTable(
     kind: text('kind', { enum: ['start', 'page_open'] }).notNull(),
     userId: uuid('user_id').references(() => users.id),
     reference: text('reference'),
-    /** For a page open: a hash of the cookie its browser was given, so the link works only there. */
+    /** No longer written. For a page open: a hash of the cookie its browser was given. */
     binding: text('binding'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -964,7 +965,7 @@ export const agentApplications = pgTable(
     identityIdType: text('identity_id_type'),
     identityWithBvn: boolean('identity_with_bvn').notNull().default(false),
     identityReference: text('identity_reference'),
-    /** The app session the check was started from: its hosted page works only while that session lasts. */
+    /** No longer written. The app session a check was started from, for the pages Jiffo once served. */
     identitySessionId: uuid('identity_session_id'),
     identityOutcome: text('identity_outcome', { enum: ['passed', 'failed', 'review'] }),
     identityCheckedAt: timestamp('identity_checked_at', { withTimezone: true }),
@@ -1019,7 +1020,7 @@ export const customerVerifications = pgTable(
     status: text('status', { enum: ['checking', 'verified', 'review', 'failed', 'declined'] }).notNull(),
     provider: text('provider').notNull(),
     reference: text('reference').notNull(),
-    /** The app session the check was started from: its hosted page works only while that session lasts. */
+    /** No longer written. The app session a check was started from, for the pages Jiffo once served. */
     sessionId: uuid('session_id'),
     idType: text('id_type').notNull(),
     /** The provider's overall answer, once back. */
