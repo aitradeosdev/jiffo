@@ -11,7 +11,7 @@ import { Button } from '@/ui/kit';
 import { ObScreen, Question } from '@/ui/onboarding';
 
 /** Screens an agent uses while applying: the application itself, and the steps it shares with the app. */
-const APPLYING = ['/apply', '/name', '/payout-account', '/preferences'];
+const APPLYING = ['/apply', '/name', '/payout-account', '/pin', '/preferences'];
 
 /** Everything behind sign-in. A signed-out visitor goes to the welcome screen; a nameless account to the name step. */
 export default function AppLayout() {

@@ -3,17 +3,18 @@ import * as Crypto from 'expo-crypto';
 import { ActivityIndicator, View } from 'react-native';
 import { router } from 'expo-router';
 import { goBack } from '@/nav';
-import { useSession } from '@/auth/session';
 import { ApiError, errorMessage } from '@/api/client';
 import { useResource } from '@/api/useResource';
 import { naira, parseNaira } from '@/money';
 import { space } from '@/theme/tokens';
 import { Button, Field, Screen, Text } from '@/ui/kit';
+import { moneyErrorMessage, useMoneyAction } from '@/auth/use-money-action';
 import { Chip, Row } from '@/ui/parts';
 
 /** Withdraw to the agent's own bank account: free once a day, or now for a small fee. */
 export default function Withdraw() {
-  const { api } = useSession();
+  // Signed by this phone's key, with the app PIN (docs/security-plan.md, A3, A7).
+  const money = useMoneyAction();
   const wallet = useResource<{ availableKobo: number; withdrawalsHeldUntil?: string | null }>('/v1/wallet');
   const account = useResource<{ bankName: string; accountNumber: string; inReview?: boolean } | null>(
     '/v1/payout-account',
@@ -36,14 +37,18 @@ export default function Withdraw() {
     try {
       const intent = `${kobo}:${speed}`;
       if (requestKey.current?.for !== intent) requestKey.current = { for: intent, id: Crypto.randomUUID() };
-      await api.post('/v1/wallet/withdrawals', { amountKobo: kobo, speed, requestId: requestKey.current.id });
-      goBack();
+      const done = await money.run('POST', '/v1/wallet/withdrawals', {
+        amountKobo: kobo,
+        speed,
+        requestId: requestKey.current.id,
+      });
+      if (done) goBack();
     } catch (e) {
       const remaining = e instanceof ApiError ? e.details.remainingKobo : undefined;
       setError(
         typeof remaining === 'number'
           ? `${errorMessage(e)} You can withdraw ${naira(remaining)} more today.`
-          : errorMessage(e),
+          : moneyErrorMessage(e, errorMessage),
       );
     } finally {
       setBusy(false);
@@ -158,6 +163,7 @@ export default function Withdraw() {
           To {account.data.bankName} · {account.data.accountNumber}
         </Text>
       ) : null}
+      {money.sheet}
     </Screen>
   );
 }

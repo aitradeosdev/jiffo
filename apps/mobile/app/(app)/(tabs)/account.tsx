@@ -92,6 +92,7 @@ export default function Account() {
           <MenuRow icon="tune" label="Errand preferences" onPress={() => router.push('/preferences')} />
           <MenuRow icon="chart" label="Earnings" onPress={() => router.push('/wallet')} />
           <MenuRow icon="bank" label="Payout account" onPress={() => router.push('/payout-account')} />
+          <MenuRow icon="lock" label="App PIN" onPress={() => router.push('/pin')} />
         </View>
       ) : null}
 

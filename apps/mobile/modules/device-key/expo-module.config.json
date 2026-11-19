@@ -1,0 +1,5 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": { "modules": ["DeviceKeyModule"] },
+  "android": { "modules": ["com.jiffo.devicekey.DeviceKeyModule"] }
+}
