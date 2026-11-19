@@ -19,6 +19,7 @@ function deps(platform: 'ios' | 'android', native: Partial<AttestNative> = {}) {
     }),
   } as unknown as AttestDeps['api'];
   let kept: string | null = null;
+  let hold: number | null = null;
   const fake: AttestNative = {
     integrityToken: vi.fn(async (hash: string) => `play:${hash}`),
     newAppleKey: vi.fn(async () => 'key-1'),
@@ -33,7 +34,13 @@ function deps(platform: 'ios' | 'android', native: Partial<AttestNative> = {}) {
     app: 'agent',
     deviceKey: async () => 'install-1',
     sha256Hex,
-    appleKey: { get: async () => kept, set: async (k) => void (kept = k) },
+    appleKey: {
+      get: async () => kept,
+      set: async (k) => void (kept = k),
+      holdUntil: async () => hold,
+      hold: async (until) => void (hold = until),
+    },
+    now: () => 1_000_000,
   };
   return { d, calls, fake };
 }
@@ -87,5 +94,42 @@ describe('app checks from the phone (MB3)', () => {
     });
     expect(await attestationHeaders(ios.d, 'POST', '/v1/wallet/withdrawals', BODY)).toEqual({});
     expect(await ios.d.appleKey.get()).toBeNull();
+  });
+
+  it('makes and registers a new iPhone key when the kept one stopped working (a reinstall)', async () => {
+    const { d, fake } = deps('ios');
+    await d.appleKey.set('old-key');
+    let first = true;
+    (fake.appleAssertion as ReturnType<typeof vi.fn>).mockImplementation(async (keyId: string) => {
+      if (keyId === 'old-key' && first) {
+        first = false;
+        throw new Error('invalid key');
+      }
+      return `assertion:${keyId}`;
+    });
+    const headers = await attestationHeaders(d, 'POST', '/v1/wallet/withdrawals', BODY);
+    expect(headers[ATTEST_HEADERS.keyId]).toBe('key-1');
+    expect(await d.appleKey.get()).toBe('key-1');
+  });
+
+  it("waits before trying a key again when the server didn't take it, rather than on every request", async () => {
+    const ios = deps('ios');
+    (ios.d.api.public as ReturnType<typeof vi.fn>).mockImplementation(async (_m: string, path: string) => {
+      if (path.endsWith('/apple-key')) throw new Error('not set up');
+      return { nonce: 'n' };
+    });
+    expect(await attestationHeaders(ios.d, 'POST', '/v1/wallet/withdrawals', BODY)).toEqual({});
+    expect(await attestationHeaders(ios.d, 'POST', '/v1/wallet/withdrawals', BODY)).toEqual({});
+    expect(ios.fake.newAppleKey).toHaveBeenCalledTimes(1);
+    // After the wait, it tries again.
+    ios.d.now = () => 1_000_000 + 7 * 3_600_000;
+    await attestationHeaders(ios.d, 'POST', '/v1/wallet/withdrawals', BODY);
+    expect(ios.fake.newAppleKey).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks nothing of the server when the phone can't make a check (no Play project set)", async () => {
+    const { d, calls } = deps('android', { ready: () => false });
+    expect(await attestationHeaders(d, 'POST', '/v1/wallet/withdrawals', BODY)).toEqual({});
+    expect(calls).toEqual([]);
   });
 });

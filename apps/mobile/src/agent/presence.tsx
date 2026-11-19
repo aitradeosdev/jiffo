@@ -109,7 +109,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
       const here = { lat: position.coords.latitude, lng: position.coords.longitude };
       // Report the position first: the board answers only around a recent one.
       const res = await send({ online: true, ...here }).catch((e: unknown) =>
-        selfieNeeded(e) ? { online: false } : null,
+        selfieNeeded(e) || (e instanceof ApiError && e.code === 'attestation_failed') ? { online: false } : null,
       );
       if (switched.current) return;
       setCoords(here);
@@ -185,7 +185,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   const wentOffline = useCallback(() => {
     if (!onlineRef.current) return;
     setOnlineState(false);
-    setError('You went offline. Go online again to take your selfie.');
+    setError('You went offline. Go online again to carry on.');
   }, []);
   const followServer = useCallback(
     (res: { online: boolean; selfieNeeded?: SelfieReason }) => {
@@ -195,7 +195,8 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   );
   const followServerError = useCallback(
     (e: unknown) => {
-      if (selfieNeeded(e)) wentOffline();
+      // Asked for a selfie, or for the app check (MB3), the server is treating this as going online.
+      if (selfieNeeded(e) || (e instanceof ApiError && e.code === 'attestation_failed')) wentOffline();
     },
     [wentOffline],
   );

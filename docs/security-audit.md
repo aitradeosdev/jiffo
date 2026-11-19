@@ -51,8 +51,8 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 10c. Agents: selfie checks against Smile ID's kept face, server side: daily, at random, on a new phone, before a payout change; three failures suspend (A4, I8, P8, X4) | aitradeosdev/jiffo#66 | merged |
 | 10c. Agents: selfie checks in the agent app, with Smile ID's SDK (I2) | aitradeosdev/jiffo#67 | merged |
 | 10d. The apps: no screenshots on PIN, money and ID screens, tokens kept on the phone only, no web sign-in in production, links checked (A9, MB2, MB5) | aitradeosdev/jiffo#68 | merged |
-| 10d. App checks, server side: Play Integrity and App Attest at sign-in, withdrawals, payout changes and going online; recorded, or enforced with a selfie for a doubtful phone (MB3) | aitradeosdev/jiffo#69 | open |
-| 10d. App checks in the apps: the native module and the checked requests (MB3) | this pull request | open |
+| 10d. App checks, server side: Play Integrity and App Attest at sign-in, withdrawals, payout changes and going online; recorded, or enforced with a selfie for a doubtful phone (MB3) | aitradeosdev/jiffo#69 | merged |
+| 10d. App checks in the apps: the native module and the checked requests (MB3) | aitradeosdev/jiffo#70 | open |
 
 ## Summary
 

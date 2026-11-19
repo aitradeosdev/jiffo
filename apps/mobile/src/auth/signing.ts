@@ -37,9 +37,10 @@ export async function signedRequest<T>(
   body: unknown,
   pin: string,
 ): Promise<T> {
+  // The app check first: it can take a while (an iPhone's first key), and the phone's code lasts 2 minutes.
+  const checked = deps.attest ? await deps.attest(method, path, body) : {};
   const { nonce } = await deps.api.post<{ nonce: string }>('/v1/devices/current/challenge');
   const signature = await deps.sign(await signedPayload(nonce, method, path, JSON.stringify(body), deps.sha256Hex));
-  const checked = deps.attest ? await deps.attest(method, path, body) : {};
   return deps.api.withHeaders<T>(method, path, body, {
     ...checked,
     [SIGNED_HEADERS.nonce]: nonce,

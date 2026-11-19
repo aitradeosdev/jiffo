@@ -8,6 +8,7 @@ import { sha256Hex } from './hash';
 import { deviceKey } from './install-key';
 
 const APPLE_KEY = `jiffo.${VARIANT}.appAttestKey`;
+const APPLE_KEY_HOLD = `jiffo.${VARIANT}.appAttestKeyHold`;
 
 /** The two app-check routes are public: they come before sign-in too. */
 const publicApi = createApiClient({
@@ -22,8 +23,16 @@ const deps: AttestDeps = {
   app: VARIANT,
   deviceKey,
   sha256Hex,
-  appleKey: { get: () => secureStorage.get(APPLE_KEY), set: (keyId) => secureStorage.set(APPLE_KEY, keyId) },
+  appleKey: {
+    get: () => secureStorage.get(APPLE_KEY),
+    set: (keyId) => secureStorage.set(APPLE_KEY, keyId),
+    holdUntil: async () => Number(await secureStorage.get(APPLE_KEY_HOLD)) || null,
+    hold: (until) => secureStorage.set(APPLE_KEY_HOLD, until ? String(until) : null),
+  },
 };
+
+// Play Integrity prepares its token provider ahead, so the first check doesn't wait on it.
+appAttest?.prepare?.();
 
 /**
  * The app check's headers for a request (docs/security-plan.md, MB3): sign-in, money actions and going

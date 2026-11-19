@@ -38,6 +38,7 @@ public class AppAttestModule: Module {
     }
 
     /// Play Integrity is Android's.
+    AsyncFunction("prepareIntegrity") { (_: String) in }
     AsyncFunction("integrityToken") { (_: String, _: String) -> String in
       throw AppAttestError("Play Integrity is for Android")
     }
