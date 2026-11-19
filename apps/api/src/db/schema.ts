@@ -24,6 +24,9 @@ import {
   AGENT_TIERS,
   APPROVAL_KINDS,
   APPROVAL_STATUSES,
+  RISK_FLAG_KINDS,
+  RISK_FLAG_STATUSES,
+  RISK_QUEUES,
   WITHDRAWAL_HOLD_REASONS,
   type AdminRole,
   type CountrySettings,
@@ -186,10 +189,22 @@ export const devices = pgTable(
     /** What the app last found on this phone (MB4): root, an emulator, hooking tools, a debugger. */
     riskSignals: jsonb('risk_signals').$type<string[]>().notNull().default([]),
     riskSignalsAt: timestamp('risk_signals_at', { withTimezone: true }),
+    /**
+     * A keyed hash of the phone's own id, the same in both apps on one phone (iOS's id for the vendor,
+     * Android's id for apps signed with one key), so accounts sharing a phone can be flagged (I3, E6). The id
+     * itself is never kept.
+     */
+    phoneFingerprint: text('phone_fingerprint'),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('devices_user_key_app_uq').on(t.userId, t.deviceKey, t.app)],
+  (t) => [
+    uniqueIndex('devices_user_key_app_uq').on(t.userId, t.deviceKey, t.app),
+    // Other accounts on the same phone, for the shared-phone flags.
+    index('devices_key_idx').on(t.deviceKey),
+    index('devices_phone_fingerprint_idx').on(t.phoneFingerprint),
+    index('devices_public_key_idx').on(t.publicKey),
+  ],
 );
 
 /** Single-use codes a phone signs a money request over (A3): issued by the server, used once, short-lived. */
@@ -805,6 +820,11 @@ export const payoutAccounts = pgTable(
     /** Some providers' recipient codes carry the account number (Flutterwave's), so it is encrypted too. */
     recipientCode: encrypted('payout_accounts', 'recipient_code').notNull(),
     /**
+     * A keyed hash of the bank and account number, so one account saved by two agents is flagged (I3) without
+     * decrypting every account to compare them.
+     */
+    accountFingerprint: text('account_fingerprint'),
+    /**
      * approved: withdrawals go here. pending: the bank's name for it only nearly matches the legal name, so
      * support looks first, and withdrawals keep going to the approved one meanwhile. declined: support said no.
      */
@@ -827,6 +847,7 @@ export const payoutAccounts = pgTable(
       .on(t.userId)
       .where(sql`${t.replacedAt} is null and ${t.reviewStatus} = 'pending'`),
     index('payout_accounts_review_idx').on(t.reviewStatus, t.createdAt),
+    index('payout_accounts_fingerprint_idx').on(t.accountFingerprint),
   ],
 );
 
@@ -1002,6 +1023,66 @@ export const alerts = pgTable(
       .where(sql`resolved_at is null`),
     index('alerts_country_created_idx').on(t.countryCode, t.createdAt),
   ],
+);
+
+/* ---------- Fraud flags ---------- */
+
+/**
+ * Something that looks like fraud, for a person to look at (docs/security-plan.md, E5, E6, I3): an errand to
+ * carry cash, a customer and agent sharing a phone, two agents on one bank account. A flag refuses nothing by
+ * itself. Errands flagged and not cleared are left out of the counts admin sets tiers by (F3).
+ */
+export const riskFlags = pgTable(
+  'risk_flags',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    countryCode: char('country_code', { length: 2 })
+      .notNull()
+      .references(() => countries.code),
+    /** risk: the Risk queue, for operations. verification: accounts, for the verification team. */
+    queue: text('queue', { enum: RISK_QUEUES }).notNull(),
+    kind: text('kind', { enum: RISK_FLAG_KINDS }).notNull(),
+    /**
+     * What a flag is about, so the same finding isn't flagged twice: the errand, or the two accounts. A pair
+     * flagged again and again counts its rounds in it.
+     */
+    dedupeKey: text('dedupe_key').notNull(),
+    /** The account it is about: the customer, for an errand. */
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    /** The other account: the errand's agent, or the account sharing the phone or bank account. */
+    otherUserId: uuid('other_user_id').references(() => users.id),
+    /** What was found, for the reviewer: the words, how a phone was shared, the minutes and amounts. */
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    status: text('status', { enum: RISK_FLAG_STATUSES }).notNull().default('open'),
+    decidedBy: uuid('decided_by').references(() => admins.id),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    decisionNote: text('decision_note'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('risk_flags_dedupe_uq').on(t.kind, t.dedupeKey),
+    index('risk_flags_queue_idx').on(t.countryCode, t.queue, t.status, t.createdAt, t.id),
+    index('risk_flags_user_idx').on(t.userId),
+    index('risk_flags_other_user_idx').on(t.otherUserId),
+  ],
+);
+
+/** The errands a flag is about: one, or every errand of a pair flagged together. */
+export const riskFlagErrands = pgTable(
+  'risk_flag_errands',
+  {
+    flagId: uuid('flag_id')
+      .notNull()
+      .references(() => riskFlags.id),
+    errandId: uuid('errand_id')
+      .notNull()
+      .references(() => errands.id),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.flagId, t.errandId] }), index('risk_flag_errands_errand_idx').on(t.errandId)],
 );
 
 /* ---------- Files ---------- */

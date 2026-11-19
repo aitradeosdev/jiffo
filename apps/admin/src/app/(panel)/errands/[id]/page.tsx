@@ -13,6 +13,8 @@ import { ActionsForm } from './actions-form';
 export const metadata: Metadata = { title: 'Errand' };
 
 interface Detail {
+  /** Fraud flags on the errand (E5, E6). */
+  flags: Array<{ id: string; queue: string; kind: string; label: string; status: string }>;
   errand: {
     id: string;
     countryCode: string;
@@ -148,6 +150,20 @@ export default async function ErrandPage({
           </div>
           <h1 className="mt-2 max-w-3xl text-2xl leading-snug font-extrabold tracking-tight">{e.description}</h1>
           <p className="num mt-1 text-[13px] text-ink-3 select-all">{e.id}</p>
+          {d.flags.length ? (
+            <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Flags">
+              {d.flags.map((f) => (
+                <li key={f.id}>
+                  <Link href={`/flags?queue=${f.queue}&status=${f.status}&errand=${e.id}`}>
+                    <Badge tone={f.status === 'cleared' ? 'neutral' : 'danger'}>
+                      {f.label}
+                      {f.status === 'open' ? ' · open' : f.status === 'confirmed' ? ' · fraud' : ' · cleared'}
+                    </Badge>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </div>
 

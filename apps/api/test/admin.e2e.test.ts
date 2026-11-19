@@ -220,7 +220,7 @@ describe('admin', () => {
     expect(me.body).toMatchObject({
       email,
       role: 'operations',
-      permissions: ['read', 'errands', 'disputes', 'suspend', 'tiers', 'reveal'],
+      permissions: ['read', 'errands', 'disputes', 'risk', 'suspend', 'tiers', 'reveal'],
     });
     expect(me.body.countries.map((c: { code: string }) => c.code)).toContain('NG');
     // Once the app is on, the setup step is closed, so a stolen password can't replace it.

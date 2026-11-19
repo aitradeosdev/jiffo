@@ -8,6 +8,7 @@ import { CountriesService } from '../countries/countries.service';
 import { sha256 } from '../common/crypto';
 import { forbidden, unauthorized } from '../common/errors';
 import { PushService } from '../push/push.service';
+import { RiskFlagsService } from '../risk/risk-flags.service';
 import { WithdrawalHoldsService } from '../money/withdrawal-holds.service';
 import { normalisePhone } from './phone';
 import { OtpService } from './otp.service';
@@ -29,6 +30,8 @@ export interface DeviceInfo {
   key: string;
   platform: 'ios' | 'android' | 'web';
   name?: string | undefined;
+  /** The phone's own id, kept only as a keyed hash, to flag accounts sharing a phone (I3, E6). */
+  phoneId?: string | undefined;
 }
 
 export const publicUser = (u: typeof users.$inferSelect) => ({
@@ -52,6 +55,7 @@ export class AuthService {
     private readonly push: PushService,
     private readonly holds: WithdrawalHoldsService,
     private readonly attestation: AttestationService,
+    private readonly risk: RiskFlagsService,
   ) {}
 
   /** How long a session lasts from now, never past its absolute end (SESSION_MAX_DAYS after sign-in). */
@@ -103,7 +107,8 @@ export class AuthService {
       ...attest,
     });
 
-    return this.db.transaction(async (tx) => {
+    const phoneFingerprint = this.risk.phoneFingerprint(device.platform, device.phoneId);
+    const signedIn = await this.db.transaction(async (tx) => {
       const inserted = await tx
         .insert(users)
         .values({ phone, countryCode: country })
@@ -141,6 +146,7 @@ export class AuthService {
           // What the app found on the phone (MB4), as it said at this sign-in.
           riskSignals: attest.evidence.signals ?? [],
           riskSignalsAt: new Date(),
+          phoneFingerprint,
         })
         .onConflictDoUpdate({
           target: [devices.userId, devices.deviceKey, devices.app],
@@ -152,6 +158,8 @@ export class AuthService {
             ...(newPhone || doubtful ? { selfieNeeded: true } : {}),
             riskSignals: attest.evidence.signals ?? [],
             riskSignalsAt: new Date(),
+            // An app that sends none (an older version) keeps the one it sent before.
+            ...(phoneFingerprint ? { phoneFingerprint } : {}),
           },
         })
         .returning();
@@ -197,8 +205,13 @@ export class AuthService {
         signedOutDevices: [...new Set(elsewhere.map((r) => r.deviceId))],
         /** Set when this sign-in started a hold on withdrawals, to tell the agent once it is saved. */
         heldUntil: heldUntil ? { userId: user.id, until: heldUntil } : null,
+        device: { userId: user.id, id: deviceRow!.id },
       };
     });
+    // Another account on this phone is flagged for verification, beside the sign-in (I3).
+    this.risk.phoneUsed(signedIn.device.userId, signedIn.device.id);
+    const { device: _signedInOn, ...out } = signedIn;
+    return out;
   }
 
   /**

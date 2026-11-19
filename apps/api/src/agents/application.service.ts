@@ -17,6 +17,7 @@ import {
 import { PushService } from '../push/push.service';
 import { WithdrawalHoldsService } from '../money/withdrawal-holds.service';
 import { CountriesService } from '../countries/countries.service';
+import { RiskFlagsService } from '../risk/risk-flags.service';
 
 type Application = typeof agentApplications.$inferSelect;
 type Check = { key: string; outcome: string; note?: string };
@@ -54,6 +55,7 @@ export class AgentApplicationService implements IdentityOwner {
     private readonly push: PushService,
     private readonly countries: CountriesService,
     private readonly holds: WithdrawalHoldsService,
+    private readonly risk: RiskFlagsService,
   ) {
     checks.register('agent', this);
   }
@@ -62,7 +64,13 @@ export class AgentApplicationService implements IdentityOwner {
     const [existing] = await this.db.select().from(agentApplications).where(eq(agentApplications.userId, userId));
     if (existing) return existing;
     const [user] = await this.db.select({ countryCode: users.countryCode }).from(users).where(eq(users.id, userId));
-    await this.db.insert(agentApplications).values({ userId, countryCode: user!.countryCode }).onConflictDoNothing();
+    const started = await this.db
+      .insert(agentApplications)
+      .values({ userId, countryCode: user!.countryCode })
+      .onConflictDoNothing()
+      .returning({ userId: agentApplications.userId });
+    // Now an agent-to-be: a phone they share with other accounts goes to verification (I3).
+    if (started.length) this.risk.becameApplicant(userId);
     return (await this.db.select().from(agentApplications).where(eq(agentApplications.userId, userId)))[0]!;
   }
 

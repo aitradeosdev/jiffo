@@ -22,6 +22,8 @@ interface Stats {
   completed: number;
   cancelled: number;
   disputed: number;
+  /** Flagged for fraud and not cleared: left out of the counts above (F3). */
+  flagged: number;
 }
 
 interface Detail {
@@ -179,12 +181,23 @@ export default async function PersonPage({
   const can = (p: (typeof me.permissions)[number]) => me.permissions.includes(p);
   const p = d.person;
   const stats = (s: Stats) => (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-      <Stat label="Errands" value={s.total} />
-      <Stat label="Completed" value={s.completed} />
-      <Stat label="Cancelled" value={s.cancelled} />
-      <Stat label="Disputed" value={s.disputed} tone={s.disputed ? 'warn' : undefined} />
-    </div>
+    <>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+        <Stat label="Errands" value={s.total} />
+        <Stat label="Completed" value={s.completed} />
+        <Stat label="Cancelled" value={s.cancelled} />
+        <Stat label="Disputed" value={s.disputed} tone={s.disputed ? 'warn' : undefined} />
+        <Stat label="Flagged" value={s.flagged} tone={s.flagged ? 'danger' : undefined} />
+      </div>
+      {s.flagged ? (
+        <p className="mt-2 text-sm text-ink-2">
+          Errands flagged for fraud are left out of the other counts until cleared.{' '}
+          <Link href={`/flags?person=${encodeURIComponent(p.id)}`} className="font-semibold underline">
+            See the flags
+          </Link>
+        </p>
+      ) : null}
+    </>
   );
 
   return (

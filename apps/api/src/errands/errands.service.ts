@@ -32,6 +32,7 @@ import { AgentApplicationService } from '../agents/application.service';
 import { CustomerIdentityService } from '../identity/customer-identity.service';
 import { MAPS, type MapsAdapter } from '../adapters/maps';
 import { UploadsService } from '../files/uploads.service';
+import { RiskFlagsService } from '../risk/risk-flags.service';
 import { participantRole } from './access';
 import { ErrandNotifier, type TransitionResult } from './errand-notifier';
 import { EVENT_DATA, type CreateErrandInput, type ErrandEventInput } from './errand-input';
@@ -122,6 +123,7 @@ export class ErrandsService implements OnModuleInit {
     private readonly presence: PresenceService,
     private readonly applications: AgentApplicationService,
     private readonly customerIdentity: CustomerIdentityService,
+    private readonly risk: RiskFlagsService,
   ) {}
 
   onModuleInit() {
@@ -472,6 +474,8 @@ export class ErrandsService implements OnModuleInit {
       await this.scheduleTimers(errand!, settings);
       return errand!;
     });
+    // Moderation flags it for the Risk queue if it asks for cash or money sent, or ends where it starts (E5).
+    this.risk.errandCreated(created, input.stops);
 
     return this.viewOne(created, 'customer', auth.userId);
   }

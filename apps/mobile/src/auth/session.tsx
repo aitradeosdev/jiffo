@@ -8,6 +8,7 @@ import { forgetPin, setUpPhone } from './device-security';
 import { appCheck } from './app-check';
 import { deviceKey, keepDeviceKeyOnThisPhone } from './install-key';
 import { deviceKeyRemove } from '../../modules/device-key';
+import { phoneId } from '../../modules/app-attest';
 import type { CodeSent, SignedIn, User } from '../api/types';
 
 const TOKENS_KEY = `jiffo.${VARIANT}.tokens`;
@@ -121,6 +122,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           key: await deviceKey(),
           platform: Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web',
           name: Device.modelName ?? undefined,
+          // So accounts sharing a phone can be flagged for staff (I3, E6); only a keyed hash is kept.
+          phoneId: (await phoneId()) ?? undefined,
         },
       };
       // With the app check (MB3), made for this request.

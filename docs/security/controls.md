@@ -87,6 +87,24 @@ Google Play Integrity on Android and Apple App Attest on iOS show that a request
 - **Mock locations:** the agent app sends the phone's own word that a position is mocked (Android). A mocked position can't place an agent at a drop-off: marking an errand delivered, the hand-off PIN and the drop-off photo are refused until a real position comes in. It isn't shown or sent to the customer, isn't counted among agents nearby, and doesn't open the board.
 - **Limits:** these are the app's own word, so a changed app could leave them out (though not without failing the check, which covers them). They add to Google's and Apple's checks (MB3), which run outside the app. Virtual cameras are for Smile ID's liveness and injection checks to catch (I2).
 
+## Fraud flags (E5, E6, I3, F3)
+
+A flag asks a person to look; it refuses nothing by itself. Each check runs beside the request that set it off, so the person waits for nothing and an error in a check only goes to the log.
+
+- **Moderation (E5):** a new errand is flagged for the Risk queue when it asks the agent to carry or withdraw cash, asks for money to be sent to an account (an account number counts, but not a phone number with the country code), or ends where it starts (pickup and drop-off nearer than Settings, Risk flags say). The flag keeps the words found, never an account number.
+- **Collusion (E6), when an agent accepts or finishes an errand:**
+  - the customer and the agent have used one phone: the same install of an app, the same phone key, or the phone's own id;
+  - the customer's wallet was topped up from a bank account whose holder isn't the customer and is named as the agent's payout account is;
+  - the same pair has paired up as many times as Settings say within so many days; their later errands join the flag while it stands;
+  - a high-value errand was delivered faster than Settings allow, or than its stops can be driven between at 60 km/h.
+
+  A flag about a pair stands for all their errands: a pair a reviewer cleared isn't flagged for sharing again, and a cleared run of repeat errands is counted afresh.
+- **Shared accounts (I3), to the verification queue:** two accounts used on one phone, when at least one has started an agent application (one phone's key on two agent accounts included; starting an application looks at the phone again), and one bank account saved by two agents, with every account they share on the one flag. Customers' accounts sharing a phone aren't flagged: families do, and there are no promotions to abuse yet.
+- **The phone's id:** both apps send it at sign-in (iOS's id for the vendor, Android's id for apps signed with one key). The server keeps only a keyed hash, as it does for payout accounts (`phone_fingerprint`, `account_fingerprint`, with keys derived from the ID fingerprint key).
+- **Deciding:** the Flags page has the Risk queue, for operations (the `risk` permission), and shared accounts, for the verification team. Each flag is cleared, confirmed as fraud, or reopened, with a reason in the audit log; a button must be pressed, so Enter in the note decides nothing. Nobody decides a flag about their own app account. The errand's page shows its flags, and the person's page links to theirs.
+- **Tier counts (F3):** the counts on a person's page, and the errand count in the People list, leave out errands with a flag that isn't cleared, and show them as Flagged.
+- **Not yet:** errands with no GPS movement need the location trail (fix 11, the trail part), and IP addresses, Wi-Fi networks and the same face on two IDs come in the next part of fix 11.
+
 ## The apps on the phone
 
 - **No screenshots (A9):** the PIN, wallet, top-up, withdrawal, payout account and ID check screens, the hand-off PIN (the customer's and the agent's), and the selfie check block screenshots and screen recording while they are in front (Android also hides them in the app switcher). An identity provider's own page opens in the phone's browser, outside the app, so the app can't block it there.

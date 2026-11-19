@@ -14,6 +14,7 @@ interface AppAttestNative {
   newAppleKey(): Promise<string>;
   attestAppleKey(keyId: string, clientDataHash: string): Promise<string>;
   appleAssertion(keyId: string, clientDataHash: string): Promise<string>;
+  phoneId?(): Promise<string | null>;
 }
 
 const native = requireOptionalNativeModule<AppAttestNative>('AppAttest');
@@ -37,3 +38,16 @@ export const appAttest: AttestNative | null = native
       appleAssertion: (keyId, hash) => native.appleAssertion(keyId, hash),
     }
   : null;
+
+/**
+ * The phone's own id, the same in both Jiffo apps on one phone (docs/security-plan.md, I3, E6): iOS's id for
+ * the vendor, Android's id for apps signed with one key. Sent at sign-in, so accounts sharing a phone can be
+ * flagged; the server keeps only a keyed hash. Null on the web, in Expo Go, or from a build without it.
+ */
+export async function phoneId(): Promise<string | null> {
+  try {
+    return (await native?.phoneId?.()) ?? null;
+  } catch {
+    return null;
+  }
+}

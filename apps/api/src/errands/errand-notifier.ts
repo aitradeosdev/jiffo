@@ -6,6 +6,7 @@ import { formatNaira, TERMINAL_STATES, type CountrySettings, type ErrandEvent } 
 import { ChatService } from '../chat/chat.service';
 import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { RiskFlagsService } from '../risk/risk-flags.service';
 import type { ErrandRow } from './errand-view';
 
 export interface TransitionResult {
@@ -213,6 +214,7 @@ export class ErrandNotifier {
     private readonly realtime: RealtimeGateway,
     private readonly chat: ChatService,
     private readonly push: PushService,
+    private readonly risk: RiskFlagsService,
   ) {}
 
   /**
@@ -241,6 +243,8 @@ export class ErrandNotifier {
   }
 
   async transitioned(r: TransitionResult) {
+    // Pairings and finished errands are checked for fraud flags beside this (E6).
+    this.risk.errandChanged(r.before, r.after);
     try {
       await this.run(r);
     } catch (error) {
