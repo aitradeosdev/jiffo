@@ -7,8 +7,8 @@ import { ZodBody } from '../common/zod-body';
 import { AgentSelfieService } from './agent-selfie.service';
 
 const StartBody = z.object({
-  /** Asked for before changing the payout account (P8); otherwise the server says what it is for. */
-  for: z.literal('payout_change').optional(),
+  /** Asked for before changing the payout account (P8), or for a phone the app check doubts (MB3). */
+  for: z.enum(['payout_change', 'device_check']).optional(),
 });
 
 /** The agent's selfie checks, from the agent app (docs/security-plan.md, A4, I8, P8, X4). */

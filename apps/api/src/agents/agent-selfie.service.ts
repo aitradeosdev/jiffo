@@ -30,6 +30,7 @@ const WHY: Record<SelfieReason, string> = {
   random: 'Take a quick selfie to go online',
   new_device: 'Take a quick selfie to use money on this phone',
   payout_change: 'Take a quick selfie to change your payout account',
+  device_check: "Take a quick selfie: we couldn't fully check this phone",
 };
 
 /** A selfie passed this recently counts as fresh, for changing the payout account (P8). */
@@ -126,7 +127,8 @@ export class AgentSelfieService implements SelfieOwner {
     return !!device?.needed;
   }
 
-  private fresh(userId: string) {
+  /** A selfie passed in the last few minutes. */
+  fresh(userId: string) {
     return this.passedSince(userId, new Date(Date.now() - FRESH_SELFIE_MS));
   }
 
@@ -153,6 +155,11 @@ export class AgentSelfieService implements SelfieOwner {
     return this.reasonToGoOnline(auth, true);
   }
 
+  /** A phone the app check doubts (MB3): a money action on it needs a selfie passed in the last few minutes. */
+  async assertFreshForDevice(auth: AuthContext) {
+    if (!(await this.fresh(auth.userId))) throw this.needed('device_check');
+  }
+
   /**
    * Changing the payout account, rather than adding the first: a selfie passed in the last few minutes (P8).
    * Asked before a signed request's single-use code is used, and again where the change is made.
@@ -170,7 +177,7 @@ export class AgentSelfieService implements SelfieOwner {
    * Starts a selfie check: what the provider's SDK in the app needs to take the selfie, against the face kept
    * from the agent's first check (that check's reference is the enrolled id).
    */
-  async start(auth: AuthContext, asked?: 'payout_change') {
+  async start(auth: AuthContext, asked?: 'payout_change' | 'device_check') {
     const [app] = await this.db
       .select({
         provider: agentApplications.identityProvider,

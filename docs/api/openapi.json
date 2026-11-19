@@ -4058,7 +4058,11 @@
                 "type": "object",
                 "properties": {
                   "for": {
-                    "const": "payout_change"
+                    "type": "string",
+                    "enum": [
+                      "payout_change",
+                      "device_check"
+                    ]
                   }
                 },
                 "additionalProperties": false
@@ -4113,6 +4117,110 @@
         "x-apps": [
           "agent"
         ]
+      }
+    },
+    "/v1/attestation/apple-key": {
+      "post": {
+        "operationId": "AttestationController.appleKey",
+        "tags": [
+          "Attestation"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deviceKey": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 128
+                  },
+                  "app": {
+                    "type": "string",
+                    "enum": [
+                      "customer",
+                      "agent"
+                    ]
+                  },
+                  "keyId": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 100
+                  },
+                  "attestation": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 20000
+                  },
+                  "nonce": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 100
+                  }
+                },
+                "required": [
+                  "deviceKey",
+                  "app",
+                  "keyId",
+                  "attestation",
+                  "nonce"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "auth"
+      }
+    },
+    "/v1/attestation/challenge": {
+      "post": {
+        "operationId": "AttestationController.challenge",
+        "tags": [
+          "Attestation"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deviceKey": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "deviceKey"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "auth"
       }
     },
     "/v1/auth/logout": {

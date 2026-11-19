@@ -50,7 +50,8 @@ The tables below stay as they were at the audit. What has been fixed since:
 | Identity: Smile ID the only provider, ahead of 10c's selfie checks (Dojah and Youverify removed) | aitradeosdev/jiffo#65 | merged |
 | 10c. Agents: selfie checks against Smile ID's kept face, server side: daily, at random, on a new phone, before a payout change; three failures suspend (A4, I8, P8, X4) | aitradeosdev/jiffo#66 | merged |
 | 10c. Agents: selfie checks in the agent app, with Smile ID's SDK (I2) | aitradeosdev/jiffo#67 | merged |
-| 10d. The apps: no screenshots on PIN, money and ID screens, tokens kept on the phone only, no web sign-in in production, links checked (A9, MB2, MB5) | this pull request | open |
+| 10d. The apps: no screenshots on PIN, money and ID screens, tokens kept on the phone only, no web sign-in in production, links checked (A9, MB2, MB5) | aitradeosdev/jiffo#68 | merged |
+| 10d. App checks, server side: Play Integrity and App Attest at sign-in, withdrawals, payout changes and going online; recorded, or enforced with a selfie for a doubtful phone (MB3) | this pull request | open |
 
 ## Summary
 
@@ -455,6 +456,9 @@ What each needs from the code is provided as noted.
   - TLS
   - zero-trust access with SSO in front of the admin panel and admin API
 - **Google and Apple:** Play Integrity and App Attest setup (fix 10), and the Maps key restricted to the apps.
+  - **Google:** in Play Console, link the apps to a Google Cloud project and turn on the Play Integrity API. Then give the API a service account key for that project (`PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON`) and the apps' signing certificate digests (`ANDROID_CERT_SHA256`, from Play Console, App integrity).
+  - **Apple:** turn on App Attest for both App IDs, and give the API the team id (`APPLE_TEAM_ID`).
+  - Then turn Settings, Security, App checks to Enforce, once the store builds have been out for a while with no unexpected failures in the record.
 - **Penetration test** before launch, in the plan's scope, then yearly.
 - **Legal:**
   - CBN opinion on the pooled wallet

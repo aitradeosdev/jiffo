@@ -3,6 +3,7 @@ import { AGENT_OUT_STATES } from '@jiffo/shared';
 import { and, eq, gt, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { agentPresence, errands, type SelfieReason } from '../db/schema';
+import { AttestationService, type AttestContext } from '../attestation/attestation.service';
 import { AgentApplicationService } from './application.service';
 import { AgentSelfieService } from './agent-selfie.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -55,13 +56,18 @@ export class PresenceService {
     private readonly realtime: RealtimeGateway,
     private readonly applications: AgentApplicationService,
     private readonly selfie: AgentSelfieService,
+    private readonly attestation: AttestationService,
   ) {}
 
   /**
    * Going online or offline, and where the agent is. Without `online` (the app reporting from the
    * background), the agent stays online or offline as they last chose, or as support or the sweep left them.
    */
-  async report(auth: AuthContext, input: { online?: boolean; lat?: number; lng?: number }) {
+  async report(
+    auth: AuthContext,
+    input: { online?: boolean; lat?: number; lng?: number },
+    attest?: Pick<AttestContext, 'evidence' | 'request'>,
+  ) {
     const [running, [current]] = await Promise.all([
       this.db
         .select({ id: errands.id, customerId: errands.customerId, status: errands.status })
@@ -76,12 +82,26 @@ export class PresenceService {
       if (running.length === 0 && input.online) await this.applications.assertApproved(auth.userId);
       body = { ...body, online: false };
     }
-    // Going online (not staying online, as the app's heartbeat says) needs today's selfie first (I8). An agent
-    // already online stays so past midnight, and is asked the next time they go online. One with an errand
-    // running keeps sharing where they are for it, offline, and is told the selfie is still to take.
+    // Going online (not staying online, as the app's heartbeat says) needs today's selfie first (I8), then
+    // the app check (MB3), whose doubts ask for a selfie too. An agent already online stays so past midnight,
+    // and is asked the next time they go online. One with an errand running is kept sharing where they are
+    // for it, offline, whatever stops them going online: told a selfie is still to take, or refused the check.
     let selfieNeeded: SelfieReason | null = null;
     if (body.online && !current?.online) {
       selfieNeeded = await this.selfie.neededToGoOnline(auth);
+      // The day's selfie is asked for before the check is used, so the app sends the same check again after.
+      if (!selfieNeeded) {
+        try {
+          const attested = await this.attestation.enforceSession(auth, 'go_online', {
+            evidence: attest?.evidence ?? {},
+            request: attest?.request ?? { method: 'PUT', path: '/v1/agent/presence', body: undefined },
+          });
+          if (attested === 'doubtful' && !(await this.selfie.fresh(auth.userId))) selfieNeeded = 'device_check';
+        } catch (error) {
+          if (running.length === 0) throw error;
+          body = { ...body, online: false };
+        }
+      }
       if (selfieNeeded && running.length === 0) throw this.selfie.needed(selfieNeeded);
       if (selfieNeeded) body = { ...body, online: false };
     }

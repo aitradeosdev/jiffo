@@ -4,3 +4,7 @@
 # A made-up Termii key in a test, renamed in a later commit so the allowlist recognises it as one.
 820dc6d7ce9cc2aab9867dab4e3ab616c05892e2:apps/api/test/approvals.e2e.test.ts:generic-api-key:341
 ae40f275f874b01d780e9995bf19b6ebc5fa5c7b:apps/api/test/approvals.e2e.test.ts:generic-api-key:399
+# Throwaway P-256 keys made for the App Attest test fixtures, removed in a later commit: the tests now make
+# their own key at run time.
+0f4c7f059fe151d773899ec3565f5dc496ed1170:apps/api/test/fixtures/app-attest.json:private-key:6
+0f4c7f059fe151d773899ec3565f5dc496ed1170:apps/api/test/fixtures/app-attest.json:private-key:13

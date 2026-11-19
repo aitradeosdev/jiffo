@@ -225,6 +225,13 @@
       "when": 1795114820580,
       "tag": "0031_agent_selfie",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795121661048,
+      "tag": "0032_app_attestation",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, gte, isNull, ne } from 'drizzle-orm';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
+import { AttestationService, type AttestContext } from '../attestation/attestation.service';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { devices, refreshTokens, sessions, users, type AppName } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
@@ -50,6 +51,7 @@ export class AuthService {
     private readonly tokens: TokensService,
     private readonly push: PushService,
     private readonly holds: WithdrawalHoldsService,
+    private readonly attestation: AttestationService,
   ) {}
 
   /** How long a session lasts from now, never past its absolute end (SESSION_MAX_DAYS after sign-in). */
@@ -69,7 +71,16 @@ export class AuthService {
   }
 
   /** Signs in with a code. The same phone number is one account across both apps. */
-  async verifyCode(phoneInput: string, code: string, app: AppName, device: DeviceInfo) {
+  async verifyCode(
+    phoneInput: string,
+    code: string,
+    app: AppName,
+    device: DeviceInfo,
+    attest: Pick<AttestContext, 'evidence' | 'request'> = {
+      evidence: {},
+      request: { method: 'POST', path: '/v1/auth/otp/verify', body: undefined },
+    },
+  ) {
     // The apps' web builds keep tokens in the browser's storage, not the phone's keychain (docs/security-plan.md,
     // MB2): they are for development only. Refused before the code is checked, so it still works in the app.
     // The platform is the app's own word, so this stops Jiffo's web builds, not a script that says it is a
@@ -79,6 +90,18 @@ export class AuthService {
     }
     const { phone, country } = await this.resolvePhone(phoneInput);
     await this.otp.verify(phone, country, code);
+    // Our store app on a real phone (MB3), checked once the code is right, so nobody can make Jiffo ask Google
+    // or Apple without one. A doubtful phone in the agent app needs a selfie before money moves on it.
+    const [known] = await this.db.select({ id: users.id }).from(users).where(eq(users.phone, phone));
+    const attested = await this.attestation.enforce({
+      purpose: 'sign_in',
+      deviceKey: device.key,
+      platform: device.platform,
+      app,
+      userId: known?.id ?? null,
+      countryCode: country,
+      ...attest,
+    });
 
     return this.db.transaction(async (tx) => {
       const inserted = await tx
@@ -102,6 +125,7 @@ export class AuthService {
               .where(and(eq(devices.userId, user.id), eq(devices.app, 'agent')))
           : [];
       const newPhone = known.length > 0 && !known.some((d) => d.key === device.key && !d.forgottenAt);
+      const doubtful = attested === 'doubtful' && app === 'agent';
       const heldUntil = newPhone ? await this.holds.start(tx, user.id, 'new_device') : null;
 
       const [deviceRow] = await tx
@@ -112,8 +136,8 @@ export class AuthService {
           app,
           platform: device.platform,
           name: device.name ?? null,
-          // A new phone also needs a selfie before money actions (A4, X4); a pass clears it.
-          selfieNeeded: newPhone,
+          // A new phone, or one the app check doubts, needs a selfie before money actions (A4, X4, MB3).
+          selfieNeeded: newPhone || doubtful,
         })
         .onConflictDoUpdate({
           target: [devices.userId, devices.deviceKey, devices.app],
@@ -122,7 +146,7 @@ export class AuthService {
             name: device.name ?? null,
             lastSeenAt: new Date(),
             forgottenAt: null,
-            ...(newPhone ? { selfieNeeded: true } : {}),
+            ...(newPhone || doubtful ? { selfieNeeded: true } : {}),
           },
         })
         .returning();
