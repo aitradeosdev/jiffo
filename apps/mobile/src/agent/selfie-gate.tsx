@@ -17,8 +17,8 @@ import { useColors } from '@/theme/theme';
 import { space } from '@/theme/tokens';
 import { Button, Text } from '@/ui/kit';
 import { SELFIE_WHY, waitForVerdict, type SelfieAnswer, type SelfieReason, type StartedSelfie } from './selfie';
-import { SelfieCapture, selfieCaptureAvailable } from './selfie-capture';
-import type { CaptureEnd } from './selfie-capture.types';
+import { captureFor } from './selfie-capture';
+import { DECIDED_BY_SERVER, type CaptureEnd } from './selfie-capture.types';
 
 interface SelfieGate {
   /** Asks for a selfie check; true once it passed. False when the agent left it, or it didn't pass. */
@@ -58,9 +58,6 @@ type Step =
   | { kind: 'capture'; started: StartedSelfie; consentedAt: string }
   | { kind: 'checking'; started: StartedSelfie }
   | { kind: 'answer'; started: StartedSelfie; answer: SelfieAnswer; error?: string };
-
-/** A Smile ID session the SDK can run with; without these it would refuse to start. */
-const ready = (s: StartedSelfie) => !!s.session.token && !!s.session.partnerId && !!s.session.privacyPolicyUrl;
 
 /**
  * Agents' selfie checks (docs/security-plan.md, A4, I2, I8, P8, X4): says why one is asked for, with the
@@ -147,15 +144,17 @@ export function SelfieProvider({ children }: { children: ReactNode }) {
   // Tapping "Take selfie" is agreeing to it, with the notice on this screen.
   const begin = (started: StartedSelfie) => {
     // The development provider decides on its own, with no camera.
-    if (!started.session.token) return void check(started);
-    if (!selfieCaptureAvailable()) {
+    if (DECIDED_BY_SERVER.includes(started.provider)) return void check(started);
+    // Otherwise the provider's own SDK takes it, if this build of the app has it.
+    const capture = captureFor(started.provider);
+    if (!capture?.available()) {
       return setStep({
         kind: 'intro',
         started,
-        error: 'This needs the Jiffo Agent app from the App Store or Google Play.',
+        error: 'This needs the latest Jiffo Agent app from the App Store or Google Play.',
       });
     }
-    if (!ready(started)) {
+    if (!capture.ready(started.session)) {
       return setStep({ kind: 'intro', started, error: "Selfie checks aren't set up yet. Contact support." });
     }
     setStep({ kind: 'capture', started, consentedAt: new Date().toISOString() });
@@ -178,6 +177,7 @@ export function SelfieProvider({ children }: { children: ReactNode }) {
     return () => setHosts((h) => h.filter((x) => x !== id));
   }, []);
 
+  const Capture = step.kind === 'capture' ? captureFor(step.started.provider)?.Capture : undefined;
   const view = (
     <Modal
       visible={step.kind !== 'closed'}
@@ -185,8 +185,8 @@ export function SelfieProvider({ children }: { children: ReactNode }) {
       presentationStyle="fullScreen"
       onRequestClose={() => close(false)}
     >
-      {step.kind === 'capture' ? (
-        <SelfieCapture
+      {step.kind === 'capture' && Capture ? (
+        <Capture
           session={step.started.session}
           givenNames={user?.firstName ?? ''}
           lastName={user?.lastName ?? ''}
