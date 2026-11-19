@@ -13,6 +13,7 @@ import {
   createErrand,
   createTestApp,
   fund,
+  randomPhone,
   signed,
   signIn,
   type TestApp,
@@ -106,7 +107,7 @@ describe('risk signals', () => {
   it("keeps each account's signals to itself on a phone two accounts use", async () => {
     const first = await signIn(t, 'agent');
     // A second account signs in on the same install.
-    const phone = `+234803${String(Date.now()).slice(-7)}`;
+    const phone = randomPhone();
     await request(t.http).post('/v1/auth/otp/request').send({ phone }).expect(200);
     await request(t.http)
       .post('/v1/auth/otp/verify')
