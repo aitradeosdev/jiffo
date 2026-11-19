@@ -119,6 +119,11 @@ export interface IdentityAdapter {
    */
   selfieResult?(input: { enrolledId: string; reference: string }): Promise<SelfieResult>;
   /**
+   * A job's verdict asked of the provider, for one its webhook already showed to be a selfie check of the
+   * right kind but still running then. Null when the provider doesn't know the job.
+   */
+  selfieJob?(jobId: string): Promise<SelfieVerdict | null>;
+  /**
    * A result the provider sent us, once its signature shows it came from them; null when it doesn't. May ask
    * the provider to confirm it, and throws IdentityProviderError when it can't, so the provider sends it again.
    */
@@ -219,7 +224,7 @@ export class FakeIdentityAdapter implements IdentityAdapter {
   async addressResult(reference: string): Promise<AddressResult> {
     return this.addresses.get(reference) ?? { status: 'pending' };
   }
-  /** Selfie checks' outcomes for tests to queue; each check takes the next, and passes when there is none. */
+
   /** The verdicts the next selfie checks get, in order; passed once these run out. */
   readonly selfieOutcomes: Array<'passed' | 'failed' | 'retry'> = [];
 

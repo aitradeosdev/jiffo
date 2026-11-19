@@ -33,9 +33,9 @@ export class AgentSelfieController {
   }
 
   /** After the SDK sent the selfie: the verdict, or pending until the provider has sent it. */
+  // Polled while the provider decides, so counted as an ordinary request.
   @Post(':id/finish')
   @HttpCode(200)
-  @RateLimit('paid')
   finish(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     return this.selfie.finish(auth, id);
   }

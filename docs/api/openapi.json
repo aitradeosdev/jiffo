@@ -4109,7 +4109,7 @@
             "description": "An error"
           }
         },
-        "x-rate-limit": "paid",
+        "x-rate-limit": "default",
         "x-apps": [
           "agent"
         ]

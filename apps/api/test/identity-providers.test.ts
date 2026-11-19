@@ -181,7 +181,7 @@ describe('Smile ID selfie checks, for agents (I8)', () => {
     const form = calls[0]!.init.body as FormData;
     expect(form.get('user_id')).toBe('jid-1');
     expect(form.get('product')).toBe('smart_selfie_authentication');
-    expect(form.get('allow_new_enroll')).toBeNull();
+    expect(form.get('allow_new_enroll')).toBe('false');
     expect(form.get('use_enrolled_image')).toBeNull();
     expect(JSON.parse(await (form.get('partner_params') as Blob).text())).toEqual({ reference: 'sel-1' });
     expect(JSON.parse(await (form.get('payload') as Blob).text())).toEqual({

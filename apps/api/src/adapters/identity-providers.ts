@@ -12,6 +12,7 @@ import {
   type IdentityResult,
   type ParsedWebhook,
   type SelfieSession,
+  type SelfieVerdict,
   SELFIE_PREFIX,
 } from './identity';
 import { providerInfo, type IdType } from '@jiffo/shared';
@@ -67,6 +68,22 @@ const ADDRESS_BY_SUPPORT: AddressResult = {
   outcome: 'review',
   note: "This provider doesn't check addresses; our team does",
 };
+
+/**
+ * A selfie job's verdict from Smile ID's status API. clear: the face matched. block: it didn't. error or
+ * attention: unclear, so it's taken again.
+ */
+function verdictOf(
+  job: { status?: string; user_id?: string; message?: string; created_at?: string },
+  jobId: string,
+): SelfieVerdict {
+  const created = job.created_at ? new Date(job.created_at) : null;
+  const base = { enrolledId: job.user_id ?? '', jobId, ...(created && !isNaN(+created) ? { createdAt: created } : {}) };
+  if (job.status === 'processing') return { status: 'pending', ...base };
+  const outcome = job.status === 'clear' ? 'passed' : job.status === 'block' ? 'failed' : 'retry';
+  const note = outcome === 'passed' ? undefined : (job.message ?? job.status);
+  return { status: 'done', outcome, ...(note ? { note } : {}), ...base };
+}
 
 /** How old a Smile ID callback's signed timestamp may be. Their signature doesn't cover the body. */
 const SMILE_CALLBACK_MAX_AGE_MS = 30 * 60_000;
@@ -240,26 +257,21 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
     const job = await this.jobStatus(jobId);
     if (!job?.user_id) return null;
     const replayKey = `${signature}:${jobId}`;
-    const createdAt = job.created_at ? new Date(job.created_at) : undefined;
-    const base = { enrolledId: job.user_id, jobId, ...(createdAt && !isNaN(+createdAt) ? { createdAt } : {}) };
+    const verdict = verdictOf(job, jobId);
     const authentication =
       body.product === 'smart_selfie_authentication' &&
       (body.partner_params?.job_type === undefined || String(body.partner_params.job_type) === '2');
     if (!authentication) {
       const note = 'The selfie was not checked against your kept face';
-      return { kind: 'selfie', reference, replayKey, verdict: { status: 'done', outcome: 'failed', note, ...base } };
+      return { kind: 'selfie', reference, replayKey, verdict: { ...verdict, status: 'done', outcome: 'failed', note } };
     }
-    if (job.status === 'processing')
-      return { kind: 'selfie', reference, replayKey, verdict: { status: 'pending', ...base } };
-    // clear: the face matched. block: it didn't. error or attention: unclear, so it's taken again.
-    const outcome = job.status === 'clear' ? 'passed' : job.status === 'block' ? 'failed' : 'retry';
-    const note = outcome === 'passed' ? undefined : (job.message ?? job.status);
-    return {
-      kind: 'selfie',
-      reference,
-      replayKey,
-      verdict: { status: 'done', outcome, ...(note ? { note } : {}), ...base },
-    };
+    return { kind: 'selfie', reference, replayKey, verdict };
+  }
+
+  /** A selfie job still running when its callback came, which showed it was a SmartSelfie Authentication. */
+  async selfieJob(jobId: string): Promise<SelfieVerdict | null> {
+    const job = await this.jobStatus(jobId);
+    return job?.user_id ? verdictOf(job, jobId) : null;
   }
 
   /** A job's verdict from Smile ID itself; null when they don't know the job. */
@@ -296,6 +308,8 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
     const json = (value: unknown) => new Blob([JSON.stringify(value)], { type: 'application/json' });
     scope.append('user_id', input.enrolledId);
     scope.append('product', 'smart_selfie_authentication');
+    // Only this token can allow a new enrolment, which would replace the kept face; said outright.
+    scope.append('allow_new_enroll', 'false');
     scope.append('partner_params', json({ reference: input.reference }));
     scope.append('payload', json({ callback_url: `${this.ctx.publicApiUrl}/v1/webhooks/identity/smileid` }));
     const token = await this.token(scope);

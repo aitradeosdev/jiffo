@@ -11,6 +11,7 @@ import {
   agentSelfieChecks,
   alerts,
   devices,
+  errands,
   otpChallenges,
   providerSettings,
   sessions,
@@ -18,9 +19,12 @@ import {
 } from '../src/db/schema';
 import { ProvidersService } from '../src/providers/providers.service';
 import {
+  act,
   adminAs,
   agentWithMoney,
+  createErrand,
   createTestApp,
+  fund,
   signed,
   signIn,
   switchProvider,
@@ -89,6 +93,19 @@ describe('agent selfie checks', () => {
     await online(agent).expect(200);
     await online(agent, false).expect(200);
     refused(await online(agent), 'selfie_needed', 'daily');
+  });
+
+  it('keeps sharing the position for a running errand while the selfie is still to take', async () => {
+    const agent = await signIn(t, 'agent');
+    const customer = await signIn(t, 'customer');
+    await fund(t, customer);
+    const errand = await createErrand(t, customer);
+    await act(t, agent, errand.id, 'accept');
+    await ageSelfies(agent, '2 days');
+    const res = await online(agent).expect(200);
+    expect(res.body).toEqual({ online: false, sharingLocation: true, selfieNeeded: 'daily' });
+    const [presence] = await t.db.select().from(agentPresence).where(eq(agentPresence.userId, agent.userId));
+    expect(presence).toMatchObject({ online: false, lat: HERE.lat, lng: HERE.lng });
   });
 
   it("counts the day in the country's time zone", async () => {
@@ -194,6 +211,14 @@ describe('agent selfie checks', () => {
 
   it('suspends the account after three failures in a row, signs it out and tells staff', async () => {
     const agent = await signIn(t, 'agent', { noSelfie: true });
+    // The same account in the customer app, with a request still waiting for an agent.
+    await t.db
+      .update(otpChallenges)
+      .set({ createdAt: sql`${otpChallenges.createdAt} - interval '1 hour'` })
+      .where(eq(otpChallenges.phone, agent.phone));
+    const asCustomer = await signIn(t, 'customer', { phone: agent.phone });
+    await fund(t, asCustomer);
+    const waiting = await createErrand(t, asCustomer);
     const verdicts = vi.spyOn(FakeIdentityAdapter.prototype, 'selfieResult');
     verdicts.mockResolvedValue({ status: 'done', outcome: 'failed', note: 'The face did not match' });
     expect(await selfie(agent)).toMatchObject({ status: 'failed', triesLeft: 2 });
@@ -211,6 +236,9 @@ describe('agent selfie checks', () => {
     expect(alert?.message).toMatch(/suspended/);
     const [presence] = await t.db.select().from(agentPresence).where(eq(agentPresence.userId, agent.userId));
     expect(presence?.online ?? false).toBe(false);
+    // Its request still waiting for an agent is closed, as a suspension from the panel does.
+    const [closed] = await t.db.select().from(errands).where(eq(errands.id, waiting.id));
+    expect(closed!.status).toBe('cancelled');
 
     // Staff look and reactivate it: the count starts again, so one more failure doesn't suspend it at once.
     const ops = await adminAs(t, 'operations');
@@ -256,7 +284,18 @@ describe('agent selfie checks', () => {
     t.payments.accounts.set(`058:${accountNumber}`, 'TUNDE BAKARE');
     await ageSelfies(agent, '20 minutes');
     const change = () => signed(t, agent).put('/v1/payout-account').send({ bankCode: '058', accountNumber });
+    const usedCodes = async () =>
+      (
+        (
+          await t.db.execute(
+            sql`select count(*)::int as n from device_challenges c join devices d on d.id = c.device_id where d.user_id = ${agent.userId} and c.used_at is not null`,
+          )
+        ).rows[0] as { n: number }
+      ).n;
+    const before = await usedCodes();
     refused(await change(), 'selfie_needed', 'payout_change');
+    // Asked before the confirmation is used up, so the app sends the same one again after the selfie.
+    expect(await usedCodes()).toBe(before);
     expect((await request(t.http).get('/v1/agent/selfie').set(agent.headers).expect(200)).body.fresh).toBe(false);
     const started = await request(t.http)
       .post('/v1/agent/selfie')
@@ -273,6 +312,21 @@ describe('agent selfie checks', () => {
     expect((await request(t.http).post('/v1/agent/selfie').set(applicant.headers).send({})).body.error.code).toBe(
       'selfie_unavailable',
     );
+    // An identity check still running, or with our team, may have no face kept yet.
+    for (const identityOutcome of [null, 'review'] as const) {
+      const waiting = await signIn(t, 'agent', { unapproved: true });
+      await t.db.insert(agentApplications).values({
+        userId: waiting.userId,
+        countryCode: 'NG',
+        status: identityOutcome ? 'review' : 'checking',
+        identityProvider: 'fake',
+        identityReference: `jid-${randomUUID()}`,
+        identityOutcome,
+      });
+      expect((await request(t.http).post('/v1/agent/selfie').set(waiting.headers).send({})).body.error.code).toBe(
+        'selfie_unavailable',
+      );
+    }
     const agent = await signIn(t, 'agent');
     await t.db
       .update(agentApplications)
@@ -364,6 +418,21 @@ describe('agent selfie checks', () => {
       await callback(reference, 'job_01').expect(200);
       expect((await finish()).body.status).toBe('passed');
       await online(agent).expect(200);
+    });
+
+    it('finishes from the status API a job that was still running when its callback came', async () => {
+      await smileIdOn();
+      token();
+      const { agent, enrolledId } = await smileAgent();
+      const started = await request(t.http).post('/v1/agent/selfie').set(agent.headers).send({}).expect(200);
+      const running = jobStatus({ status: 'processing', user_id: enrolledId, created_at: new Date().toISOString() });
+      await callback(started.body.session.reference, 'job_05').expect(200);
+      const finish = () =>
+        request(t.http).post(`/v1/agent/selfie/${started.body.id}/finish`).set(agent.headers).expect(200);
+      expect((await finish()).body.status).toBe('pending');
+      running.mockResolvedValue({ status: 'clear', user_id: enrolledId, created_at: new Date().toISOString() });
+      expect((await finish()).body.status).toBe('passed');
+      expect(running).toHaveBeenLastCalledWith('job_05');
     });
 
     it("fails a job for another person, an older job, another product, and won't use one job twice", async () => {

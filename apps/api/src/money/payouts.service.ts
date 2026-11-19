@@ -145,12 +145,7 @@ export class PayoutsService {
    */
   async setAccount(auth: AuthContext, bankCode: string, accountNumber: string) {
     // Changing it, rather than adding the first, needs a selfie just before (docs/security-plan.md, P8).
-    const [current] = await this.db
-      .select({ id: payoutAccounts.id })
-      .from(payoutAccounts)
-      .where(and(eq(payoutAccounts.userId, auth.userId), isNull(payoutAccounts.replacedAt)))
-      .limit(1);
-    if (current) await this.selfie.assertFresh(auth);
+    await this.selfie.assertFreshForPayoutChange(auth);
     const [me] = await this.db.select().from(users).where(eq(users.id, auth.userId));
     if (!me?.firstName || !me.lastName) throw conflict('profile_incomplete', 'Add your first and last name first');
     // One provider for the whole step, so the account is recorded with the provider that registered it.

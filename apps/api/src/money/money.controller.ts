@@ -130,7 +130,7 @@ export class MoneyController {
     return this.payouts.getAccount(auth);
   }
 
-  @Signed()
+  @Signed({ selfie: 'payout_change' })
   @Put('payout-account')
   @Apps('agent')
   setPayoutAccount(

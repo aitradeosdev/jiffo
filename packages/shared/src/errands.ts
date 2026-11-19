@@ -138,8 +138,11 @@ export const ERRAND_EVENTS = {
   admin_intervene: { from: AGENT_OUT_STATES, to: 'disputed', actors: ['admin'] },
   resolve_complete: { from: ['disputed'], to: 'completed', actors: ['admin'] },
   resolve_cancel: { from: ['disputed'], to: 'cancelled', actors: ['admin'] },
-  /** Support closes an errand still waiting for an agent, for example when its customer is suspended. */
-  admin_cancel: { from: ['requested'], to: 'cancelled', actors: ['admin'] },
+  /**
+   * Support closes an errand still waiting for an agent, for example when its customer is suspended; the
+   * system does when it suspends the account itself (an agent's failed selfie checks, on the same account).
+   */
+  admin_cancel: { from: ['requested'], to: 'cancelled', actors: ['admin', 'system'] },
 } as const satisfies Record<string, Rule>;
 
 export type ErrandEvent = keyof typeof ERRAND_EVENTS;

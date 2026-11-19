@@ -350,7 +350,8 @@ export class IdentityChecksService {
     if (parsed.replayKey && !(await this.firstUse(provider, parsed.replayKey, rawBody))) return null;
     if (parsed.kind === 'selfie') {
       const { reference, verdict } = parsed;
-      if (verdict.status !== 'done' || !this.selfieOwner) return { reference, settled: false };
+      // A job still running is kept with its check, which asks for its status when the app finishes it.
+      if (!this.selfieOwner) return { reference, settled: false };
       return { reference, settled: await this.selfieOwner.settleSelfie(provider, reference, verdict) };
     }
     const { reference, result } = parsed;
