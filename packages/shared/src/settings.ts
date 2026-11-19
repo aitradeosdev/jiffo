@@ -39,6 +39,7 @@ export const DEFAULT_SECURITY_SETTINGS = {
   appPinTries: 5,
   dailySelfie: true,
   randomSelfiePercent: 0,
+  attestation: 'record' as 'off' | 'record' | 'enforce',
 };
 
 /**
@@ -200,6 +201,13 @@ export const CountrySettingsSchema = z.object({
        * 0 means never. Each is a paid check.
        */
       randomSelfiePercent: z.number().int().min(0).max(100).default(0),
+      /**
+       * App attestation (MB3): Google Play Integrity and Apple App Attest show a request comes from the store
+       * app on a real phone. record keeps each result for staff and risk signals without refusing anything;
+       * enforce refuses a failed or missing one at sign-in, withdrawals, payout account changes and going
+       * online, and asks a doubtful one for a selfie. Turn enforce on once both are set up.
+       */
+      attestation: z.enum(['off', 'record', 'enforce']).default('record'),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
 });

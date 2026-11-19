@@ -20,6 +20,9 @@ const PUBLIC = new Set([
   'POST /v1/auth/otp/verify',
   'POST /v1/auth/refresh',
   'POST /v1/admin/auth/sign-in',
+  // The app check (MB3) is asked for before sign-in, so it has no session; tied to the install, rate-limited.
+  'POST /v1/attestation/challenge',
+  'POST /v1/attestation/apple-key',
   'POST /v1/admin/auth/code',
   'POST /v1/admin/auth/passkey/options',
   'POST /v1/admin/auth/passkey',

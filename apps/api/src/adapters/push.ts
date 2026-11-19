@@ -1,6 +1,6 @@
 import { providerFetch } from './provider-fetch';
 import { Logger } from '@nestjs/common';
-import { importPKCS8, SignJWT } from 'jose';
+import { GoogleServiceAuth, parseServiceAccount, type ServiceAccount } from './google-auth';
 
 export interface PushNotification {
   title: string;
@@ -42,31 +42,21 @@ export class MemoryPushAdapter implements PushAdapter {
   }
 }
 
-interface ServiceAccount {
-  project_id: string;
-  client_email: string;
-  private_key: string;
-}
-
-const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 
 /** Firebase Cloud Messaging, HTTP v1 API, authenticated with a service account. */
 export class FcmPushAdapter implements PushAdapter {
   readonly name = 'fcm';
   private readonly account: ServiceAccount;
-  private accessToken: { value: string; expiresAt: number } | null = null;
+  private readonly auth: GoogleServiceAuth;
   private readonly logger = new Logger('FcmPush');
 
   constructor(
     serviceAccountJson: string,
     private readonly fetchImpl: typeof fetch = providerFetch,
   ) {
-    const parsed = JSON.parse(serviceAccountJson) as Partial<ServiceAccount>;
-    if (!parsed.project_id || !parsed.client_email || !parsed.private_key) {
-      throw new Error('FCM_SERVICE_ACCOUNT_JSON must include project_id, client_email and private_key');
-    }
-    this.account = parsed as ServiceAccount;
+    this.account = parseServiceAccount(serviceAccountJson, 'FCM_SERVICE_ACCOUNT_JSON');
+    this.auth = new GoogleServiceAuth(this.account, FCM_SCOPE, fetchImpl);
   }
 
   /** For the panel's Test button: the key signs in to Google. */
@@ -75,25 +65,8 @@ export class FcmPushAdapter implements PushAdapter {
     return `Signed in to the Firebase project ${this.account.project_id}`;
   }
 
-  private async token(): Promise<string> {
-    if (this.accessToken && this.accessToken.expiresAt > Date.now() + 60_000) return this.accessToken.value;
-    const key = await importPKCS8(this.account.private_key, 'RS256');
-    const assertion = await new SignJWT({ scope: FCM_SCOPE })
-      .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
-      .setIssuer(this.account.client_email)
-      .setAudience(GOOGLE_TOKEN_URL)
-      .setIssuedAt()
-      .setExpirationTime('1h')
-      .sign(key);
-    const res = await this.fetchImpl(GOOGLE_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }),
-    });
-    if (!res.ok) throw new Error(`FCM auth failed with ${res.status}`);
-    const body = (await res.json()) as { access_token: string; expires_in: number };
-    this.accessToken = { value: body.access_token, expiresAt: Date.now() + body.expires_in * 1000 };
-    return body.access_token;
+  private token(): Promise<string> {
+    return this.auth.token();
   }
 
   async send(tokens: string[], n: PushNotification): Promise<PushResult> {

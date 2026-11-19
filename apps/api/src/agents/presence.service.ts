@@ -2,7 +2,8 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AGENT_OUT_STATES } from '@jiffo/shared';
 import { and, eq, gt, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
-import { agentPresence, errands, type SelfieReason } from '../db/schema';
+import { agentPresence, devices, errands, type SelfieReason } from '../db/schema';
+import { AttestationService, type AttestContext } from '../attestation/attestation.service';
 import { AgentApplicationService } from './application.service';
 import { AgentSelfieService } from './agent-selfie.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -55,13 +56,26 @@ export class PresenceService {
     private readonly realtime: RealtimeGateway,
     private readonly applications: AgentApplicationService,
     private readonly selfie: AgentSelfieService,
+    private readonly attestation: AttestationService,
   ) {}
+
+  private async deviceOf(auth: AuthContext) {
+    const [device] = await this.db
+      .select({ deviceKey: devices.deviceKey, platform: devices.platform })
+      .from(devices)
+      .where(eq(devices.id, auth.deviceId));
+    return device ?? { deviceKey: auth.deviceId, platform: 'web' as const };
+  }
 
   /**
    * Going online or offline, and where the agent is. Without `online` (the app reporting from the
    * background), the agent stays online or offline as they last chose, or as support or the sweep left them.
    */
-  async report(auth: AuthContext, input: { online?: boolean; lat?: number; lng?: number }) {
+  async report(
+    auth: AuthContext,
+    input: { online?: boolean; lat?: number; lng?: number },
+    attest?: Pick<AttestContext, 'evidence' | 'request'>,
+  ) {
     const [running, [current]] = await Promise.all([
       this.db
         .select({ id: errands.id, customerId: errands.customerId, status: errands.status })
@@ -81,7 +95,20 @@ export class PresenceService {
     // running keeps sharing where they are for it, offline, and is told the selfie is still to take.
     let selfieNeeded: SelfieReason | null = null;
     if (body.online && !current?.online) {
+      // Our store app on a real phone (MB3); a phone the check doubts takes a selfie first.
+      const attested = await this.attestation.enforce({
+        purpose: 'go_online',
+        ...(await this.deviceOf(auth)),
+        app: auth.app,
+        userId: auth.userId,
+        countryCode: auth.countryCode,
+        evidence: attest?.evidence ?? {},
+        request: attest?.request ?? { method: 'PUT', path: '/v1/agent/presence', body: undefined },
+      });
       selfieNeeded = await this.selfie.neededToGoOnline(auth);
+      if (!selfieNeeded && attested === 'doubtful' && !(await this.selfie.fresh(auth.userId))) {
+        selfieNeeded = 'device_check';
+      }
       if (selfieNeeded && running.length === 0) throw this.selfie.needed(selfieNeeded);
       if (selfieNeeded) body = { ...body, online: false };
     }

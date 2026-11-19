@@ -1,8 +1,9 @@
 import { RateLimit } from '../common/rate-limit';
-import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Put, Req, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { Apps, AuthGuard, CurrentAuth } from '../auth/auth.guard';
-import type { AuthContext } from '../auth/auth.types';
+import type { AuthContext, AuthedRequest } from '../auth/auth.types';
+import { evidenceOf } from '../attestation/evidence';
 import { ZodBody } from '../common/zod-body';
 import { PresenceService } from './presence.service';
 
@@ -29,7 +30,11 @@ export class PresenceController {
 
   @Put()
   @RateLimit('presence')
-  report(@CurrentAuth() auth: AuthContext, @Body(new ZodBody(PresenceBody)) body: z.infer<typeof PresenceBody>) {
-    return this.presence.report(auth, body);
+  report(
+    @CurrentAuth() auth: AuthContext,
+    @Body(new ZodBody(PresenceBody)) body: z.infer<typeof PresenceBody>,
+    @Req() req: AuthedRequest & { rawBody?: Buffer },
+  ) {
+    return this.presence.report(auth, body, evidenceOf(req));
   }
 }

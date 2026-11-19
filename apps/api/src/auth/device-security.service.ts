@@ -72,6 +72,16 @@ export class DeviceSecurityService {
     return { deviceKey: !!device?.key, hasPin: !!user?.hash, pinLocked: !!user?.locked };
   }
 
+  /** This session's phone: its install key and platform, for the app check (MB3). */
+  async deviceOf(auth: AuthContext) {
+    const [device] = await this.db
+      .select({ deviceKey: devices.deviceKey, platform: devices.platform })
+      .from(devices)
+      .where(eq(devices.id, auth.deviceId));
+    if (!device) throw forbidden('device_key_needed', 'Set up this phone for money actions first');
+    return device;
+  }
+
   /** The sign-in this session began with was in the last few minutes. */
   private async fresh(auth: AuthContext) {
     const [session] = await this.db

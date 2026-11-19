@@ -31,6 +31,7 @@ import {
 } from '../src/db/schema';
 import { sha256 } from '../src/common/crypto';
 import { SIGNED_HEADERS, signedPayload } from '../src/auth/device-security.service';
+import { ATTEST_HEADERS } from '../src/attestation/attestation.types';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { AppName } from '../src/db/schema';
 
@@ -86,6 +87,19 @@ export interface Person {
   deviceKey?: KeyObject;
   /** Their app PIN (A7). */
   pin?: string;
+  /** This phone's install key (devices.device_key), which names it to the app check (MB3). */
+  installKey?: string;
+}
+
+/**
+ * App-check headers (MB3) from the development stand-in, which says `verdict`: a code for this install, and a
+ * fake token. Production never takes them.
+ */
+export async function attestation(t: TestApp, installKey: string, verdict = 'trusted') {
+  const { nonce } = (
+    await request(t.http).post('/v1/attestation/challenge').send({ deviceKey: installKey }).expect(200)
+  ).body;
+  return { [ATTEST_HEADERS.nonce]: nonce as string, [ATTEST_HEADERS.token]: `fake:${verdict}` };
 }
 
 /** The app PIN test agents choose. */
@@ -112,7 +126,11 @@ export async function secureDevice(t: TestApp, who: Person): Promise<Person> {
  * A money request as the agent app sends it: a single-use code from the server, signed by the phone's key
  * over the request, with the app PIN. `pin: null` leaves the PIN out; `key` signs with another key.
  */
-export function signed(t: TestApp, who: Person, options: { pin?: string | null; key?: KeyObject } = {}) {
+export function signed(
+  t: TestApp,
+  who: Person,
+  options: { pin?: string | null; key?: KeyObject; attest?: string } = {},
+) {
   const call = (method: 'post' | 'put', path: string) => ({
     send: (body: object) =>
       new SignedCall(async () => {
@@ -126,9 +144,11 @@ export function signed(t: TestApp, who: Person, options: { pin?: string | null; 
           dsaEncoding: 'der',
         }).toString('base64');
         const pin = options.pin === undefined ? who.pin : options.pin;
+        const attested = options.attest ? await attestation(t, who.installKey!, options.attest) : {};
         const agent = request(t.http);
         return (method === 'post' ? agent.post(path) : agent.put(path))
           .set(who.headers)
+          .set(attested)
           .set(SIGNED_HEADERS.nonce, nonce)
           .set(SIGNED_HEADERS.signature, signature)
           .set(pin ? { [SIGNED_HEADERS.pin]: pin } : {})
@@ -181,12 +201,14 @@ export async function signIn(
   const ip = options.ip ?? randomIp();
   await request(t.http).post('/v1/auth/otp/request').set('x-forwarded-for', ip).send({ phone }).expect(200);
   const code = t.messaging.lastCodeFor(phone);
+  const installKey = randomUUID();
   const res = await request(t.http)
     .post('/v1/auth/otp/verify')
     .set('x-forwarded-for', ip)
-    .send({ phone, code, app, device: { key: randomUUID(), platform: 'android', name: 'Test phone' } })
+    .send({ phone, code, app, device: { key: installKey, platform: 'android', name: 'Test phone' } })
     .expect(200);
   const person: Person = {
+    installKey,
     phone,
     userId: res.body.user.id,
     accessToken: res.body.accessToken,

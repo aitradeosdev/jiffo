@@ -272,6 +272,17 @@ export const SECTIONS: Section[] = [
         help: 'Out of 100 times an agent goes online, how many ask for one more selfie. 0 is off.',
       },
       {
+        path: 'security.attestation',
+        label: 'App checks (Play Integrity and App Attest)',
+        kind: 'select',
+        options: [
+          { value: 'record', label: 'Record only' },
+          { value: 'enforce', label: 'Enforce' },
+          { value: 'off', label: 'Off' },
+        ],
+        help: 'Whether sign-in and money actions must come from the store app on a real phone. Record only keeps each result for staff. Enforce refuses a failed one and asks a doubtful one for a selfie: turn it on once both are set up for the apps.',
+      },
+      {
         path: 'security.appPinTries',
         label: 'Wrong app PINs before it locks',
         kind: 'count',

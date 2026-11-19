@@ -65,6 +65,19 @@ const EnvSchema = z
     TERMII_BASE_URL: z.string().url().default('https://api.ng.termii.com'),
     PUSH_PROVIDER: z.enum(['console', 'memory', 'fcm']).default('console'),
     FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
+    /**
+     * App attestation (docs/security-plan.md, MB3). Google Play Integrity: a service account of the Google Cloud
+     * project linked to the apps in Play Console, with the Play Integrity API on, and the apps' package names.
+     */
+    PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON: z.string().optional(),
+    ANDROID_PACKAGE_CUSTOMER: z.string().default('com.jiffoapp.customer'),
+    ANDROID_PACKAGE_AGENT: z.string().default('com.jiffoapp.agent'),
+    /** SHA-256 digests of the apps' signing certificates (Play Console, App integrity), hex, comma-separated. */
+    ANDROID_CERT_SHA256: z.string().optional(),
+    /** Apple App Attest: the team id and the apps' bundle ids, for the App IDs attested keys belong to. */
+    APPLE_TEAM_ID: z.string().optional(),
+    IOS_BUNDLE_ID_CUSTOMER: z.string().default('com.jiffoapp.customer'),
+    IOS_BUNDLE_ID_AGENT: z.string().default('com.jiffoapp.agent'),
     CHAT_PROVIDER: z.enum(['builtin']).default('builtin'),
     MAPS_PROVIDER: z.enum(['google', 'fake']).default('fake'),
     /** memory keeps files in the API process: development and tests only. */

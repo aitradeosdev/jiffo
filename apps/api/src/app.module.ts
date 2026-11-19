@@ -19,6 +19,7 @@ import { AlertsModule } from './alerts/alerts.module';
 import { PlacesModule } from './places/places.module';
 import { FilesModule } from './files/files.module';
 import { IdentityModule } from './identity/identity.module';
+import { AttestationModule } from './attestation/attestation.module';
 import { RatingsModule } from './ratings/ratings.module';
 import { PushModule } from './push/push.module';
 import { RealtimeModule } from './realtime/realtime.module';
@@ -36,6 +37,7 @@ import { UsersModule } from './users/users.module';
     AuthModule,
     UsersModule,
     IdentityModule,
+    AttestationModule,
     AgentsModule,
     PushModule,
     RealtimeModule,

@@ -5,6 +5,7 @@ import { APPS } from '../db/schema';
 import { unauthorized } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { evidenceOf } from '../attestation/evidence';
 import { AuthService, RefreshReused } from './auth.service';
 import { AuthGuard, CurrentAuth } from './auth.guard';
 import type { AuthContext, AuthedRequest } from './auth.types';
@@ -46,12 +47,13 @@ export class AuthController {
 
   @Post('otp/verify')
   @HttpCode(200)
-  async verify(@Body(new ZodBody(VerifyCodeBody)) body: z.infer<typeof VerifyCodeBody>) {
+  async verify(@Body(new ZodBody(VerifyCodeBody)) body: z.infer<typeof VerifyCodeBody>, @Req() req: AuthedRequest) {
     const { response, replacedSessionIds, signedOutDevices, heldUntil } = await this.auth.verifyCode(
       body.phone,
       body.code,
       body.app,
       body.device,
+      evidenceOf(req),
     );
     this.realtime.disconnectSessions(replacedSessionIds);
     this.auth.tellSignedOut(signedOutDevices, heldUntil);

@@ -105,7 +105,7 @@ export class MoneyController {
   }
 
   // Signed by the agent's phone, with their app PIN (docs/security-plan.md, A3, A5, A7).
-  @Signed()
+  @Signed({ attest: 'withdrawal' })
   @Post('wallet/withdrawals')
   @Apps('agent')
   withdraw(@CurrentAuth() auth: AuthContext, @Body(new ZodBody(WithdrawalBody)) body: z.infer<typeof WithdrawalBody>) {
@@ -130,7 +130,7 @@ export class MoneyController {
     return this.payouts.getAccount(auth);
   }
 
-  @Signed({ selfie: 'payout_change' })
+  @Signed({ selfie: 'payout_change', attest: 'payout_account' })
   @Put('payout-account')
   @Apps('agent')
   setPayoutAccount(

@@ -57,6 +57,20 @@ How Jiffo protects people, money and data, area by area. What is required is in 
 - **Session length:** however often it is refreshed, a session ends `SESSION_MAX_DAYS` (default 90) after sign-in.
 - **Where tokens live (MB2):** in the phone's keychain or keystore, readable after the first unlock and only on that phone. They are never in an iCloud or iTunes backup, and the Android app is left out of backups, so a session is never restored onto another phone. The apps' web builds, which keep tokens in the browser, are for development: in production the API refuses their sign-in. The app says which platform it is, so this stops Jiffo's own web builds, not a script that claims to be a phone; app attestation (MB3) is what will prove a sign-in comes from the store app.
 
+## App checks (MB3)
+
+Google Play Integrity on Android and Apple App Attest on iOS show that a request comes from our store app on a real phone.
+
+- **What is checked:** each check is over a single-use code from the server (`POST /v1/attestation/challenge`, good for 5 minutes, for that install only), and covers the request's method, path and body, as a signed money request does.
+  - **Android:** Google decodes the token and says whether the app is ours as Play installed it, signed with our key, on a genuine phone.
+  - **iOS:** the phone makes a key in its Secure Enclave and Apple attests it once (`POST /v1/attestation/apple-key`, checked against Apple's root certificate, our App ID and the code). Each request after that is signed by that key, with a counter, so nothing is used twice.
+- **Where:** sign-in, withdrawals, payout account changes, and going online (not the position updates while online).
+- **Settings, Security, App checks:**
+  - **Record only** (the default) keeps every result, with the reasons, and refuses nothing.
+  - **Enforce** refuses a failed, missing or unavailable check: not our app, a changed one, a code for another request or install, or a check not set up for that platform. A doubtful phone isn't refused: rooted, an emulator, a development build, or Google not answering. Instead the agent takes a selfie first, at most 10 minutes before the money action or going online, and a doubtful sign-in to the agent app marks the phone as needing one.
+- **What is kept:** each verdict and its reasons (`device_attestations`), for staff and the risk signals of MB4. No token is kept.
+- **Development:** builds and tests use a stand-in (`fake:<verdict>`), which production never accepts.
+
 ## The apps on the phone
 
 - **No screenshots (A9):** the PIN, wallet, top-up, withdrawal, payout account and ID check screens, the hand-off PIN (the customer's and the agent's), and the selfie check block screenshots and screen recording while they are in front (Android also hides them in the app switcher). An identity provider's own page opens in the phone's browser, outside the app, so the app can't block it there.

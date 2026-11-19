@@ -30,6 +30,7 @@ const WHY: Record<SelfieReason, string> = {
   random: 'Take a quick selfie to go online',
   new_device: 'Take a quick selfie to use money on this phone',
   payout_change: 'Take a quick selfie to change your payout account',
+  device_check: "Take a quick selfie: we couldn't fully check this phone",
 };
 
 /** A selfie passed this recently counts as fresh, for changing the payout account (P8). */
@@ -126,7 +127,8 @@ export class AgentSelfieService implements SelfieOwner {
     return !!device?.needed;
   }
 
-  private fresh(userId: string) {
+  /** A selfie passed in the last few minutes. */
+  fresh(userId: string) {
     return this.passedSince(userId, new Date(Date.now() - FRESH_SELFIE_MS));
   }
 
@@ -151,6 +153,11 @@ export class AgentSelfieService implements SelfieOwner {
    */
   neededToGoOnline(auth: AuthContext): Promise<SelfieReason | null> {
     return this.reasonToGoOnline(auth, true);
+  }
+
+  /** A phone the app check doubts (MB3): a money action on it needs a selfie passed in the last few minutes. */
+  async assertFreshForDevice(auth: AuthContext) {
+    if (!(await this.fresh(auth.userId))) throw this.needed('device_check');
   }
 
   /**

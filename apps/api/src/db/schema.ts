@@ -211,8 +211,78 @@ export const deviceChallenges = pgTable(
   ],
 );
 
-/** What asks an agent for a selfie: the day's first time online, a random check, a new phone, a payout change. */
-export const SELFIE_REASONS = ['daily', 'random', 'new_device', 'payout_change'] as const;
+/* ---------- App attestation (docs/security-plan.md, MB3) ---------- */
+
+/**
+ * A single-use code an attestation is made over: given to this install (its device key, which also names it
+ * before sign-in), good for a few minutes, used once.
+ */
+export const attestationChallenges = pgTable(
+  'attestation_challenges',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** The install's own key (devices.device_key), not a device row: sign-in asks before there is one. */
+    deviceKey: text('device_key').notNull(),
+    /** Only the hash of the code is kept. */
+    nonceHash: text('nonce_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('attestation_challenges_nonce_uq').on(t.nonceHash),
+    index('attestation_challenges_expires_idx').on(t.expiresAt),
+  ],
+);
+
+/**
+ * A key an iPhone made in its Secure Enclave and Apple attested as our app's (App Attest). Each assertion
+ * after counts up, so none is used twice. An install may have several; none replaces another.
+ */
+export const appAttestKeys = pgTable(
+  'app_attest_keys',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    deviceKey: text('device_key').notNull(),
+    /** Apple's id for the key, base64. */
+    keyId: text('key_id').notNull(),
+    /** TEAMID.bundle.id */
+    appId: text('app_id').notNull(),
+    publicKey: text('public_key').notNull(),
+    counter: integer('counter').notNull().default(0),
+    /** Attested in Apple's development environment: a development build. */
+    development: boolean('development').notNull().default(false),
+    createdAt: createdAt(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('app_attest_keys_key_uq').on(t.keyId), index('app_attest_keys_device_idx').on(t.deviceKey)],
+);
+
+/** Each attestation checked: for staff, and as a risk signal (MB4). Only the verdict and why, no token. */
+export const deviceAttestations = pgTable(
+  'device_attestations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    deviceKey: text('device_key').notNull(),
+    userId: uuid('user_id').references(() => users.id),
+    app: text('app', { enum: APPS }).notNull(),
+    platform: text('platform', { enum: ['ios', 'android', 'web'] }).notNull(),
+    purpose: text('purpose', { enum: ['sign_in', 'withdrawal', 'payout_account', 'go_online'] }).notNull(),
+    verdict: text('verdict', { enum: ['trusted', 'doubtful', 'failed', 'missing', 'unavailable'] }).notNull(),
+    reasons: jsonb('reasons').$type<string[]>().notNull().default([]),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('device_attestations_device_idx').on(t.deviceKey, t.createdAt),
+    index('device_attestations_user_idx').on(t.userId, t.createdAt),
+  ],
+);
+
+/**
+ * What asks an agent for a selfie: the day's first time online, a random check, a new phone, a payout change,
+ * or a phone the app check (MB3) doubts.
+ */
+export const SELFIE_REASONS = ['daily', 'random', 'new_device', 'payout_change', 'device_check'] as const;
 export type SelfieReason = (typeof SELFIE_REASONS)[number];
 
 /**
