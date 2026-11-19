@@ -42,6 +42,15 @@ export const DEFAULT_SECURITY_SETTINGS = {
   attestation: 'record' as 'off' | 'record' | 'enforce',
 };
 
+/** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
+export const DEFAULT_RISK_SETTINGS = {
+  samePlaceMeters: 100,
+  repeatPairingErrands: 5,
+  repeatPairingDays: 30,
+  fastHighValueKobo: 5_000_000,
+  fastErrandMinutes: 10,
+};
+
 /**
  * Everything admin can change for a country. Each saved change becomes a new version,
  * so an errand can always be explained by the settings that applied when it ran.
@@ -210,6 +219,31 @@ export const CountrySettingsSchema = z.object({
       attestation: z.enum(['off', 'record', 'enforce']).default('record'),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
+  /**
+   * When errands are flagged for the Risk queue (docs/security-plan.md, E5, E6). A flag asks a person to look;
+   * it refuses nothing.
+   */
+  risk: z
+    .object({
+      /** A pickup and a drop-off nearer than this count as the same place. 0 turns the flag off. */
+      samePlaceMeters: z.number().int().min(0).max(5_000).default(100),
+      /** The same customer and agent pairing this many times within repeatPairingDays is flagged. */
+      repeatPairingErrands: z.number().int().min(2).max(1_000).default(5),
+      repeatPairingDays: z.number().int().min(1).max(365).default(30),
+      /** Errands worth at least this (fee and items) finished unusually fast are flagged. */
+      fastHighValueKobo: kobo.default(5_000_000),
+      /**
+       * Unusually fast: from accepted to delivered in less than this, or than the route takes at 60 km/h,
+       * whichever is longer.
+       */
+      fastErrandMinutes: z
+        .number()
+        .int()
+        .min(1)
+        .max(24 * 60)
+        .default(10),
+    })
+    .default(DEFAULT_RISK_SETTINGS),
 });
 
 export type CountrySettings = z.infer<typeof CountrySettingsSchema>;
@@ -271,6 +305,7 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
   topUps: { oneTimeAccount: true, fixedAccount: false },
   profiles: { showCustomerPhotoBeforeAccept: false },
   security: DEFAULT_SECURITY_SETTINGS,
+  risk: DEFAULT_RISK_SETTINGS,
 };
 
 /** The part of the settings the apps may read. Limits and identity provider details stay on the server. */

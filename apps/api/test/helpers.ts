@@ -233,17 +233,22 @@ export async function signIn(
     unsecured?: boolean;
     /** Leaves the agent without today's selfie, and a new phone still needing one, for tests of them (I8). */
     noSelfie?: boolean;
+    /** Signs in on this install of the app, as another account signed in on the same phone would. */
+    installKey?: string;
+    /** The phone's own id, as both apps on one phone send it (docs/security-plan.md, I3, E6). */
+    phoneId?: string;
   } = {},
 ): Promise<Person> {
   const phone = options.phone ?? randomPhone();
   const ip = options.ip ?? randomIp();
   await request(t.http).post('/v1/auth/otp/request').set('x-forwarded-for', ip).send({ phone }).expect(200);
   const code = t.messaging.lastCodeFor(phone);
-  const installKey = randomUUID();
+  const installKey = options.installKey ?? randomUUID();
+  const device = { key: installKey, platform: 'android', name: 'Test phone', phoneId: options.phoneId };
   const res = await request(t.http)
     .post('/v1/auth/otp/verify')
     .set('x-forwarded-for', ip)
-    .send({ phone, code, app, device: { key: installKey, platform: 'android', name: 'Test phone' } })
+    .send({ phone, code, app, device })
     .expect(200);
   const person: Person = {
     installKey,

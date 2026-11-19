@@ -31,6 +31,7 @@ import { PushService } from '../push/push.service';
 import { AuditService } from './audit.service';
 import { securityOf } from './approvals.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { flaggedErrand } from '../risk/flagged';
 import { ApplicationsAdminService } from './applications-admin.service';
 import { IdChecksAdminService } from './id-checks-admin.service';
 import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
@@ -88,9 +89,12 @@ export class PeopleAdminService {
           and "agent_presence"."located_at" > now() - make_interval(secs => ${ONLINE_MS / 1000}), false)`,
         // Written out with table names: inside a select list Drizzle leaves columns unqualified, and a bare
         // "id" inside these subqueries would mean the subquery's own table.
+        // Errands flagged for fraud and not cleared are left out (F3).
         errands: agent
-          ? sql<number>`(select count(*)::int from errands e where e.agent_id = "users"."id" and e.status = 'completed')`
-          : sql<number>`(select count(*)::int from errands e where e.customer_id = "users"."id")`,
+          ? sql<number>`(select count(*)::int from errands e where e.agent_id = "users"."id" and e.status = 'completed'
+              and not ${flaggedErrand(sql`e.id`)})`
+          : sql<number>`(select count(*)::int from errands e where e.customer_id = "users"."id"
+              and not ${flaggedErrand(sql`e.id`)})`,
         rating: sql<number | null>`(select round(avg(r.stars)::numeric, 1)::float from errand_ratings r
           where r.ratee_id = "users"."id" and r.rater_role = ${agent ? 'customer' : 'agent'})`,
         balanceKobo: sql<number>`coalesce((select sum(a.balance)::bigint from ledger_accounts a
@@ -320,18 +324,25 @@ export class PeopleAdminService {
     };
   }
 
+  /**
+   * A person's errands as admin sets tiers by them: errands flagged for fraud and not cleared are left out of
+   * every count and counted on their own (docs/security-plan.md, F3).
+   */
   private async counts(who: SQL) {
+    const flagged = flaggedErrand(sql`"errands"."id"`);
     const [row] = await this.db
       .select({
-        total: sql<number>`count(*)::int`,
-        completed: sql<number>`count(*) filter (where ${errands.status} = 'completed')::int`,
-        cancelled: sql<number>`count(*) filter (where ${errands.status} in ('cancelled', 'expired'))::int`,
+        total: sql<number>`count(*) filter (where not ${flagged})::int`,
+        completed: sql<number>`count(*) filter (where ${errands.status} = 'completed' and not ${flagged})::int`,
+        cancelled: sql<number>`count(*) filter (where ${errands.status} in ('cancelled', 'expired')
+          and not ${flagged})::int`,
         disputed: sql<number>`count(*) filter (where exists (select 1 from errand_events e
-          where e.errand_id = "errands"."id" and e.to_status = 'disputed'))::int`,
+          where e.errand_id = "errands"."id" and e.to_status = 'disputed') and not ${flagged})::int`,
+        flagged: sql<number>`count(*) filter (where ${flagged})::int`,
       })
       .from(errands)
       .where(who);
-    return row ?? { total: 0, completed: 0, cancelled: 0, disputed: 0 };
+    return row ?? { total: 0, completed: 0, cancelled: 0, disputed: 0, flagged: 0 };
   }
 
   /** Errands the person is part of that haven't ended. */

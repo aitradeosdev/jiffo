@@ -27,6 +27,7 @@ import { AgentsService } from '../agents/agents.service';
 import { AgentApplicationService } from '../agents/application.service';
 import { AgentSelfieService } from '../agents/agent-selfie.service';
 import { nameMatch } from '../common/names';
+import { RiskFlagsService } from '../risk/risk-flags.service';
 
 type PayoutRow = typeof payouts.$inferSelect;
 const BANKS_TTL_MS = 24 * 3_600_000;
@@ -98,6 +99,7 @@ export class PayoutsService {
     private readonly holds: WithdrawalHoldsService,
     private readonly selfie: AgentSelfieService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly risk: RiskFlagsService,
   ) {}
 
   async listBanks() {
@@ -178,6 +180,7 @@ export class PayoutsService {
 
     const { recipientCode } = await payments.createRecipient({ name: accountName, bankCode, accountNumber });
     const review = match === 'near';
+    const accountFingerprint = this.risk.accountFingerprint(bankCode, accountNumber);
     const earlier = await this.db.transaction(async (tx) => {
       // One change at a time per agent.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payout-account:' + auth.userId}))`);
@@ -215,6 +218,7 @@ export class PayoutsService {
         accountName,
         accountLast4: accountNumber.slice(-4),
         recipientCode,
+        accountFingerprint,
         reviewStatus: review ? 'pending' : 'approved',
       });
       // A new account in place of one in use pauses withdrawals (A6, P8). The first account doesn't: there is
@@ -224,6 +228,8 @@ export class PayoutsService {
       const until = redirected && !review ? await this.holds.start(tx, auth.userId, 'payout_account') : null;
       return { before: before ?? null, until };
     });
+    // Another agent with the same account is flagged for verification, beside this (I3).
+    this.risk.payoutAccountSaved(auth.userId, accountFingerprint);
     // By SMS and email too (A6); the push below says it.
     if (earlier.until) await this.holds.tell(auth.userId, 'payout_account', earlier.until, { push: false });
     // Told on every change, so a change they didn't make doesn't go unnoticed.

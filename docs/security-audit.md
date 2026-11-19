@@ -53,7 +53,8 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 10d. The apps: no screenshots on PIN, money and ID screens, tokens kept on the phone only, no web sign-in in production, links checked (A9, MB2, MB5) | aitradeosdev/jiffo#68 | merged |
 | 10d. App checks, server side: Play Integrity and App Attest at sign-in, withdrawals, payout changes and going online; recorded, or enforced with a selfie for a doubtful phone (MB3) | aitradeosdev/jiffo#69 | merged |
 | 10d. App checks in the apps: the native module and the checked requests (MB3) | aitradeosdev/jiffo#70 | merged |
-| 10d. Risk signals: root, emulators, hooking tools and debuggers sent and kept, counted as doubtful and shown to staff; mocked positions refused at the drop-off (MB4) | this pull request | open |
+| 10d. Risk signals: root, emulators, hooking tools and debuggers sent and kept, counted as doubtful and shown to staff; mocked positions refused at the drop-off (MB4) | aitradeosdev/jiffo#71 | merged |
+| 11a. Fraud flags and the Risk queue: cash, "send money" and same-place errands; a customer and agent sharing a phone or bank, pairing again and again, or finishing a high-value errand too fast; accounts sharing a phone (one phone's key on two agent accounts included) or a payout account, to verification; tier counts without flagged errands (E5, most of E6, the shared-account half of I3, F3) | this pull request | open |
 
 ## Summary
 
@@ -461,6 +462,7 @@ What each needs from the code is provided as noted.
   - **Google:** in Play Console, link the apps to a Google Cloud project and turn on the Play Integrity API. Then give the API a service account key for that project (`PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON`) and the apps' signing certificate digests (`ANDROID_CERT_SHA256`, from Play Console, App integrity).
   - **Apple:** turn on App Attest for both App IDs, and give the API the team id (`APPLE_TEAM_ID`).
   - Then turn Settings, Security, App checks to Enforce, once the store builds have been out for a while with no unexpected failures in the record.
+  - **Shared phones (fix 11):** when setting up Play App Signing for the second app, choose to sign it with the same key as the first, so Android gives both apps the same phone id and a customer and agent on one phone can be told apart from two phones. In the Play Data safety form and Apple's privacy labels, declare the device id as collected for fraud prevention and security.
 - **Penetration test** before launch, in the plan's scope, then yearly.
 - **Legal:**
   - CBN opinion on the pooled wallet

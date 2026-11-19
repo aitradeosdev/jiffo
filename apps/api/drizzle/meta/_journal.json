@@ -239,6 +239,13 @@
       "when": 1795124205729,
       "tag": "0033_risk_signals",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795126423313,
+      "tag": "0034_risk_flags",
+      "breakpoints": true
     }
   ]
 }

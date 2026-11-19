@@ -16,8 +16,10 @@ export const ADMIN_PERMISSIONS = [
   'suspend',
   /** Setting agent tiers. */
   'tiers',
-  /** Deciding agent applications and customers' ID checks. */
+  /** Deciding agent applications and customers' ID checks, and flags about accounts sharing a phone or bank. */
   'verify',
+  /** Deciding the Risk queue: errands flagged for cash, collusion and other signs of fraud. */
+  'risk',
   /** Wallet adjustments and refunds, payout accounts, the nightly checks and money alerts. */
   'money',
   /** Prices, fees, timers, limits, categories, states and providers. */
@@ -39,13 +41,13 @@ export const ADMIN_ROLE_INFO: Record<
   owner: { label: 'Owner', about: 'Everything, including the team and settings', permissions: ADMIN_PERMISSIONS },
   operations: {
     label: 'Operations',
-    about: 'Errands, disputes, suspensions and agent tiers',
-    permissions: ['read', 'errands', 'disputes', 'suspend', 'tiers', 'reveal'],
+    about: 'Errands, disputes, the Risk queue, suspensions and agent tiers',
+    permissions: ['read', 'errands', 'disputes', 'risk', 'suspend', 'tiers', 'reveal'],
   },
   disputes: { label: 'Disputes', about: 'Settling disputes', permissions: ['read', 'disputes', 'reveal'] },
   verification: {
     label: 'Verification',
-    about: "Agent applications and customers' ID checks",
+    about: "Agent applications, customers' ID checks and shared-account flags",
     permissions: ['read', 'verify', 'reveal'],
   },
   finance: {

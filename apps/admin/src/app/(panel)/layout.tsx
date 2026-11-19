@@ -8,6 +8,7 @@ import {
   AuditIcon,
   DisputesIcon,
   ErrandsIcon,
+  FlagsIcon,
   MoneyIcon,
   OverviewIcon,
   PeopleIcon,
@@ -27,6 +28,7 @@ const SECTIONS: Array<NavItem & { needs: Permission }> = [
   { href: '/people', label: 'People', icon: <PeopleIcon />, needs: 'read' },
   { href: '/applications', label: 'Applications', icon: <ApplicationsIcon />, needs: 'read' },
   { href: '/id-checks', label: 'ID checks', icon: <IdChecksIcon />, needs: 'read' },
+  { href: '/flags', label: 'Flags', icon: <FlagsIcon />, needs: 'read' },
   { href: '/money', label: 'Money', icon: <MoneyIcon />, needs: 'read' },
   { href: '/approvals', label: 'Approvals', icon: <ApprovalsIcon />, needs: 'read' },
   { href: '/settings', label: 'Settings', icon: <SettingsIcon />, needs: 'read' },
@@ -39,9 +41,17 @@ export default async function PanelLayout({ children }: { children: ReactNode })
   const me = await getMe();
   // A role that signs in with a passkey adds one before anything else.
   if (me.needsPasskey) redirect('/passkey');
-  const [country, approvals] = await Promise.all([getCountry(), api<{ waiting: number }>('/admin/approvals/waiting')]);
+  const country = await getCountry();
+  const [approvals, flags] = await Promise.all([
+    api<{ waiting: number }>('/admin/approvals/waiting'),
+    api<Record<'risk' | 'verification', { open: number }>>(`/admin/flags/counts?country=${country.code}`),
+  ]);
+  const counts: Record<string, number> = {
+    '/approvals': approvals.waiting,
+    '/flags': flags.risk.open + flags.verification.open,
+  };
   const items = SECTIONS.filter((s) => me.permissions.includes(s.needs)).map(({ needs: _, ...item }) =>
-    item.href === '/approvals' ? { ...item, count: approvals.waiting } : item,
+    counts[item.href] ? { ...item, count: counts[item.href] } : item,
   );
 
   return (

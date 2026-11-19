@@ -18,3 +18,80 @@ export const riskSignalsOf = (list: string | undefined): RiskSignal[] =>
   [...new Set((list ?? '').split(',').map((s) => s.trim()))].filter((s): s is RiskSignal =>
     (RISK_SIGNALS as readonly string[]).includes(s),
   );
+
+/**
+ * The queues flags go to (docs/security-plan.md, E6, I3): errands that look like fraud to the Risk queue,
+ * accounts that share a phone or a bank account to verification. Each needs its own permission to decide.
+ */
+export const RISK_QUEUES = ['risk', 'verification'] as const;
+export type RiskQueue = (typeof RISK_QUEUES)[number];
+
+export const RISK_QUEUE_INFO: Record<RiskQueue, { label: string; permission: 'risk' | 'verify' }> = {
+  risk: { label: 'Risk', permission: 'risk' },
+  verification: { label: 'Verification', permission: 'verify' },
+};
+
+/** Why something was flagged. A flag asks a person to look; it never refuses anything by itself. */
+export const RISK_FLAG_KINDS = [
+  'cash_errand',
+  'send_money',
+  'same_place',
+  'pair_shared_phone',
+  'pair_shared_bank',
+  'repeat_pairing',
+  'fast_high_value',
+  'shared_phone',
+  'shared_payout_account',
+] as const;
+export type RiskFlagKind = (typeof RISK_FLAG_KINDS)[number];
+
+export const RISK_FLAG_INFO: Record<RiskFlagKind, { queue: RiskQueue; label: string; about: string }> = {
+  cash_errand: {
+    queue: 'risk',
+    label: 'Cash',
+    about: 'The errand asks the agent to carry or withdraw cash (E5).',
+  },
+  send_money: {
+    queue: 'risk',
+    label: 'Send money to an account',
+    about: 'The errand asks for money to be sent to a bank account (E5).',
+  },
+  same_place: {
+    queue: 'risk',
+    label: 'Ends where it starts',
+    about: 'The pickup and the drop-off are the same place (E5).',
+  },
+  pair_shared_phone: {
+    queue: 'risk',
+    label: 'Customer and agent share a phone',
+    about: "The customer's and the agent's accounts have both been used on one phone (E6).",
+  },
+  pair_shared_bank: {
+    queue: 'risk',
+    label: "Topped up from the agent's account",
+    about: "The customer's wallet was topped up from a bank account in the name on the agent's payout account (E6).",
+  },
+  repeat_pairing: {
+    queue: 'risk',
+    label: 'Same customer and agent again and again',
+    about: 'The same customer and agent have paired up many times in a short while (E6).',
+  },
+  fast_high_value: {
+    queue: 'risk',
+    label: 'High value, finished fast',
+    about: 'A high-value errand was finished faster than its route can be travelled (E6).',
+  },
+  shared_phone: {
+    queue: 'verification',
+    label: 'Phone shared between accounts',
+    about: 'Two accounts, at least one of them an agent, have been used on one phone (I3).',
+  },
+  shared_payout_account: {
+    queue: 'verification',
+    label: 'Bank account on two accounts',
+    about: 'Two agents saved the same bank account for their withdrawals (I3).',
+  },
+};
+
+export const RISK_FLAG_STATUSES = ['open', 'cleared', 'confirmed'] as const;
+export type RiskFlagStatus = (typeof RISK_FLAG_STATUSES)[number];

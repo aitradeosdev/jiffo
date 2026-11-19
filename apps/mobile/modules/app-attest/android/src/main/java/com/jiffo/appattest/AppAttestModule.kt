@@ -2,6 +2,7 @@ package com.jiffo.appattest
 
 import android.os.Build
 import android.os.Debug
+import android.provider.Settings
 import com.google.android.gms.tasks.Task
 import com.google.android.play.core.integrity.IntegrityManagerFactory
 import com.google.android.play.core.integrity.StandardIntegrityManager.PrepareIntegrityTokenRequest
@@ -66,6 +67,16 @@ class AppAttestModule : Module() {
         if (RiskChecks.hooked()) add("hooking")
         if (RiskChecks.debugged()) add("debugger")
       }
+    }
+
+    /**
+     * The phone's id for apps signed with one key (docs/security-plan.md, I3, E6): the same in both Jiffo apps
+     * when Play signs them with the same key, so accounts sharing a phone can be flagged. It stays the same
+     * when an app is reinstalled. The server keeps only a keyed hash of it.
+     */
+    AsyncFunction("phoneId") {
+      val context = appContext.reactContext?.applicationContext ?: return@AsyncFunction null
+      Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
     }
 
     AsyncFunction("newAppleKey") { -> throw AppAttestException("App Attest is for iPhones") }

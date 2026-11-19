@@ -2,6 +2,7 @@ import Darwin
 import DeviceCheck
 import ExpoModulesCore
 import MachO
+import UIKit
 
 /// Apple App Attest (docs/security-plan.md, MB3): a key made in the Secure Enclave that Apple attests is our
 /// store app's, on a genuine iPhone. Apple attests it once; after that it signs an assertion over each checked
@@ -47,6 +48,12 @@ public class AppAttestModule: Module {
       if RiskChecks.hooked() { found.append("hooking") }
       if RiskChecks.debugged() { found.append("debugger") }
       return found
+    }
+
+    /// The phone's id for one developer's apps (docs/security-plan.md, I3, E6): the same in both Jiffo apps on
+    /// one iPhone, so accounts sharing a phone can be flagged. The server keeps only a keyed hash of it.
+    AsyncFunction("phoneId") { () -> String? in
+      UIDevice.current.identifierForVendor?.uuidString
     }
 
     /// Play Integrity is Android's.

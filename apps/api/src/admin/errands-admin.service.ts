@@ -24,6 +24,7 @@ import { ADMIN_ERRAND_EVENTS, ErrandsService, type AdminErrandEvent } from '../e
 import { UploadsService } from '../files/uploads.service';
 import { chargeableItemsKobo, WalletService, type DisputeSplit } from '../money/wallet.service';
 import { AuditService } from './audit.service';
+import { FlagsAdminService } from './flags-admin.service';
 import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
 
@@ -64,6 +65,7 @@ export class ErrandsAdminService {
     private readonly uploads: UploadsService,
     private readonly countries: CountriesService,
     private readonly audit: AuditService,
+    private readonly flags: FlagsAdminService,
   ) {}
 
   /** Newest first, filtered by status and searched by errand id, phone number, name or description. */
@@ -315,6 +317,8 @@ export class ErrandsAdminService {
     const { pinCipher: _pin, pinHmac: _pinCheck, ...fields } = errand;
     return {
       errand: fields,
+      /** Fraud flags on it, in the Risk queue (E5, E6). */
+      flags: await this.flags.forErrand(errand.id),
       customer: byId.get(errand.customerId) ?? null,
       agent: errand.agentId ? { ...byId.get(errand.agentId)!, tier: tier[0]?.tier ?? 'bronze' } : null,
       stops,

@@ -309,6 +309,42 @@ export const SECTIONS: Section[] = [
     ],
   },
   {
+    title: 'Risk flags',
+    about:
+      'When errands go to the Risk queue for a person to look at. A flag refuses nothing; staff decide, and flagged errands leave the counts used for agent tiers until cleared.',
+    fields: [
+      {
+        path: 'risk.samePlaceMeters',
+        label: 'Pickup and drop-off count as the same place within',
+        kind: 'count',
+        help: 'In metres. 0 turns this flag off.',
+      },
+      {
+        path: 'risk.repeatPairingErrands',
+        label: 'Flag the same customer and agent after this many errands',
+        kind: 'count',
+        help: 'Counted over the days below. Later errands of the pair join the same flag.',
+      },
+      {
+        path: 'risk.repeatPairingDays',
+        label: 'Days the errands above are counted over',
+        kind: 'count',
+      },
+      {
+        path: 'risk.fastHighValueKobo',
+        label: 'Flag errands finished unusually fast when worth at least',
+        kind: 'naira',
+        help: 'The fee and the items together.',
+      },
+      {
+        path: 'risk.fastErrandMinutes',
+        label: 'Unusually fast: delivered within',
+        kind: 'minutes',
+        help: 'Of being accepted, or faster than the route takes at 60 km/h, whichever is longer.',
+      },
+    ],
+  },
+  {
     title: 'Profiles',
     about: 'What each side sees of the other.',
     fields: [

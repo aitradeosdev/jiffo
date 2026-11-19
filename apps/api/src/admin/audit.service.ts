@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, inArray, lt } from 'drizzle-orm';
 import { forbidden } from '../common/errors';
 import { DB, type Db, type Tx } from '../db/database.module';
-import { adminApprovals, adminAudit, admins, errands, users } from '../db/schema';
+import { adminApprovals, adminAudit, admins, errands, riskFlags, users } from '../db/schema';
 import type { AdminContext } from './admin.types';
 
 export interface AuditEntry {
@@ -39,8 +39,8 @@ export class AuditService {
   }
 
   /**
-   * The app accounts a change is about: the person, an errand's customer and agent, or, for a request waiting
-   * for approval, whoever its change is about.
+   * The app accounts a change is about: the person, an errand's customer and agent, a flag's accounts, or, for
+   * a request waiting for approval, whoever its change is about.
    */
   private async peopleIn(
     tx: Tx | Db,
@@ -55,6 +55,13 @@ export class AuditService {
         .from(errands)
         .where(eq(errands.id, targetId));
       return errand ? [errand.customerId, errand.agentId].filter((id): id is string => !!id) : [];
+    }
+    if (targetType === 'flag') {
+      const [flag] = await tx
+        .select({ userId: riskFlags.userId, otherUserId: riskFlags.otherUserId })
+        .from(riskFlags)
+        .where(eq(riskFlags.id, targetId));
+      return flag ? [flag.userId, flag.otherUserId].filter((id): id is string => !!id) : [];
     }
     if (targetType === 'approval') {
       const [approval] = await tx

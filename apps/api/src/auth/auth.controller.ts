@@ -25,6 +25,11 @@ const VerifyCodeBody = z.object({
     key: z.string().min(8).max(128),
     platform: z.enum(['ios', 'android', 'web']),
     name: z.string().max(80).optional(),
+    /**
+     * The phone's own id, the same in both apps on one phone (iOS's id for the vendor, Android's id for apps
+     * signed with one key): only a keyed hash of it is kept, to flag accounts sharing a phone (I3, E6).
+     */
+    phoneId: z.string().trim().min(8).max(100).optional(),
   }),
 });
 const RefreshBody = z.object({ refreshToken: z.string().min(20).max(200) });

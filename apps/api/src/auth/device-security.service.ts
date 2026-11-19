@@ -9,6 +9,7 @@ import { CountriesService } from '../countries/countries.service';
 import { DB, type Db } from '../db/database.module';
 import { deviceChallenges, devices, sessions, users } from '../db/schema';
 import { WithdrawalHoldsService } from '../money/withdrawal-holds.service';
+import { RiskFlagsService } from '../risk/risk-flags.service';
 import type { AuthContext } from './auth.types';
 
 /** How long a phone has to sign over a code the server gave it. */
@@ -56,6 +57,7 @@ export class DeviceSecurityService {
     @Inject(APP_CONFIG) config: AppConfig,
     private readonly countries: CountriesService,
     private readonly holds: WithdrawalHoldsService,
+    private readonly risk: RiskFlagsService,
   ) {
     this.pinKey = subKey(Buffer.from(config.PIN_KEY, 'hex'), 'jiffo app pin');
   }
@@ -123,6 +125,8 @@ export class DeviceSecurityService {
         .where(eq(devices.id, auth.deviceId));
       return replaced ? this.holds.start(tx, auth.userId, 'new_device') : null;
     });
+    // The same key on another account means one phone for both (I3): flagged for verification.
+    this.risk.phoneUsed(auth.userId, auth.deviceId);
     if (until) await this.holds.tell(auth.userId, 'new_device', until);
   }
 

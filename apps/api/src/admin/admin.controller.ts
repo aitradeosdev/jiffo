@@ -24,7 +24,14 @@ import { SettingsAdminService } from './settings-admin.service';
 import { ProvidersAdminService } from './providers-admin.service';
 import { APPLICATION_STATUSES, ApplicationsAdminService } from './applications-admin.service';
 import { ID_CHECK_STATUSES, IdChecksAdminService } from './id-checks-admin.service';
-import { adminErrandPermission, AGENT_TIERS, PROVIDER_CATEGORIES } from '@jiffo/shared';
+import { FlagsAdminService } from './flags-admin.service';
+import {
+  adminErrandPermission,
+  AGENT_TIERS,
+  PROVIDER_CATEGORIES,
+  RISK_FLAG_STATUSES,
+  RISK_QUEUES,
+} from '@jiffo/shared';
 import { forbidden, notFound } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
 import { AdminGuard, Confirmed, CurrentAdmin, Needs, NoReason } from './admin.guard';
@@ -154,6 +161,18 @@ const ApplicationsQuery = z.object({
   before: z.string().max(80).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });
+const FlagsQuery = z.object({
+  country: z.string().length(2).toUpperCase(),
+  queue: z.enum(RISK_QUEUES).default('risk'),
+  status: z.enum(RISK_FLAG_STATUSES).default('open'),
+  /** Flags about this person, or this errand. */
+  person: z.string().uuid().optional(),
+  errand: z.string().uuid().optional(),
+  before: z.string().max(80).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+const FlagId = new ParseUUIDPipe({ exceptionFactory: () => notFound('flag_not_found', 'Flag not found') });
+const FlagDecisionBody = z.object({ decision: z.enum(['clear', 'confirm', 'reopen']), note: Note });
 const PayoutAccountDecisionBody = z.object({ decision: z.enum(['approve', 'decline']), note: Note });
 /** The note is shown to the agent when their application is declined. */
 const DecisionBody = z.object({ decision: z.enum(['approve', 'reject', 'reopen']), note: Note });
@@ -190,6 +209,7 @@ export class AdminController {
     private readonly settingsAdmin: SettingsAdminService,
     private readonly applications: ApplicationsAdminService,
     private readonly idChecks: IdChecksAdminService,
+    private readonly flags: FlagsAdminService,
     private readonly providerSettings: ProvidersAdminService,
     private readonly approvals: ApprovalsService,
     private readonly gated: ApprovalRequests,
@@ -521,6 +541,32 @@ export class AdminController {
     @Body(new ZodBody(IdDecisionBody)) body: z.infer<typeof IdDecisionBody>,
   ) {
     return this.idChecks.decide(admin, id, body);
+  }
+
+  /* ---------- Fraud flags: the Risk and verification queues (E5, E6, I3) ---------- */
+
+  @Get('flags')
+  @Needs('read')
+  listFlags(@Query(new ZodBody(FlagsQuery)) query: z.infer<typeof FlagsQuery>) {
+    return this.flags.list(query);
+  }
+
+  @Get('flags/counts')
+  @Needs('read')
+  flagCounts(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
+    return this.flags.counts(query.country);
+  }
+
+  /** Clear, confirm or reopen a flag: the Risk queue needs risk, the verification queue verify. */
+  @Post('flags/:id/decision')
+  @HttpCode(200)
+  @Needs('risk', 'verify')
+  decideFlag(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', FlagId) id: string,
+    @Body(new ZodBody(FlagDecisionBody)) body: z.infer<typeof FlagDecisionBody>,
+  ) {
+    return this.flags.decide(admin, id, body);
   }
 
   @Get('people')
