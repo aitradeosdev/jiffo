@@ -1,4 +1,4 @@
-import { createHash, createPrivateKey, generateKeyPairSync, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { verifyAssertion, verifyKeyAttestation, type AttestedKey } from '../src/attestation/app-attest';
 import fixture from './fixtures/app-attest.json';
@@ -51,8 +51,14 @@ describe('Apple App Attest: a new key (MB3)', () => {
 });
 
 describe('Apple App Attest: each request (MB3)', () => {
-  const key: AttestedKey = attest('production');
-  const leafKey = createPrivateKey(fixture.production.leafKey);
+  // Each request is checked against the key kept from its attestation: one of our own stands in for it.
+  const { privateKey: leafKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const key: AttestedKey = {
+    appId: 'ABCDE12345.com.jiffoapp.agent',
+    publicKey: publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+    counter: 0,
+    development: false,
+  };
   const authData = (counter: number, appId = 'ABCDE12345.com.jiffoapp.agent') => {
     const c = Buffer.alloc(4);
     c.writeUInt32BE(counter);
