@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SmileIdIdentityAdapter } from '../src/adapters/identity-providers';
-import { agentApplications, providerSettings } from '../src/db/schema';
+import { agentApplications, customerVerifications, providerSettings } from '../src/db/schema';
 import { ProvidersService } from '../src/providers/providers.service';
 import {
   adminAs,
@@ -193,11 +193,11 @@ describe("identity checks on the provider's own page", () => {
     await switchProvider(t, 'identity', null);
   });
 
-  it('ignores settings saved for an identity provider Jiffo no longer has, and refuses its results', async () => {
-    // Saved and switched on by an owner before that provider was taken out of Jiffo.
+  it('ignores settings saved for an identity provider Jiffo no longer has, and finishes what was left running', async () => {
+    // Saved and switched on by an owner before Dojah was taken out of Jiffo.
     await t.db.insert(providerSettings).values({
       category: 'identity',
-      provider: 'retired',
+      provider: 'dojah',
       active: true,
       config: { appId: 'app-1' },
       secretHints: { secretKey: '••••ab12' },
@@ -211,21 +211,21 @@ describe("identity checks on the provider's own page", () => {
     expect(identity).toMatchObject({ active: null, fallback: 'fake' });
     expect(identity.providers.map((p: { key: string }) => p.key)).toEqual(['smileid']);
 
-    // A check started with it can't be finished there, and its results are refused.
+    // An identity check left running with it ends as failed, so the agent checks again with the provider in use.
     const agent = await newAgent();
     await t.db
       .update(agentApplications)
-      .set({ identityProvider: 'retired', identityReference: 'jid-retired-1', identityIdType: 'nin' })
+      .set({ identityProvider: 'dojah', identityReference: 'jid-retired-1', identityIdType: 'nin' })
       .where(eq(agentApplications.userId, agent.userId));
-    const finish = await request(t.http).post('/v1/agent/application/identity/finish').set(agent.headers);
-    expect(finish.status).toBe(503);
-    expect(finish.body.error.code).toBe('identity_unavailable');
+    await request(t.http).post('/v1/agent/application/identity/finish').set(agent.headers).expect(200);
+    const [ended] = await t.db.select().from(agentApplications).where(eq(agentApplications.userId, agent.userId));
+    expect(ended!.identityOutcome).toBe('failed');
+    // Its results are refused the way an unsigned call is: nothing tells a stranger what is set up.
     await request(t.http)
-      .post('/v1/webhooks/identity/retired')
+      .post('/v1/webhooks/identity/dojah')
       .set('content-type', 'application/json')
       .send(JSON.stringify({ reference_id: 'jid-retired-1', verification_status: 'Completed' }))
-      .expect(404);
-    // The agent starts again, with the provider in use now.
+      .expect(401);
     const again = await request(t.http)
       .post('/v1/agent/application/identity')
       .set(agent.headers)
@@ -233,12 +233,24 @@ describe("identity checks on the provider's own page", () => {
       .expect(200);
     expect(again.body.provider).toBe('fake');
 
-    // Switching in the panel still works, and turns the old settings off.
+    // A customer's check left running with Youverify ends as failed, so the app offers a new one.
+    const customer = await signIn(t, 'customer', { unverified: true });
+    await t.db.insert(customerVerifications).values({
+      userId: customer.userId,
+      status: 'checking',
+      provider: 'youverify',
+      reference: `cid-${uniqueNin()}`,
+      idType: 'nin',
+      updatedAt: new Date(Date.now() - 3_600_000),
+    });
+    const seen = await request(t.http).get('/v1/me/identity').set(customer.headers).expect(200);
+    expect(seen.body.status).toBe('failed');
+
+    // Switching in the panel still works; the old row stays ignored (the migration deletes such rows).
     await switchProvider(t, 'identity', null);
-    const [left] = await t.db
-      .select()
-      .from(providerSettings)
-      .where(and(eq(providerSettings.category, 'identity'), eq(providerSettings.provider, 'retired')));
-    expect(left!.active).toBe(false);
+    expect(providers.current('identity').name).toBe('fake');
+    await t.db
+      .delete(providerSettings)
+      .where(and(eq(providerSettings.category, 'identity'), eq(providerSettings.provider, 'dojah')));
   });
 });

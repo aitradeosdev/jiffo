@@ -203,6 +203,42 @@ export class UnconfiguredIdentityAdapter implements IdentityAdapter {
   }
 }
 
+/**
+ * Identity providers Jiffo used to support. Only Smile ID can re-check a selfie against the face it kept, so it
+ * is the only one now (docs/security-plan.md, I8).
+ */
+export const RETIRED_IDENTITY_PROVIDERS: readonly string[] = ['dojah', 'youverify'];
+
+/**
+ * Finishes what was left running with a retired provider, which can't be asked any more: an identity check ends
+ * as failed, so the person checks again with the provider in use, and an address goes to our team, as Smile
+ * ID's do. Nothing new starts with it.
+ */
+export class RetiredIdentityAdapter implements IdentityAdapter {
+  readonly flow = 'hosted' as const;
+  readonly idTypes: readonly IdType[] = [];
+  readonly bvnAlongside = false;
+  constructor(readonly name: string) {}
+  startIdentity(): Promise<never> {
+    return Promise.reject(new IdentityUnavailable());
+  }
+  async identityResult(): Promise<IdentityResult> {
+    return {
+      status: 'done',
+      outcome: 'failed',
+      checks: [
+        { key: 'selfie', outcome: 'failed', note: 'Checked with a service Jiffo no longer uses. Check your ID again.' },
+      ],
+    };
+  }
+  startAddress(): Promise<never> {
+    return Promise.reject(new IdentityUnavailable());
+  }
+  async addressResult(): Promise<AddressResult> {
+    return { status: 'done', outcome: 'review', note: 'Our team confirms the address at review' };
+  }
+}
+
 export class IdentityUnavailable extends Error {
   constructor() {
     super('No identity provider is set up');

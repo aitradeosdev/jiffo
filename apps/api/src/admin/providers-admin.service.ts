@@ -398,7 +398,8 @@ export class ProvidersAdminService {
   }
 
   private switchable(rows: Row[], category: ProviderCategory, provider: string | null) {
-    const from = rows.find((r) => r.active)?.provider ?? null;
+    // A provider Jiffo no longer has counts as off, as in the list.
+    const from = rows.find((r) => r.active && hasBuilder(category, r.provider))?.provider ?? null;
     const row = provider ? rows.find((r) => r.provider === provider) : undefined;
     if (provider) {
       if (!this.complete(row, category, provider)) {

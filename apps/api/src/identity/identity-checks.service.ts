@@ -11,11 +11,13 @@ import {
   type IdentityRequest,
   type IdentityResult,
   REFERENCE_PREFIX,
+  RETIRED_IDENTITY_PROVIDERS,
+  RetiredIdentityAdapter,
 } from '../adapters/identity';
 import { IdentityProviderError } from '../adapters/identity-providers';
 import { sha256 } from '../common/crypto';
 import { keyFor } from '../common/keys';
-import { badRequest, notFound, tooMany, unavailable } from '../common/errors';
+import { badRequest, tooMany, unavailable } from '../common/errors';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
 import { identityAttempts, webhookSignatures } from '../db/schema';
@@ -119,6 +121,8 @@ export class IdentityChecksService {
    * that is said as identity checks being unavailable, and support can look at it.
    */
   startedWith(name: string | null): IdentityAdapter {
+    // What was left running with a provider Jiffo no longer has finishes, rather than waiting for ever.
+    if (name && RETIRED_IDENTITY_PROVIDERS.includes(name)) return new RetiredIdentityAdapter(name);
     return (name ? this.providers.named('identity', name) : null) ?? new UnconfiguredIdentityAdapter();
   }
 
@@ -326,7 +330,8 @@ export class IdentityChecksService {
   async recordWebhook(provider: string, rawBody: Buffer, headers: Record<string, string | string[] | undefined>) {
     const adapter = this.providers.named('identity', provider);
     const parse = adapter?.parseWebhook?.bind(adapter);
-    if (!parse) throw notFound('not_found', 'Not found');
+    // Answered as an unsigned call is, so the answer doesn't tell a stranger which providers are set up.
+    if (!parse) return null;
     // A provider that can't be reached to confirm the result answers 503, so it sends the result again.
     const parsed = await this.call(() => parse(rawBody, headers));
     if (!parsed) return null;
