@@ -149,20 +149,27 @@ export class AuthService {
     });
   }
 
-  /** Tells the agent a new phone's sign-in paused their withdrawals, by push, SMS and email. */
+  /**
+   * Tells the agent a new phone's sign-in paused their withdrawals, by SMS and email; the push goes to their
+   * other phones with the signed-out notice. Not waited for, and it never throws.
+   */
   tellHeld(held: { userId: string; until: Date } | null) {
-    // Not waited for, like the signed-out notice: the new phone's sign-in shouldn't wait on providers.
-    if (held) void this.holds.tell(held.userId, 'new_device', held.until);
+    if (held) void this.holds.tell(held.userId, 'new_device', held.until, { push: false });
   }
 
   /** Tells the phones a new sign-in signed out, so a sign-in the owner didn't make doesn't go unnoticed. */
-  tellSignedOut(deviceIds: string[]) {
+  tellSignedOut(deviceIds: string[], held: { userId: string; until: Date } | null = null) {
     // Not waited for: the new phone's sign-in shouldn't wait on the push provider.
-    void this.push.notifyDevices(deviceIds, {
-      title: 'Signed in on another phone',
-      body: "Your Jiffo account was just signed in on another phone, so this one was signed out. If that wasn't you, sign in again and contact support.",
-      data: { type: 'auth.signed_out' },
-    });
+    void (async () => {
+      // A hold it started is said here too: these are the phones the owner had, where the number someone
+      // may have taken over doesn't reach (docs/security-plan.md, A6).
+      const hold = held ? ` ${await this.holds.sentence(held.userId, held.until)}` : '';
+      await this.push.notifyDevices(deviceIds, {
+        title: 'Signed in on another phone',
+        body: `Your Jiffo account was just signed in on another phone, so this one was signed out.${hold} If that wasn't you, sign in again and contact support.`,
+        data: { type: 'auth.signed_out' },
+      });
+    })().catch(() => undefined);
   }
 
   /** Swaps a refresh token for a new pair. A token that was already used revokes the whole session. */

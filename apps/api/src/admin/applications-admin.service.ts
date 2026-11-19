@@ -6,6 +6,7 @@ import { admins, agentApplications, states, users } from '../db/schema';
 import { AgentApplicationService } from '../agents/application.service';
 import { PushService } from '../push/push.service';
 import { AuditService } from './audit.service';
+import { WithdrawalHoldsService } from '../money/withdrawal-holds.service';
 import { SUPPORT_CHECK_LABELS, type Check } from './check-labels';
 import { requireCountry } from './countries';
 import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
@@ -43,6 +44,7 @@ export class ApplicationsAdminService {
     private readonly push: PushService,
     private readonly audit: AuditService,
     private readonly applications: AgentApplicationService,
+    private readonly holds: WithdrawalHoldsService,
   ) {}
 
   /** How many applications are in each state, for the tabs. */
@@ -201,7 +203,7 @@ export class ApplicationsAdminService {
     userId: string,
     input: { decision: 'approve' | 'reject' | 'reopen'; note: string },
   ) {
-    const { before, after } = await this.db.transaction(async (tx) => {
+    const { before, after, holdUntil } = await this.db.transaction(async (tx) => {
       const result = await this.applications.decide(tx, { userId, adminId: admin.adminId, ...input });
       await this.audit.record(tx, admin, {
         action: `application.${input.decision}`,
@@ -216,6 +218,8 @@ export class ApplicationsAdminService {
       });
       return result;
     });
+    // An account brought in with the approval paused withdrawals: the agent hears it everywhere (A6).
+    if (holdUntil) await this.holds.tell(userId, 'payout_account', holdUntil);
     await this.push.notifyUser(userId, 'agent', {
       title:
         after.status === 'approved'

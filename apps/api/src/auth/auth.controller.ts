@@ -52,7 +52,7 @@ export class AuthController {
       body.device,
     );
     this.realtime.disconnectSessions(replacedSessionIds);
-    this.auth.tellSignedOut(signedOutDevices);
+    this.auth.tellSignedOut(signedOutDevices, heldUntil);
     this.auth.tellHeld(heldUntil);
     return response;
   }

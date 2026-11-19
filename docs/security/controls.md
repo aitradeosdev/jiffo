@@ -115,8 +115,8 @@ Agents only, to an account in their own name. One free scheduled withdrawal a da
 - **Suspension:** a suspended agent's withdrawals wait until they are reactivated.
 - **Hold after an account change:**
   - A new payout account in place of one in use, or a sign-in to the agent app on a phone the account hasn't used, pauses withdrawals for 48 hours (Settings, Security; it can't be switched off).
-  - An agent's first account and first phone don't, and nor does the customer app. A nearly matching account pauses them from when support approves it.
-  - The agent is told by push, SMS and email, so a change they didn't make is noticed before money can leave.
+  - An agent's first account and first phone don't, nor does the customer app, nor saving the same account again. A nearly matching account pauses them from when support approves it, on its own or with the application.
+  - The agent is told by SMS and email, and by push: after a new phone's sign-in, on the phones it signed out, which are the owner's, since the number may now be someone else's. So a change they didn't make is noticed before money can leave.
   - New withdrawals are refused until it ends; one asked for before it waits, then goes as asked. Paystack's transfer approval refuses a held agent's transfer.
   - A later change never shortens a hold. Staff see it on the agent's page.
 - **Daily caps (Settings, Security):** instant withdrawals are capped per agent and for all agents together.

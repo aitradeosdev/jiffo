@@ -13,6 +13,9 @@ export interface MessagingAdapter {
 
 export const MESSAGING = Symbol('MESSAGING');
 
+const codeNotSent = () => unavailable('sms_failed', 'We could not send the code. Try again in a moment.');
+const textNotSent = () => unavailable('sms_failed', 'The text message could not be sent.');
+
 const otpText = (code: string, ttlSeconds: number) =>
   `Your Jiffo code is ${code}. It expires in ${Math.round(ttlSeconds / 60)} minutes. Never share it with anyone.`;
 
@@ -55,11 +58,15 @@ export class TermiiMessagingAdapter implements MessagingAdapter {
     private readonly fetchImpl: typeof fetch = providerFetch,
   ) {}
 
-  sendOtp(phone: string, code: string, ttlSeconds: number) {
-    return this.sendText(phone, otpText(code, ttlSeconds));
+  async sendOtp(phone: string, code: string, ttlSeconds: number) {
+    if (!(await this.post(phone, otpText(code, ttlSeconds)))) throw codeNotSent();
   }
 
   async sendText(phone: string, text: string) {
+    if (!(await this.post(phone, text))) throw textNotSent();
+  }
+
+  private async post(phone: string, text: string) {
     const res = await this.fetchImpl(`${this.baseUrl}/api/sms/send`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -72,7 +79,7 @@ export class TermiiMessagingAdapter implements MessagingAdapter {
         channel: 'dnd',
       }),
     });
-    if (!res.ok) throw unavailable('sms_failed', 'We could not send the code. Try again in a moment.');
+    return res.ok;
   }
 
   /** For the panel's Test button: the key works, and how much credit is left. Sends nothing. */
@@ -106,11 +113,16 @@ export class AfricasTalkingMessagingAdapter implements MessagingAdapter {
     private readonly fetchImpl: typeof fetch = providerFetch,
   ) {}
 
-  sendOtp(phone: string, code: string, ttlSeconds: number) {
-    return this.sendText(phone, otpText(code, ttlSeconds));
+  async sendOtp(phone: string, code: string, ttlSeconds: number) {
+    if (!(await this.post(phone, otpText(code, ttlSeconds)))) throw codeNotSent();
   }
 
   async sendText(phone: string, text: string) {
+    if (!(await this.post(phone, text))) throw textNotSent();
+  }
+
+  /** Sends one SMS; false when it didn't go, with why in the log (never the number). */
+  private async post(phone: string, text: string) {
     const body = new URLSearchParams({
       username: this.username,
       to: phone,
@@ -132,7 +144,7 @@ export class AfricasTalkingMessagingAdapter implements MessagingAdapter {
       });
     } catch (error) {
       this.logger.warn(`SMS not sent: ${(error as Error).message}`);
-      throw unavailable('sms_failed', 'We could not send the code. Try again in a moment.');
+      return false;
     }
     const json = (await res.json().catch(() => null)) as {
       SMSMessageData?: { Message?: string; Recipients?: Array<{ statusCode?: number; status?: string }> };
@@ -143,8 +155,9 @@ export class AfricasTalkingMessagingAdapter implements MessagingAdapter {
       this.logger.warn(
         `SMS not sent: HTTP ${res.status}, ${recipient ? `${recipient.statusCode} ${recipient.status}` : (json?.SMSMessageData?.Message ?? 'no recipient')}`,
       );
-      throw unavailable('sms_failed', 'We could not send the code. Try again in a moment.');
+      return false;
     }
+    return true;
   }
 
   check() {

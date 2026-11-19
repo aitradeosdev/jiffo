@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { agentApplications, devices, otpChallenges, payouts, users } from '../src/db/schema';
+import { agentApplications, devices, otpChallenges, payoutAccounts, payouts, users } from '../src/db/schema';
 import { nameIndex } from '../src/db/fields';
 import { PayoutsService } from '../src/money/payouts.service';
 import { adminAs, agentWithMoney, createTestApp, randomIp, uniqueDigits, type Person, type TestApp } from './helpers';
@@ -159,6 +159,62 @@ describe('the withdrawal hold after an account change', () => {
     const fresh = await signInOn(agent, 'agent', randomUUID());
     await expectHeld(fresh);
     // Told after the sign-in answers, so it doesn't wait on the SMS provider.
+    await vi.waitFor(() =>
+      expect(t.messaging.texts.filter((m) => m.phone === agent.phone).at(-1)?.text).toMatch(/new phone/),
+    );
+  });
+
+  it('tells the owner on the phone a new sign-in signed out, since the number may not be theirs now', async () => {
+    const agent = await agentWithMoney(t);
+    const token = `push-${randomUUID()}`;
+    await request(t.http).put('/v1/devices/current/push-token').set(agent.headers).send({ token }).expect(204);
+    await signInOn(agent, 'agent', randomUUID());
+    await vi.waitFor(() =>
+      expect(t.push.sent.filter((p) => p.token === token).at(-1)).toMatchObject({
+        title: 'Signed in on another phone',
+        body: expect.stringMatching(/withdrawals are paused/i),
+      }),
+    );
+  });
+
+  it("doesn't hold when the account in use is saved again unchanged", async () => {
+    const agent = await agentWithMoney(t);
+    const [current] = await t.db
+      .select({ bankCode: payoutAccounts.bankCode, accountNumber: payoutAccounts.accountNumber })
+      .from(payoutAccounts)
+      .where(and(eq(payoutAccounts.userId, agent.userId), isNull(payoutAccounts.replacedAt)));
+    await request(t.http).put('/v1/payout-account').set(agent.headers).send(current!).expect(200);
+    expect(await heldUntil(agent)).toBeNull();
+  });
+
+  it('holds when approving an application also brings in a waiting account', async () => {
+    const agent = await agentWithMoney(t);
+    await t.db
+      .update(agentApplications)
+      .set({
+        legalName: 'TUNDE ADEWALE BAKARE',
+        legalNameIndex: nameIndex('TUNDE ADEWALE BAKARE'),
+        identityOutcome: 'passed',
+        status: 'review',
+      })
+      .where(eq(agentApplications.userId, agent.userId));
+    await newAccount(agent, 'T BAKARE').expect(200);
+    const verification = await adminAs(t, 'verification');
+    await request(t.http)
+      .post(`/v1/admin/people/${agent.userId}/application`)
+      .set(verification.headers)
+      .send({ decision: 'approve', note: 'The bank shortens the first name' })
+      .expect(200);
+    await expectHeld(agent);
+    expect(t.messaging.texts.filter((m) => m.phone === agent.phone).at(-1)?.text).toMatch(/payout account changed/);
+  });
+
+  it('says the latest reason, to the agent and to staff alike', async () => {
+    const agent = await agentWithMoney(t);
+    await newAccount(agent).expect(200);
+    await signInOn(agent, 'agent', randomUUID());
+    const [row] = await t.db.select({ reason: users.withdrawalsHeldFor }).from(users).where(eq(users.id, agent.userId));
+    expect(row!.reason).toBe('new_device');
     await vi.waitFor(() =>
       expect(t.messaging.texts.filter((m) => m.phone === agent.phone).at(-1)?.text).toMatch(/new phone/),
     );

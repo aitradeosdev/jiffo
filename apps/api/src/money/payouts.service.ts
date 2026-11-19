@@ -18,7 +18,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { AuthContext } from '../auth/auth.types';
 import { conflict, unprocessable } from '../common/errors';
 import { AlertsService } from '../alerts/alerts.service';
-import { WithdrawalHoldsService } from './withdrawal-holds.service';
+import { hoursFrom, WithdrawalHoldsService } from './withdrawal-holds.service';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { nameWords, plainName } from '../common/names';
 import { LedgerService, transfer } from './ledger.service';
@@ -73,6 +73,9 @@ export const payoutView = (p: PayoutRow) => ({
 });
 
 /** Agents' payout accounts and withdrawals. Customers never withdraw in the app. */
+/** Agents whose withdrawals aren't on hold: the rest wait, and aren't tried on every run (A6). */
+const notHeld = () => or(isNull(users.withdrawalsHeldUntil), lt(users.withdrawalsHeldUntil, new Date()));
+
 @Injectable()
 export class PayoutsService {
   private readonly logger = new Logger(PayoutsService.name);
@@ -175,7 +178,11 @@ export class PayoutsService {
       // One change at a time per agent.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'payout-account:' + auth.userId}))`);
       const [before] = await tx
-        .select({ id: payoutAccounts.id })
+        .select({
+          id: payoutAccounts.id,
+          bankCode: payoutAccounts.bankCode,
+          accountNumber: payoutAccounts.accountNumber,
+        })
         .from(payoutAccounts)
         .where(
           and(
@@ -208,7 +215,9 @@ export class PayoutsService {
       });
       // A new account in place of one in use pauses withdrawals (A6, P8). The first account doesn't: there is
       // nothing yet to redirect. One waiting for support pauses them when it is approved.
-      const until = before && !review ? await this.holds.start(tx, auth.userId, 'payout_account') : null;
+      // The same account saved again redirects nothing, so it doesn't.
+      const redirected = !!before && (before.bankCode !== bankCode || before.accountNumber !== accountNumber);
+      const until = redirected && !review ? await this.holds.start(tx, auth.userId, 'payout_account') : null;
       return { before: before ?? null, until };
     });
     // By SMS and email too (A6); the push below says it.
@@ -220,7 +229,7 @@ export class PayoutsService {
           title: review ? 'We are checking your new account' : 'Payout account changed',
           body: review
             ? `The name on the account ending ${accountNumber.slice(-4)} is close to the name on your ID, but not the same, so support will check it. Your withdrawals keep going to your current account meanwhile.`
-            : `Withdrawals now go to your account ending ${accountNumber.slice(-4)}${earlier.until ? `, and are paused for ${this.holdHours(earlier.until)} hours for your safety` : ''}. If you didn't change it, contact support now.`,
+            : `Withdrawals now go to your account ending ${accountNumber.slice(-4)}${earlier.until ? `, and are paused for ${hoursFrom(earlier.until)} hours for your safety` : ''}. If you didn't change it, contact support now.`,
           data: { type: 'wallet.payout_account' },
         })
         .catch(() => undefined);
@@ -286,16 +295,11 @@ export class PayoutsService {
         title: decision === 'approve' ? 'New account approved' : 'New account not approved',
         body:
           decision === 'approve'
-            ? `Withdrawals now go to your account ending ${last4}${account.holdUntil ? `, and are paused for ${this.holdHours(account.holdUntil)} hours for your safety` : ''}.`
+            ? `Withdrawals now go to your account ending ${last4}${account.holdUntil ? `, and are paused for ${hoursFrom(account.holdUntil)} hours for your safety` : ''}.`
             : `Support couldn't approve the account ending ${last4}. Your withdrawals keep going to your current account.`,
         data: { type: 'wallet.payout_account' },
       })
       .catch(() => undefined);
-  }
-
-  /** Whole hours from now until a hold ends, as an agent is told it. */
-  private holdHours(until: Date) {
-    return Math.max(1, Math.round((until.getTime() - Date.now()) / 3_600_000));
   }
 
   /* ---------- Withdrawals ---------- */
@@ -804,7 +808,8 @@ export class PayoutsService {
     const scheduled = await this.db
       .select({ id: payouts.id })
       .from(payouts)
-      .where(and(eq(payouts.status, 'requested'), eq(payouts.speed, 'scheduled')))
+      .innerJoin(users, eq(users.id, payouts.userId))
+      .where(and(eq(payouts.status, 'requested'), eq(payouts.speed, 'scheduled'), notHeld()))
       .limit(5_000);
     for (const p of scheduled) await this.send(p.id);
     return { scheduled: scheduled.length, ...(await this.retryPending()) };
@@ -819,11 +824,13 @@ export class PayoutsService {
     const instant = await this.db
       .select({ id: payouts.id })
       .from(payouts)
+      .innerJoin(users, eq(users.id, payouts.userId))
       .where(
         and(
           eq(payouts.status, 'requested'),
           eq(payouts.speed, 'instant'),
           lt(payouts.createdAt, new Date(Date.now() - RETRY_AFTER_MS)),
+          notHeld(),
         ),
       )
       .limit(1_000);
