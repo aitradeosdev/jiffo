@@ -108,8 +108,12 @@
           "name": "admin_audit_admin_id_admins_id_fk",
           "tableFrom": "admin_audit",
           "tableTo": "admins",
-          "columnsFrom": ["admin_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "admin_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -225,8 +229,12 @@
           "name": "admin_sessions_admin_id_admins_id_fk",
           "tableFrom": "admin_sessions",
           "tableTo": "admins",
-          "columnsFrom": ["admin_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "admin_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -689,8 +697,12 @@
           "name": "agent_applications_user_id_users_id_fk",
           "tableFrom": "agent_applications",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -698,8 +710,12 @@
           "name": "agent_applications_country_code_countries_code_fk",
           "tableFrom": "agent_applications",
           "tableTo": "countries",
-          "columnsFrom": ["country_code"],
-          "columnsTo": ["code"],
+          "columnsFrom": [
+            "country_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -787,8 +803,12 @@
           "name": "agent_presence_user_id_users_id_fk",
           "tableFrom": "agent_presence",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -862,8 +882,12 @@
           "name": "agent_profiles_user_id_users_id_fk",
           "tableFrom": "agent_profiles",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -985,8 +1009,12 @@
           "name": "categories_country_code_countries_code_fk",
           "tableFrom": "categories",
           "tableTo": "countries",
-          "columnsFrom": ["country_code"],
-          "columnsTo": ["code"],
+          "columnsFrom": [
+            "country_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1068,8 +1096,12 @@
           "name": "conversations_errand_id_errands_id_fk",
           "tableFrom": "conversations",
           "tableTo": "errands",
-          "columnsFrom": ["errand_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "errand_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1077,8 +1109,12 @@
           "name": "conversations_customer_id_users_id_fk",
           "tableFrom": "conversations",
           "tableTo": "users",
-          "columnsFrom": ["customer_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "customer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1086,8 +1122,12 @@
           "name": "conversations_agent_id_users_id_fk",
           "tableFrom": "conversations",
           "tableTo": "users",
-          "columnsFrom": ["agent_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1335,8 +1375,12 @@
           "name": "deposits_user_id_users_id_fk",
           "tableFrom": "deposits",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1344,8 +1388,12 @@
           "name": "deposits_country_code_countries_code_fk",
           "tableFrom": "deposits",
           "tableTo": "countries",
-          "columnsFrom": ["country_code"],
-          "columnsTo": ["code"],
+          "columnsFrom": [
+            "country_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1458,8 +1506,12 @@
           "name": "devices_user_id_users_id_fk",
           "tableFrom": "devices",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1553,8 +1605,12 @@
           "name": "earning_holds_user_id_users_id_fk",
           "tableFrom": "earning_holds",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1562,8 +1618,12 @@
           "name": "earning_holds_country_code_countries_code_fk",
           "tableFrom": "earning_holds",
           "tableTo": "countries",
-          "columnsFrom": ["country_code"],
-          "columnsTo": ["code"],
+          "columnsFrom": [
+            "country_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1571,8 +1631,12 @@
           "name": "earning_holds_errand_id_errands_id_fk",
           "tableFrom": "earning_holds",
           "tableTo": "errands",
-          "columnsFrom": ["errand_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "errand_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1687,8 +1751,12 @@
           "name": "errand_calls_errand_id_errands_id_fk",
           "tableFrom": "errand_calls",
           "tableTo": "errands",
-          "columnsFrom": ["errand_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "errand_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1696,8 +1764,12 @@
           "name": "errand_calls_caller_id_users_id_fk",
           "tableFrom": "errand_calls",
           "tableTo": "users",
-          "columnsFrom": ["caller_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "caller_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1705,8 +1777,12 @@
           "name": "errand_calls_callee_id_users_id_fk",
           "tableFrom": "errand_calls",
           "tableTo": "users",
-          "columnsFrom": ["callee_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "callee_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1806,8 +1882,12 @@
           "name": "errand_events_errand_id_errands_id_fk",
           "tableFrom": "errand_events",
           "tableTo": "errands",
-          "columnsFrom": ["errand_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "errand_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1916,8 +1996,12 @@
           "name": "errand_ratings_errand_id_errands_id_fk",
           "tableFrom": "errand_ratings",
           "tableTo": "errands",
-          "columnsFrom": ["errand_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "errand_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1925,8 +2009,12 @@
           "name": "errand_ratings_rater_id_users_id_fk",
           "tableFrom": "errand_ratings",
           "tableTo": "users",
-          "columnsFrom": ["rater_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "rater_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1934,8 +2022,12 @@
           "name": "errand_ratings_ratee_id_users_id_fk",
           "tableFrom": "errand_ratings",
           "tableTo": "users",
-          "columnsFrom": ["ratee_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "ratee_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2054,8 +2146,12 @@
           "name": "errand_stops_errand_id_errands_id_fk",
           "tableFrom": "errand_stops",
           "tableTo": "errands",
-          "columnsFrom": ["errand_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "errand_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2331,8 +2427,12 @@
           "name": "errands_country_code_countries_code_fk",
           "tableFrom": "errands",
           "tableTo": "countries",
-          "columnsFrom": ["country_code"],
-          "columnsTo": ["code"],
+          "columnsFrom": [
+            "country_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2340,8 +2440,12 @@
           "name": "errands_customer_id_users_id_fk",
           "tableFrom": "errands",
           "tableTo": "users",
-          "columnsFrom": ["customer_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "customer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2349,8 +2453,12 @@
           "name": "errands_agent_id_users_id_fk",
           "tableFrom": "errands",
           "tableTo": "users",
-          "columnsFrom": ["agent_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2460,8 +2568,12 @@
           "name": "journal_entries_country_code_countries_code_fk",
           "tableFrom": "journal_entries",
           "tableTo": "countries",
-          "columnsFrom": ["country_code"],
-          "columnsTo": ["code"],
+          "columnsFrom": [
+            "country_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2469,8 +2581,12 @@
           "name": "journal_entries_errand_id_errands_id_fk",
           "tableFrom": "journal_entries",
           "tableTo": "errands",
-          "columnsFrom": ["errand_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "errand_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2587,8 +2703,12 @@
           "name": "ledger_accounts_country_code_countries_code_fk",
           "tableFrom": "ledger_accounts",
           "tableTo": "countries",
-          "columnsFrom": ["country_code"],
-          "columnsTo": ["code"],
+          "columnsFrom": [
+            "country_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2720,8 +2840,12 @@
           "name": "messages_conversation_id_conversations_id_fk",
           "tableFrom": "messages",
           "tableTo": "conversations",
-          "columnsFrom": ["conversation_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "conversation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2729,8 +2853,12 @@
           "name": "messages_sender_id_users_id_fk",
           "tableFrom": "messages",
           "tableTo": "users",
-          "columnsFrom": ["sender_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "sender_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2953,8 +3081,12 @@
           "name": "payout_accounts_user_id_users_id_fk",
           "tableFrom": "payout_accounts",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -3155,8 +3287,12 @@
           "name": "payouts_user_id_users_id_fk",
           "tableFrom": "payouts",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -3164,8 +3300,12 @@
           "name": "payouts_country_code_countries_code_fk",
           "tableFrom": "payouts",
           "tableTo": "countries",
-          "columnsFrom": ["country_code"],
-          "columnsTo": ["code"],
+          "columnsFrom": [
+            "country_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -3173,8 +3313,12 @@
           "name": "payouts_payout_account_id_payout_accounts_id_fk",
           "tableFrom": "payouts",
           "tableTo": "payout_accounts",
-          "columnsFrom": ["payout_account_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "payout_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -3264,8 +3408,12 @@
           "name": "postings_journal_id_journal_entries_id_fk",
           "tableFrom": "postings",
           "tableTo": "journal_entries",
-          "columnsFrom": ["journal_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "journal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -3273,8 +3421,12 @@
           "name": "postings_account_id_ledger_accounts_id_fk",
           "tableFrom": "postings",
           "tableTo": "ledger_accounts",
-          "columnsFrom": ["account_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -3513,8 +3665,12 @@
           "name": "provider_settings_updated_by_admins_id_fk",
           "tableFrom": "provider_settings",
           "tableTo": "admins",
-          "columnsFrom": ["updated_by"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -3598,8 +3754,12 @@
           "name": "reconciliation_runs_country_code_countries_code_fk",
           "tableFrom": "reconciliation_runs",
           "tableTo": "countries",
-          "columnsFrom": ["country_code"],
-          "columnsTo": ["code"],
+          "columnsFrom": [
+            "country_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -3690,8 +3850,12 @@
           "name": "refresh_tokens_session_id_sessions_id_fk",
           "tableFrom": "refresh_tokens",
           "tableTo": "sessions",
-          "columnsFrom": ["session_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -3779,8 +3943,12 @@
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -3788,8 +3956,12 @@
           "name": "sessions_device_id_devices_id_fk",
           "tableFrom": "sessions",
           "tableTo": "devices",
-          "columnsFrom": ["device_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "device_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -3871,8 +4043,12 @@
           "name": "settings_versions_country_code_countries_code_fk",
           "tableFrom": "settings_versions",
           "tableTo": "countries",
-          "columnsFrom": ["country_code"],
-          "columnsTo": ["code"],
+          "columnsFrom": [
+            "country_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -3955,8 +4131,12 @@
           "name": "states_country_code_countries_code_fk",
           "tableFrom": "states",
           "tableTo": "countries",
-          "columnsFrom": ["country_code"],
-          "columnsTo": ["code"],
+          "columnsFrom": [
+            "country_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -4053,8 +4233,12 @@
           "name": "uploads_owner_id_users_id_fk",
           "tableFrom": "uploads",
           "tableTo": "users",
-          "columnsFrom": ["owner_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -4062,8 +4246,12 @@
           "name": "uploads_errand_id_errands_id_fk",
           "tableFrom": "uploads",
           "tableTo": "errands",
-          "columnsFrom": ["errand_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "errand_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -4171,8 +4359,12 @@
           "name": "users_country_code_countries_code_fk",
           "tableFrom": "users",
           "tableTo": "countries",
-          "columnsFrom": ["country_code"],
-          "columnsTo": ["code"],
+          "columnsFrom": [
+            "country_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -4182,7 +4374,9 @@
         "users_phone_unique": {
           "name": "users_phone_unique",
           "nullsNotDistinct": false,
-          "columns": ["phone"]
+          "columns": [
+            "phone"
+          ]
         }
       },
       "policies": {},
