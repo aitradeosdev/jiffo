@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { oneOf, safeLinkPath, wholeNumber } from './links';
+import { linkTarget, oneOf, safeLinkPath, wholeNumber } from './links';
 
 describe('links into the app (docs/security-plan.md, MB5)', () => {
   it('opens only the screens other apps and pages may send people to, without their parameters', () => {
@@ -50,5 +50,14 @@ describe('errand ids from the address', () => {
     expect(errandIdParam('../wallet')).toBeNull();
     expect(errandIdParam(['3f1c2b9e-6d4a-4c1e-9b7a-2a5d8e9f0c11'])).toBeNull();
     expect(errandIdParam(undefined)).toBeNull();
+  });
+});
+
+describe('a link arriving while the app is open', () => {
+  it('opens an allowed screen, and otherwise leaves the person where they are', () => {
+    expect(linkTarget('jiffo://identity-done', false)).toBe('/identity-done');
+    expect(linkTarget('jiffo-agent://withdraw?amount=1', false)).toBeNull();
+    // Opening the app with one, it starts at the start.
+    expect(linkTarget('jiffo-agent://withdraw?amount=1', true)).toBe('/');
   });
 });

@@ -48,8 +48,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       package: v.bundleId,
       adaptiveIcon: { foregroundImage: `./assets/${variant}/icon.png`, backgroundColor: v.background },
       predictiveBackGestureEnabled: false,
-      // Nothing of the app's goes into Android's backups, so no session or key is restored onto another phone
-      // (docs/security-plan.md, MB2).
+      // The app is left out of Android's cloud backups (docs/security-plan.md, MB2). A cable or Wi-Fi transfer
+      // to a new phone may still copy its files, but the tokens in them are sealed with keys that stay in the
+      // old phone's keystore, so they can't be read there.
       allowBackup: false,
     },
     web: { favicon: `./assets/${variant}/favicon.png`, output: 'single' },

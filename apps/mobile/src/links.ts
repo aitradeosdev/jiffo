@@ -25,6 +25,16 @@ export function safeLinkPath(link: string): string {
   }
 }
 
+/**
+ * Where a link from outside takes the person: an allowed screen; else the start when it opened the app, and
+ * nowhere (they stay where they were, mid-withdrawal say) when the app was already open.
+ */
+export function linkTarget(link: string, initial: boolean): string | null {
+  const path = safeLinkPath(link);
+  if (path !== '/') return path;
+  return initial || ['/', ''].includes(link.replace(/^(jiffo|jiffo-agent):\/\//, '/').replace(/\/+$/, '')) ? '/' : null;
+}
+
 /** A parameter read as one of the values it may have, else `fallback`. */
 export function oneOf<T extends string>(value: string | string[] | undefined, allowed: readonly T[], fallback: T): T {
   return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;

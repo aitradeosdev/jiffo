@@ -58,6 +58,16 @@ async function deviceKey() {
   return key;
 }
 
+/**
+ * Saves this install's id again, which keeps it for this phone only from now on (docs/security-plan.md,
+ * MB2): one saved by an earlier version would otherwise stay in backups, and a phone restored from one would
+ * count as the same phone, without the new-phone hold or selfie. Tokens are saved again at each refresh.
+ */
+async function keepDeviceKeyOnThisPhone() {
+  const existing = await secureStorage.get(DEVICE_KEY);
+  if (existing) await secureStorage.set(DEVICE_KEY, existing);
+}
+
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>('loading');
   const [user, setUser] = useState<User | null>(null);
@@ -96,6 +106,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Once per launch; a phone that can't save it now tries at the next one.
+    void keepDeviceKeyOnThisPhone().catch(() => undefined);
     (async () => {
       if (!(await tokenStore.get())) return signedOut.current();
       for (let attempt = 0; !stopped; attempt += 1) {

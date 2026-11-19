@@ -6,6 +6,7 @@ import { EndedErrand } from './ended';
 import { Matching } from './matching';
 import { CustomerRate } from './rate';
 import { CustomerTrip } from './trip';
+import { useNoScreenCapture } from '@/ui/no-screen-capture';
 import { useErrand, useHandoffPin } from './use-errand';
 
 /**
@@ -18,6 +19,8 @@ export function CustomerErrand({ id }: { id: string }) {
   const state = useErrand(id);
   const { errand, error, reload, can, act, busy, actionError, shortKobo } = state;
   const pin = useHandoffPin(errand);
+  // While the hand-off PIN is on screen, no screenshots or screen recording (docs/security-plan.md, A9).
+  useNoScreenCapture('handoff-pin', !!pin);
   // While matching, look again every half minute so the count of agents nearby stays current.
   const matching = errand?.status === 'requested';
   useEffect(() => {

@@ -72,6 +72,8 @@ export class AuthService {
   async verifyCode(phoneInput: string, code: string, app: AppName, device: DeviceInfo) {
     // The apps' web builds keep tokens in the browser's storage, not the phone's keychain (docs/security-plan.md,
     // MB2): they are for development only. Refused before the code is checked, so it still works in the app.
+    // The platform is the app's own word, so this stops Jiffo's web builds, not a script that says it is a
+    // phone: app attestation (MB3) is what proves a sign-in comes from the store app.
     if (device.platform === 'web' && this.config.NODE_ENV === 'production') {
       throw forbidden('web_sign_in_off', 'Sign in with the Jiffo app from the App Store or Google Play');
     }
