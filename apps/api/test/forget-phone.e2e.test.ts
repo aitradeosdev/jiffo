@@ -90,4 +90,26 @@ describe('signing out and forgetting the phone', () => {
       .where(and(eq(devices.userId, agent.userId), eq(devices.deviceKey, phone)));
     expect(again!.forgotten).toBeNull();
   });
+
+  it("puts a forgotten phone back under the number's own code limits, like a stranger's", async () => {
+    const agent = await agentWithMoney(t);
+    const phone = await deviceKeyOf(agent);
+    await request(t.http).post('/v1/auth/logout').set(agent.headers).send({ forgetPhone: true }).expect(204);
+    // Asking for codes from it, a few minutes apart so the wait between codes passes.
+    const ask = async () => {
+      await t.db
+        .update(otpChallenges)
+        .set({ createdAt: sql`${otpChallenges.createdAt} - interval '2 minutes'` })
+        .where(eq(otpChallenges.phone, agent.phone));
+      return request(t.http)
+        .post('/v1/auth/otp/request')
+        .set('x-forwarded-for', randomIp())
+        .send({ phone: agent.phone, deviceKey: phone });
+    };
+    const answers = [];
+    for (let i = 0; i < 4; i++) answers.push((await ask()).status);
+    // The number's limit (3 in 15 minutes) applies, counting the agent's own sign-in code: the third is refused,
+    // where the phone's own limit alone would allow it. It is no longer the owner's known phone.
+    expect(answers.slice(0, 3)).toEqual([200, 200, 429]);
+  });
 });

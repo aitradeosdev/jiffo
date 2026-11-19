@@ -155,17 +155,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
    */
   const signOut = useCallback(
     async (options: { forgetPhone?: boolean } = {}) => {
+      // Whether the server forgot this phone: not when the session had already ended (a 401).
+      let serverForgot = false;
       try {
         await api.post('/v1/auth/logout', options.forgetPhone ? { forgetPhone: true } : undefined);
+        serverForgot = !!options.forgetPhone;
       } catch (error) {
         if (!(error instanceof ApiError && error.status === 401)) {
           throw new ApiError(0, 'sign_out_failed', "Can't sign out right now. Check your connection and try again.");
         }
       }
+      // Forgotten, the phone's key goes too, before anything is cleared. Even if the server couldn't mark the
+      // phone, a fresh key at the next sign-in then pauses withdrawals there (the server sees the key change).
+      // If neither happened, nothing would: say so, and stay signed in to try again.
+      if (options.forgetPhone) {
+        try {
+          await deviceKeyRemove();
+        } catch {
+          if (!serverForgot) {
+            throw new ApiError(
+              0,
+              'forget_failed',
+              "This phone couldn't be forgotten. Sign in again, then log out and forget it.",
+            );
+          }
+        }
+      }
       // A PIN kept behind the fingerprint is this person's alone: the next one on the phone doesn't get it.
       if (user) await forgetPin(user.id);
-      // Forgotten, the phone's key goes too, so a fresh one is made at the next sign-in.
-      if (options.forgetPhone) await deviceKeyRemove().catch(() => undefined);
       await tokenStore.set(null);
       signedOut.current();
     },

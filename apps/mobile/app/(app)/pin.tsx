@@ -67,8 +67,15 @@ export default function PinScreen() {
           Alert.alert('PIN saved', "Your fingerprint or face wasn't set up for it. Try again later.");
       }
       if (res.withdrawalsHeldUntil) {
-        const message =
-          'For your safety, withdrawals are paused for 48 hours after a PIN change. You can keep working as usual.';
+        // The length is a setting: say when they open again, not a fixed number of hours.
+        const until = new Date(res.withdrawalsHeldUntil).toLocaleString(undefined, {
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          hour: 'numeric',
+          minute: '2-digit',
+        });
+        const message = `For your safety, withdrawals are paused after a PIN change, until ${until}. You can keep working as usual.`;
         if (Platform.OS === 'web') window.alert(message);
         else Alert.alert('PIN changed', message);
       }
@@ -88,7 +95,8 @@ export default function PinScreen() {
         <Text variant="title">Sign in again to set a new PIN</Text>
         <Text tone="ink2">
           For your safety, a forgotten or locked PIN is set again only just after signing in on this phone. Sign out,
-          sign in with the code we text you, then set your new PIN straight away. Withdrawals pause for 48 hours after.
+          sign in with the code we text you, then set your new PIN straight away. Withdrawals pause for a while after,
+          for your safety.
         </Text>
       </Screen>
     );

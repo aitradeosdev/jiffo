@@ -35,6 +35,8 @@ export default function Account() {
   const name = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Your account';
 
   const leave = async (forgetPhone = false) => {
+    // One at a time: a plain log-out ending the session first would leave the phone unforgotten.
+    if (busy) return;
     setBusy(forgetPhone ? 'forget' : 'out');
     setError(null);
     try {
@@ -45,10 +47,11 @@ export default function Account() {
     }
   };
   // For a phone being handed on (docs/security-plan.md, A6): asks first, since signing in on it again pauses
-  // withdrawals for 48 hours.
+  // withdrawals for a while.
   const forgetPhone = () => {
+    if (busy) return;
     const message =
-      'Use this if someone else will use this phone. Your account forgets it: signing in on it again counts as a new phone, and withdrawals pause for 48 hours.';
+      'Use this if someone else will use this phone. Your account forgets it: signing in on it again counts as a new phone, and withdrawals pause for a while, for your safety.';
     if (Platform.OS === 'web') {
       if (window.confirm(message)) void leave(true);
       return;
@@ -59,6 +62,7 @@ export default function Account() {
     ]);
   };
   const leaveOthers = async () => {
+    if (busy) return;
     setBusy('others');
     setError(null);
     try {

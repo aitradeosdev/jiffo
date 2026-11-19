@@ -252,7 +252,6 @@ export class AuthService {
     throw unauthorized('invalid_refresh_token', 'Sign in again');
   }
 
-  /** Ends this session and stops push notifications to this phone. */
   /**
    * Signs this phone out. Forgetting it too, for a phone being handed on, drops its key from the account and
    * makes the next sign-in on it count as a new phone, with the withdrawal hold (docs/security-plan.md, A6).

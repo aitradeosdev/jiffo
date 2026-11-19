@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, gt, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, sql, isNull } from 'drizzle-orm';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
 import { devices, otpChallenges, users } from '../db/schema';
@@ -101,7 +101,8 @@ export class OtpService {
             .select({ id: devices.id })
             .from(devices)
             .innerJoin(users, eq(users.id, devices.userId))
-            .where(and(eq(users.phone, phone), eq(devices.deviceKey, deviceKey)))
+            // A phone its owner asked to forget is a stranger again (docs/security-plan.md, A6).
+            .where(and(eq(users.phone, phone), eq(devices.deviceKey, deviceKey), isNull(devices.forgottenAt)))
             .limit(1)
         ).length > 0;
       const byNumber = known ? 0 : over(await counted(otpChallenges.phone, phone));
