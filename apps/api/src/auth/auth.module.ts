@@ -3,14 +3,17 @@ import { RECURRING_JOBS, type RecurringJobs } from '../timers/recurring-jobs';
 import { AuthController } from './auth.controller';
 import { AuthGuard, SessionVerifier } from './auth.guard';
 import { AuthService } from './auth.service';
+import { DeviceSecurityController } from './device-security.controller';
+import { DeviceSecurityService } from './device-security.service';
+import { SignedGuard } from './signed.guard';
 import { OtpService } from './otp.service';
 import { TokensService } from './tokens.service';
 
 @Global()
 @Module({
-  controllers: [AuthController],
-  providers: [AuthService, OtpService, TokensService, SessionVerifier, AuthGuard],
-  exports: [TokensService, SessionVerifier, AuthGuard],
+  controllers: [AuthController, DeviceSecurityController],
+  providers: [AuthService, OtpService, TokensService, SessionVerifier, AuthGuard, DeviceSecurityService, SignedGuard],
+  exports: [TokensService, SessionVerifier, AuthGuard, DeviceSecurityService, SignedGuard],
 })
 export class AuthModule implements OnModuleInit {
   constructor(

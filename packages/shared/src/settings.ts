@@ -36,6 +36,7 @@ export const DEFAULT_SECURITY_SETTINGS = {
   approvalExpiryHours: 72,
   dailyIdReveals: 20,
   withdrawalHoldHours: 48,
+  appPinTries: 5,
 };
 
 /**
@@ -188,6 +189,8 @@ export const CountrySettingsSchema = z.object({
         .min(1)
         .max(24 * 7)
         .default(48),
+      /** Wrong app PINs in a row before it locks until reset by signing in again (A7). */
+      appPinTries: z.number().int().min(3).max(10).default(5),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
 });

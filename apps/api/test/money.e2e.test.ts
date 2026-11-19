@@ -17,6 +17,7 @@ import {
   type Person,
   type TestApp,
   clearReconciliationPauses,
+  signed,
 } from './helpers';
 
 /** Fee 250,000 kobo; service fee 10% = 25,000; Bronze commission 15% = 37,500. */
@@ -471,27 +472,23 @@ describe('money', () => {
     it('accepts only a payout account in the agent’s own name', async () => {
       t.payments.accounts.set('058:0123456789', 'BAKARE TUNDE ADEWALE');
       t.payments.accounts.set('058:0987654321', 'CHIOMA OKAFOR');
-      await request(t.http)
+      await signed(t, earner)
         .post('/v1/wallet/withdrawals')
-        .set(earner.headers)
         .send({ requestId: randomUUID(), amountKobo: 100_000, speed: 'instant' })
         .expect(409);
 
-      const wrong = await request(t.http)
+      const wrong = await signed(t, earner)
         .put('/v1/payout-account')
-        .set(earner.headers)
         .send({ bankCode: '058', accountNumber: '0987654321' })
         .expect(422);
       expect(wrong.body.error).toMatchObject({ code: 'account_name_mismatch', accountName: 'CHIOMA OKAFOR' });
-      const missing = await request(t.http)
+      const missing = await signed(t, earner)
         .put('/v1/payout-account')
-        .set(earner.headers)
         .send({ bankCode: '058', accountNumber: '1111111111' })
         .expect(422);
       expect(missing.body.error.code).toBe('account_not_found');
-      const ok = await request(t.http)
+      const ok = await signed(t, earner)
         .put('/v1/payout-account')
-        .set(earner.headers)
         .send({ bankCode: '058', accountNumber: '0123456789' })
         .expect(200);
       expect(ok.body).toEqual({
@@ -504,9 +501,8 @@ describe('money', () => {
       });
 
       const nameless = await signIn(t, 'agent');
-      const res = await request(t.http)
+      const res = await signed(t, nameless)
         .put('/v1/payout-account')
-        .set(nameless.headers)
         .send({ bankCode: '058', accountNumber: '0123456789' })
         .expect(409);
       expect(res.body.error.code).toBe('profile_incomplete');
@@ -514,9 +510,8 @@ describe('money', () => {
 
     it('sends an instant withdrawal for a fee, and settles it when the bank confirms', async () => {
       const start = (await balanceOf(t, earner)).availableKobo;
-      const res = await request(t.http)
+      const res = await signed(t, earner)
         .post('/v1/wallet/withdrawals')
-        .set(earner.headers)
         .send({ requestId: randomUUID(), amountKobo: 100_000, speed: 'instant' })
         .expect(201);
       expect(res.body).toMatchObject({ status: 'processing', amountKobo: 100_000, feeKobo: 10_000, sendKobo: 90_000 });
@@ -545,9 +540,8 @@ describe('money', () => {
         throw new Error('socket hang up'); // ...but the answer never arrives
       };
       try {
-        const res = await request(t.http)
+        const res = await signed(t, earner)
           .post('/v1/wallet/withdrawals')
-          .set(earner.headers)
           .send({ requestId: randomUUID(), amountKobo: 30_000, speed: 'instant' })
           .expect(201);
         expect(res.body.status).toBe('processing');
@@ -561,9 +555,8 @@ describe('money', () => {
     it('gives the money back when the provider refuses a transfer outright', async () => {
       const start = (await balanceOf(t, earner)).availableKobo;
       t.payments.rejectNextTransfer = 'Transfer recipient is no longer valid';
-      const res = await request(t.http)
+      const res = await signed(t, earner)
         .post('/v1/wallet/withdrawals')
-        .set(earner.headers)
         .send({ requestId: randomUUID(), amountKobo: 25_000, speed: 'instant' })
         .expect(201);
       // The agent gets a general reason; the provider's words stay with support.
@@ -581,9 +574,8 @@ describe('money', () => {
       };
       let id = '';
       try {
-        const res = await request(t.http)
+        const res = await signed(t, earner)
           .post('/v1/wallet/withdrawals')
-          .set(earner.headers)
           .send({ requestId: randomUUID(), amountKobo: 20_000, speed: 'instant' })
           .expect(201);
         expect(res.body.status).toBe('requested');
@@ -602,9 +594,8 @@ describe('money', () => {
 
     it('gives the full amount back, fee included, when the bank bounces it', async () => {
       const start = (await balanceOf(t, earner)).availableKobo;
-      const res = await request(t.http)
+      const res = await signed(t, earner)
         .post('/v1/wallet/withdrawals')
-        .set(earner.headers)
         .send({ requestId: randomUUID(), amountKobo: 50_000, speed: 'instant' })
         .expect(201);
       const [row] = await t.db.select().from(payouts).where(eq(payouts.id, res.body.id));
@@ -615,15 +606,13 @@ describe('money', () => {
     });
 
     it('queues one free withdrawal a day and sends it on the daily run', async () => {
-      const res = await request(t.http)
+      const res = await signed(t, earner)
         .post('/v1/wallet/withdrawals')
-        .set(earner.headers)
         .send({ requestId: randomUUID(), amountKobo: 40_000, speed: 'scheduled' })
         .expect(201);
       expect(res.body).toMatchObject({ status: 'requested', feeKobo: 0, sendKobo: 40_000 });
-      const again = await request(t.http)
+      const again = await signed(t, earner)
         .post('/v1/wallet/withdrawals')
-        .set(earner.headers)
         .send({ requestId: randomUUID(), amountKobo: 10_000, speed: 'scheduled' })
         .expect(409);
       expect(again.body.error.code).toBe('scheduled_withdrawal_exists');
@@ -635,21 +624,18 @@ describe('money', () => {
     });
 
     it('applies the daily limit and the balance', async () => {
-      const poor = await request(t.http)
+      const poor = await signed(t, earner)
         .post('/v1/wallet/withdrawals')
-        .set(earner.headers)
         .send({ requestId: randomUUID(), amountKobo: 4_900_000, speed: 'instant' })
         .expect(422);
       expect(poor.body.error.code).toBe('daily_limit_reached');
-      const tooMuch = await request(t.http)
+      const tooMuch = await signed(t, earner)
         .post('/v1/wallet/withdrawals')
-        .set(earner.headers)
         .send({ requestId: randomUUID(), amountKobo: 1_000_000, speed: 'instant' })
         .expect(409);
       expect(tooMuch.body.error.code).toBe('insufficient_funds');
-      const tiny = await request(t.http)
+      const tiny = await signed(t, earner)
         .post('/v1/wallet/withdrawals')
-        .set(earner.headers)
         .send({ requestId: randomUUID(), amountKobo: 5_000, speed: 'scheduled' })
         .expect(422);
       expect(tiny.body.error.code).toBe('withdrawal_too_small');
@@ -672,9 +658,8 @@ describe('money', () => {
       const payee = await signIn(t, 'agent', { firstName: 'Ngozi' });
       await request(t.http).patch('/v1/me').set(payee.headers).send({ lastName: 'Eze' }).expect(200);
       t.payments.accounts.set('044:2222222222', 'EZE NGOZI');
-      await request(t.http)
+      await signed(t, payee)
         .put('/v1/payout-account')
-        .set(payee.headers)
         .send({ bankCode: '044', accountNumber: '2222222222' })
         .expect(200);
       const errand = await createErrand(t, buyer);
@@ -686,9 +671,8 @@ describe('money', () => {
         .update(earningHolds)
         .set({ availableAt: new Date(Date.now() - 1000) })
         .where(eq(earningHolds.userId, payee.userId));
-      const out = await request(t.http)
+      const out = await signed(t, payee)
         .post('/v1/wallet/withdrawals')
-        .set(payee.headers)
         .send({ requestId: randomUUID(), amountKobo: 100_000, speed: 'instant' })
         .expect(201);
       const [row] = await t.db.select().from(payouts).where(eq(payouts.id, out.body.id));

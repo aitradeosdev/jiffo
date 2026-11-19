@@ -15,6 +15,7 @@ import {
   type Person,
   type TestApp,
   clearReconciliationPauses,
+  signed,
 } from './helpers';
 
 type Admin = Awaited<ReturnType<typeof adminAs>>;
@@ -206,14 +207,9 @@ describe('admin money', () => {
       note: 'Bonus for the launch week',
     }).then((r) => expect(r.status).toBe(200));
     t.payments.accounts.set('058:0123456789', 'TUNDE BAKARE');
-    await request(t.http)
-      .put('/v1/payout-account')
-      .set(agent.headers)
-      .send({ bankCode: '058', accountNumber: '0123456789' })
-      .expect(200);
-    const sent = await request(t.http)
+    await signed(t, agent).put('/v1/payout-account').send({ bankCode: '058', accountNumber: '0123456789' }).expect(200);
+    const sent = await signed(t, agent)
       .post('/v1/wallet/withdrawals')
-      .set(agent.headers)
       .send({ requestId: randomUUID(), amountKobo: 100_000, speed: 'instant' })
       .expect(201);
     const payouts = await get('payouts?country=NG&filter=pending').expect(200);

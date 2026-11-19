@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from 'node:crypto';
+import { generateKeyPairSync, randomInt, randomUUID, sign, type KeyObject } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -27,6 +27,7 @@ import {
   adminPasskeys,
 } from '../src/db/schema';
 import { sha256 } from '../src/common/crypto';
+import { SIGNED_HEADERS, signedPayload } from '../src/auth/device-security.service';
 import { and, eq, sql } from 'drizzle-orm';
 import type { AppName } from '../src/db/schema';
 
@@ -78,12 +79,98 @@ export interface Person {
   accessToken: string;
   refreshToken: string;
   headers: { Authorization: string };
+  /** The private half of this phone's key, as the Secure Enclave or Keystore would hold it (A3). */
+  deviceKey?: KeyObject;
+  /** Their app PIN (A7). */
+  pin?: string;
+}
+
+/** The app PIN test agents choose. */
+export const TEST_PIN = '2580';
+
+/**
+ * Sets a phone up for money actions as the agent app does after signing in: makes a P-256 key and registers
+ * its public half, then sets the app PIN if there isn't one yet (docs/security-plan.md, A3, A7).
+ */
+export async function secureDevice(t: TestApp, who: Person): Promise<Person> {
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  await request(t.http)
+    .put('/v1/devices/current/key')
+    .set(who.headers)
+    .send({ publicKey: publicKey.export({ type: 'spki', format: 'der' }).toString('base64') })
+    .expect(204);
+  const secured: Person = { ...who, deviceKey: privateKey, pin: TEST_PIN };
+  const status = (await request(t.http).get('/v1/me/security').set(who.headers).expect(200)).body;
+  if (!status.hasPin) await signed(t, secured).put('/v1/me/pin').send({ pin: TEST_PIN }).expect(200);
+  return secured;
+}
+
+/**
+ * A money request as the agent app sends it: a single-use code from the server, signed by the phone's key
+ * over the request, with the app PIN. `pin: null` leaves the PIN out; `key` signs with another key.
+ */
+export function signed(t: TestApp, who: Person, options: { pin?: string | null; key?: KeyObject } = {}) {
+  const call = (method: 'post' | 'put', path: string) => ({
+    send: (body: object) =>
+      new SignedCall(async () => {
+        const { nonce } = (await request(t.http).post('/v1/devices/current/challenge').set(who.headers).expect(200))
+          .body;
+        const raw = JSON.stringify(body);
+        const key = options.key ?? who.deviceKey;
+        if (!key) throw new Error('This phone has no key: secureDevice() it first');
+        const signature = sign('sha256', Buffer.from(signedPayload(nonce, method, path, raw)), {
+          key,
+          dsaEncoding: 'der',
+        }).toString('base64');
+        const pin = options.pin === undefined ? who.pin : options.pin;
+        const agent = request(t.http);
+        return (method === 'post' ? agent.post(path) : agent.put(path))
+          .set(who.headers)
+          .set(SIGNED_HEADERS.nonce, nonce)
+          .set(SIGNED_HEADERS.signature, signature)
+          .set(pin ? { [SIGNED_HEADERS.pin]: pin } : {})
+          .set('content-type', 'application/json')
+          .send(raw);
+      }),
+  });
+  return { post: (path: string) => call('post', path), put: (path: string) => call('put', path) };
+}
+
+/** A signed request's answer, awaitable, with supertest's .expect(status) and .expect(/body/) checks. */
+export class SignedCall implements PromiseLike<request.Response> {
+  private result?: Promise<request.Response>;
+  constructor(private readonly run: () => Promise<request.Response>) {}
+  private go() {
+    return (this.result ??= this.run());
+  }
+  expect(check: number | RegExp): SignedCall {
+    return new SignedCall(async () => {
+      const res = await this.go();
+      const ok = typeof check === 'number' ? res.status === check : check.test(JSON.stringify(res.body));
+      if (!ok) throw new Error(`expected ${String(check)}, got ${res.status} ${JSON.stringify(res.body)}`);
+      return res;
+    });
+  }
+  then<A = request.Response, B = never>(
+    onfulfilled?: ((value: request.Response) => A | PromiseLike<A>) | null,
+    onrejected?: ((reason: unknown) => B | PromiseLike<B>) | null,
+  ): PromiseLike<A | B> {
+    return this.go().then(onfulfilled, onrejected);
+  }
 }
 
 export async function signIn(
   t: TestApp,
   app: AppName,
-  options: { phone?: string; firstName?: string | null; ip?: string; unapproved?: boolean; unverified?: boolean } = {},
+  options: {
+    phone?: string;
+    firstName?: string | null;
+    ip?: string;
+    unapproved?: boolean;
+    unverified?: boolean;
+    /** Leaves an agent's phone without its key and PIN, for tests of setting them up. */
+    unsecured?: boolean;
+  } = {},
 ): Promise<Person> {
   const phone = options.phone ?? randomPhone();
   const ip = options.ip ?? randomIp();
@@ -123,6 +210,8 @@ export async function signIn(
   }
   const firstName = options.firstName === undefined ? (app === 'customer' ? 'Ada' : 'Tunde') : options.firstName;
   if (firstName) await request(t.http).patch('/v1/me').set(person.headers).send({ firstName }).expect(200);
+  // Test agents' phones are set up for money actions, as the agent app does at sign-in (A3, A7).
+  if (app === 'agent' && !options.unsecured) return secureDevice(t, person);
   return person;
 }
 
@@ -341,11 +430,7 @@ export async function completeApplication(t: TestApp, agent: Person, nin = uniqu
   }).expect(200);
   const accountNumber = `0${uniqueDigits(9)}`;
   t.payments.accounts.set(`058:${accountNumber}`, 'TUNDE BAKARE');
-  await request(t.http)
-    .put('/v1/payout-account')
-    .set(agent.headers)
-    .send({ bankCode: '058', accountNumber })
-    .expect(200);
+  await signed(t, agent).put('/v1/payout-account').send({ bankCode: '058', accountNumber }).expect(200);
   await request(t.http).patch('/v1/agent/profile').set(agent.headers).send({ takesPurchases: true }).expect(200);
   await call('post', '/terms', { accepted: true }).expect(200);
   return nin;
@@ -367,11 +452,7 @@ export async function agentWithMoney(t: TestApp, amountKobo = 1_000_000) {
   await request(t.http).patch('/v1/me').set(agent.headers).send({ lastName: 'Bakare' }).expect(200);
   const accountNumber = `0${uniqueDigits(9)}`;
   t.payments.accounts.set(`058:${accountNumber}`, 'TUNDE BAKARE');
-  await request(t.http)
-    .put('/v1/payout-account')
-    .set(agent.headers)
-    .send({ bankCode: '058', accountNumber })
-    .expect(200);
+  await signed(t, agent).put('/v1/payout-account').send({ bankCode: '058', accountNumber }).expect(200);
   const done = await approved(t, 'finance', (headers) =>
     request(t.http).post('/v1/admin/money/adjustments').set(headers).send({
       personId: agent.userId,

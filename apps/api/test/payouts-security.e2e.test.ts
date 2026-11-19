@@ -17,6 +17,7 @@ import {
   type Person,
   type TestApp,
   approved,
+  signed,
 } from './helpers';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -47,9 +48,8 @@ describe('withdrawals under abuse', () => {
   });
 
   const withdraw = (who: Person, body: Record<string, unknown>) =>
-    request(t.http)
+    signed(t, who)
       .post('/v1/wallet/withdrawals')
-      .set(who.headers)
       .send({ requestId: randomUUID(), ...body });
   const payoutOf = async (id: string) => (await t.db.select().from(payouts).where(eq(payouts.id, id)))[0]!;
   const recipientOf = async (payout: { payoutAccountId: string }) =>
@@ -83,9 +83,8 @@ describe('withdrawals under abuse', () => {
   describe('repeats', () => {
     it('needs a request key on every withdrawal', async () => {
       const agent = await agentWithMoney(t);
-      const res = await request(t.http)
+      const res = await signed(t, agent)
         .post('/v1/wallet/withdrawals')
-        .set(agent.headers)
         .send({ amountKobo: 20_000, speed: 'scheduled' })
         .expect(400);
       expect(res.body.error.code).toBe('invalid_request');

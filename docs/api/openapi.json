@@ -4409,6 +4409,71 @@
         ]
       }
     },
+    "/v1/devices/current/challenge": {
+      "post": {
+        "operationId": "DeviceSecurityController.challenge",
+        "tags": [
+          "DeviceSecurity"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default"
+      }
+    },
+    "/v1/devices/current/key": {
+      "put": {
+        "operationId": "DeviceSecurityController.registerKey",
+        "tags": [
+          "DeviceSecurity"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "publicKey": {
+                    "type": "string",
+                    "minLength": 60,
+                    "maxLength": 400
+                  }
+                },
+                "required": [
+                  "publicKey"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default"
+      }
+    },
     "/v1/devices/current/push-token": {
       "put": {
         "operationId": "PushController.setToken",
@@ -5504,6 +5569,75 @@
         ]
       }
     },
+    "/v1/me/pin": {
+      "put": {
+        "operationId": "DeviceSecurityController.setPin",
+        "tags": [
+          "DeviceSecurity"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pin": {
+                    "type": "string"
+                  },
+                  "currentPin": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pin"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default",
+        "x-guards": [
+          "SignedGuard"
+        ]
+      }
+    },
+    "/v1/me/security": {
+      "get": {
+        "operationId": "DeviceSecurityController.status",
+        "tags": [
+          "DeviceSecurity"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default"
+      }
+    },
     "/v1/me/stats": {
       "get": {
         "operationId": "UsersController.stats",
@@ -5597,6 +5731,9 @@
         "x-rate-limit": "default",
         "x-apps": [
           "agent"
+        ],
+        "x-guards": [
+          "SignedGuard"
         ]
       }
     },
@@ -6090,6 +6227,9 @@
         "x-rate-limit": "default",
         "x-apps": [
           "agent"
+        ],
+        "x-guards": [
+          "SignedGuard"
         ]
       }
     },

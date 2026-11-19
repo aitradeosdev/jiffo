@@ -106,6 +106,15 @@ How Jiffo protects people, money and data, area by area. What is required is in 
 - **PIN storage:** each PIN is encrypted under its errand's own key and checked by a keyed hash. It is cleared when the errand ends.
 - **Limits:** item money is capped for new agents and new customers. Counter-offers are limited per minute, and admin can cap how many errands one agent holds at once.
 
+## Money actions on the phone
+
+- **The phone's own key:** after signing in, the agent app makes a P-256 key in the phone's secure hardware (the Secure Enclave or Android Keystore), which can't be copied off it, and registers the public half: once per phone, and only in the first 10 minutes after a fresh sign-in, so a stolen session can't add a key of its own.
+- **Signed requests:** a withdrawal and a payout account change are each signed with that key over a single-use code from the server (`POST /v1/devices/current/challenge`, good for 2 minutes), the method, the path and a hash of the body. A code works once and only for the phone it was given to; a changed body or another key is refused.
+- **The app PIN:** 4 digits, not a run or one digit repeated, kept as a keyed hash. Money actions carry it and the server checks it after the signature, so guessing it needs the phone. Fingerprint or face can fill it in from the phone's locked storage.
+- **Wrong PINs:** counted; at the limit in Settings, Security (default 5) it locks, even for the right PIN, until reset by signing in again on the phone. Changing it needs the current PIN.
+- **A new PIN pauses withdrawals** for 48 hours, like a new account or phone: whoever took the number over would reset it that way.
+- So an SMS code alone never moves money (A5): it gets a session, but not the key on the owner's phone or their PIN.
+
 ## Withdrawals
 
 Agents only, to an account in their own name. One free scheduled withdrawal a day, or instant for a fee. A bounced transfer puts the full amount back.
