@@ -23,6 +23,11 @@ export function devicePublicKey(): Promise<string> {
   return native.publicKey(ALIAS);
 }
 
+/** Deletes the key from this phone: after signing out and forgetting the phone, a fresh one is made next time. */
+export async function deviceKeyRemove(): Promise<void> {
+  if (native) await native.remove(ALIAS);
+}
+
 /** An ECDSA P-256 SHA-256 signature over the text, as base64 DER. */
 export function deviceSign(text: string): Promise<string> {
   if (!native) throw new Error("This build can't sign money actions");

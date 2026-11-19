@@ -1,0 +1,1 @@
+ALTER TABLE "devices" ADD COLUMN "forgotten_at" timestamp with time zone;

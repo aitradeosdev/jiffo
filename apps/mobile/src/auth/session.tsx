@@ -6,6 +6,7 @@ import { API_URL, VARIANT } from '../config';
 import { secureStorage } from '../storage';
 import { ApiError, createApiClient, toTokens, type ApiClient, type Tokens } from '../api/client';
 import { forgetPin, setUpPhone } from './device-security';
+import { deviceKeyRemove } from '../../modules/device-key';
 import type { CodeSent, SignedIn, User } from '../api/types';
 
 const TOKENS_KEY = `jiffo.${VARIANT}.tokens`;
@@ -20,7 +21,8 @@ interface SessionValue {
   requestCode(phone: string): Promise<CodeSent>;
   verifyCode(phone: string, code: string): Promise<User>;
   updateProfile(changes: Partial<Pick<User, 'firstName' | 'lastName' | 'email'>>): Promise<User>;
-  signOut(): Promise<void>;
+  /** `forgetPhone`: for a phone being handed on; signing in on it again then pauses withdrawals (A6). */
+  signOut(options?: { forgetPhone?: boolean }): Promise<void>;
 }
 
 const SessionContext = createContext<SessionValue | null>(null);
@@ -151,19 +153,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
    * Ends the session on the server first, so this phone stops getting pushes. Offline or with the server
    * down, it throws and the person stays signed in; a session the server already ended just clears.
    */
-  const signOut = useCallback(async () => {
-    try {
-      await api.post('/v1/auth/logout');
-    } catch (error) {
-      if (!(error instanceof ApiError && error.status === 401)) {
-        throw new ApiError(0, 'sign_out_failed', "Can't sign out right now. Check your connection and try again.");
+  const signOut = useCallback(
+    async (options: { forgetPhone?: boolean } = {}) => {
+      try {
+        await api.post('/v1/auth/logout', options.forgetPhone ? { forgetPhone: true } : undefined);
+      } catch (error) {
+        if (!(error instanceof ApiError && error.status === 401)) {
+          throw new ApiError(0, 'sign_out_failed', "Can't sign out right now. Check your connection and try again.");
+        }
       }
-    }
-    // A PIN kept behind the fingerprint is this person's alone: the next one on the phone doesn't get it.
-    if (user) await forgetPin(user.id);
-    await tokenStore.set(null);
-    signedOut.current();
-  }, [api, user]);
+      // A PIN kept behind the fingerprint is this person's alone: the next one on the phone doesn't get it.
+      if (user) await forgetPin(user.id);
+      // Forgotten, the phone's key goes too, so a fresh one is made at the next sign-in.
+      if (options.forgetPhone) await deviceKeyRemove().catch(() => undefined);
+      await tokenStore.set(null);
+      signedOut.current();
+    },
+    [api, user],
+  );
 
   const value = useMemo(
     () => ({ status, user, api, requestCode, verifyCode, updateProfile, signOut }),

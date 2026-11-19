@@ -27,6 +27,8 @@ const VerifyCodeBody = z.object({
   }),
 });
 const RefreshBody = z.object({ refreshToken: z.string().min(20).max(200) });
+/** `forgetPhone`: for a phone being handed on (A6). */
+const LogoutBody = z.object({ forgetPhone: z.boolean().optional() }).default({});
 
 @Controller('auth')
 @RateLimit('auth')
@@ -74,8 +76,8 @@ export class AuthController {
   @Post('logout')
   @HttpCode(204)
   @UseGuards(AuthGuard)
-  async logout(@CurrentAuth() auth: AuthContext) {
-    await this.auth.logout(auth);
+  async logout(@CurrentAuth() auth: AuthContext, @Body(new ZodBody(LogoutBody)) body: z.infer<typeof LogoutBody>) {
+    await this.auth.logout(auth, body);
     this.realtime.disconnectSessions([auth.sessionId]);
   }
 

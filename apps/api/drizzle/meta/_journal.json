@@ -204,6 +204,13 @@
       "when": 1795108558363,
       "tag": "0028_device_keys_and_app_pin",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1795110345640,
+      "tag": "0029_forget_phone",
+      "breakpoints": true
     }
   ]
 }

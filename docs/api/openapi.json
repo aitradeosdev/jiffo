@@ -4027,6 +4027,23 @@
             "app": []
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "forgetPhone": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false,
+                "default": {}
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Done"
