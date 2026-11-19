@@ -129,7 +129,7 @@ export async function secureDevice(t: TestApp, who: Person): Promise<Person> {
 export function signed(
   t: TestApp,
   who: Person,
-  options: { pin?: string | null; key?: KeyObject; attest?: string } = {},
+  options: { pin?: string | null; key?: KeyObject; attest?: string; attestHeaders?: Record<string, string> } = {},
 ) {
   const call = (method: 'post' | 'put', path: string) => ({
     send: (body: object) =>
@@ -144,7 +144,8 @@ export function signed(
           dsaEncoding: 'der',
         }).toString('base64');
         const pin = options.pin === undefined ? who.pin : options.pin;
-        const attested = options.attest ? await attestation(t, who.installKey!, options.attest) : {};
+        const attested =
+          options.attestHeaders ?? (options.attest ? await attestation(t, who.installKey!, options.attest) : {});
         const agent = request(t.http);
         return (method === 'post' ? agent.post(path) : agent.put(path))
           .set(who.headers)

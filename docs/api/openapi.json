@@ -4058,7 +4058,11 @@
                 "type": "object",
                 "properties": {
                   "for": {
-                    "const": "payout_change"
+                    "type": "string",
+                    "enum": [
+                      "payout_change",
+                      "device_check"
+                    ]
                   }
                 },
                 "additionalProperties": false

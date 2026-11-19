@@ -6,9 +6,12 @@ import { APP_CONFIG, type AppConfig } from '../src/config/app-config';
 import { CountriesService } from '../src/countries/countries.service';
 import { agentSelfieChecks, deviceAttestations, otpChallenges } from '../src/db/schema';
 import {
+  act,
   agentWithMoney,
   attestation,
+  createErrand,
   createTestApp,
+  fund,
   passSelfie,
   randomPhone,
   signed,
@@ -67,28 +70,41 @@ describe('app attestation', () => {
     expect(res.body.error.code).toBe(code);
   };
 
-  it('records each check, and refuses nothing, until Settings say to enforce it', async () => {
+  it('records each check, and refuses or waits for nothing, until Settings say to enforce it', async () => {
     const agent = await signIn(t, 'agent');
-    expect(await recorded(agent.installKey!)).toEqual([
-      expect.objectContaining({ purpose: 'sign_in', verdict: 'missing', app: 'agent', platform: 'android' }),
-    ]);
+    // Checked alongside, so a slow provider never holds up a mode that refuses nothing.
+    await vi.waitFor(async () =>
+      expect(await recorded(agent.installKey!)).toEqual([
+        expect.objectContaining({
+          purpose: 'sign_in',
+          verdict: 'missing',
+          app: 'agent',
+          platform: 'android',
+        }),
+      ]),
+    );
   });
 
-  it('refuses sign-in without a check, a failed one, or one for another install, before using the code', async () => {
+  it('refuses sign-in without a check, a failed one, or one for another install, after the code', async () => {
     enforce();
-    const phone = randomPhone();
-    const code = await codeFor(phone);
+    const tryWith = async (installKey: string, headers: Record<string, string> = {}, code?: string) => {
+      const phone = randomPhone();
+      return verify(phone, code ?? (await codeFor(phone)), installKey, headers);
+    };
     const installKey = randomUUID();
-    refused(await verify(phone, code, installKey), 'attestation_failed');
-    refused(await verify(phone, code, installKey, await attestation(t, installKey, 'failed')), 'attestation_failed');
+    refused(await tryWith(installKey), 'attestation_failed');
+    refused(await tryWith(installKey, await attestation(t, installKey, 'failed')), 'attestation_failed');
     // A code given to another install.
-    refused(await verify(phone, code, installKey, await attestation(t, randomUUID())), 'attestation_failed');
-    // The sign-in code is still good: none of these used it.
+    refused(await tryWith(installKey, await attestation(t, randomUUID())), 'attestation_failed');
+    // Nothing reaches the provider without a right sign-in code first: no check, nothing recorded.
+    const phone = randomPhone();
+    await codeFor(phone);
+    const wrongCode = await verify(phone, '000000', installKey, await attestation(t, installKey));
+    expect(wrongCode.status).toBe(400);
     const headers = await attestation(t, installKey);
-    await verify(phone, code, installKey, headers).expect(200);
+    await tryWith(installKey, headers).then((r) => expect(r.status).toBe(200));
     // An attestation's code works once.
-    const again = randomPhone();
-    refused(await verify(again, await codeFor(again), installKey, headers), 'attestation_failed');
+    refused(await tryWith(installKey, headers), 'attestation_failed');
     const rows = await recorded(installKey);
     expect(rows.map((r) => r.verdict).sort()).toEqual(['failed', 'failed', 'failed', 'missing', 'trusted']);
   });
@@ -106,6 +122,13 @@ describe('app attestation', () => {
         ).rows[0] as { n: number }
       ).n;
     const before = await usedCodes();
+    // Asked for the PIN first, the app sends the same check again: it isn't used up by that.
+    const headers = await attestation(t, agent.installKey!);
+    refused(
+      await signed(t, agent, { pin: null, attestHeaders: headers }).post('/v1/wallet/withdrawals').send(withdrawal()),
+      'pin_missing',
+    );
+    expect(await usedCodes()).toBe(before);
     refused(await signed(t, agent).post('/v1/wallet/withdrawals').send(withdrawal()), 'attestation_failed');
     refused(
       await signed(t, agent, { attest: 'failed' }).post('/v1/wallet/withdrawals').send(withdrawal()),
@@ -124,8 +147,11 @@ describe('app attestation', () => {
     expect(doubtful.body.error.reason).toBe('device_check');
     await passSelfie(t, agent);
     await signed(t, agent, { attest: 'doubtful' }).post('/v1/wallet/withdrawals').send(withdrawal()).expect(201);
-    // A trusted phone goes straight through the checks, to the day's one free withdrawal, which is taken.
-    const trusted = await signed(t, agent, { attest: 'trusted' }).post('/v1/wallet/withdrawals').send(withdrawal());
+    // The check asked for the PIN before is still good, and goes straight through to the day's one free
+    // withdrawal, which is taken.
+    const trusted = await signed(t, agent, { attestHeaders: headers })
+      .post('/v1/wallet/withdrawals')
+      .send(withdrawal());
     expect(trusted.body.error.code).toBe('scheduled_withdrawal_exists');
   });
 
@@ -153,6 +179,34 @@ describe('app attestation', () => {
     expect(doubtful.body.error.reason).toBe('device_check');
     await passSelfie(t, agent);
     await online(await attestation(t, agent.installKey!, 'doubtful')).expect(200);
+  });
+
+  it("asks for the day's selfie before using up the check, and keeps an agent on an errand sharing", async () => {
+    const agent = await signIn(t, 'agent', { noSelfie: true });
+    const busy = await signIn(t, 'agent');
+    const customer = await signIn(t, 'customer');
+    await fund(t, customer);
+    const errand = await createErrand(t, customer);
+    await act(t, busy, errand.id, 'accept');
+    enforce();
+    const online = (headers: Record<string, string> = {}) =>
+      request(t.http)
+        .put('/v1/agent/presence')
+        .set(agent.headers)
+        .set(headers)
+        .send({ online: true, lat: 6.448, lng: 3.47 });
+    const headers = await attestation(t, agent.installKey!);
+    refused(await online(headers), 'selfie_needed');
+    await passSelfie(t, agent);
+    await online(headers).expect(200);
+
+    // On an errand, a failed check keeps them offline but sharing where they are, for that customer.
+    const res = await request(t.http)
+      .put('/v1/agent/presence')
+      .set(busy.headers)
+      .send({ online: true, lat: 6.448, lng: 3.47 })
+      .expect(200);
+    expect(res.body).toMatchObject({ online: false, sharingLocation: true });
   });
 
   it("marks a doubtful phone at an agent's sign-in, so money needs a selfie on it", async () => {

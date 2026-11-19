@@ -65,9 +65,11 @@ Google Play Integrity on Android and Apple App Attest on iOS show that a request
   - **Android:** Google decodes the token and says whether the app is ours as Play installed it, signed with our key, on a genuine phone.
   - **iOS:** the phone makes a key in its Secure Enclave and Apple attests it once (`POST /v1/attestation/apple-key`, checked against Apple's root certificate, our App ID and the code). Each request after that is signed by that key, with a counter, so nothing is used twice.
 - **Where:** sign-in, withdrawals, payout account changes, and going online (not the position updates while online).
+  - **Sign-in:** checked once the sign-in code is right, so nobody can make Jiffo ask Google or Apple without one. A refused check uses that code up.
+  - **Money actions and going online:** checked after everything the app answers by sending the same request again, which is the PIN, a new phone's selfie, a payout change's selfie and the day's selfie. Those answers don't use the check up. Each attempt after that carries a fresh check.
 - **Settings, Security, App checks:**
-  - **Record only** (the default) keeps every result, with the reasons, and refuses nothing.
-  - **Enforce** refuses a failed, missing or unavailable check: not our app, a changed one, a code for another request or install, or a check not set up for that platform. A doubtful phone isn't refused: rooted, an emulator, a development build, or Google not answering. Instead the agent takes a selfie first, at most 10 minutes before the money action or going online, and a doubtful sign-in to the agent app marks the phone as needing one.
+  - **Record only** (the default) keeps every result, with the reasons, and refuses nothing. It is checked alongside the request, so a slow provider never holds the request up.
+  - **Enforce** refuses a failed, missing or unavailable check: not our app, a changed one, a code for another request or install, or a check not set up for that platform. A doubtful phone isn't refused: rooted, an emulator, a development build, or Google not answering. An agent on an errand who is refused the check while going online stays offline but keeps sharing their position for that customer. For a doubtful phone, the agent takes a selfie first, at most 10 minutes before the money action or going online, and a doubtful sign-in to the agent app marks the phone as needing one.
 - **What is kept:** each verdict and its reasons (`device_attestations`), for staff and the risk signals of MB4. No token is kept.
 - **Development:** builds and tests use a stand-in (`fake:<verdict>`), which production never accepts.
 

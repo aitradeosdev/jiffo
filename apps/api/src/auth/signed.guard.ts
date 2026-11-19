@@ -55,33 +55,24 @@ export class SignedGuard implements CanActivate {
       selfie: null,
       attest: null,
     };
-    // Before the code is used, so the app can take the selfie and send the same one again.
+    const signedRequest = {
+      method: req.method,
+      path: req.originalUrl,
+      body: req.rawBody,
+      nonce: req.header(SIGNED_HEADERS.nonce),
+      signature: req.header(SIGNED_HEADERS.signature),
+    };
+    const pinValue = pin ? req.header(SIGNED_HEADERS.pin) : false;
+    // Everything the app answers by sending the same request again comes before anything single-use is used
+    // up (the phone's code, the app check's): a payout change's selfie, this phone's selfie, the PIN.
     if (selfie === 'payout_change' && auth.app === 'agent') await this.selfie.assertFreshForPayoutChange(auth);
+    await this.security.precheck(auth, signedRequest, pinValue);
     if (attest) {
-      const device = await this.security.deviceOf(auth);
-      const verdict = await this.attestation.enforce({
-        purpose: attest,
-        deviceKey: device.deviceKey,
-        platform: device.platform,
-        app: auth.app,
-        userId: auth.userId,
-        countryCode: auth.countryCode,
-        ...evidenceOf(req),
-      });
+      const verdict = await this.attestation.enforceSession(auth, attest, evidenceOf(req));
       // A phone the app check doubts: a selfie first, rather than refusing everyone on such a phone.
       if (verdict === 'doubtful' && auth.app === 'agent') await this.selfie.assertFreshForDevice(auth);
     }
-    await this.security.verify(
-      auth,
-      {
-        method: req.method,
-        path: req.originalUrl,
-        body: req.rawBody,
-        nonce: req.header(SIGNED_HEADERS.nonce),
-        signature: req.header(SIGNED_HEADERS.signature),
-      },
-      pin ? req.header(SIGNED_HEADERS.pin) : false,
-    );
+    await this.security.verify(auth, signedRequest, pinValue);
     return true;
   }
 }

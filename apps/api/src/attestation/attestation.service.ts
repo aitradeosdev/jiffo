@@ -6,7 +6,8 @@ import { badRequest, forbidden } from '../common/errors';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { CountriesService } from '../countries/countries.service';
 import { DB, type Db } from '../db/database.module';
-import { appAttestKeys, attestationChallenges, deviceAttestations, type AppName } from '../db/schema';
+import { appAttestKeys, attestationChallenges, deviceAttestations, devices, type AppName } from '../db/schema';
+import type { AuthContext } from '../auth/auth.types';
 import { AppAttestError, verifyAssertion, verifyKeyAttestation } from './app-attest';
 import {
   attestedHash,
@@ -34,6 +35,15 @@ export interface AttestContext {
 }
 
 const sha256hex = (text: string) => createHash('sha256').update(text).digest('hex');
+
+type AttestMode = 'off' | 'record' | 'enforce';
+
+const refusal = (verdict: Verdict) =>
+  forbidden(
+    'attestation_failed',
+    "This needs the Jiffo app from the App Store or Google Play, on a phone that hasn't been changed",
+    { verdict },
+  );
 
 /**
  * App attestation (docs/security-plan.md, MB3): Google Play Integrity on Android and Apple App Attest on iOS
@@ -74,7 +84,7 @@ export class AttestationService {
     return this.config.NODE_ENV === 'production';
   }
 
-  async mode(countryCode: string) {
+  async mode(countryCode: string): Promise<AttestMode> {
     const saved = await this.countries.currentSettingsIfAny(countryCode);
     return saved?.settings.security?.attestation ?? DEFAULT_SECURITY_SETTINGS.attestation;
   }
@@ -157,21 +167,42 @@ export class AttestationService {
   }
 
   /**
-   * Checks a request as Settings, Security says. Off: nothing. Record: kept, never refused. Enforce: a
-   * failed, missing or unavailable one is refused, and a doubtful one is returned as such, for the caller to
-   * ask for more (a selfie). Otherwise the answer is trusted.
+   * Checks a request as Settings, Security says. Off: nothing. Record: checked alongside and kept, never
+   * waited for or refused. Enforce: a failed, missing or unavailable one is refused, and a doubtful one is
+   * returned as such, for the caller to ask for more (a selfie). Otherwise the answer is trusted.
    */
-  async enforce(ctx: AttestContext): Promise<'trusted' | 'doubtful'> {
-    const mode = await this.mode(ctx.countryCode);
+  async enforce(ctx: AttestContext, known?: AttestMode): Promise<'trusted' | 'doubtful'> {
+    const mode = known ?? (await this.mode(ctx.countryCode));
     if (mode === 'off') return 'trusted';
+    if (mode === 'record') {
+      void this.check(ctx).catch((error: unknown) => this.logger.warn(`Check not recorded: ${String(error)}`));
+      return 'trusted';
+    }
     const { verdict, reasons } = await this.check(ctx);
-    if (mode === 'record') return 'trusted';
     if (verdict === 'trusted' || verdict === 'doubtful') return verdict;
     this.logger.warn(`Refused ${ctx.purpose} on ${ctx.platform}: ${verdict} ${reasons.join('; ')}`);
-    throw forbidden(
-      'attestation_failed',
-      "This needs the Jiffo app from the App Store or Google Play, on a phone that hasn't been changed",
-      { verdict },
+    throw refusal(verdict);
+  }
+
+  /** As enforce, for a signed-in session: its phone's install key and platform come from its device. */
+  async enforceSession(
+    auth: AuthContext,
+    purpose: AttestPurpose,
+    attest: Pick<AttestContext, 'evidence' | 'request'>,
+  ): Promise<'trusted' | 'doubtful'> {
+    const mode = await this.mode(auth.countryCode);
+    if (mode === 'off') return 'trusted';
+    const [device] = await this.db
+      .select({ deviceKey: devices.deviceKey, platform: devices.platform })
+      .from(devices)
+      .where(eq(devices.id, auth.deviceId));
+    if (!device) {
+      if (mode === 'enforce') throw refusal('missing');
+      return 'trusted';
+    }
+    return this.enforce(
+      { purpose, ...device, app: auth.app, userId: auth.userId, countryCode: auth.countryCode, ...attest },
+      mode,
     );
   }
 

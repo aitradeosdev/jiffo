@@ -89,18 +89,19 @@ export class AuthService {
       throw forbidden('web_sign_in_off', 'Sign in with the Jiffo app from the App Store or Google Play');
     }
     const { phone, country } = await this.resolvePhone(phoneInput);
-    // Our store app on a real phone (MB3), checked before the code so a refusal uses nothing up. A doubtful
-    // phone in the agent app needs a selfie before money moves on it.
+    await this.otp.verify(phone, country, code);
+    // Our store app on a real phone (MB3), checked once the code is right, so nobody can make Jiffo ask Google
+    // or Apple without one. A doubtful phone in the agent app needs a selfie before money moves on it.
+    const [known] = await this.db.select({ id: users.id }).from(users).where(eq(users.phone, phone));
     const attested = await this.attestation.enforce({
       purpose: 'sign_in',
       deviceKey: device.key,
       platform: device.platform,
       app,
-      userId: null,
+      userId: known?.id ?? null,
       countryCode: country,
       ...attest,
     });
-    await this.otp.verify(phone, country, code);
 
     return this.db.transaction(async (tx) => {
       const inserted = await tx

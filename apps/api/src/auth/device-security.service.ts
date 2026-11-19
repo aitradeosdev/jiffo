@@ -72,16 +72,6 @@ export class DeviceSecurityService {
     return { deviceKey: !!device?.key, hasPin: !!user?.hash, pinLocked: !!user?.locked };
   }
 
-  /** This session's phone: its install key and platform, for the app check (MB3). */
-  async deviceOf(auth: AuthContext) {
-    const [device] = await this.db
-      .select({ deviceKey: devices.deviceKey, platform: devices.platform })
-      .from(devices)
-      .where(eq(devices.id, auth.deviceId));
-    if (!device) throw forbidden('device_key_needed', 'Set up this phone for money actions first');
-    return device;
-  }
-
   /** The sign-in this session began with was in the last few minutes. */
   private async fresh(auth: AuthContext) {
     const [session] = await this.db
@@ -151,6 +141,26 @@ export class DeviceSecurityService {
   }
 
   /**
+   * What a signed request is refused for before anything single-use is used up: no key on this phone, a
+   * selfie this phone still needs, no signature, or no PIN. The app then sends the same request again, so
+   * these come before the code and the app check (MB3) are used.
+   */
+  async precheck(auth: AuthContext, request: { nonce?: string; signature?: string }, pin: string | undefined | false) {
+    const [device] = await this.db
+      .select({ key: devices.publicKey, selfieNeeded: devices.selfieNeeded })
+      .from(devices)
+      .where(eq(devices.id, auth.deviceId));
+    if (!device?.key) throw forbidden('device_key_needed', 'Set up this phone for money actions first');
+    // A new phone first shows it's the agent holding it (A4, X4).
+    if (device.selfieNeeded && auth.app === 'agent') {
+      throw forbidden('selfie_needed', 'Take a quick selfie to use money on this phone', { reason: 'new_device' });
+    }
+    if (!request.nonce || !request.signature) throw forbidden('signature_needed', 'Confirm this on your phone');
+    if (pin !== false && !pin) throw forbidden('pin_missing', 'Enter your app PIN');
+    return { key: device.key, nonce: request.nonce, signature: request.signature };
+  }
+
+  /**
    * Checks a signed request: this phone's key over a code the server gave it, used once, then the app PIN
    * when the action needs it. The signature comes first, so guessing the PIN needs the phone.
    */
@@ -159,25 +169,14 @@ export class DeviceSecurityService {
     request: { method: string; path: string; body: Buffer | undefined; nonce?: string; signature?: string },
     pin: string | undefined | false,
   ) {
-    const [device] = await this.db
-      .select({ key: devices.publicKey, selfieNeeded: devices.selfieNeeded })
-      .from(devices)
-      .where(eq(devices.id, auth.deviceId));
-    if (!device?.key) throw forbidden('device_key_needed', 'Set up this phone for money actions first');
-    // A new phone first shows it's the agent holding it (A4, X4). Before the code is used, so it can be sent again.
-    if (device.selfieNeeded && auth.app === 'agent') {
-      throw forbidden('selfie_needed', 'Take a quick selfie to use money on this phone', { reason: 'new_device' });
-    }
-    if (!request.nonce || !request.signature) throw forbidden('signature_needed', 'Confirm this on your phone');
-    // Asked for before the code is used up, so the app can ask for the PIN and send the same code.
-    if (pin !== false && !pin) throw forbidden('pin_missing', 'Enter your app PIN');
+    const { key, nonce, signature } = await this.precheck(auth, request, pin);
     // Used up whether or not the rest passes: a code is good for one try.
     const [used] = await this.db
       .update(deviceChallenges)
       .set({ usedAt: new Date() })
       .where(
         and(
-          eq(deviceChallenges.nonceHash, sha256(request.nonce)),
+          eq(deviceChallenges.nonceHash, sha256(nonce)),
           eq(deviceChallenges.deviceId, auth.deviceId),
           isNull(deviceChallenges.usedAt),
           gt(deviceChallenges.expiresAt, new Date()),
@@ -189,12 +188,12 @@ export class DeviceSecurityService {
     try {
       ok = verify(
         'sha256',
-        Buffer.from(signedPayload(request.nonce, request.method, request.path, request.body)),
+        Buffer.from(signedPayload(nonce, request.method, request.path, request.body)),
         {
-          key: createPublicKey({ key: Buffer.from(device.key, 'base64'), format: 'der', type: 'spki' }),
+          key: createPublicKey({ key: Buffer.from(key, 'base64'), format: 'der', type: 'spki' }),
           dsaEncoding: 'der',
         },
-        Buffer.from(request.signature, 'base64'),
+        Buffer.from(signature, 'base64'),
       );
     } catch {
       ok = false;

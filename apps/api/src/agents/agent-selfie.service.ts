@@ -177,7 +177,7 @@ export class AgentSelfieService implements SelfieOwner {
    * Starts a selfie check: what the provider's SDK in the app needs to take the selfie, against the face kept
    * from the agent's first check (that check's reference is the enrolled id).
    */
-  async start(auth: AuthContext, asked?: 'payout_change') {
+  async start(auth: AuthContext, asked?: 'payout_change' | 'device_check') {
     const [app] = await this.db
       .select({
         provider: agentApplications.identityProvider,
