@@ -1,8 +1,9 @@
 import { Platform } from 'react-native';
-import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { deviceKeyAvailable, devicePublicKey, deviceSign } from '../../modules/device-key';
 import { ApiError, type ApiClient } from '../api/client';
+import { appCheck } from './app-check';
+import { sha256Hex } from './hash';
 import { signedRequest } from './signing';
 
 /** What the server knows about this phone and the person's PIN (GET /v1/me/security). */
@@ -11,9 +12,6 @@ export interface SecurityStatus {
   hasPin: boolean;
   pinLocked: boolean;
 }
-
-const sha256Hex = (text: string) =>
-  Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, text, { encoding: Crypto.CryptoEncoding.HEX });
 
 /** This build can sign money actions: a development or store build on a phone, not Expo Go or the web. */
 export const canSign = () => Platform.OS !== 'web' && deviceKeyAvailable();
@@ -42,9 +40,21 @@ export function setUpPhone(api: ApiClient): Promise<'ready' | 'unsupported' | 's
   return settingUp;
 }
 
-/** A withdrawal or payout account change: signed by this phone's key, with the app PIN (A3, A7). */
+/** Money actions the server also asks the app check for (MB3). */
+const CHECKED = new Set(['/v1/wallet/withdrawals', '/v1/payout-account']);
+
+/**
+ * A withdrawal or payout account change: signed by this phone's key, with the app PIN (A3, A7), and with the
+ * app check where the server asks for it (MB3), made fresh for each attempt.
+ */
 export function moneyRequest<T>(api: ApiClient, method: 'POST' | 'PUT', path: string, body: unknown, pin: string) {
-  return signedRequest<T>({ api, sign: deviceSign, sha256Hex }, method, path, body, pin);
+  return signedRequest<T>(
+    { api, sign: deviceSign, sha256Hex, ...(CHECKED.has(path) ? { attest: appCheck } : {}) },
+    method,
+    path,
+    body,
+    pin,
+  );
 }
 
 /*

@@ -90,7 +90,7 @@ export function SelfieProvider({ children }: { children: ReactNode }) {
       try {
         const started = await api.post<StartedSelfie>(
           '/v1/agent/selfie',
-          why === 'payout_change' ? { for: 'payout_change' } : {},
+          why === 'payout_change' || why === 'device_check' ? { for: why } : {},
         );
         if (run.current === token) setStep({ kind: 'intro', started });
       } catch (e) {

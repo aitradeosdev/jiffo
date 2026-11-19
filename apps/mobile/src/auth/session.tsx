@@ -1,16 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Platform } from 'react-native';
-import * as Crypto from 'expo-crypto';
 import * as Device from 'expo-device';
 import { API_URL, VARIANT } from '../config';
 import { secureStorage } from '../storage';
 import { ApiError, createApiClient, toTokens, type ApiClient, type Tokens } from '../api/client';
 import { forgetPin, setUpPhone } from './device-security';
+import { appCheck } from './app-check';
+import { deviceKey, keepDeviceKeyOnThisPhone } from './install-key';
 import { deviceKeyRemove } from '../../modules/device-key';
 import type { CodeSent, SignedIn, User } from '../api/types';
 
 const TOKENS_KEY = `jiffo.${VARIANT}.tokens`;
-const DEVICE_KEY = `jiffo.${VARIANT}.device`;
 
 type Status = 'loading' | 'signedOut' | 'signedIn';
 
@@ -48,25 +48,6 @@ let onSignedOut: () => void = () => undefined;
  * would take as a stolen refresh token.
  */
 export const sharedApi = createApiClient({ baseUrl: API_URL, store: tokenStore, onSignedOut: () => onSignedOut() });
-
-/** A random id for this install, kept across sign-ins, so the server ties sessions and push to this phone. */
-async function deviceKey() {
-  const existing = await secureStorage.get(DEVICE_KEY);
-  if (existing) return existing;
-  const key = Crypto.randomUUID();
-  await secureStorage.set(DEVICE_KEY, key);
-  return key;
-}
-
-/**
- * Saves this install's id again, which keeps it for this phone only from now on (docs/security-plan.md,
- * MB2): one saved by an earlier version would otherwise stay in backups, and a phone restored from one would
- * count as the same phone, without the new-phone hold or selfie. Tokens are saved again at each refresh.
- */
-async function keepDeviceKeyOnThisPhone() {
-  const existing = await secureStorage.get(DEVICE_KEY);
-  if (existing) await secureStorage.set(DEVICE_KEY, existing);
-}
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>('loading');
@@ -132,7 +113,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const verifyCode = useCallback(
     async (phone: string, code: string) => {
-      const res = await api.public<SignedIn>('POST', '/v1/auth/otp/verify', {
+      const body = {
         phone,
         code,
         app: VARIANT,
@@ -141,7 +122,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           platform: Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web',
           name: Device.modelName ?? undefined,
         },
-      });
+      };
+      // With the app check (MB3), made for this request.
+      const checked = await appCheck('POST', '/v1/auth/otp/verify', body);
+      const res = await api.publicWithHeaders<SignedIn>('POST', '/v1/auth/otp/verify', body, checked);
       await tokenStore.set(toTokens(res, Date.now()));
       // The agent app registers this phone's key now: the server takes one only just after signing in (A3).
       if (VARIANT === 'agent') void setUpPhone(api).catch(() => undefined);

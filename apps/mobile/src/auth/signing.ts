@@ -22,6 +22,8 @@ export interface SigningDeps {
   /** Signs with the phone's own key: ECDSA P-256 SHA-256, base64 DER. */
   sign(text: string): Promise<string>;
   sha256Hex(text: string): Promise<string>;
+  /** The app check's headers for this request (MB3), when the server asks for one. */
+  attest?(method: 'POST' | 'PUT', path: string, body: unknown): Promise<Record<string, string>>;
 }
 
 /**
@@ -35,9 +37,12 @@ export async function signedRequest<T>(
   body: unknown,
   pin: string,
 ): Promise<T> {
+  // The app check first: it can take a while (an iPhone's first key), and the phone's code lasts 2 minutes.
+  const checked = deps.attest ? await deps.attest(method, path, body) : {};
   const { nonce } = await deps.api.post<{ nonce: string }>('/v1/devices/current/challenge');
   const signature = await deps.sign(await signedPayload(nonce, method, path, JSON.stringify(body), deps.sha256Hex));
   return deps.api.withHeaders<T>(method, path, body, {
+    ...checked,
     [SIGNED_HEADERS.nonce]: nonce,
     [SIGNED_HEADERS.signature]: signature,
     ...(pin ? { [SIGNED_HEADERS.pin]: pin } : {}),

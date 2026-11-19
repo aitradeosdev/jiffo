@@ -158,6 +158,9 @@ export function createApiClient(options: ApiOptions) {
       request<T>(method, path, body, true, headers),
     /** For sign-in and public routes. */
     public: <T>(method: Method, path: string, body?: unknown) => request<T>(method, path, body, false),
+    /** A public route with headers of its own: sign-in with the app check (src/auth/attestation.ts). */
+    publicWithHeaders: <T>(method: Method, path: string, body: unknown, headers: Record<string, string>) =>
+      request<T>(method, path, body, false, headers),
     /** The current access token, refreshed if needed. For the realtime socket. */
     accessToken: async () => (await validToken())?.accessToken ?? null,
     store: options.store,

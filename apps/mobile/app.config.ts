@@ -43,7 +43,16 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     orientation: 'portrait',
     icon: `./assets/${variant}/icon.png`,
     userInterfaceStyle: 'automatic',
-    ios: { bundleIdentifier: v.bundleId, supportsTablet: false },
+    ios: {
+      bundleIdentifier: v.bundleId,
+      supportsTablet: false,
+      // App Attest (docs/security-plan.md, MB3): store builds use Apple's production environment; a development
+      // build can set APP_ATTEST_ENVIRONMENT=development, which the API counts as doubtful in production.
+      entitlements: {
+        'com.apple.developer.devicecheck.appattest-environment':
+          process.env.APP_ATTEST_ENVIRONMENT === 'development' ? 'development' : 'production',
+      },
+    },
     android: {
       package: v.bundleId,
       adaptiveIcon: { foregroundImage: `./assets/${variant}/icon.png`, backgroundColor: v.background },
@@ -100,6 +109,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       variant,
       apiUrl: process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000',
       country: process.env.EXPO_PUBLIC_COUNTRY ?? 'NG',
+      // The Google Cloud project linked to the apps in Play Console, for Play Integrity (MB3). Not a secret.
+      playCloudProjectNumber: process.env.PLAY_CLOUD_PROJECT_NUMBER ?? '',
     },
   };
 };

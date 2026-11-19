@@ -4,7 +4,7 @@
  */
 import { ApiError } from '../api/client';
 
-export type SelfieReason = 'daily' | 'random' | 'new_device' | 'payout_change';
+export type SelfieReason = 'daily' | 'random' | 'new_device' | 'payout_change' | 'device_check';
 
 /** What the provider's SDK needs, from the server: for Smile ID, a token for this check alone. */
 export interface SelfieSession {
@@ -31,7 +31,7 @@ export type SelfieAnswer =
   | { status: 'failed'; triesLeft?: number; note?: string | null }
   | { status: 'suspended' };
 
-const REASONS: readonly SelfieReason[] = ['daily', 'random', 'new_device', 'payout_change'];
+const REASONS: readonly SelfieReason[] = ['daily', 'random', 'new_device', 'payout_change', 'device_check'];
 
 /** The selfie an action asked for, if it was refused for want of one. */
 export function selfieNeeded(error: unknown): SelfieReason | null {
@@ -46,6 +46,7 @@ export const SELFIE_WHY: Record<SelfieReason, string> = {
   random: "A quick extra check that it's you, before you go online.",
   new_device: "You're on a new phone. We check it's you before money can move from it.",
   payout_change: "You're changing where your money goes. We check it's you first.",
+  device_check: "We couldn't fully check this phone, so we check it's you before going on.",
 };
 
 /**

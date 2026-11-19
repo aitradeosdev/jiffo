@@ -23,6 +23,7 @@ uses it.
 | `expo-screen-capture` | Blocking screenshots and screen recording on the PIN, wallet, ID and selfie screens (A9) | Nothing beyond the app |
 | `expo-secure-store` | Keeping the sign-in tokens in the phone's keychain or keystore, and the agent's app PIN behind their fingerprint or face when they turn that on | The keychain, Face ID or fingerprint |
 | `expo-crypto` | The random key that names this install as a device, and the hash of a signed money request's body | Nothing beyond the app |
+| `modules/app-attest` (Jiffo's own), with Google's `com.google.android.play:integrity` on Android and Apple's DeviceCheck framework on iOS | App checks (MB3): a Play Integrity token or an App Attest assertion over each checked request, for the server to verify | Google Play services or Apple's App Attest service |
 | `modules/device-key` (Jiffo's own) | The agent app's signing key in the Secure Enclave or Android Keystore, for money requests (A3). No third party | The secure hardware |
 | `expo-dev-client` | Development builds only, to try the native key before a store build; the store builds don't include its launcher | Nothing beyond the app |
 | `expo-device` | The phone's model, for the list of signed-in devices, and whether it's a real phone before asking for push | Device model |

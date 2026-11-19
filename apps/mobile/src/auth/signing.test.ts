@@ -72,4 +72,35 @@ describe('signed money requests', () => {
       ),
     ).toBe(false);
   });
+
+  it("makes the app check before taking the phone's short-lived code, and sends both", async () => {
+    const order: string[] = [];
+    const api = {
+      post: async <T>() => {
+        order.push('challenge');
+        return { nonce: 'code-9' } as T;
+      },
+      withHeaders: async <T>(_m: string, _p: string, _b: unknown, headers: Record<string, string>) => {
+        order.push('send');
+        return headers as T;
+      },
+    };
+    const headers = await signedRequest<Record<string, string>>(
+      {
+        api: api as never,
+        sign: async () => 'sig',
+        sha256Hex: async (text) => createHash('sha256').update(text).digest('hex'),
+        attest: async () => {
+          order.push('attest');
+          return { 'x-jiffo-attest': 'token' };
+        },
+      },
+      'POST',
+      '/v1/wallet/withdrawals',
+      {},
+      '2580',
+    );
+    expect(order).toEqual(['attest', 'challenge', 'send']);
+    expect(headers).toMatchObject({ 'x-jiffo-attest': 'token', [SIGNED_HEADERS.nonce]: 'code-9' });
+  });
 });
