@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { FakeIdentityAdapter, type IdentityResult } from '../src/adapters/identity';
 import { CountriesService } from '../src/countries/countries.service';
 import { customerVerifications, userNetworks } from '../src/db/schema';
+import { IdentityChecksService } from '../src/identity/identity-checks.service';
 import { NetworksService } from '../src/risk/networks.service';
 import { RiskFlagsService } from '../src/risk/risk-flags.service';
 import {
@@ -104,7 +105,9 @@ describe('network and same-face flags', () => {
     }
     const errand = await accepted(customer, agent);
     expect(await flagsFor({ errand: errand.id })).toEqual([]);
-    expect(await t.db.select().from(userNetworks).where(eq(userNetworks.userId, customer.userId))).toEqual([]);
+    // A phone network's address is kept only to mark it as a carrier's; a VPN's or an unknown one, not at all.
+    const kept = await t.db.select().from(userNetworks).where(eq(userNetworks.userId, customer.userId));
+    expect(kept.map((n) => n.kind)).toEqual(['cellular']);
   });
 
   it("doesn't count a busy address, such as a shop's Wi-Fi, or one used long ago", async () => {
@@ -122,9 +125,43 @@ describe('network and same-face flags', () => {
     await t.db
       .update(userNetworks)
       .set({ lastSeenAt: sql`now() - interval '60 days'` })
-      .where(eq(userNetworks.fingerprint, t.app.get(NetworksService).fingerprint(old)));
+      .where(eq(userNetworks.fingerprint, t.app.get(NetworksService).fingerprint(old)!));
     const errand = await accepted(customer, agent);
     expect(await flagsFor({ errand: errand.id })).toEqual([]);
+  });
+
+  it('needs the two to have used it around the same time, not weeks apart', async () => {
+    const { customer, agent } = await pair();
+    const ip = randomIp();
+    await from(customer, ip, 'wifi');
+    await from(agent, ip, 'wifi');
+    await settled();
+    // The customer's use ended three weeks ago, before the agent's began: an address a home's provider gave
+    // to another home since.
+    await t.db
+      .update(userNetworks)
+      .set({ firstSeenAt: sql`now() - interval '22 days'`, lastSeenAt: sql`now() - interval '21 days'` })
+      .where(eq(userNetworks.userId, customer.userId));
+    const errand = await accepted(customer, agent);
+    expect(await flagsFor({ errand: errand.id })).toEqual([]);
+  });
+
+  it("doesn't count an address someone reached over a phone network, such as a MiFi's", async () => {
+    const { customer, agent } = await pair();
+    const ip = randomIp();
+    await from(customer, ip, 'wifi');
+    await from(agent, ip, 'wifi');
+    // A third phone on that carrier's address: it is shared by the carrier's customers.
+    await from(await signIn(t, 'customer'), ip, 'cellular');
+    const errand = await accepted(customer, agent);
+    expect(await flagsFor({ errand: errand.id })).toEqual([]);
+  });
+
+  it("never fails a request over an address it can't read", async () => {
+    const who = await signIn(t, 'customer');
+    await from(who, '1:2:3:4:5:6:7:8::9', 'wifi');
+    await from(who, 'not-an-address', 'wifi');
+    expect(await t.db.select().from(userNetworks).where(eq(userNetworks.userId, who.userId))).toEqual([]);
   });
 
   it('forgets addresses after 90 days', async () => {
@@ -181,6 +218,25 @@ describe('network and same-face flags', () => {
       const [flag] = await flagsFor({ person: second.userId }, 'verification');
       expect(flag).toMatchObject({ kind: 'same_face', details: { sameIdNumber: false } });
       expect(flag!.people.map((p) => p.id).sort()).toEqual([first.userId, second.userId].sort());
+    });
+
+    it("finds the account of an earlier check, after it started another and the day's attempts were forgotten", async () => {
+      const first = await customer();
+      await checkId(first);
+      const earlier = await referenceOf(first);
+      // It checked again since, under a new reference, and the attempts' list has been pruned.
+      await t.db
+        .update(customerVerifications)
+        .set({ reference: `cid-${crypto.randomUUID()}` })
+        .where(eq(customerVerifications.userId, first.userId));
+      await t.db.execute(
+        sql`update identity_attempts set created_at = now() - interval '3 days' where reference = ${earlier}`,
+      );
+      await t.app.get(IdentityChecksService).prune();
+      const second = await customer();
+      providerFinds([{ reference: earlier, face: true, idNumber: false }]);
+      await checkId(second);
+      expect((await flagsFor({ person: second.userId }, 'verification')).map((f) => f.kind)).toEqual(['same_face']);
     });
 
     it("ignores matches it can't tie to another account, and matches on the ID number alone", async () => {

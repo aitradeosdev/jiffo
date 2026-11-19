@@ -197,20 +197,29 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
     }
   }
 
+  /** Each check on its own, so one that fails leaves the others to run. */
   private async checkPairing(errand: ErrandRow & { agentId: string }) {
     const pair = { customerId: errand.customerId, agentId: errand.agentId };
-    const by = await this.sharedPhone(pair.customerId, pair.agentId);
-    if (by.length) await this.raisePair('pair_shared_phone', errand, { by });
-    if (await this.toppedUpFromAgent(pair.customerId, pair.agentId)) await this.raisePair('pair_shared_bank', errand);
-    const { sharedNetworkDays, busyNetworkAccounts } = await this.risk(errand.countryCode);
-    const networks = await this.networks.sharedBetween(
-      pair.customerId,
-      pair.agentId,
-      sharedNetworkDays,
-      busyNetworkAccounts,
-    );
-    if (networks.length) await this.raisePair('pair_shared_network', errand, { by: networks });
-    await this.checkRepeats(errand);
+    const step = (what: string, check: () => Promise<unknown>) =>
+      check().catch((error: Error) => this.logger.warn(`Risk check ${what} on ${errand.id} failed: ${error.message}`));
+    await step('shared phone', async () => {
+      const by = await this.sharedPhone(pair.customerId, pair.agentId);
+      if (by.length) await this.raisePair('pair_shared_phone', errand, { by });
+    });
+    await step('shared bank', async () => {
+      if (await this.toppedUpFromAgent(pair.customerId, pair.agentId)) await this.raisePair('pair_shared_bank', errand);
+    });
+    await step('shared network', async () => {
+      const { sharedNetworkDays, busyNetworkAccounts } = await this.risk(errand.countryCode);
+      const networks = await this.networks.sharedBetween(
+        pair.customerId,
+        pair.agentId,
+        sharedNetworkDays,
+        busyNetworkAccounts,
+      );
+      if (networks.length) await this.raisePair('pair_shared_network', errand, { by: networks });
+    });
+    await step('repeat pairing', () => this.checkRepeats(errand));
   }
 
   /**
@@ -398,11 +407,12 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
     const [me] = await this.db.select({ countryCode: users.countryCode }).from(users).where(eq(users.id, userId));
     if (!me) return;
     const references = faces.map((r) => r.reference);
-    // Whose checks they were: customers' and agents' current checks, and every check started lately.
+    // Whose checks they were: every check started, and customers' and agents' current ones (for checks
+    // started before every reference was kept).
     const { rows } = await this.db.execute<{ user_id: string; reference: string }>(sql`
-      select user_id, reference from customer_verifications where reference in ${references}
-      union select user_id, identity_reference from agent_applications where identity_reference in ${references}
-      union select user_id, reference from identity_attempts where kind = 'start' and reference in ${references}`);
+      select user_id, reference from identity_references where reference in ${references}
+      union select user_id, reference from customer_verifications where reference in ${references}
+      union select user_id, identity_reference from agent_applications where identity_reference in ${references}`);
     const owners = new Map<string, boolean>();
     for (const row of rows) {
       if (row.user_id === userId) continue;

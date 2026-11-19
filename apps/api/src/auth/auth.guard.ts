@@ -78,7 +78,7 @@ export class AuthGuard implements CanActivate {
       context.getClass(),
     ]);
     if (apps && !apps.includes(req.auth.app)) throw forbidden('wrong_app', `Use the ${apps.join(' or ')} app for this`);
-    // The network it came over, for the shared-network flags (E6); written beside the request.
+    // The network it came over, for the shared-network flags (E6); written beside the request, never failing it.
     this.networks.seen(req.auth.userId, req.ip, req.header(NETWORK_HEADER));
     return true;
   }

@@ -21,7 +21,7 @@ import { keyFor } from '../common/keys';
 import { badRequest, tooMany, unavailable } from '../common/errors';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
-import { identityAttempts, webhookSignatures } from '../db/schema';
+import { identityAttempts, identityReferences, webhookSignatures } from '../db/schema';
 import { ProvidersService } from '../providers/providers.service';
 import { RiskFlagsService } from '../risk/risk-flags.service';
 
@@ -82,6 +82,8 @@ export const ID_CHECK_LABELS: Record<string, string> = {
 const DAY_MS = 24 * 3_600_000;
 /** Attempts and webhook signatures are kept this long: well past any limit or provider's age check. */
 const KEPT_MS = 2 * DAY_MS;
+/** Which account a check was for, kept while a provider may still name it as the same face (I3). */
+const REFERENCES_KEPT_MS = 400 * DAY_MS;
 
 /**
  * Identity checks with the provider switched on in the panel, for customers and agents alike: which IDs a
@@ -235,6 +237,11 @@ export class IdentityChecksService {
       await this.db.delete(identityAttempts).where(eq(identityAttempts.id, attempt));
       throw error;
     }
+    // Kept apart from the day's attempts, which are soon forgotten, for a face found on it later (I3).
+    await this.db
+      .insert(identityReferences)
+      .values({ reference: started.reference, userId, provider: adapter.name })
+      .onConflictDoNothing();
     return {
       reference: started.reference,
       provider: adapter.name,
@@ -289,7 +296,11 @@ export class IdentityChecksService {
       .delete(webhookSignatures)
       .where(lt(webhookSignatures.seenAt, before))
       .returning({ provider: webhookSignatures.provider });
-    return { attempts: attempts.length, signatures: signatures.length };
+    const references = await this.db
+      .delete(identityReferences)
+      .where(lt(identityReferences.createdAt, new Date(Date.now() - REFERENCES_KEPT_MS)))
+      .returning({ reference: identityReferences.reference });
+    return { attempts: attempts.length, signatures: signatures.length, references: references.length };
   }
 
   /** Asks the provider a check was started with for its result. */

@@ -15,4 +15,10 @@ describe('networks', () => {
     expect(networkOf('2c0f:2a80:0:1f01::1')).not.toBe(home);
     expect(networkOf('2c0f::1')).toBe('2c0f:0:0:0');
   });
+
+  it("gives nothing for what isn't an address", () => {
+    expect(networkOf('1:2:3:4:5:6:7:8::9')).toBeNull();
+    expect(networkOf('not-an-address')).toBeNull();
+    expect(networkOf('')).toBeNull();
+  });
 });

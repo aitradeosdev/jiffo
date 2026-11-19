@@ -1,5 +1,5 @@
 {
-  "id": "57ba043e-e3d9-4625-8f12-0b5e2b280cb3",
+  "id": "c5ae1c21-1d08-4a70-9b4c-35e10e9eb6b7",
   "prevId": "f9a3449f-48c7-4223-ae60-338b438e66ab",
   "version": "7",
   "dialect": "postgresql",
@@ -4446,6 +4446,74 @@
         "identity_attempts_user_id_users_id_fk": {
           "name": "identity_attempts_user_id_users_id_fk",
           "tableFrom": "identity_attempts",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.identity_references": {
+      "name": "identity_references",
+      "schema": "",
+      "columns": {
+        "reference": {
+          "name": "reference",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "identity_references_created_idx": {
+          "name": "identity_references_created_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "identity_references_user_id_users_id_fk": {
+          "name": "identity_references_user_id_users_id_fk",
+          "tableFrom": "identity_references",
           "tableTo": "users",
           "columnsFrom": [
             "user_id"

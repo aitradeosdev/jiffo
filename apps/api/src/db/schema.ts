@@ -1087,8 +1087,8 @@ export const riskFlagErrands = pgTable(
 
 /**
  * The Wi-Fi networks and addresses an account's phones used (docs/security-plan.md, E6), as keyed hashes of
- * the public address: never the address. Only Wi-Fi and wired connections, by the app's word; a phone
- * network's or a VPN's address is shared by thousands. Forgotten 90 days after last use.
+ * the public address: never the address. Wi-Fi and wired connections, by the app's word, and phone networks
+ * only to mark an address as a carrier's, which thousands share. Forgotten 90 days after last use.
  */
 export const userNetworks = pgTable(
   'user_networks',
@@ -1096,7 +1096,7 @@ export const userNetworks = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id),
-    kind: text('kind', { enum: ['wifi', 'wired'] }).notNull(),
+    kind: text('kind', { enum: ['wifi', 'wired', 'cellular'] }).notNull(),
     fingerprint: text('fingerprint').notNull(),
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1106,6 +1106,24 @@ export const userNetworks = pgTable(
     index('user_networks_fingerprint_idx').on(t.fingerprint, t.lastSeenAt),
     index('user_networks_last_seen_idx').on(t.lastSeenAt),
   ],
+);
+
+/**
+ * Which account each identity check was for, by our reference (docs/security-plan.md, I3): a provider that
+ * finds the same face on an earlier check names that check by its reference, which may be long replaced on
+ * the account. Kept for a little over a year, as providers look back that far at most.
+ */
+export const identityReferences = pgTable(
+  'identity_references',
+  {
+    reference: text('reference').primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    provider: text('provider').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('identity_references_created_idx').on(t.createdAt)],
 );
 
 /* ---------- Files ---------- */
