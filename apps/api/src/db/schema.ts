@@ -24,6 +24,7 @@ import {
   AGENT_TIERS,
   APPROVAL_KINDS,
   APPROVAL_STATUSES,
+  WITHDRAWAL_HOLD_REASONS,
   type AdminRole,
   type CountrySettings,
   type ErrandState,
@@ -122,6 +123,13 @@ export const users = pgTable(
     status: text('status', { enum: ['active', 'suspended'] })
       .notNull()
       .default('active'),
+    /**
+     * Agents' withdrawals wait until then after a change to the account: a new payout account or a sign-in
+     * on a new phone (docs/security-plan.md, A6). Never moved earlier by a later change.
+     */
+    withdrawalsHeldUntil: timestamp('withdrawals_held_until', { withTimezone: true }),
+    /** What started the hold, for the agent and support. */
+    withdrawalsHeldFor: text('withdrawals_held_for', { enum: WITHDRAWAL_HOLD_REASONS }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

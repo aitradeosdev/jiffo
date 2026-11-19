@@ -190,6 +190,13 @@
       "when": 1794682412460,
       "tag": "0026_admin_phone",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1795105948125,
+      "tag": "0027_withdrawal_hold",
+      "breakpoints": true
     }
   ]
 }

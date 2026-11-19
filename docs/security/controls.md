@@ -108,11 +108,17 @@ How Jiffo protects people, money and data, area by area. What is required is in 
 
 ## Withdrawals
 
-agents only, to an account in their own name. One free scheduled withdrawal a day, or instant for a fee. A bounced transfer puts the full amount back.
+Agents only, to an account in their own name. One free scheduled withdrawal a day, or instant for a fee. A bounced transfer puts the full amount back.
 
 - **Repeats:** each request carries the app's key, so a repeated tap or a retry makes one withdrawal.
 - **Sending:** one run at a time claims a withdrawal before sending it. Only a first try that the provider refuses outright gives the money back. An unclear answer after that raises an alert instead.
 - **Suspension:** a suspended agent's withdrawals wait until they are reactivated.
+- **Hold after an account change:**
+  - A new payout account in place of one in use, or a sign-in to the agent app on a phone the account hasn't used, pauses withdrawals for 48 hours (Settings, Security; it can't be switched off).
+  - An agent's first account and first phone don't, and nor does the customer app. A nearly matching account pauses them from when support approves it.
+  - The agent is told by push, SMS and email, so a change they didn't make is noticed before money can leave.
+  - New withdrawals are refused until it ends; one asked for before it waits, then goes as asked. Paystack's transfer approval refuses a held agent's transfer.
+  - A later change never shortens a hold. Staff see it on the agent's page.
 - **Daily caps (Settings, Security):** instant withdrawals are capped per agent and for all agents together.
 - **Paystack's transfer approval URL:** `POST /v1/webhooks/paystack/transfer-approval`, registered in the Paystack dashboard. It approves only a withdrawal Jiffo is sending, for its exact amount and the agent's recipient.
 

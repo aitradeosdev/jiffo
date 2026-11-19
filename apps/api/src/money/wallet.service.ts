@@ -11,7 +11,15 @@ import {
   type ErrandEvent,
 } from '@jiffo/shared';
 import { DB, type Db, type Tx } from '../db/database.module';
-import { earningHolds, errands, journalEntries, ledgerAccounts, postings, type LedgerAccountType } from '../db/schema';
+import {
+  earningHolds,
+  errands,
+  journalEntries,
+  ledgerAccounts,
+  postings,
+  users,
+  type LedgerAccountType,
+} from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
 import { AgentsService } from '../agents/agents.service';
 import { ApiError, conflict, notFound, unprocessable } from '../common/errors';
@@ -391,6 +399,11 @@ export class WalletService {
 
   /* ---------- Reading ---------- */
 
+  private async heldUntil(userId: string) {
+    const [user] = await this.db.select({ until: users.withdrawalsHeldUntil }).from(users).where(eq(users.id, userId));
+    return user?.until && user.until > new Date() ? user.until.toISOString() : null;
+  }
+
   async summary(auth: AuthContext) {
     const { currency, timezone } = await this.countries.basics(auth.countryCode);
     if (auth.app === 'customer') {
@@ -424,6 +437,8 @@ export class WalletService {
       week,
       tier: await this.agents.tier(auth.userId),
       upcoming: holds.filter((h) => h.availableAt.getTime() > now).slice(0, 20),
+      /** Withdrawals wait until then after an account change (docs/security-plan.md, A6); null when they don't. */
+      withdrawalsHeldUntil: await this.heldUntil(auth.userId),
     };
   }
 

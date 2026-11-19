@@ -57,6 +57,9 @@ export class SwitchingMessaging implements MessagingAdapter {
   sendOtp(...a: Parameters<MessagingAdapter['sendOtp']>) {
     return this.providers.current('sms').sendOtp(...a);
   }
+  sendText(...a: Parameters<MessagingAdapter['sendText']>) {
+    return this.providers.current('sms').sendText(...a);
+  }
 }
 
 export class SwitchingPush implements PushAdapter {

@@ -254,6 +254,12 @@ export const SECTIONS: Section[] = [
         help: 'Hours. It must then be asked for again.',
       },
       {
+        path: 'security.withdrawalHoldHours',
+        label: "Agents' withdrawals pause after a new payout account or phone for",
+        kind: 'hours',
+        help: "Hours. They are told by push, SMS and email, so a change they didn't make is noticed before money can leave. It can't be switched off.",
+      },
+      {
         path: 'security.dailyIdReveals',
         label: "People's details one staff member may reveal in a day",
         kind: 'count',

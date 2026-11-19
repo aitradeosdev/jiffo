@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { agentTierLabel } from '@jiffo/shared';
+import { agentTierLabel, WITHDRAWAL_HOLD_INFO } from '@jiffo/shared';
 import { birth } from './birth';
 import { RevealCard } from './reveal';
 import { notFound } from 'next/navigation';
@@ -55,6 +55,8 @@ interface Detail {
     lastLocatedAt: string | null;
     availableKobo: number;
     heldKobo: number;
+    /** Withdrawals wait until then after an account change (A6). */
+    withdrawalsHeld: { until: string; reason: 'payout_account' | 'new_device' | 'pin' | null } | null;
     rating: number | null;
     stats: Stats;
     payoutAccount: {
@@ -374,6 +376,17 @@ export default async function PersonPage({
                       : 'None yet'}
                   </dd>
                 </div>
+                {d.agent.withdrawalsHeld ? (
+                  <div>
+                    <dt className="text-ink-3">Withdrawals</dt>
+                    <dd>
+                      Paused until {time(d.agent.withdrawalsHeld.until)}, because{' '}
+                      {d.agent.withdrawalsHeld.reason
+                        ? WITHDRAWAL_HOLD_INFO[d.agent.withdrawalsHeld.reason].staff
+                        : 'their account changed'}
+                    </dd>
+                  </div>
+                ) : null}
               </dl>
             </Card>
           ) : null}

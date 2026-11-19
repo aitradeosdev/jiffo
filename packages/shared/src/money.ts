@@ -95,3 +95,18 @@ export function formatNaira(amount: Kobo): string {
   const whole = naira.toLocaleString('en-NG');
   return kobo === 0 ? `₦${whole}` : `₦${whole}.${String(kobo).padStart(2, '0')}`;
 }
+
+/**
+ * What pauses an agent's withdrawals for a while (docs/security-plan.md, A6): a new payout account, a sign-in
+ * on a new phone, or (with the app PIN) a new PIN. Whoever takes over a number or an account can't move the
+ * money out before the owner hears and acts.
+ */
+export const WITHDRAWAL_HOLD_REASONS = ['payout_account', 'new_device', 'pin'] as const;
+export type WithdrawalHoldReason = (typeof WITHDRAWAL_HOLD_REASONS)[number];
+
+/** Why withdrawals are paused, finishing "because ...": to the agent, and to staff about the agent. */
+export const WITHDRAWAL_HOLD_INFO: Record<WithdrawalHoldReason, { because: string; staff: string }> = {
+  payout_account: { because: 'your payout account changed', staff: 'their payout account changed' },
+  new_device: { because: 'you signed in on a new phone', staff: 'they signed in on a new phone' },
+  pin: { because: 'your app PIN changed', staff: 'their app PIN changed' },
+};

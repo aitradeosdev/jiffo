@@ -7,6 +7,8 @@ import { africasTalkingApi, africasTalkingCheck, PROVIDER_TIMEOUT_MS } from './a
 export interface MessagingAdapter {
   readonly name: string;
   sendOtp(phone: string, code: string, ttlSeconds: number): Promise<void>;
+  /** A notice about the person's own account, such as a hold on their withdrawals (docs/security-plan.md, A6). */
+  sendText(phone: string, text: string): Promise<void>;
 }
 
 export const MESSAGING = Symbol('MESSAGING');
@@ -21,14 +23,22 @@ export class ConsoleMessagingAdapter implements MessagingAdapter {
   async sendOtp(phone: string, code: string, ttlSeconds: number) {
     this.logger.log(`OTP for ${phone}: ${code} (valid ${ttlSeconds}s)`);
   }
+  async sendText(phone: string, text: string) {
+    this.logger.log(`SMS to ${phone}: ${text}`);
+  }
 }
 
 /** Tests: keeps the codes in memory so a test can read them back. */
 export class MemoryMessagingAdapter implements MessagingAdapter {
   readonly name = 'memory';
   readonly sent: Array<{ phone: string; code: string }> = [];
+  /** Notices other than codes. */
+  readonly texts: Array<{ phone: string; text: string }> = [];
   async sendOtp(phone: string, code: string) {
     this.sent.push({ phone, code });
+  }
+  async sendText(phone: string, text: string) {
+    this.texts.push({ phone, text });
   }
   lastCodeFor(phone: string): string | undefined {
     return [...this.sent].reverse().find((m) => m.phone === phone)?.code;
@@ -45,7 +55,11 @@ export class TermiiMessagingAdapter implements MessagingAdapter {
     private readonly fetchImpl: typeof fetch = providerFetch,
   ) {}
 
-  async sendOtp(phone: string, code: string, ttlSeconds: number) {
+  sendOtp(phone: string, code: string, ttlSeconds: number) {
+    return this.sendText(phone, otpText(code, ttlSeconds));
+  }
+
+  async sendText(phone: string, text: string) {
     const res = await this.fetchImpl(`${this.baseUrl}/api/sms/send`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -53,7 +67,7 @@ export class TermiiMessagingAdapter implements MessagingAdapter {
         api_key: this.apiKey,
         to: phone.replace(/^\+/, ''),
         from: this.senderId,
-        sms: otpText(code, ttlSeconds),
+        sms: text,
         type: 'plain',
         channel: 'dnd',
       }),
@@ -92,11 +106,15 @@ export class AfricasTalkingMessagingAdapter implements MessagingAdapter {
     private readonly fetchImpl: typeof fetch = providerFetch,
   ) {}
 
-  async sendOtp(phone: string, code: string, ttlSeconds: number) {
+  sendOtp(phone: string, code: string, ttlSeconds: number) {
+    return this.sendText(phone, otpText(code, ttlSeconds));
+  }
+
+  async sendText(phone: string, text: string) {
     const body = new URLSearchParams({
       username: this.username,
       to: phone,
-      message: otpText(code, ttlSeconds),
+      message: text,
       bulkSMSMode: '1',
       ...(this.senderId ? { from: this.senderId } : {}),
     });
@@ -113,7 +131,7 @@ export class AfricasTalkingMessagingAdapter implements MessagingAdapter {
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
-      this.logger.warn(`Sign-in code not sent: ${(error as Error).message}`);
+      this.logger.warn(`SMS not sent: ${(error as Error).message}`);
       throw unavailable('sms_failed', 'We could not send the code. Try again in a moment.');
     }
     const json = (await res.json().catch(() => null)) as {
@@ -123,7 +141,7 @@ export class AfricasTalkingMessagingAdapter implements MessagingAdapter {
     if (res.status !== 201 || !recipient || !AT_ACCEPTED.has(Number(recipient.statusCode))) {
       // Why, without the number: an empty balance, an unapproved sender ID and an outage look alike to the person.
       this.logger.warn(
-        `Sign-in code not sent: HTTP ${res.status}, ${recipient ? `${recipient.statusCode} ${recipient.status}` : (json?.SMSMessageData?.Message ?? 'no recipient')}`,
+        `SMS not sent: HTTP ${res.status}, ${recipient ? `${recipient.statusCode} ${recipient.status}` : (json?.SMSMessageData?.Message ?? 'no recipient')}`,
       );
       throw unavailable('sms_failed', 'We could not send the code. Try again in a moment.');
     }
