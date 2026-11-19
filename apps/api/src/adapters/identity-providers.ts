@@ -323,6 +323,7 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
       token,
       partnerId: this.partnerId,
       sandbox: this.base.includes('testapi'),
+      privacyPolicyUrl: this.privacyPolicyUrl,
     };
   }
 

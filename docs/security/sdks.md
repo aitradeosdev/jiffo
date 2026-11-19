@@ -7,6 +7,13 @@ Providers (payments, SMS, identity, calls, maps, push, Resend and Postmark email
 (`apps/api/src/adapters`), not through their SDKs. Their keys stay on the server, calls time out, redirects
 aren't followed, and only their own hosts are allowed.
 
+The one exception is Smile ID's SDK in the agent app, for selfie checks (docs/security-plan.md, I2, I8). A selfie
+with liveness has to be taken in the provider's own native code, not a web view. The app never holds Smile ID's
+API key. For each check, the server gives it a token Smile ID issued for that agent's enrolled face and
+SmartSelfie Authentication only, valid 15 minutes. The verdict goes from Smile ID to the server. Both store
+builds link the SDK, since its native modules can't yet be left out of the customer build; only the agent app
+uses it.
+
 ## Mobile apps (`apps/mobile`)
 
 | Package | What it's for | What it can reach |
@@ -26,6 +33,13 @@ aren't followed, and only their own hosts are allowed.
 | `expo-clipboard` | Copying an account number for a top-up | The clipboard, when the person taps copy |
 | `socket.io-client` | Live errand updates and chat | The Jiffo API only |
 | `@jiffo/shared` | Jiffo's own shared rules and types | — |
+| `@smileid/usesmileid` 12.3.0 (with its `@smileid/*` bridge, kamera camera engine and platform interface) | The agent's selfie check against the face Smile ID kept from their ID check (A4, I2, I8, P8, X4): Smile ID's own screens, camera and liveness. Crash reporting to Smile ID is off | The camera, with permission. Smile ID's API, with a token for that check alone. It sends Smile ID the selfie, liveness frames and its own device metadata |
+| `@smileid/usesmileid_mlkit_face`, `@smileid/usesmileid_vision_face` | Finding the face in the selfie camera: Google's ML Kit on Android, Apple's Vision on iOS, on the phone | Nothing beyond the phone |
+| `react-native-quick-crypto`, `react-native-quick-base64`, `react-native-nitro-modules` | Required by Smile ID's SDK, which signs its own requests to Smile ID | Nothing beyond the app |
+| `lottie-react-native` | Required by Smile ID's SDK, for its animations | Nothing beyond the app |
+| `expo-brightness`, `expo-file-system`, `expo-haptics`, `expo-image-manipulator`, `expo-keep-awake`, `expo-screen-orientation` | Required by Smile ID's SDK: screen brightness and orientation while the selfie is taken, the selfie file until it is sent, haptics | The screen and the app's own files |
+
+Smile ID's optional peers that only add device metadata (`expo-battery`, `expo-cellular`, `expo-network`, `expo-sensors`, `@react-native-async-storage/async-storage`) aren't installed.
 
 ## Admin panel (`apps/admin`)
 

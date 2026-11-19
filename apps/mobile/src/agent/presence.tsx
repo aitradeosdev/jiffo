@@ -3,7 +3,7 @@ import { AppState, Linking, View } from 'react-native';
 import * as Location from 'expo-location';
 import { useSession } from '../auth/session';
 import { useRealtimeEvent } from '../realtime/realtime';
-import { errorMessage } from '../api/client';
+import { ApiError, errorMessage } from '../api/client';
 import type { Coords } from '../location';
 import { Button, Text } from '../ui/kit';
 import { ModalSheet } from '../ui/modal-sheet';
@@ -15,6 +15,8 @@ import {
   stopBackgroundLocation,
 } from './background-location';
 import { lastSent, markSent, REPORT_EVERY_MS } from './background-rules';
+import { withSelfie, type SelfieReason } from './selfie';
+import { useSelfie } from './selfie-gate';
 
 /** Sent this often even when the agent isn't moving, so a parked agent stays visible and online. */
 const HEARTBEAT_MS = 60_000;
@@ -43,6 +45,7 @@ const PresenceContext = createContext<Presence | null>(null);
  */
 export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   const { api, user } = useSession();
+  const selfie = useSelfie();
   const [online, setOnlineState] = useState(false);
   const [coords, setCoords] = useState<Coords | null>(null);
   const [switching, setSwitching] = useState(false);
@@ -63,7 +66,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   const send = useCallback(
     async (next: { online: boolean; lat?: number; lng?: number }) => {
       markSent();
-      await api.put('/v1/agent/presence', next);
+      return api.put<{ online: boolean; selfieNeeded?: SelfieReason }>('/v1/agent/presence', next);
     },
     [api],
   );
@@ -138,7 +141,19 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
           }
           const here = { lat: position.coords.latitude, lng: position.coords.longitude };
           setCoords(here);
-          await send({ online: true, ...here });
+          // Going online the first time each day needs a selfie (docs/security-plan.md, I8). An agent on an
+          // errand is kept sharing their position, offline, until it passes.
+          const sent = await withSelfie(async () => {
+            const res = await send({ online: true, ...here });
+            if (res.selfieNeeded) {
+              throw new ApiError(403, 'selfie_needed', 'Take your selfie to go online.', { reason: res.selfieNeeded });
+            }
+            return res;
+          }, selfie.take);
+          if (!sent) {
+            setError('Take your selfie to go online.');
+            return;
+          }
         } else {
           await send({ online: false });
         }
@@ -150,7 +165,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
         setSwitching(false);
       }
     },
-    [permit, send],
+    [permit, send, selfie.take],
   );
 
   // Follow the agent while online or out on an errand, sending at most every few seconds.

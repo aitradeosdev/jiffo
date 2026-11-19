@@ -14,6 +14,8 @@ import {
   setUpPhone,
   type SecurityStatus,
 } from '@/auth/device-security';
+import { withSelfie } from '@/agent/selfie';
+import { useSelfie } from '@/agent/selfie-gate';
 import { moneyErrorMessage } from '@/auth/use-money-action';
 import { space } from '@/theme/tokens';
 import { Button, Field, Screen, Text } from '@/ui/kit';
@@ -27,6 +29,7 @@ const digits = (t: string) => t.replace(/\D/g, '').slice(0, 4);
  */
 export default function PinScreen() {
   const { api, user, signOut } = useSession();
+  const selfie = useSelfie();
   const { reset } = useLocalSearchParams<{ reset?: string }>();
   const status = useResource<SecurityStatus>('/v1/me/security');
   const [current, setCurrent] = useState('');
@@ -50,13 +53,19 @@ export default function PinScreen() {
         setSignInAgain(true);
         return;
       }
-      const res = await moneyRequest<{ withdrawalsHeldUntil: string | null }>(
-        api,
-        'PUT',
-        '/v1/me/pin',
-        changing ? { pin, currentPin: current } : { pin },
-        '',
+      // On a new phone, a selfie comes first (A4, X4).
+      const res = await withSelfie(
+        () =>
+          moneyRequest<{ withdrawalsHeldUntil: string | null }>(
+            api,
+            'PUT',
+            '/v1/me/pin',
+            changing ? { pin, currentPin: current } : { pin },
+            '',
+          ),
+        selfie.take,
       );
+      if (!res) return;
       // The PIN is saved on the server; keeping it behind the fingerprint is a convenience, and a cancelled
       // prompt there mustn't look like the save failed.
       try {

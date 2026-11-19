@@ -26,6 +26,12 @@ const VARIANTS = {
   },
 } as const;
 
+/** Smile ID's face detectors' build settings: ML Kit on Android, Apple's Vision on iOS. KSP as their samples use. */
+const SMILE_ID_PLUGINS: NonNullable<ExpoConfig['plugins']> = [
+  ['@smileid/usesmileid_mlkit_face', { kspVersion: '2.3.6' }],
+  '@smileid/usesmileid_vision_face',
+];
+
 export default ({ config }: ConfigContext): ExpoConfig => {
   const v = VARIANTS[variant];
   return {
@@ -59,7 +65,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'expo-image-picker',
         {
           photosPermission: 'Jiffo uses your photos so you can share them with your agent in chat.',
-          cameraPermission: 'Jiffo uses the camera for receipts, item photos and drop-off photos.',
+          cameraPermission:
+            variant === 'agent'
+              ? 'Jiffo Agent uses the camera for receipts, item photos, drop-off photos, and the selfie that checks it is you.'
+              : 'Jiffo uses the camera for receipts, item photos and drop-off photos.',
         },
       ],
       [
@@ -78,6 +87,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ],
       // Android draws Google Maps and needs a key at build time; iOS uses Apple Maps, which needs none.
       ['react-native-maps', { androidGoogleMapsApiKey: process.env.GOOGLE_MAPS_ANDROID_API_KEY }],
+      // Smile ID's selfie checks (docs/security-plan.md, I2, I8). Only the agent app uses them, but native
+      // modules are linked into both builds, which compile only with these settings.
+      ...SMILE_ID_PLUGINS,
     ],
     experiments: { typedRoutes: false },
     extra: {

@@ -61,6 +61,8 @@ export interface SelfieSession {
   token?: string;
   partnerId?: string;
   sandbox?: boolean;
+  /** Jiffo's privacy notice, which the app shows before the selfie, as the notice the agent agrees to. */
+  privacyPolicyUrl?: string;
 }
 
 /** A selfie verdict the provider sent to its webhook, confirmed with it: for which enrolled person. */
