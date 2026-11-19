@@ -1,5 +1,7 @@
+import Darwin
 import DeviceCheck
 import ExpoModulesCore
+import MachO
 
 /// Apple App Attest (docs/security-plan.md, MB3): a key made in the Secure Enclave that Apple attests is our
 /// store app's, on a genuine iPhone. Apple attests it once; after that it signs an assertion over each checked
@@ -37,6 +39,16 @@ public class AppAttestModule: Module {
       }
     }
 
+    /// What the app finds on the phone (docs/security-plan.md, MB4). The app's own word: it adds to App Attest.
+    AsyncFunction("riskSignals") { () -> [String] in
+      var found: [String] = []
+      if RiskChecks.jailbroken() { found.append("rooted") }
+      if RiskChecks.simulator() { found.append("emulator") }
+      if RiskChecks.hooked() { found.append("hooking") }
+      if RiskChecks.debugged() { found.append("debugger") }
+      return found
+    }
+
     /// Play Integrity is Android's.
     AsyncFunction("prepareIntegrity") { (_: String) in }
     AsyncFunction("integrityToken") { (_: String, _: String) -> String in
@@ -71,5 +83,76 @@ extension Data {
       index = next
     }
     self.init(bytes)
+  }
+}
+
+/// Signs of a phone that isn't as Apple ships it, or of someone watching the app.
+enum RiskChecks {
+  private static let jailbreakPaths = [
+    "/Applications/Cydia.app", "/Applications/Sileo.app", "/Library/MobileSubstrate/MobileSubstrate.dylib",
+    "/bin/bash", "/usr/sbin/sshd", "/etc/apt", "/private/var/lib/apt/", "/usr/bin/ssh", "/var/jb",
+    "/private/var/jb", "/usr/lib/libjailbreak.dylib",
+  ]
+  private static let hookNames = [
+    "frida", "fridagadget", "cynject", "libcycript", "substrateloader", "sslkillswitch", "mobilesubstrate",
+    "libhooker", "substitute", "tweakinject",
+  ]
+
+  static func jailbroken() -> Bool {
+    #if targetEnvironment(simulator)
+      return false
+    #else
+      if jailbreakPaths.contains(where: { FileManager.default.fileExists(atPath: $0) }) { return true }
+      // An app can't write outside its sandbox on a phone as Apple ships it.
+      let probe = "/private/jiffo-\(UUID().uuidString)"
+      if (try? "x".write(toFile: probe, atomically: true, encoding: .utf8)) != nil {
+        try? FileManager.default.removeItem(atPath: probe)
+        return true
+      }
+      return false
+    #endif
+  }
+
+  static func simulator() -> Bool {
+    #if targetEnvironment(simulator)
+      return true
+    #else
+      return false
+    #endif
+  }
+
+  /// A hooking library loaded into the app, or Frida's server listening on the phone.
+  static func hooked() -> Bool {
+    for index in 0..<_dyld_image_count() {
+      guard let raw = _dyld_get_image_name(index) else { continue }
+      let name = String(cString: raw).lowercased()
+      if hookNames.contains(where: { name.contains($0) }) { return true }
+    }
+    return listening(on: 27042)
+  }
+
+  /// A debugger attached to the app.
+  static func debugged() -> Bool {
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+    guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0 else { return false }
+    return (info.kp_proc.p_flag & P_TRACED) != 0
+  }
+
+  private static func listening(on port: UInt16) -> Bool {
+    let socketFd = socket(AF_INET, SOCK_STREAM, 0)
+    guard socketFd >= 0 else { return false }
+    defer { close(socketFd) }
+    var address = sockaddr_in()
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_port = port.bigEndian
+    address.sin_addr.s_addr = inet_addr("127.0.0.1")
+    let result = withUnsafePointer(to: &address) {
+      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        connect(socketFd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+      }
+    }
+    return result == 0
   }
 }

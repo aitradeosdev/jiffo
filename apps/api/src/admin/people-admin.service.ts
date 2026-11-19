@@ -161,6 +161,8 @@ export class PeopleAdminService {
           name: devices.name,
           push: sql<boolean>`${devices.pushToken} is not null`,
           lastSeenAt: devices.lastSeenAt,
+          riskSignals: devices.riskSignals,
+          riskSignalsAt: devices.riskSignalsAt,
           activeSessions: sql<number>`(select count(*)::int from sessions s
               where s.device_id = "devices"."id" and s.revoked_at is null and s.expires_at > now())`,
         })

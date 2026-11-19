@@ -132,4 +132,17 @@ describe('app checks from the phone (MB3)', () => {
     expect(await attestationHeaders(d, 'POST', '/v1/wallet/withdrawals', BODY)).toEqual({});
     expect(calls).toEqual([]);
   });
+
+  it('sends what the app finds on the phone with the check, and even when no check can be made', async () => {
+    const { d } = deps('android', { riskSignals: async () => ['rooted', 'hooking'] });
+    const headers = await attestationHeaders(d, 'POST', '/v1/wallet/withdrawals', BODY);
+    expect(headers).toMatchObject({ [ATTEST_HEADERS.risk]: 'rooted,hooking', [ATTEST_HEADERS.nonce]: 'nonce-1' });
+    const failing = deps('android', {
+      riskSignals: async () => ['emulator'],
+      integrityToken: async () => Promise.reject(new Error('no Play')),
+    });
+    expect(await attestationHeaders(failing.d, 'POST', '/v1/wallet/withdrawals', BODY)).toEqual({
+      [ATTEST_HEADERS.risk]: 'emulator',
+    });
+  });
 });

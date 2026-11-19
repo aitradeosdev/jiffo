@@ -351,8 +351,12 @@ export class ErrandsService implements OnModuleInit {
   private async assertAtDropoff(tx: Tx, errand: ErrandRow, settings: CountrySettings) {
     const meters = settings.security.handoffDistanceMeters;
     if (!meters) return;
-    const { rows } = await tx.execute<{ locatedAt: Date | string | null; distance: number | string | null }>(sql`
-      select p.located_at as "locatedAt", ST_Distance(p.location, s.location) as distance
+    const { rows } = await tx.execute<{
+      locatedAt: Date | string | null;
+      distance: number | string | null;
+      mocked: boolean;
+    }>(sql`
+      select p.located_at as "locatedAt", ST_Distance(p.location, s.location) as distance, p.mocked
       from agent_presence p, errand_stops s
       where p.user_id = ${errand.agentId} and s.errand_id = ${errand.id} and s.kind = 'dropoff'
         and p.location is not null
@@ -360,6 +364,10 @@ export class ErrandsService implements OnModuleInit {
     const at = rows[0];
     if (!at || !freshWithin(at.locatedAt, settings.security.positionFreshMinutes)) {
       throw unprocessable('location_needed', 'Turn on location: Jiffo checks you are at the drop-off');
+    }
+    // A position the phone says is mocked (MB4) says nothing about where the agent is.
+    if (at.mocked) {
+      throw unprocessable('mock_location', 'Turn off mock location: Jiffo checks you are really at the drop-off');
     }
     const distance = Number(at.distance);
     if (distance > meters) {

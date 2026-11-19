@@ -1,5 +1,7 @@
 package com.jiffo.appattest
 
+import android.os.Build
+import android.os.Debug
 import com.google.android.gms.tasks.Task
 import com.google.android.play.core.integrity.IntegrityManagerFactory
 import com.google.android.play.core.integrity.StandardIntegrityManager.PrepareIntegrityTokenRequest
@@ -10,6 +12,9 @@ import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import java.io.File
+import java.net.InetSocketAddress
+import java.net.Socket
 
 /**
  * Google Play Integrity, standard requests (docs/security-plan.md, MB3): Google vouches, over a request's
@@ -53,6 +58,16 @@ class AppAttestModule : Module() {
         .addOnFailureListener { error -> promise.reject(AppAttestException(error.message ?: "Play Integrity didn't answer")) }
     }
 
+    /** What the app finds on the phone (docs/security-plan.md, MB4). The app's own word: it adds to Play Integrity. */
+    AsyncFunction("riskSignals") {
+      buildList {
+        if (RiskChecks.rooted()) add("rooted")
+        if (RiskChecks.emulator()) add("emulator")
+        if (RiskChecks.hooked()) add("hooking")
+        if (RiskChecks.debugged()) add("debugger")
+      }
+    }
+
     AsyncFunction("newAppleKey") { -> throw AppAttestException("App Attest is for iPhones") }
     AsyncFunction("attestAppleKey") { _: String, _: String -> throw AppAttestException("App Attest is for iPhones") }
     AsyncFunction("appleAssertion") { _: String, _: String -> throw AppAttestException("App Attest is for iPhones") }
@@ -88,3 +103,40 @@ class AppAttestModule : Module() {
 }
 
 class AppAttestException(message: String) : CodedException(message)
+
+/** Signs of a phone that isn't as its maker ships it, or of someone watching the app. */
+object RiskChecks {
+  private val suPaths = listOf(
+    "/system/app/Superuser.apk", "/sbin/su", "/system/bin/su", "/system/xbin/su", "/data/local/xbin/su",
+    "/data/local/bin/su", "/system/sd/xbin/su", "/system/bin/failsafe/su", "/data/local/su", "/su/bin/su",
+    "/system/bin/.ext/su", "/system/usr/we-need-root/su", "/cache/su", "/data/adb/magisk",
+  )
+  private val hookNames = listOf("frida", "gum-js-loop", "gmain", "linjector", "xposed", "lsposed", "substrate")
+
+  fun rooted(): Boolean =
+    Build.TAGS?.contains("test-keys") == true || suPaths.any { File(it).exists() }
+
+  fun emulator(): Boolean {
+    val fingerprint = Build.FINGERPRINT.lowercase()
+    val model = Build.MODEL.lowercase()
+    val hardware = Build.HARDWARE.lowercase()
+    val product = Build.PRODUCT.lowercase()
+    return fingerprint.startsWith("generic") || fingerprint.contains("emulator") ||
+      model.contains("emulator") || model.contains("android sdk built for") || model.contains("sdk_gphone") ||
+      hardware.contains("goldfish") || hardware.contains("ranchu") ||
+      product.contains("sdk") || product.contains("emulator") || product.contains("simulator")
+  }
+
+  /** A hooking library loaded into the app, the Xposed bridge, or Frida's server listening on the phone. */
+  fun hooked(): Boolean {
+    val maps = runCatching { File("/proc/self/maps").readText().lowercase() }.getOrDefault("")
+    if (hookNames.any { maps.contains(it) }) return true
+    if (runCatching { Class.forName("de.robv.android.xposed.XposedBridge") }.isSuccess) return true
+    return runCatching {
+      Socket().use { it.connect(InetSocketAddress("127.0.0.1", 27042), 150) }
+      true
+    }.getOrDefault(false)
+  }
+
+  fun debugged(): Boolean = Debug.isDebuggerConnected() || Debug.waitingForDebugger()
+}

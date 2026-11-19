@@ -65,7 +65,7 @@ export class PresenceService {
    */
   async report(
     auth: AuthContext,
-    input: { online?: boolean; lat?: number; lng?: number },
+    input: { online?: boolean; lat?: number; lng?: number; mocked?: boolean },
     attest?: Pick<AttestContext, 'evidence' | 'request'>,
   ) {
     const [running, [current]] = await Promise.all([
@@ -109,7 +109,7 @@ export class PresenceService {
     const located = sharing && body.lat !== undefined && body.lng !== undefined;
     const now = new Date();
     const place = located
-      ? { lat: body.lat!, lng: body.lng!, location: point(body.lat!, body.lng!), locatedAt: now }
+      ? { lat: body.lat!, lng: body.lng!, location: point(body.lat!, body.lng!), locatedAt: now, mocked: !!body.mocked }
       : sharing
         ? {}
         : { lat: null, lng: null, location: null, locatedAt: null };

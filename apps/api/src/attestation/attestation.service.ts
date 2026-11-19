@@ -11,6 +11,7 @@ import type { AuthContext } from '../auth/auth.types';
 import { AppAttestError, verifyAssertion, verifyKeyAttestation } from './app-attest';
 import {
   attestedHash,
+  RISK_LABELS,
   type AttestationCheck,
   type AttestEvidence,
   type AttestPurpose,
@@ -151,10 +152,25 @@ export class AttestationService {
       .onConflictDoNothing({ target: appAttestKeys.keyId });
   }
 
-  /** The verdict on a request's evidence, kept for staff and risk signals. */
+  /**
+   * The verdict on a request's evidence, kept for staff. What the app found on the phone (MB4) makes a
+   * trusted phone doubtful, and is kept as the device's latest.
+   */
   async check(ctx: AttestContext): Promise<AttestationCheck> {
-    const result = await this.judge(ctx);
+    const signals = ctx.evidence.signals ?? [];
+    const judged = await this.judge(ctx);
+    const result: AttestationCheck = signals.length
+      ? {
+          verdict: judged.verdict === 'trusted' ? 'doubtful' : judged.verdict,
+          reasons: [...judged.reasons, ...signals.map((s) => RISK_LABELS[s])],
+        }
+      : judged;
+    await this.db
+      .update(devices)
+      .set({ riskSignals: signals, riskSignalsAt: new Date() })
+      .where(and(eq(devices.deviceKey, ctx.deviceKey), eq(devices.app, ctx.app)));
     await this.db.insert(deviceAttestations).values({
+      signals,
       deviceKey: ctx.deviceKey,
       userId: ctx.userId,
       app: ctx.app,

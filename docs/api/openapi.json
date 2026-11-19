@@ -3914,6 +3914,9 @@
                     "type": "number",
                     "minimum": -180,
                     "maximum": 180
+                  },
+                  "mocked": {
+                    "type": "boolean"
                   }
                 },
                 "additionalProperties": false

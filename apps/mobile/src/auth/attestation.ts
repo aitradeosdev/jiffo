@@ -11,6 +11,8 @@ export const ATTEST_HEADERS = {
   nonce: 'x-jiffo-attest-nonce',
   token: 'x-jiffo-attest',
   keyId: 'x-jiffo-attest-key',
+  /** What the app found on the phone (MB4), comma-separated. */
+  risk: 'x-jiffo-risk',
 } as const;
 
 /** What the phone does: hashes in and out as hex, Apple's answers as base64. */
@@ -19,6 +21,8 @@ export interface AttestNative {
   ready?(): boolean;
   /** Gets ready ahead of the first check (Play Integrity's token provider). */
   prepare?(): void;
+  /** What the app finds on the phone (MB4): rooted, emulator, hooking, debugger. */
+  riskSignals?(): Promise<string[]>;
   /** Android: a Play Integrity token over the request's hash. */
   integrityToken(requestHash: string): Promise<string>;
   /** iOS: a new App Attest key in the Secure Enclave; its id. */
@@ -113,7 +117,21 @@ export async function attestationHeaders(
   body: unknown,
 ): Promise<Record<string, string>> {
   const native = deps.native;
-  if (!native || deps.platform === 'web' || native.ready?.() === false) return {};
+  if (!native || deps.platform === 'web') return {};
+  // Sent whether or not a check can be made: the app's own word, which adds to Google's and Apple's.
+  const signals = await native.riskSignals?.().catch(() => []);
+  const risk: Record<string, string> = signals?.length ? { [ATTEST_HEADERS.risk]: signals.join(',') } : {};
+  return { ...risk, ...(await check(deps, native, method, path, body)) };
+}
+
+async function check(
+  deps: AttestDeps,
+  native: AttestNative,
+  method: 'POST' | 'PUT',
+  path: string,
+  body: unknown,
+): Promise<Record<string, string>> {
+  if (native.ready?.() === false) return {};
   try {
     const deviceKey = await deps.deviceKey();
     // An iPhone needs its key first; without one, no code is asked for.

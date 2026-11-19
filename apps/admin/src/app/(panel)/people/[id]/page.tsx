@@ -43,6 +43,9 @@ interface Detail {
     push: boolean;
     lastSeenAt: string;
     activeSessions: number;
+    /** What the app last found on the phone (MB4). */
+    riskSignals: string[];
+    riskSignalsAt: string | null;
   }>;
   agent: {
     tier: string;
@@ -151,6 +154,14 @@ const HISTORY: Record<string, string> = {
   payout_reversed: 'Withdrawal returned',
   hold_release: 'Earnings now available',
   settle: 'Errand paid out',
+};
+
+/** What the app reports finding on a phone (docs/security-plan.md, MB4). */
+const RISK_LABELS: Record<string, string> = {
+  rooted: 'rooted or jailbroken',
+  emulator: 'an emulator',
+  hooking: 'a hooking tool',
+  debugger: 'a debugger',
 };
 
 export default async function PersonPage({
@@ -406,6 +417,12 @@ export default async function PersonPage({
                       {dev.activeSessions ? 'signed in' : 'signed out'}
                       {dev.push ? ' · notifications on' : ''}
                     </p>
+                    {dev.riskSignals.length ? (
+                      <p className="text-[13px] font-semibold text-danger">
+                        The app found: {dev.riskSignals.map((s) => RISK_LABELS[s] ?? s).join(', ')}
+                        {dev.riskSignalsAt ? ` (${ago(dev.riskSignalsAt, country.timezone)})` : ''}
+                      </p>
+                    ) : null}
                   </li>
                 ))}
               </ul>
