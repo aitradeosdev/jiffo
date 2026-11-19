@@ -9,6 +9,7 @@ export function FlagDecisionForm({ id, open }: { id: string; open: boolean }) {
     <NoteForm
       id={id}
       action={decideFlag}
+      noEnter
       placeholder={open ? 'What you found, for example: siblings, checked by call' : 'Why it needs another look'}
       buttons={
         open

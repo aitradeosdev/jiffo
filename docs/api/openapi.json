@@ -1857,6 +1857,22 @@
               "maxLength": 2,
               "minLength": 2
             }
+          },
+          {
+            "name": "person",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "errand",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {

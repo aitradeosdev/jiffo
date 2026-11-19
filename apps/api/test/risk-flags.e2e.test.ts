@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CountriesService } from '../src/countries/countries.service';
-import { adminAudit, deposits, otpChallenges } from '../src/db/schema';
+import { adminAudit, deposits, devices, otpChallenges, payoutAccounts } from '../src/db/schema';
 import { RiskFlagsService } from '../src/risk/risk-flags.service';
 import {
   act,
@@ -12,6 +12,7 @@ import {
   createTestApp,
   fund,
   LAGOS_STOPS,
+  passSelfie,
   signed,
   signIn,
   uniqueDigits,
@@ -235,6 +236,14 @@ describe('fraud flags and the Risk queue', () => {
     // Confirmed fraud stays out; cleared, it counts again.
     await decide(ops, flag!.id, 'confirm', 'No movement at all, agent and customer related').expect(200);
     expect(await stats()).toMatchObject({ completed: 1, flagged: 1 });
+    // The Flags page, opened from the person's page, counts their flags only.
+    const counts = (
+      await request(t.http).get(`/v1/admin/flags/counts?country=NG&person=${agent.userId}`).set(ops.headers).expect(200)
+    ).body;
+    expect(counts).toEqual({
+      risk: { open: 0, cleared: 0, confirmed: 1 },
+      verification: { open: 0, cleared: 0, confirmed: 0 },
+    });
     await decide(ops, flag!.id, 'reopen', 'Opened by mistake, looking again').expect(200);
     await decide(ops, flag!.id, 'clear', 'Shop next door, receipt checked').expect(200);
     expect(await stats()).toMatchObject({ total: 2, completed: 2, flagged: 0 });
@@ -278,6 +287,83 @@ describe('fraud flags and the Risk queue', () => {
     const counts = (await request(t.http).get('/v1/admin/flags/counts?country=NG').set(ops.headers).expect(200)).body;
     expect(counts.risk.confirmed).toBeGreaterThanOrEqual(1);
     expect(counts.verification.cleared).toBeGreaterThanOrEqual(1);
+  });
+
+  it('lists decided flags by when they were decided, latest first', async () => {
+    const customer = await signIn(t, 'customer');
+    await fund(t, customer);
+    const older = await createErrand(t, customer, { description: 'Bring cash from the ATM' });
+    const newer = await createErrand(t, customer, { description: 'Bring cash from the POS' });
+    const [a] = await flagsFor({ errand: older.id });
+    const [b] = await flagsFor({ errand: newer.id });
+    await decide(ops, b!.id, 'confirm', 'Cash runs are not allowed').expect(200);
+    await decide(ops, a!.id, 'confirm', 'Cash runs are not allowed').expect(200);
+    const confirmed = await flagsFor({ person: customer.userId }, 'risk', 'confirmed');
+    expect(confirmed.map((f) => f.id)).toEqual([a!.id, b!.id]);
+  });
+
+  it("doesn't fail a sign-in over a phone id it can't use", async () => {
+    const person = await signIn(t, 'customer', { phoneId: '' });
+    const rows = await t.db
+      .select({ fingerprint: devices.phoneFingerprint })
+      .from(devices)
+      .where(eq(devices.userId, person.userId));
+    expect(rows).toEqual([{ fingerprint: null }]);
+  });
+
+  it('counts someone as an agent once they apply, and looks at their phone again then', async () => {
+    const phoneId = randomUUID();
+    await signIn(t, 'customer', { phoneId });
+    // Opened the agent app but never applied: two customers' accounts on a family phone.
+    const curious = await signIn(t, 'agent', { phoneId, unapproved: true, unsecured: true });
+    expect(await flagsFor({ person: curious.userId }, 'verification')).toEqual([]);
+    await request(t.http).get('/v1/agent/application').set(curious.headers).expect(200);
+    expect(kinds(await flagsFor({ person: curious.userId }, 'verification'))).toEqual(['shared_phone']);
+  });
+
+  it('keeps every bank account two agents share on their one flag', async () => {
+    const first = `0${uniqueDigits(9)}`;
+    const second = `0${uniqueDigits(9)}`;
+    const one = await agentWithAccount(first);
+    const two = await agentWithAccount(first);
+    t.payments.accounts.set(`058:${second}`, 'TUNDE BAKARE');
+    for (const agent of [one, two]) {
+      await passSelfie(t, agent);
+      await signed(t, agent).put('/v1/payout-account').send({ bankCode: '058', accountNumber: second }).expect(200);
+    }
+    const flags = await flagsFor({ person: two.userId }, 'verification');
+    expect(flags).toHaveLength(1);
+    expect(flags[0]!.details.accounts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ last4: first.slice(-4) }),
+        expect.objectContaining({ last4: second.slice(-4) }),
+      ]),
+    );
+  });
+
+  it('fingerprints older bank accounts, past one it cannot read', async () => {
+    const agent = await agentWithAccount(`0${uniqueDigits(9)}`);
+    await t.db.update(payoutAccounts).set({ accountFingerprint: null }).where(eq(payoutAccounts.userId, agent.userId));
+    const [good] = await t.db
+      .select({ id: payoutAccounts.id, provider: payoutAccounts.provider, bankName: payoutAccounts.bankName })
+      .from(payoutAccounts)
+      .where(eq(payoutAccounts.userId, agent.userId));
+    // An account whose number was sealed under another key.
+    const [bad] = (
+      await t.db.execute<{ id: string }>(sql`insert into payout_accounts
+        (user_id, provider, bank_code, bank_name, account_number, account_name, recipient_code, replaced_at)
+        values (${agent.userId}, ${good!.provider}, '058', ${good!.bankName}, 'enc:v1:broken', 'enc:v1:broken',
+          'enc:v1:broken', now())
+        returning id`)
+    ).rows;
+    await t.app.get(RiskFlagsService).fingerprintOldAccounts();
+    const rows = await t.db
+      .select({ id: payoutAccounts.id, fingerprint: payoutAccounts.accountFingerprint })
+      .from(payoutAccounts)
+      .where(eq(payoutAccounts.userId, agent.userId));
+    expect(rows.find((r) => r.id === good!.id)?.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(rows.find((r) => r.id === bad!.id)?.fingerprint).toBeNull();
+    await t.db.delete(payoutAccounts).where(eq(payoutAccounts.id, bad!.id));
   });
 
   it('refuses a staff member deciding a flag about their own app account', async () => {

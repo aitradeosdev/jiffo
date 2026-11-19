@@ -1,4 +1,10 @@
-import { Inject, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  type BeforeApplicationShutdown,
+  type OnApplicationBootstrap,
+} from '@nestjs/common';
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import { RISK_FLAG_INFO, type RiskFlagKind } from '@jiffo/shared';
 import { haversineMeters } from '../adapters/maps';
@@ -8,7 +14,9 @@ import { matchesLegalName } from '../common/names';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { CountriesService } from '../countries/countries.service';
 import { DB, type Db } from '../db/database.module';
+import { openField } from '../db/fields';
 import {
+  agentApplications,
   deposits,
   devices,
   errandStops,
@@ -36,6 +44,30 @@ interface Raise {
   errandIds?: string[];
 }
 
+/** Older payout accounts fingerprinted at a time. */
+const BACKFILL_BATCH = 200;
+
+/**
+ * A flag's details with a later finding's: lists are joined, each item once (the ways a phone was shared,
+ * the bank accounts two agents share); anything else takes the later value.
+ */
+function mergeDetails(earlier: Record<string, unknown>, later: Record<string, unknown>) {
+  const out: Record<string, unknown> = { ...earlier };
+  for (const [key, value] of Object.entries(later)) {
+    const before = earlier[key];
+    if (Array.isArray(before) && Array.isArray(value)) {
+      const seen = new Map([...before, ...value].map((item) => [JSON.stringify(item), item]));
+      out[key] = [...seen.values()];
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+/** How long shutting down waits for checks still running. */
+const SHUTDOWN_WAIT_MS = 5_000;
+
 /** Two accounts in a fixed order, so A with B and B with A are one flag. */
 const pairKey = (a: string, b: string) => [a, b].sort().join(':');
 
@@ -45,7 +77,7 @@ const pairKey = (a: string, b: string) => [a, b].sort().join(':');
  * neither waits for it nor fails with it; a flag refuses nothing by itself.
  */
 @Injectable()
-export class RiskFlagsService implements OnApplicationBootstrap {
+export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicationShutdown {
   private readonly logger = new Logger(RiskFlagsService.name);
   private readonly running = new Set<Promise<unknown>>();
   /** Keys of their own, derived from the ID fingerprint key: phones' ids and bank accounts are never kept. */
@@ -82,6 +114,11 @@ export class RiskFlagsService implements OnApplicationBootstrap {
     while (this.running.size) await Promise.allSettled([...this.running]);
   }
 
+  /** Checks under way finish before the database closes, for up to a few seconds. */
+  async beforeApplicationShutdown() {
+    await Promise.race([this.settled(), new Promise((resolve) => setTimeout(resolve, SHUTDOWN_WAIT_MS).unref())]);
+  }
+
   /** Runs a check beside the request: never waited for, and a failure is only logged. */
   private later(what: string, check: () => Promise<unknown>) {
     const run: Promise<unknown> = check()
@@ -110,6 +147,14 @@ export class RiskFlagsService implements OnApplicationBootstrap {
   /** A sign-in, or a phone key saved: the phone may be another account's too (I3). */
   phoneUsed(userId: string, deviceId: string) {
     this.later(`phone ${deviceId}`, () => this.checkSharedPhone(userId, deviceId));
+  }
+
+  /** Someone started an agent application: phones they share with others now count (I3). */
+  becameApplicant(userId: string) {
+    this.later(`phones of ${userId}`, async () => {
+      const own = await this.db.select({ id: devices.id }).from(devices).where(eq(devices.userId, userId));
+      for (const device of own) await this.checkSharedPhone(userId, device.id);
+    });
   }
 
   /** A payout account saved: another agent may have saved the same one (I3). */
@@ -282,8 +327,8 @@ export class RiskFlagsService implements OnApplicationBootstrap {
 
   /**
    * Other accounts seen on this phone (I3): the same install of an app, the same phone key, or the phone's id
-   * both apps send. Flagged when either account is an agent's: a family's customer accounts on one phone are
-   * ordinary, and there are no promotions to abuse yet.
+   * both apps send. Flagged when either account is an agent's, counting anyone who has started an application:
+   * a family's customer accounts on one phone are ordinary, and there are no promotions to abuse yet.
    */
   private async checkSharedPhone(userId: string, deviceId: string) {
     const [device] = await this.db
@@ -309,9 +354,9 @@ export class RiskFlagsService implements OnApplicationBootstrap {
     const agents = new Set(
       (
         await this.db
-          .selectDistinct({ userId: devices.userId })
-          .from(devices)
-          .where(and(inArray(devices.userId, [userId, ...others.map((o) => o.userId)]), eq(devices.app, 'agent')))
+          .select({ userId: agentApplications.userId })
+          .from(agentApplications)
+          .where(inArray(agentApplications.userId, [userId, ...others.map((o) => o.userId)]))
       ).map((r) => r.userId),
     );
     for (const other of others) {
@@ -348,7 +393,7 @@ export class RiskFlagsService implements OnApplicationBootstrap {
         dedupeKey: pairKey(userId, other.userId),
         userId,
         otherUserId: other.userId,
-        details: { bankName: other.bankName, last4: other.last4 },
+        details: { accounts: [{ bankName: other.bankName, last4: other.last4 }] },
       });
     }
   }
@@ -377,18 +422,25 @@ export class RiskFlagsService implements OnApplicationBootstrap {
     if (created) {
       this.logger.log(`Flagged ${input.kind} for ${RISK_FLAG_INFO[input.kind].queue}`);
     } else {
-      const [standing] = await this.db
-        .update(riskFlags)
-        .set({ details: input.details ?? {}, updatedAt: new Date() })
-        .where(
-          and(
-            eq(riskFlags.kind, input.kind),
-            eq(riskFlags.dedupeKey, input.dedupeKey),
-            ne(riskFlags.status, 'cleared'),
-          ),
-        )
-        .returning({ id: riskFlags.id });
-      id = standing?.id;
+      id = await this.db.transaction(async (tx) => {
+        const [standing] = await tx
+          .select({ id: riskFlags.id, details: riskFlags.details })
+          .from(riskFlags)
+          .where(
+            and(
+              eq(riskFlags.kind, input.kind),
+              eq(riskFlags.dedupeKey, input.dedupeKey),
+              ne(riskFlags.status, 'cleared'),
+            ),
+          )
+          .for('update');
+        if (!standing) return undefined;
+        await tx
+          .update(riskFlags)
+          .set({ details: mergeDetails(standing.details, input.details ?? {}), updatedAt: new Date() })
+          .where(eq(riskFlags.id, standing.id));
+        return standing.id;
+      });
     }
     if (id && input.errandIds?.length) await this.link(id, input.errandIds);
     return id ?? null;
@@ -401,25 +453,33 @@ export class RiskFlagsService implements OnApplicationBootstrap {
       .onConflictDoNothing();
   }
 
-  /** Fingerprints for accounts saved before they were kept, a few hundred at a time. */
-  private async fingerprintOldAccounts() {
+  /**
+   * Fingerprints for accounts saved before they were kept, a few hundred at a time. Each account number is
+   * opened on its own, so one that can't be read (sealed under another key) is passed over, not the rest.
+   */
+  async fingerprintOldAccounts() {
+    let after: string | null = null;
+    let skipped = 0;
     for (;;) {
-      const batch = await this.db
-        .select({
-          id: payoutAccounts.id,
-          bankCode: payoutAccounts.bankCode,
-          accountNumber: payoutAccounts.accountNumber,
-        })
-        .from(payoutAccounts)
-        .where(isNull(payoutAccounts.accountFingerprint))
-        .limit(200);
-      if (!batch.length) return;
-      for (const account of batch) {
-        await this.db
-          .update(payoutAccounts)
-          .set({ accountFingerprint: this.accountFingerprint(account.bankCode, account.accountNumber) })
-          .where(eq(payoutAccounts.id, account.id));
+      const { rows }: { rows: Array<{ id: string; bank_code: string; account_number: string }> } = await this.db
+        .execute(sql`select id, bank_code, account_number from ${payoutAccounts}
+          where account_fingerprint is null ${after === null ? sql`` : sql`and id > ${after}`}
+          order by id limit ${BACKFILL_BATCH}`);
+      for (const row of rows) {
+        try {
+          const number = openField('payout_accounts.account_number', row.account_number);
+          await this.db
+            .update(payoutAccounts)
+            .set({ accountFingerprint: this.accountFingerprint(row.bank_code, number) })
+            .where(and(eq(payoutAccounts.id, row.id), isNull(payoutAccounts.accountFingerprint)));
+        } catch (error) {
+          skipped += 1;
+          this.logger.warn(`Could not fingerprint payout account ${row.id}: ${(error as Error).message}`);
+        }
       }
+      if (rows.length < BACKFILL_BATCH) break;
+      after = rows[rows.length - 1]!.id;
     }
+    if (skipped) this.logger.warn(`${skipped} older payout accounts were left without a fingerprint`);
   }
 }

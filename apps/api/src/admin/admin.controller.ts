@@ -171,6 +171,7 @@ const FlagsQuery = z.object({
   before: z.string().max(80).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });
+const FlagCountsQuery = FlagsQuery.pick({ country: true, person: true, errand: true });
 const FlagId = new ParseUUIDPipe({ exceptionFactory: () => notFound('flag_not_found', 'Flag not found') });
 const FlagDecisionBody = z.object({ decision: z.enum(['clear', 'confirm', 'reopen']), note: Note });
 const PayoutAccountDecisionBody = z.object({ decision: z.enum(['approve', 'decline']), note: Note });
@@ -553,8 +554,8 @@ export class AdminController {
 
   @Get('flags/counts')
   @Needs('read')
-  flagCounts(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
-    return this.flags.counts(query.country);
+  flagCounts(@Query(new ZodBody(FlagCountsQuery)) query: z.infer<typeof FlagCountsQuery>) {
+    return this.flags.counts(query.country, query);
   }
 
   /** Clear, confirm or reopen a flag: the Risk queue needs risk, the verification queue verify. */

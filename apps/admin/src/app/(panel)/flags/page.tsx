@@ -113,7 +113,13 @@ export default async function FlagsPage({
   if (errand) query.set('errand', errand);
   const [page, counts, me] = await Promise.all([
     api<{ flags: Flag[]; next: string | null }>(`/admin/flags?${query}`),
-    api<Record<RiskQueue, Record<RiskFlagStatus, number>>>(`/admin/flags/counts?country=${country.code}`),
+    api<Record<RiskQueue, Record<RiskFlagStatus, number>>>(
+      `/admin/flags/counts?${new URLSearchParams({
+        country: country.code,
+        ...(person ? { person } : {}),
+        ...(errand ? { errand } : {}),
+      })}`,
+    ),
     getMe(),
   ]);
   const canDecide = me.permissions.includes(RISK_QUEUE_INFO[queue].permission);
@@ -170,7 +176,11 @@ export default async function FlagsPage({
       <Card padded={false}>
         {page.flags.length === 0 ? (
           <Empty title={status === 'open' ? 'Nothing to look at' : `No flags ${STATUS[status].label.toLowerCase()}`}>
-            {status === 'open' ? 'Flags that need a person show up here.' : null}
+            {person || errand
+              ? 'Nothing here about them. The counts above show where their flags are.'
+              : status === 'open'
+                ? 'Flags that need a person show up here.'
+                : null}
           </Empty>
         ) : (
           <ul className="divide-y divide-line">

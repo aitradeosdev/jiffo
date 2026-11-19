@@ -3,13 +3,13 @@
 import { redirect } from 'next/navigation';
 import type { NoteFormState } from '@/components/note-form';
 import { api, messageOf } from '@/lib/api';
+import { flagDecisionOf } from '@/lib/flags';
 
-const DECISIONS = ['clear', 'confirm', 'reopen'] as const;
-
-/** Clears, confirms or reopens a fraud flag, saying why. */
+/** Clears, confirms or reopens a fraud flag, saying why. Only a button pressed decides: never a default. */
 export async function decideFlag(_: NoteFormState, form: FormData): Promise<NoteFormState> {
   const id = String(form.get('id') ?? '');
-  const decision = DECISIONS.find((d) => d === form.get('decision')) ?? 'clear';
+  const decision = flagDecisionOf(form.get('decision'));
+  if (!decision) return { error: 'Choose what to do with the flag.' };
   let queue: string;
   try {
     ({ queue } = await api<{ queue: string }>(`/admin/flags/${encodeURIComponent(id)}/decision`, {

@@ -36,12 +36,13 @@ export class FlagsAdminService {
     private readonly audit: AuditService,
   ) {}
 
-  async counts(country: string) {
+  /** How many flags each queue holds in each state: the country's, or one person's or errand's. */
+  async counts(country: string, about: { person?: string; errand?: string } = {}) {
     await requireCountry(this.db, country);
     const rows = await this.db
       .select({ queue: riskFlags.queue, status: riskFlags.status, count: sql<number>`count(*)::int` })
       .from(riskFlags)
-      .where(eq(riskFlags.countryCode, country))
+      .where(and(eq(riskFlags.countryCode, country), this.about(about)))
       .groupBy(riskFlags.queue, riskFlags.status);
     const of = (queue: RiskQueue) =>
       Object.fromEntries(
@@ -50,7 +51,20 @@ export class FlagsAdminService {
     return Object.fromEntries(RISK_QUEUES.map((q) => [q, of(q)])) as Record<RiskQueue, Record<RiskFlagStatus, number>>;
   }
 
-  /** Flags in one queue and state: open ones oldest first, as a queue is worked; decided ones newest first. */
+  /** Flags about one person (either side), or linked to one errand. */
+  private about({ person, errand }: { person?: string; errand?: string }) {
+    return and(
+      person ? or(eq(riskFlags.userId, person), eq(riskFlags.otherUserId, person)) : undefined,
+      errand
+        ? sql`exists (select 1 from ${riskFlagErrands} fe where fe.flag_id = ${riskFlags.id} and fe.errand_id = ${errand})`
+        : undefined,
+    );
+  }
+
+  /**
+   * Flags in one queue and state: open ones oldest first, as a queue is worked; decided ones by when they
+   * were decided, latest first.
+   */
   async list(query: {
     country: string;
     queue: RiskQueue;
@@ -63,6 +77,8 @@ export class FlagsAdminService {
     await requireCountry(this.db, query.country);
     const cursor = parseCursor(query.before);
     const oldestFirst = query.status === 'open';
+    // Open flags go by when they were raised, decided ones by when they were decided.
+    const at = oldestFirst ? riskFlags.createdAt : sql`coalesce(${riskFlags.decidedAt}, ${riskFlags.createdAt})`;
     const rows = await this.db
       .select({
         id: riskFlags.id,
@@ -77,7 +93,7 @@ export class FlagsAdminService {
         decidedAt: riskFlags.decidedAt,
         decidedBy: admins.name,
         decisionNote: riskFlags.decisionNote,
-        cursorAt: exactTime(riskFlags.createdAt),
+        cursorAt: exactTime(at),
       })
       .from(riskFlags)
       .leftJoin(admins, eq(admins.id, riskFlags.decidedBy))
@@ -86,23 +102,15 @@ export class FlagsAdminService {
           eq(riskFlags.countryCode, query.country),
           eq(riskFlags.queue, query.queue),
           eq(riskFlags.status, query.status),
-          query.person ? or(eq(riskFlags.userId, query.person), eq(riskFlags.otherUserId, query.person)) : undefined,
-          query.errand
-            ? sql`exists (select 1 from ${riskFlagErrands} fe where fe.flag_id = ${riskFlags.id}
-                and fe.errand_id = ${query.errand})`
-            : undefined,
+          this.about(query),
           cursor
             ? oldestFirst
-              ? sql`(${riskFlags.createdAt}, ${riskFlags.id}) > (${cursor.at}::timestamptz, ${cursor.id}::uuid)`
-              : sql`(${riskFlags.createdAt}, ${riskFlags.id}) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)`
+              ? sql`(${at}, ${riskFlags.id}) > (${cursor.at}::timestamptz, ${cursor.id}::uuid)`
+              : sql`(${at}, ${riskFlags.id}) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)`
             : undefined,
         ),
       )
-      .orderBy(
-        oldestFirst
-          ? sql`${riskFlags.createdAt} asc, ${riskFlags.id} asc`
-          : sql`${riskFlags.createdAt} desc, ${riskFlags.id} desc`,
-      )
+      .orderBy(oldestFirst ? sql`${at} asc, ${riskFlags.id} asc` : sql`${at} desc, ${riskFlags.id} desc`)
       .limit(query.limit + 1);
     const page = rows.slice(0, query.limit);
     const last = page.at(-1);
