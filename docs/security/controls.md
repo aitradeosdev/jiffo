@@ -72,6 +72,7 @@ Google Play Integrity on Android and Apple App Attest on iOS show that a request
   - **Enforce** refuses a failed, missing or unavailable check: not our app, a changed one, a code for another request or install, or a check not set up for that platform. A doubtful phone isn't refused: rooted, an emulator, a development build, or Google not answering. An agent on an errand who is refused the check while going online stays offline but keeps sharing their position for that customer. For a doubtful phone, the agent takes a selfie first, at most 10 minutes before the money action or going online, and a doubtful sign-in to the agent app marks the phone as needing one.
 - **What is kept:** each verdict and its reasons (`device_attestations`), for staff and the risk signals of MB4. No token is kept.
 - **Development:** builds and tests use a stand-in (`fake:<verdict>`), which production never accepts.
+- **In the apps:** `modules/app-attest` asks Google or Apple for the check, and `src/auth/attestation.ts` builds it over the request, as the server hashes it. It is sent at sign-in, with withdrawals and payout account changes, and when going online, made fresh for each attempt. An iPhone makes its App Attest key and registers it once. Expo Go and the web build can't make a check and send none.
 
 ## The apps on the phone
 

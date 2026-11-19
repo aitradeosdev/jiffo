@@ -4,6 +4,7 @@ import * as Location from 'expo-location';
 import { useSession } from '../auth/session';
 import { useRealtimeEvent } from '../realtime/realtime';
 import { ApiError, errorMessage } from '../api/client';
+import { appCheck } from '../auth/app-check';
 import type { Coords } from '../location';
 import { Button, Text } from '../ui/kit';
 import { ModalSheet } from '../ui/modal-sheet';
@@ -64,9 +65,16 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   const switched = useRef(false);
 
   const send = useCallback(
-    async (next: { online: boolean; lat?: number; lng?: number }) => {
+    async (next: { online: boolean; lat?: number; lng?: number }, goingOnline = false) => {
       markSent();
-      return api.put<{ online: boolean; selfieNeeded?: SelfieReason }>('/v1/agent/presence', next);
+      // Going online carries the app check (MB3), made fresh each time; staying online needs none.
+      const checked = goingOnline ? await appCheck('PUT', '/v1/agent/presence', next) : {};
+      return api.withHeaders<{ online: boolean; selfieNeeded?: SelfieReason }>(
+        'PUT',
+        '/v1/agent/presence',
+        next,
+        checked,
+      );
     },
     [api],
   );
@@ -148,7 +156,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
           // Going online the first time each day needs a selfie (docs/security-plan.md, I8). An agent on an
           // errand is kept sharing their position, offline, until it passes.
           const sent = await withSelfie(async () => {
-            const res = await send({ online: true, ...here });
+            const res = await send({ online: true, ...here }, true);
             if (res.selfieNeeded) {
               throw new ApiError(403, 'selfie_needed', 'Take your selfie to go online.', { reason: res.selfieNeeded });
             }

@@ -1,0 +1,23 @@
+apply plugin: 'com.android.library'
+
+group = 'com.jiffo.appattest'
+version = '1.0.0'
+
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useExpoPublishing()
+
+android {
+  namespace "com.jiffo.appattest"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  // Google Play Integrity, standard requests (docs/security-plan.md, MB3).
+  implementation 'com.google.android.play:integrity:1.4.0'
+}
