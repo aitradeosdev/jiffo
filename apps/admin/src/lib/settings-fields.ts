@@ -260,6 +260,18 @@ export const SECTIONS: Section[] = [
         help: "Hours. They are told by push, SMS and email, so a change they didn't make is noticed before money can leave. It can't be switched off.",
       },
       {
+        path: 'security.dailySelfie',
+        label: 'Agents take a selfie before going online each day',
+        kind: 'bool',
+        help: 'Compared with the face Smile ID kept from their ID check, so the person working is the agent who was verified. Three failures in a row (Identity, Selfie tries) suspend the account.',
+      },
+      {
+        path: 'security.randomSelfiePercent',
+        label: 'Extra selfie checks at random when going online, in %',
+        kind: 'count',
+        help: 'Out of 100 times an agent goes online, how many ask for one more selfie. 0 is off.',
+      },
+      {
         path: 'security.appPinTries',
         label: 'Wrong app PINs before it locks',
         kind: 'count',

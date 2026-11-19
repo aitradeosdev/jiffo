@@ -10,6 +10,10 @@ import {
   type IdentityPerson,
   type IdentityRequest,
   type IdentityResult,
+  type ParsedWebhook,
+  type SelfieSession,
+  type SelfieVerdict,
+  SELFIE_PREFIX,
 } from './identity';
 import { providerInfo, type IdType } from '@jiffo/shared';
 
@@ -65,6 +69,22 @@ const ADDRESS_BY_SUPPORT: AddressResult = {
   note: "This provider doesn't check addresses; our team does",
 };
 
+/**
+ * A selfie job's verdict from Smile ID's status API. clear: the face matched. block: it didn't. error or
+ * attention: unclear, so it's taken again.
+ */
+function verdictOf(
+  job: { status?: string; user_id?: string; message?: string; created_at?: string },
+  jobId: string,
+): SelfieVerdict {
+  const created = job.created_at ? new Date(job.created_at) : null;
+  const base = { enrolledId: job.user_id ?? '', jobId, ...(created && !isNaN(+created) ? { createdAt: created } : {}) };
+  if (job.status === 'processing') return { status: 'pending', ...base };
+  const outcome = job.status === 'clear' ? 'passed' : job.status === 'block' ? 'failed' : 'retry';
+  const note = outcome === 'passed' ? undefined : (job.message ?? job.status);
+  return { status: 'done', outcome, ...(note ? { note } : {}), ...base };
+}
+
 /** How old a Smile ID callback's signed timestamp may be. Their signature doesn't cover the body. */
 const SMILE_CALLBACK_MAX_AGE_MS = 30 * 60_000;
 
@@ -77,7 +97,9 @@ interface SmileCallback {
   timestamp?: string;
   signature?: string;
   job_id?: string;
-  partner_params?: { user_id?: string; job_id?: string; reference?: string };
+  /** On a SmartSelfie Authentication's callback, smart_selfie_authentication. */
+  product?: string;
+  partner_params?: { user_id?: string; job_id?: string; reference?: string; job_type?: number | string };
   id_fields?: {
     first_name?: string;
     other_names?: string;
@@ -116,10 +138,12 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
     this.base = sandbox ? 'https://testapi.smileidentity.com' : 'https://api.smileidentity.com';
   }
 
-  private async token() {
+  /** A v3 token: for our own calls, or with `scope` one limited to a person and a product, for the app's SDK. */
+  private async token(scope?: FormData) {
     const res = await this.fetchImpl(`${this.base}/v3/token`, {
       method: 'POST',
       headers: { 'smileid-partner-id': this.partnerId, 'smileid-api-key': this.apiKey },
+      ...(scope ? { body: scope } : {}),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     }).catch((error: Error) => {
       throw new IdentityProviderError(`Smile ID didn't answer: ${error.message}`);
@@ -172,7 +196,7 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
    * Smile ID's status API is asked for this job, which must belong to the same check. The legal name, date
    * of birth and NIN come from the body, as the status API doesn't give them.
    */
-  async parseWebhook(rawBody: Buffer, headers: Headers) {
+  async parseWebhook(rawBody: Buffer, headers: Headers): Promise<ParsedWebhook | null> {
     let body: SmileCallback;
     try {
       body = JSON.parse(rawBody.toString('utf8')) as SmileCallback;
@@ -190,7 +214,12 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
     if (!Number.isFinite(signedAt) || Math.abs(Date.now() - signedAt) > SMILE_CALLBACK_MAX_AGE_MS) return null;
     const reference = body.partner_params?.reference ?? body.partner_params?.user_id;
     const jobId = headerOf(headers, 'smileid-job-id') ?? body.job_id ?? body.partner_params?.job_id;
-    if (!reference || !jobId || !/^[\w-]{1,100}$/.test(jobId)) return null;
+    if (!jobId || !/^[\w-]{1,100}$/.test(jobId)) return null;
+    // An agent's selfie check: ours by its reference, or any SmartSelfie job, which may come without it and is
+    // then matched to the agent by the person Smile ID says it was for.
+    const ours = reference?.startsWith(`${SELFIE_PREFIX}-`) ? reference : null;
+    if (ours || body.product?.startsWith('smart_selfie')) return this.selfieVerdict(body, ours, jobId, signature);
+    if (!reference) return null;
 
     const job = await this.jobStatus(jobId);
     if (!job || job.user_id !== reference) return null;
@@ -218,6 +247,37 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
     return { reference, result, replayKey: `${signature}:${jobId}` };
   }
 
+  /**
+   * An agent's selfie check. The body names the product, which must be SmartSelfie Authentication: any other
+   * job run under the check, such as a compare of two photos the app chose, says nothing about the face
+   * Smile ID kept, so it fails. The verdict, the person and the job's time come from the status API.
+   */
+  private async selfieVerdict(
+    body: SmileCallback,
+    reference: string | null,
+    jobId: string,
+    signature: string,
+  ): Promise<ParsedWebhook | null> {
+    const job = await this.jobStatus(jobId);
+    if (!job?.user_id) return null;
+    const replayKey = `${signature}:${jobId}`;
+    const verdict = verdictOf(job, jobId);
+    const authentication =
+      body.product === 'smart_selfie_authentication' &&
+      (body.partner_params?.job_type === undefined || String(body.partner_params.job_type) === '2');
+    if (!authentication) {
+      const note = 'The selfie was not checked against your kept face';
+      return { kind: 'selfie', reference, replayKey, verdict: { ...verdict, status: 'done', outcome: 'failed', note } };
+    }
+    return { kind: 'selfie', reference, replayKey, verdict };
+  }
+
+  /** A selfie job still running when its callback came, which showed it was a SmartSelfie Authentication. */
+  async selfieJob(jobId: string): Promise<SelfieVerdict | null> {
+    const job = await this.jobStatus(jobId);
+    return job?.user_id ? verdictOf(job, jobId) : null;
+  }
+
   /** A job's verdict from Smile ID itself; null when they don't know the job. */
   private async jobStatus(jobId: string) {
     const token = await this.token();
@@ -232,11 +292,38 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
       status?: string;
       user_id?: string;
       message?: string;
+      created_at?: string;
     } | null;
-    if (res.status === 202) return { status: 'processing', user_id: json?.user_id, message: json?.message };
+    if (res.status === 202) return { ...json, status: 'processing' };
     if (!res.ok || !json?.status)
       throw new IdentityProviderError(`Smile ID couldn't say how the check went: ${res.status}`);
     return json;
+  }
+
+  /**
+   * A SmartSelfie Authentication the agent app runs with Smile ID's SDK, against the face kept from the
+   * agent's first check, whose reference is the enrolled user id (docs/security-plan.md, I2, I8). The SDK
+   * needs a token, which reaches the phone, so it is one Smile ID limits to that person and that product,
+   * for 15 minutes. It never allows a new enrolment: without that, Smile ID never replaces the kept face. The
+   * callback address and our reference are fixed in it, and the verdict comes to the webhook.
+   */
+  async startSelfie(input: { enrolledId: string; reference: string }): Promise<SelfieSession> {
+    const scope = new FormData();
+    const json = (value: unknown) => new Blob([JSON.stringify(value)], { type: 'application/json' });
+    scope.append('user_id', input.enrolledId);
+    scope.append('product', 'smart_selfie_authentication');
+    // Only this token can allow a new enrolment, which would replace the kept face; said outright.
+    scope.append('allow_new_enroll', 'false');
+    scope.append('partner_params', json({ reference: input.reference }));
+    scope.append('payload', json({ callback_url: `${this.ctx.publicApiUrl}/v1/webhooks/identity/smileid` }));
+    const token = await this.token(scope);
+    return {
+      enrolledId: input.enrolledId,
+      reference: input.reference,
+      token,
+      partnerId: this.partnerId,
+      sandbox: this.base.includes('testapi'),
+    };
   }
 
   async startAddress(input: { person: IdentityPerson }) {

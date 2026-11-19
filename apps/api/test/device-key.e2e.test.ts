@@ -7,6 +7,7 @@ import { SIGNED_HEADERS, signedPayload } from '../src/auth/device-security.servi
 import {
   agentWithMoney,
   createTestApp,
+  passSelfie,
   secureDevice,
   signed,
   signIn,
@@ -173,6 +174,9 @@ describe("money actions need the phone's key and the app PIN", () => {
     // ...but just after signing in again, as after restoring the phone: as good as a new phone (A6).
     await t.db.update(sessions).set({ createdAt: new Date() }).where(eq(sessions.userId, agent.userId));
     await request(t.http).put('/v1/devices/current/key').set(agent.headers).send({ publicKey }).expect(204);
+    refused(await signed(t, agent).post('/v1/wallet/withdrawals').send(body()), 'selfie_needed');
+    // A selfie first, as on a new phone (X4), then the hold.
+    await passSelfie(t, agent);
     refused(await signed(t, agent).post('/v1/wallet/withdrawals').send(body()), 'signature_invalid');
     refused(
       await signed(t, agent, { key: replacement.privateKey }).post('/v1/wallet/withdrawals').send(body()),

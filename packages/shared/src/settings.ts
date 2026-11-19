@@ -37,6 +37,8 @@ export const DEFAULT_SECURITY_SETTINGS = {
   dailyIdReveals: 20,
   withdrawalHoldHours: 48,
   appPinTries: 5,
+  dailySelfie: true,
+  randomSelfiePercent: 0,
 };
 
 /**
@@ -191,6 +193,13 @@ export const CountrySettingsSchema = z.object({
         .default(48),
       /** Wrong app PINs in a row before it locks until reset by signing in again (A7). */
       appPinTries: z.number().int().min(3).max(10).default(5),
+      /** Agents pass a selfie check the first time they go online each day (I8). Each is a paid check. */
+      dailySelfie: z.boolean().default(true),
+      /**
+       * After the day's check, the chance (in percent) that going online asks for another, at random (I8).
+       * 0 means never. Each is a paid check.
+       */
+      randomSelfiePercent: z.number().int().min(0).max(100).default(0),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
 });

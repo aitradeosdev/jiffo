@@ -848,14 +848,19 @@ export class ErrandsService implements OnModuleInit {
 
   /**
    * Inside the caller's transaction, with the errand row already locked: support closes an errand still
-   * waiting for an agent. Nothing is held yet, so no money moves. Call announce() after the commit.
+   * waiting for an agent, or the system does (no admin id) when it suspends the account itself. Nothing is
+   * held yet, so no money moves. Call announce() after the commit.
    */
-  async adminCancelWaiting(tx: Tx, errand: ErrandRow, adminId: string, note: string): Promise<TransitionResult> {
+  async adminCancelWaiting(tx: Tx, errand: ErrandRow, adminId: string | null, note: string): Promise<TransitionResult> {
+    const actor = adminId ? 'admin' : 'system';
     const money = await this.settingsOf(errand.id);
     if (!money) throw notFound('errand_not_found', 'Errand not found');
-    const to = nextState(errand.status, 'admin_cancel', transitionContext(errand, 'admin'));
-    const effect: EventEffect = { patch: { pendingOfferKobo: null }, record: { note, by: 'support' } };
-    const after = await this.write(tx, errand, 'admin_cancel', to, effect, 'admin', adminId);
+    const to = nextState(errand.status, 'admin_cancel', transitionContext(errand, actor));
+    const effect: EventEffect = {
+      patch: { pendingOfferKobo: null },
+      record: { note, by: adminId ? 'support' : 'system' },
+    };
+    const after = await this.write(tx, errand, 'admin_cancel', to, effect, actor, adminId);
     await this.wallet.onErrandTransition(tx, { before: errand, after, event: 'admin_cancel', ...money });
     return { before: errand, after, event: 'admin_cancel', record: effect.record, settings: money.settings };
   }

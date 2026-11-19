@@ -47,7 +47,8 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 10b. Agents: the phone's key, signed money requests and the app PIN, server side (A3, A5, A7) | aitradeosdev/jiffo#62 | merged |
 | 10b. Agents: the phone's key, signed money requests and the app PIN, in the agent app | aitradeosdev/jiffo#63 | merged |
 | 10b. Agents: "log out and forget this phone", for a phone being handed on (A3, A6) | aitradeosdev/jiffo#64 | merged |
-| Identity: Smile ID the only provider, ahead of 10c's selfie checks (Dojah and Youverify removed) | this pull request | open |
+| Identity: Smile ID the only provider, ahead of 10c's selfie checks (Dojah and Youverify removed) | aitradeosdev/jiffo#65 | merged |
+| 10c. Agents: selfie checks against Smile ID's kept face, server side: daily, at random, on a new phone, before a payout change; three failures suspend (A4, I8, P8, X4) | this pull request | open |
 
 ## Summary
 

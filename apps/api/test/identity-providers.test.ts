@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import type { ParsedWebhook } from '../src/adapters/identity';
 import { isoDate, SmileIdIdentityAdapter } from '../src/adapters/identity-providers';
 
 type Call = { url: string; init: RequestInit };
@@ -15,6 +16,8 @@ function fakeFetch(respond: (call: Call) => Response) {
 const ctx = { publicApiUrl: 'https://api.jiffo.test', production: false };
 const person = { firstName: 'Tunde', lastName: 'Bakare', phone: '+2348031234567' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+/** An identity check's result from a parsed webhook. */
+const resultOf = (parsed: ParsedWebhook | null) => (parsed && parsed.kind !== 'selfie' ? parsed.result : undefined);
 
 describe('Smile ID', () => {
   const make = (impl: typeof fetch) =>
@@ -100,14 +103,14 @@ describe('Smile ID', () => {
 
     it("doesn't believe the body: the status API's verdict wins", async () => {
       const blocked = withStatus({ status: 'block', user_id: 'jid-1', message: 'Face did not match' });
-      expect((await make(blocked.impl).parseWebhook(callback('clear'), signed()))?.result).toMatchObject({
+      expect(resultOf(await make(blocked.impl).parseWebhook(callback('clear'), signed()))).toMatchObject({
         outcome: 'failed',
         checks: [{ key: 'id', outcome: 'failed', note: 'Face did not match' }, expect.anything()],
       });
       const look = withStatus({ status: 'attention', user_id: 'jid-1' });
-      expect((await make(look.impl).parseWebhook(callback('clear'), signed()))?.result.outcome).toBe('review');
+      expect(resultOf(await make(look.impl).parseWebhook(callback('clear'), signed()))?.outcome).toBe('review');
       const running = withStatus({ status: 'processing', user_id: 'jid-1' }, 202);
-      expect((await make(running.impl).parseWebhook(callback('clear'), signed()))?.result.status).toBe('pending');
+      expect(resultOf(await make(running.impl).parseWebhook(callback('clear'), signed()))?.status).toBe('pending');
     });
 
     it('refuses forged, old or misdirected callbacks', async () => {
@@ -138,5 +141,96 @@ describe('dates of birth', () => {
     expect(isoDate('1995-04-12')).toBe('1995-04-12');
     expect(isoDate('12-04-1995')).toBe('1995-04-12');
     expect(isoDate('April')).toBeUndefined();
+  });
+});
+
+describe('Smile ID selfie checks, for agents (I8)', () => {
+  const make = (impl: typeof fetch) =>
+    new SmileIdIdentityAdapter('1234', 'smile-key', true, 'https://jiffo.test/privacy', ctx, impl);
+  const signed = () => {
+    const timestamp = new Date().toISOString();
+    return {
+      'response-timestamp': timestamp,
+      'response-signature': createHmac('sha256', 'smile-key').update(`${timestamp}1234sid_request`).digest('base64'),
+      'smileid-job-id': 'job_01hx',
+    };
+  };
+  const callback = (product: string, extra: object = {}) =>
+    Buffer.from(
+      JSON.stringify({
+        product,
+        status: 'clear',
+        partner_params: { reference: 'sel-1', job_type: product === 'smart_selfie_authentication' ? 2 : 6 },
+        ...extra,
+      }),
+    );
+  const withStatus = (job: object, status = 200) =>
+    fakeFetch(({ url }) => (url.endsWith('/v3/token') ? json({ token: 'jwt-1' }) : json(job, status)));
+
+  it('gives the app a token only for this person and SmartSelfie Authentication, never a new enrolment', async () => {
+    const { impl, calls } = fakeFetch(() => json({ token: 'jwt-scoped' }));
+    expect(await make(impl).startSelfie({ enrolledId: 'jid-1', reference: 'sel-1' })).toEqual({
+      enrolledId: 'jid-1',
+      reference: 'sel-1',
+      token: 'jwt-scoped',
+      partnerId: '1234',
+      sandbox: true,
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe('https://testapi.smileidentity.com/v3/token');
+    const form = calls[0]!.init.body as FormData;
+    expect(form.get('user_id')).toBe('jid-1');
+    expect(form.get('product')).toBe('smart_selfie_authentication');
+    expect(form.get('allow_new_enroll')).toBe('false');
+    expect(form.get('use_enrolled_image')).toBeNull();
+    expect(JSON.parse(await (form.get('partner_params') as Blob).text())).toEqual({ reference: 'sel-1' });
+    expect(JSON.parse(await (form.get('payload') as Blob).text())).toEqual({
+      callback_url: 'https://api.jiffo.test/v1/webhooks/identity/smileid',
+    });
+  });
+
+  it("takes the selfie's verdict, person and time from the status API", async () => {
+    const at = '2026-11-19T10:00:00Z';
+    const clear = withStatus({ status: 'clear', user_id: 'jid-1', created_at: at });
+    expect(await make(clear.impl).parseWebhook(callback('smart_selfie_authentication'), signed())).toEqual({
+      kind: 'selfie',
+      reference: 'sel-1',
+      replayKey: expect.stringMatching(/:job_01hx$/),
+      verdict: { status: 'done', outcome: 'passed', enrolledId: 'jid-1', jobId: 'job_01hx', createdAt: new Date(at) },
+    });
+    // The body said clear; Smile ID's own answer wins.
+    const blocked = withStatus({ status: 'block', user_id: 'jid-1', message: 'Face did not match' });
+    expect(await make(blocked.impl).parseWebhook(callback('smart_selfie_authentication'), signed())).toMatchObject({
+      verdict: { outcome: 'failed', note: 'Face did not match' },
+    });
+    const unclear = withStatus({ status: 'error', user_id: 'jid-1' });
+    expect(await make(unclear.impl).parseWebhook(callback('smart_selfie_authentication'), signed())).toMatchObject({
+      verdict: { outcome: 'retry' },
+    });
+    const running = withStatus({ status: 'processing', user_id: 'jid-1' }, 202);
+    expect(await make(running.impl).parseWebhook(callback('smart_selfie_authentication'), signed())).toMatchObject({
+      verdict: { status: 'pending' },
+    });
+  });
+
+  it('fails any other job run under the check, such as a compare of two photos the app chose', async () => {
+    const clear = withStatus({ status: 'clear', user_id: 'jid-1' });
+    expect(await make(clear.impl).parseWebhook(callback('smart_selfie_compare'), signed())).toMatchObject({
+      kind: 'selfie',
+      verdict: { status: 'done', outcome: 'failed' },
+    });
+    expect(
+      await make(clear.impl).parseWebhook(
+        callback('smart_selfie_authentication', { partner_params: { reference: 'sel-1', job_type: 4 } }),
+        signed(),
+      ),
+    ).toMatchObject({ verdict: { outcome: 'failed' } });
+    // Unsigned, it says nothing at all.
+    expect(
+      await make(clear.impl).parseWebhook(callback('smart_selfie_authentication'), {
+        ...signed(),
+        'response-signature': 'forged',
+      }),
+    ).toBeNull();
   });
 });

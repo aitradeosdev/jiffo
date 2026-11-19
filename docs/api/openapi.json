@@ -4016,6 +4016,105 @@
         ]
       }
     },
+    "/v1/agent/selfie": {
+      "get": {
+        "operationId": "AgentSelfieController.status",
+        "tags": [
+          "AgentSelfie"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default",
+        "x-apps": [
+          "agent"
+        ]
+      },
+      "post": {
+        "operationId": "AgentSelfieController.start",
+        "tags": [
+          "AgentSelfie"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "for": {
+                    "const": "payout_change"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "paid",
+        "x-apps": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/agent/selfie/{id}/finish": {
+      "post": {
+        "operationId": "AgentSelfieController.finish",
+        "tags": [
+          "AgentSelfie"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default",
+        "x-apps": [
+          "agent"
+        ]
+      }
+    },
     "/v1/auth/logout": {
       "post": {
         "operationId": "AuthController.logout",

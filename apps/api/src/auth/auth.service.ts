@@ -99,10 +99,24 @@ export class AuthService {
 
       const [deviceRow] = await tx
         .insert(devices)
-        .values({ userId: user.id, deviceKey: device.key, app, platform: device.platform, name: device.name ?? null })
+        .values({
+          userId: user.id,
+          deviceKey: device.key,
+          app,
+          platform: device.platform,
+          name: device.name ?? null,
+          // A new phone also needs a selfie before money actions (A4, X4); a pass clears it.
+          selfieNeeded: newPhone,
+        })
         .onConflictDoUpdate({
           target: [devices.userId, devices.deviceKey, devices.app],
-          set: { platform: device.platform, name: device.name ?? null, lastSeenAt: new Date(), forgottenAt: null },
+          set: {
+            platform: device.platform,
+            name: device.name ?? null,
+            lastSeenAt: new Date(),
+            forgottenAt: null,
+            ...(newPhone ? { selfieNeeded: true } : {}),
+          },
         })
         .returning();
 

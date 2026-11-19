@@ -506,7 +506,11 @@ export class PeopleAdminService {
       const [user] = await tx.select().from(users).where(eq(users.id, id)).for('update');
       if (!user) throw notFound('person_not_found', 'Person not found');
       if (user.status === 'active') throw conflict('already_active', 'This account is already active');
-      await tx.update(users).set({ status: 'active', updatedAt: new Date() }).where(eq(users.id, id));
+      // Staff looked, so failed selfies (I8) count again from none.
+      await tx
+        .update(users)
+        .set({ status: 'active', selfieFailures: 0, updatedAt: new Date() })
+        .where(eq(users.id, id));
       await this.audit.record(tx, admin, {
         action: 'person.reactivate',
         targetType: 'person',

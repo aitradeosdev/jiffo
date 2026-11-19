@@ -2,8 +2,9 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AGENT_OUT_STATES } from '@jiffo/shared';
 import { and, eq, gt, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
-import { agentPresence, errands } from '../db/schema';
+import { agentPresence, errands, type SelfieReason } from '../db/schema';
 import { AgentApplicationService } from './application.service';
+import { AgentSelfieService } from './agent-selfie.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { AuthContext } from '../auth/auth.types';
 
@@ -53,6 +54,7 @@ export class PresenceService {
     @Inject(DB) private readonly db: Db,
     private readonly realtime: RealtimeGateway,
     private readonly applications: AgentApplicationService,
+    private readonly selfie: AgentSelfieService,
   ) {}
 
   /**
@@ -65,12 +67,7 @@ export class PresenceService {
         .select({ id: errands.id, customerId: errands.customerId, status: errands.status })
         .from(errands)
         .where(and(eq(errands.agentId, auth.userId), inArray(errands.status, [...TRAVEL_STATES]))),
-      input.online === undefined
-        ? this.db
-            .select({ online: agentPresence.online })
-            .from(agentPresence)
-            .where(eq(agentPresence.userId, auth.userId))
-        : Promise.resolve([]),
+      this.db.select({ online: agentPresence.online }).from(agentPresence).where(eq(agentPresence.userId, auth.userId)),
     ]);
     let body = { ...input, online: input.online ?? current?.online ?? false };
     // Going online is for approved agents; going offline always works. An agent not approved yet who still
@@ -78,6 +75,15 @@ export class PresenceService {
     if (body.online && !(await this.applications.approved(auth.userId))) {
       if (running.length === 0 && input.online) await this.applications.assertApproved(auth.userId);
       body = { ...body, online: false };
+    }
+    // Going online (not staying online, as the app's heartbeat says) needs today's selfie first (I8). An agent
+    // already online stays so past midnight, and is asked the next time they go online. One with an errand
+    // running keeps sharing where they are for it, offline, and is told the selfie is still to take.
+    let selfieNeeded: SelfieReason | null = null;
+    if (body.online && !current?.online) {
+      selfieNeeded = await this.selfie.neededToGoOnline(auth);
+      if (selfieNeeded && running.length === 0) throw this.selfie.needed(selfieNeeded);
+      if (selfieNeeded) body = { ...body, online: false };
     }
     const sharing = body.online || running.length > 0;
     const located = sharing && body.lat !== undefined && body.lng !== undefined;
@@ -107,7 +113,7 @@ export class PresenceService {
         });
       }
     }
-    return { online: body.online, sharingLocation: sharing };
+    return { online: body.online, sharingLocation: sharing, ...(selfieNeeded ? { selfieNeeded } : {}) };
   }
 
   /**

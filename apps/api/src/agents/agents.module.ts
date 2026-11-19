@@ -2,6 +2,8 @@ import { Global, Inject, Module, OnModuleInit } from '@nestjs/common';
 import { RECURRING_JOBS, type RecurringJobs } from '../timers/recurring-jobs';
 import { AgentApplicationController } from './application.controller';
 import { AgentApplicationService } from './application.service';
+import { AgentSelfieController } from './agent-selfie.controller';
+import { AgentSelfieService } from './agent-selfie.service';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
 import { PresenceController } from './presence.controller';
@@ -9,9 +11,9 @@ import { PresenceService } from './presence.service';
 
 @Global()
 @Module({
-  controllers: [AgentsController, PresenceController, AgentApplicationController],
-  providers: [AgentsService, PresenceService, AgentApplicationService],
-  exports: [AgentsService, PresenceService, AgentApplicationService],
+  controllers: [AgentsController, PresenceController, AgentApplicationController, AgentSelfieController],
+  providers: [AgentsService, PresenceService, AgentApplicationService, AgentSelfieService],
+  exports: [AgentsService, PresenceService, AgentApplicationService, AgentSelfieService],
 })
 export class AgentsModule implements OnModuleInit {
   constructor(

@@ -110,6 +110,18 @@ How Jiffo protects people, money and data, area by area. What is required is in 
 - **Handing a phone on:** a plain log-out keeps the phone known, so the agent can sign back in on it without a hold. "Log out and forget this phone" drops its key from the account and deletes it from the phone: signing in on it again counts as a new phone, with the 48-hour hold, even if it was the agent's only one.
 - So an SMS code alone never moves money (A5): it gets a session, but not the key on the owner's phone or their PIN.
 
+## Agents' selfie checks
+
+The person working is the agent who was verified (A4, I8, P8, X4). A selfie is taken in Smile ID's own SDK in the agent app, with liveness, and compared with the face Smile ID kept from the agent's ID check. Jiffo keeps only the outcome, never the selfie.
+
+- **Going online:** the first time each day, in the country's time zone, an agent needs a passed selfie. An agent already online stays online past midnight and is asked the next time they go online. One with an errand running keeps sharing their position for it, offline, until the selfie passes. Admin can add random checks when going online (Settings, Security, off by default); a random check stays asked for until one passes.
+- **A new phone:** a sign-in on a phone the account hasn't used, a forgotten one, or a phone whose key was replaced needs a selfie before any signed request: a withdrawal, a payout account change or the app PIN. It is asked for before the request's single-use code is used, then the 48-hour hold applies as before.
+- **Changing the payout account:** needs a selfie passed in the last 10 minutes, asked for before the request's single-use code is used. Adding the first one doesn't.
+- **Who can take one:** only an agent whose ID check passed, or whom staff approved: until then Smile ID may keep no face to compare with.
+- **Failures:** three in a row (Settings, Identity, Selfie tries) suspend the account: signed out everywhere, offline, and its own requests still waiting for an agent closed, as a suspension from the panel does. Staff get an alert listing any errands under way. Reactivating it in the panel starts the count again. An unclear selfie (poor light, say) is taken again without counting; a pass clears the count.
+- **Smile ID's token:** the SDK needs one, so the server gets a token from Smile ID for that check alone: for the agent's enrolled face and SmartSelfie Authentication only, valid 15 minutes, never allowing a new enrolment (so the kept face can't be replaced), with Jiffo's callback address fixed in it.
+- **The verdict:** comes only from Smile ID's signed callback, never from the app. It must be a SmartSelfie Authentication for this check, confirmed with Smile ID's status API for the agent's own enrolled face, made after the check started, and one job decides one check. Anything else run under the check, such as a compare of two photos the app chose, fails. A job still running when its callback comes is kept with the check, and its status is asked when the app finishes it. A SmartSelfie job that comes without the check's reference is matched to the agent whose enrolled face it was, and their latest check started before it. The callback's body isn't covered by Smile ID's signature: as for ID checks, the verdict and the person come from the status API, and a signature is good for one body only.
+
 ## Withdrawals
 
 Agents only, to an account in their own name. One free scheduled withdrawal a day, or instant for a fee. A bounced transfer puts the full amount back.

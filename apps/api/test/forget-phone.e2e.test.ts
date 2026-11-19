@@ -3,7 +3,16 @@ import { and, eq, sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { devices, otpChallenges, users } from '../src/db/schema';
-import { agentWithMoney, createTestApp, randomIp, secureDevice, signed, type Person, type TestApp } from './helpers';
+import {
+  agentWithMoney,
+  createTestApp,
+  passSelfie,
+  randomIp,
+  secureDevice,
+  signed,
+  type Person,
+  type TestApp,
+} from './helpers';
 
 /**
  * "Sign out and forget this phone" (docs/security-plan.md, A3, A6): for an agent handing a phone on. The
@@ -82,6 +91,9 @@ describe('signing out and forgetting the phone', () => {
     // The old key no longer works here; a new one is set up, as the app does.
     expect((await withdraw(back)).body.error.code).toBe('device_key_needed');
     const set = await secureDevice(t, back);
+    // A selfie first, as on any new phone (X4), then the hold.
+    expect((await withdraw(set)).body.error.code).toBe('selfie_needed');
+    await passSelfie(t, set);
     expect((await withdraw(set)).body.error.code).toBe('withdrawals_held');
     // Known again from this sign-in on.
     const [again] = await t.db
