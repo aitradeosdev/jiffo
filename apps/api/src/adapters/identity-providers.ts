@@ -214,8 +214,12 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
     if (!Number.isFinite(signedAt) || Math.abs(Date.now() - signedAt) > SMILE_CALLBACK_MAX_AGE_MS) return null;
     const reference = body.partner_params?.reference ?? body.partner_params?.user_id;
     const jobId = headerOf(headers, 'smileid-job-id') ?? body.job_id ?? body.partner_params?.job_id;
-    if (!reference || !jobId || !/^[\w-]{1,100}$/.test(jobId)) return null;
-    if (reference.startsWith(`${SELFIE_PREFIX}-`)) return this.selfieVerdict(body, reference, jobId, signature);
+    if (!jobId || !/^[\w-]{1,100}$/.test(jobId)) return null;
+    // An agent's selfie check: ours by its reference, or any SmartSelfie job, which may come without it and is
+    // then matched to the agent by the person Smile ID says it was for.
+    const ours = reference?.startsWith(`${SELFIE_PREFIX}-`) ? reference : null;
+    if (ours || body.product?.startsWith('smart_selfie')) return this.selfieVerdict(body, ours, jobId, signature);
+    if (!reference) return null;
 
     const job = await this.jobStatus(jobId);
     if (!job || job.user_id !== reference) return null;
@@ -250,7 +254,7 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
    */
   private async selfieVerdict(
     body: SmileCallback,
-    reference: string,
+    reference: string | null,
     jobId: string,
     signature: string,
   ): Promise<ParsedWebhook | null> {

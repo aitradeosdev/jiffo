@@ -382,7 +382,8 @@ describe('agent selfie checks', () => {
         .mockResolvedValue(job);
     let n = 0;
     /** Smile ID's callback for a job, signed with our key just now. */
-    const callback = (reference: string, jobId: string, product = 'smart_selfie_authentication') => {
+    /** With a null reference, the job carried none of ours. */
+    const callback = (reference: string | null, jobId: string, product = 'smart_selfie_authentication') => {
       const timestamp = new Date(Date.now() + n++ * 1000).toISOString();
       return request(t.http)
         .post('/v1/webhooks/identity/smileid')
@@ -393,7 +394,13 @@ describe('agent selfie checks', () => {
           createHmac('sha256', 'smile-key').update(`${timestamp}1234sid_request`).digest('base64'),
         )
         .set('smileid-job-id', jobId)
-        .send(JSON.stringify({ product, status: 'clear', partner_params: { reference, job_type: 2 } }));
+        .send(
+          JSON.stringify({
+            product,
+            status: 'clear',
+            partner_params: { ...(reference ? { reference } : {}), job_type: 2 },
+          }),
+        );
     };
 
     it('gives the app a scoped token, and takes the verdict only from their signed callback', async () => {
@@ -418,6 +425,31 @@ describe('agent selfie checks', () => {
       await callback(reference, 'job_01').expect(200);
       expect((await finish()).body.status).toBe('passed');
       await online(agent).expect(200);
+    });
+
+    it('matches a job that came without our reference to the agent it was for, and their latest check', async () => {
+      await smileIdOn();
+      token();
+      const { agent, enrolledId } = await smileAgent();
+      const start = async () =>
+        (await request(t.http).post('/v1/agent/selfie').set(agent.headers).send({}).expect(200)).body as {
+          id: string;
+        };
+      const status = async (id: string) =>
+        (await t.db.select().from(agentSelfieChecks).where(eq(agentSelfieChecks.id, id)))[0]!.status;
+      const earlier = await start();
+      const latest = await start();
+      // A job for no agent of ours settles nothing.
+      jobStatus({ status: 'clear', user_id: 'jid-nobody', created_at: new Date().toISOString() });
+      await callback(null, 'job_06').expect(200);
+      expect([await status(earlier.id), await status(latest.id)]).toEqual(['pending', 'pending']);
+
+      jobStatus({ status: 'clear', user_id: enrolledId, created_at: new Date().toISOString() });
+      await callback(null, 'job_07').expect(200);
+      expect([await status(earlier.id), await status(latest.id)]).toEqual(['pending', 'passed']);
+      // Another kind of SmartSelfie job, with none of our reference, fails the agent's check all the same.
+      await callback(null, 'job_08', 'smart_selfie_compare').expect(200);
+      expect(await status(earlier.id)).toBe('failed');
     });
 
     it('finishes from the status API a job that was still running when its callback came', async () => {

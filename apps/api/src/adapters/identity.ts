@@ -75,7 +75,8 @@ export interface SelfieVerdict extends SelfieResult {
 /** A signed result from a provider's webhook: an identity check's, or an agent's selfie check's. */
 export type ParsedWebhook =
   | { kind?: 'identity'; reference: string; result: IdentityResult; replayKey?: string }
-  | { kind: 'selfie'; reference: string; verdict: SelfieVerdict; replayKey?: string };
+  /** A selfie check's verdict: for our check's reference, or with none, for the person it names. */
+  | { kind: 'selfie'; reference: string | null; verdict: SelfieVerdict; replayKey?: string };
 
 export interface AddressResult {
   status: 'pending' | 'done';

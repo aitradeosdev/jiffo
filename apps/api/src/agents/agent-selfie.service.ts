@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import { and, eq, gte, isNull, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lte, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { DEFAULT_SECURITY_SETTINGS, TERMINAL_STATES } from '@jiffo/shared';
 import { SELFIE_PREFIX, type SelfieVerdict } from '../adapters/identity';
 import { AlertsService } from '../alerts/alerts.service';
@@ -249,14 +249,50 @@ export class AgentSelfieService implements SelfieOwner {
     return app?.reference ?? null;
   }
 
-  /** A selfie verdict the provider sent to its webhook, for the check with this reference. */
-  async settleSelfie(provider: string, reference: string, verdict: SelfieVerdict) {
+  /**
+   * A selfie verdict the provider sent to its webhook: for the check with this reference, or, when the job
+   * carried none, the latest check waiting for the agent whose enrolled face it was, started before the job.
+   */
+  async settleSelfie(provider: string, reference: string | null, verdict: SelfieVerdict) {
+    const check = reference ? await this.byReference(provider, reference) : await this.waitingFor(provider, verdict);
+    if (!check || check.status !== 'pending') return false;
+    return this.settleWith(check, verdict);
+  }
+
+  private async byReference(provider: string, reference: string) {
     const [check] = await this.db
       .select()
       .from(agentSelfieChecks)
       .where(and(eq(agentSelfieChecks.reference, reference), eq(agentSelfieChecks.provider, provider)));
-    if (!check || check.status !== 'pending') return false;
-    return this.settleWith(check, verdict);
+    return check ?? null;
+  }
+
+  private async waitingFor(provider: string, verdict: SelfieVerdict) {
+    const [agent] = await this.db
+      .select({ userId: agentApplications.userId })
+      .from(agentApplications)
+      .where(
+        and(
+          eq(agentApplications.identityReference, verdict.enrolledId),
+          eq(agentApplications.identityProvider, provider),
+        ),
+      );
+    if (!agent) return null;
+    const madeBy = new Date((verdict.createdAt?.getTime() ?? Date.now()) + CLOCK_SKEW_MS);
+    const [check] = await this.db
+      .select()
+      .from(agentSelfieChecks)
+      .where(
+        and(
+          eq(agentSelfieChecks.userId, agent.userId),
+          eq(agentSelfieChecks.provider, provider),
+          eq(agentSelfieChecks.status, 'pending'),
+          lte(agentSelfieChecks.createdAt, madeBy),
+        ),
+      )
+      .orderBy(desc(agentSelfieChecks.createdAt))
+      .limit(1);
+    return check ?? null;
   }
 
   /**

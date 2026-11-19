@@ -50,8 +50,11 @@ export interface JudgedResult {
 
 /** Agents' selfie checks, which a provider's webhook may decide (docs/security-plan.md, I8). */
 export interface SelfieOwner {
-  /** Decides the selfie check with this reference, if it is still waited on; false when it isn't. */
-  settleSelfie(provider: string, reference: string, verdict: SelfieVerdict): Promise<boolean>;
+  /**
+   * Decides the selfie check with this reference, or with none, the latest one waiting for the person the
+   * verdict is for; false when none is waited on.
+   */
+  settleSelfie(provider: string, reference: string | null, verdict: SelfieVerdict): Promise<boolean>;
 }
 
 /** Customers' and agents' checks, each kept where its account keeps it. */
@@ -351,8 +354,9 @@ export class IdentityChecksService {
     if (parsed.kind === 'selfie') {
       const { reference, verdict } = parsed;
       // A job still running is kept with its check, which asks for its status when the app finishes it.
-      if (!this.selfieOwner) return { reference, settled: false };
-      return { reference, settled: await this.selfieOwner.settleSelfie(provider, reference, verdict) };
+      if (!this.selfieOwner) return { reference: reference ?? verdict.jobId, settled: false };
+      const settled = await this.selfieOwner.settleSelfie(provider, reference, verdict);
+      return { reference: reference ?? verdict.jobId, settled };
     }
     const { reference, result } = parsed;
     if (result.status !== 'done') return { reference, settled: false };
