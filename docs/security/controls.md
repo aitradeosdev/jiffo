@@ -158,6 +158,14 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 - **Freeze and decide:** stepping in moves the errand into dispute, which freezes the money and makes its evidence pack. Staff then decide on the errand's page: release to the agent, refund the customer, or split. A split above the set amount needs a second admin's approval (D4). Staff's decision replaces the automatic one.
 - **Timers:** each timer acts only on the errand exactly as it was when the timer was set. A pause, a resume, the customer's answer or a dispute leaves the old timers doing nothing.
 
+## Alerts about staff (D8)
+
+- **What raises one:** checked as each staff action is written to the audit log, in the same transaction, so an alert stands only for what was done, whichever route did it:
+  - **Unusual ID reveals:** a staff member revealing many people's details in a day (Settings, Security: 10, below the daily limit of 20), reaching the limit and being refused another, or revealing any out of working hours. One alert a day for each staff member, saying the latest.
+  - **An adjustment to a staff member's account:** an adjustment asked for on an app account whose phone is a staff member's (the link D3 uses), raised as it is asked for, so owners see it before it is approved.
+  - **Money actions out of hours:** adjustments, dispute settlements, clearing a nightly check, and asking for or approving a money change, outside working hours in the country's own time (Settings, Security: 7:00 to 21:00). One alert a day for each staff member, counting them.
+- **Who sees them:** owners, on the Audit log page. They are kept out of finance's alerts and the overview's count, as the person one is about may be in finance. An owner closes one with what they found, in the audit log, and never one about themselves.
+
 ## Jiffo never asks for a code or PIN (C7)
 
 - Wherever a sign-in code or PIN is entered or shown, both apps say Jiffo will never ask for it: on the sign-in code screen, when an agent creates their app PIN or enters it for a money action, on the customer's hand-off PIN, and on the agent's hand-off keypad. The customer is told to say the hand-off PIN to the agent in person, never by call, text or chat, not even to the agent; the agent, to ask for it in person. The sign-in text message says never to share the code too. A test fails if a screen stops showing its notice.

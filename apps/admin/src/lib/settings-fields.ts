@@ -293,6 +293,24 @@ export const SECTIONS: Section[] = [
         help: 'Days, between 30 and 365. Then deleted, unless the errand is in dispute or a flag on it is still open.',
       },
       {
+        path: 'security.idRevealAlertAt',
+        label: 'Tell owners when one staff member reveals this many people in a day',
+        kind: 'count',
+        help: 'Below the daily limit, which refuses any more. The alert is on the Audit log page.',
+      },
+      {
+        path: 'security.staffHoursStart',
+        label: 'Staff working hours start at',
+        kind: 'count',
+        help: 'The hour, 0 to 23, in this country’s time. A money action or ID reveal outside working hours raises an alert for owners.',
+      },
+      {
+        path: 'security.staffHoursEnd',
+        label: 'Staff working hours end at',
+        kind: 'count',
+        help: 'The hour, 1 to 24, after the start. 0 and 24 make every hour a working hour.',
+      },
+      {
         path: 'security.releaseReminderHours',
         label: 'Remind customers of a drop-off photo after',
         kind: 'hoursList',

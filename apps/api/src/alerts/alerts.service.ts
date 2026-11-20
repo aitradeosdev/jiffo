@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
-import { DB, type Db } from '../db/database.module';
+import { and, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
+import { DB, type Db, type Tx } from '../db/database.module';
 import { alerts } from '../db/schema';
 
 export interface AlertInput {
@@ -13,6 +13,17 @@ export interface AlertInput {
   data?: Record<string, unknown>;
 }
 
+/** Which kinds of alert a list is for. */
+export interface Kinds {
+  only?: readonly string[];
+  except?: readonly string[];
+}
+const kindsWhere = (kinds: Kinds): SQL | undefined =>
+  and(
+    kinds.only ? inArray(alerts.kind, [...kinds.only]) : undefined,
+    kinds.except?.length ? notInArray(alerts.kind, [...kinds.except]) : undefined,
+  );
+
 /**
  * Things finance or the team must look at. Raising one that is already open does nothing, so a check that
  * runs every few minutes leaves one alert, not a pile. Each is also logged as an error for the log alerts.
@@ -23,8 +34,9 @@ export class AlertsService {
 
   constructor(@Inject(DB) private readonly db: Db) {}
 
-  async raise(input: AlertInput) {
-    const [row] = await this.db
+  /** Raised through `db`: the caller's transaction, so the alert stands only if what raised it does. */
+  async raise(input: AlertInput, db: Db | Tx = this.db) {
+    const [row] = await db
       .insert(alerts)
       .values({
         countryCode: input.countryCode,
@@ -43,7 +55,7 @@ export class AlertsService {
       return row;
     }
     // Already open: it shows the latest news, e.g. how far below zero revenue is now.
-    const [open] = await this.db
+    const [open] = await db
       .update(alerts)
       .set({ message: input.message, data: input.data ?? {} })
       .where(
@@ -92,20 +104,21 @@ export class AlertsService {
       );
   }
 
-  async list(countryCode: string, limit = 100) {
+  /** Open ones first, then the latest: only the kinds given, or all but those left out. */
+  async list(countryCode: string, kinds: Kinds = {}, limit = 100) {
     return this.db
       .select()
       .from(alerts)
-      .where(eq(alerts.countryCode, countryCode))
+      .where(and(eq(alerts.countryCode, countryCode), kindsWhere(kinds)))
       .orderBy(sql`${alerts.resolvedAt} is not null`, desc(alerts.createdAt))
       .limit(limit);
   }
 
-  async openCount(countryCode: string) {
+  async openCount(countryCode: string, kinds: Kinds = {}) {
     const [row] = await this.db
       .select({ n: sql<number>`count(*)::int` })
       .from(alerts)
-      .where(and(eq(alerts.countryCode, countryCode), isNull(alerts.resolvedAt)));
+      .where(and(eq(alerts.countryCode, countryCode), isNull(alerts.resolvedAt), kindsWhere(kinds)));
     return row?.n ?? 0;
   }
 }

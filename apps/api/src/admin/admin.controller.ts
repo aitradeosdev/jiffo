@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { ADMIN_ROLES } from '../db/schema';
 import { ADMIN_ERRAND_EVENTS } from '../errands/errands.service';
 import { ERRAND_FILTERS, ErrandsAdminService } from './errands-admin.service';
+import { StaffAlertsAdminService } from './staff-alerts-admin.service';
 import { PEOPLE_ROLES, PeopleAdminService } from './people-admin.service';
 import { MAX_ADJUSTMENT_KOBO, MoneyAdminService } from './money-admin.service';
 import { SettingsAdminService } from './settings-admin.service';
@@ -217,6 +218,7 @@ export class AdminController {
     private readonly team: TeamService,
     private readonly audit: AuditService,
     private readonly errands: ErrandsAdminService,
+    private readonly staffAlertsService: StaffAlertsAdminService,
     private readonly people: PeopleAdminService,
     private readonly money: MoneyAdminService,
     private readonly settingsAdmin: SettingsAdminService,
@@ -488,6 +490,24 @@ export class AdminController {
     @Body(new ZodBody(NoteBody)) body: z.infer<typeof NoteBody>,
   ) {
     return this.money.resolveAlert(admin, id, body.note);
+  }
+
+  /** Alerts about staff, for owners (docs/security-plan.md, D8). */
+  @Get('staff-alerts')
+  @Needs('team')
+  staffAlerts(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
+    return this.staffAlertsService.list(query.country);
+  }
+
+  @Post('staff-alerts/:id/resolve')
+  @HttpCode(200)
+  @Needs('team')
+  resolveStaffAlert(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodBody(NoteBody)) body: z.infer<typeof NoteBody>,
+  ) {
+    return this.staffAlertsService.resolve(admin, id, body.note);
   }
 
   /** Finance and owners only: a credit or debit on a wallet or agent balance, with a reason. */

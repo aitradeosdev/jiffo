@@ -14,6 +14,7 @@ import {
   reconciliationRuns,
   users,
 } from '../db/schema';
+import { STAFF_ALERT_KINDS } from '@jiffo/shared';
 import { conflict, notFound, unprocessable } from '../common/errors';
 import { AlertsService } from '../alerts/alerts.service';
 import { PayoutsService } from '../money/payouts.service';
@@ -55,6 +56,9 @@ export interface AdjustmentInput {
 /** Money as finance sees it: what Jiffo holds and earns, top-ups, withdrawals, the nightly check, adjustments. */
 /** Alerts the Safety queue owns, not finance (E9). */
 const SAFETY_ALERTS: ReadonlySet<string> = new Set(['emergency']);
+/** Alerts about staff are owners', on the Audit log page (D8): the person one is about may be in finance. */
+const STAFF_ALERTS: ReadonlySet<string> = new Set(STAFF_ALERT_KINDS);
+const NOT_FINANCE = [...SAFETY_ALERTS, ...STAFF_ALERTS];
 
 @Injectable()
 export class MoneyAdminService {
@@ -437,8 +441,8 @@ export class MoneyAdminService {
 
   /** Open alerts first, then the latest resolved ones. */
   async alerts(country: string) {
-    // Emergencies are the safety team's, in the Safety queue, and are closed there.
-    const rows = (await this.alertsService.list(country)).filter((a) => !SAFETY_ALERTS.has(a.kind));
+    // Emergencies are the safety team's, in the Safety queue, and are closed there; alerts about staff, owners'.
+    const rows = await this.alertsService.list(country, { except: NOT_FINANCE });
     return {
       alerts: rows.map((a) => ({
         id: a.id,
@@ -456,6 +460,9 @@ export class MoneyAdminService {
     const [kind] = await this.db.select({ kind: alerts.kind }).from(alerts).where(eq(alerts.id, id));
     if (kind && SAFETY_ALERTS.has(kind.kind)) {
       throw conflict('safety_alert', 'An emergency is closed in the Safety queue, by the safety team');
+    }
+    if (kind && STAFF_ALERTS.has(kind.kind)) {
+      throw conflict('staff_alert', 'An alert about staff is closed by an owner, on the Audit log page');
     }
     return this.db.transaction(async (tx) => {
       const [alert] = await tx
