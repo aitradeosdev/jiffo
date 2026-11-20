@@ -34,7 +34,7 @@ const Credential = <T extends z.ZodRawShape>(response: T) =>
       rawId: z.string().min(1).max(1_000),
       type: z.literal('public-key'),
       response: z.object(response).passthrough(),
-      clientExtensionResults: z.record(z.string(), z.unknown()).default({}),
+      clientExtensionResults: z.record(z.string(), z.unknown()).default(() => ({})),
     })
     .passthrough();
 const Assertion = Credential({

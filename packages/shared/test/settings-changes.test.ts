@@ -44,6 +44,19 @@ describe('settingChanges', () => {
     }
   });
 
+  it("gives each parse its own copy of a group's default, so changing one changes no other", () => {
+    const without: Record<string, unknown> = structuredClone(NIGERIA_DEFAULT_SETTINGS);
+    for (const group of ['topUps', 'security', 'risk', 'safety']) delete without[group];
+    const a = CountrySettingsSchema.parse(without);
+    const b = CountrySettingsSchema.parse(without);
+    expect(a.security).not.toBe(b.security);
+    expect(a.security.releaseReminderHours).not.toBe(b.security.releaseReminderHours);
+    expect(a.security.releaseReminderHours).not.toBe(DEFAULT_SECURITY_SETTINGS.releaseReminderHours);
+    expect(a.topUps).not.toBe(b.topUps);
+    expect(a.risk).not.toBe(b.risk);
+    expect(a.safety).not.toBe(b.safety);
+  });
+
   it('reports the service fee rule on the minimum', () => {
     const bad = structuredClone(NIGERIA_DEFAULT_SETTINGS);
     bad.fees.serviceFeeMinKobo = bad.fees.serviceFeeCapKobo + 1;
