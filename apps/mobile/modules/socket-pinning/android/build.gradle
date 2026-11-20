@@ -1,0 +1,22 @@
+plugins {
+  id 'com.android.library'
+  // Sets the SDK versions, Kotlin and Expo's own dependencies, as Expo 58's modules do.
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.jiffo.socketpinning'
+version = '1.0.0'
+
+android {
+  namespace "com.jiffo.socketpinning"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  implementation 'com.facebook.react:react-android'
+  // The pinning library's CertificatePinner: WebSockets get the very pins its requests use.
+  implementation project(':react-native-ssl-public-key-pinning')
+}

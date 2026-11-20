@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { io, type Socket } from 'socket.io-client';
 import { API_URL } from '../config';
 import { useSession } from '../auth/session';
+import { pinningReady } from '../security/pinning';
 
 const RealtimeContext = createContext<Socket | null>(null);
 
@@ -15,36 +16,43 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (status !== 'signedIn') return;
-    const s = io(`${API_URL}/realtime`, {
-      transports: ['websocket'],
-      // Read on every (re)connect. A failed token read still answers, so the handshake never hangs.
-      auth: (cb) => {
-        api
-          .accessToken()
-          .then((token) => cb({ token }))
-          .catch(() => cb({ token: null }));
-      },
-    });
+    let s: Socket | null = null;
+    let closed = false;
     // The server drops a socket whose token it refuses, and socket.io won't reconnect on its own after
     // that. Try again with a fresh token, backing off, until it connects or the person signs out.
     let attempt = 0;
     let retry: ReturnType<typeof setTimeout> | undefined;
     const reconnectLater = () => {
       clearTimeout(retry);
-      retry = setTimeout(() => s.connect(), Math.min(30_000, 1_000 * 2 ** attempt++));
+      retry = setTimeout(() => s?.connect(), Math.min(30_000, 1_000 * 2 ** attempt++));
     };
-    s.on('ready', () => {
-      attempt = 0;
+    // Opened once certificate pinning has started, so the socket carries the same pins as requests (MB7).
+    void pinningReady().then(() => {
+      if (closed) return;
+      s = io(`${API_URL}/realtime`, {
+        transports: ['websocket'],
+        // Read on every (re)connect. A failed token read still answers, so the handshake never hangs.
+        auth: (cb) => {
+          api
+            .accessToken()
+            .then((token) => cb({ token }))
+            .catch(() => cb({ token: null }));
+        },
+      });
+      s.on('ready', () => {
+        attempt = 0;
+      });
+      s.on('auth_error', reconnectLater);
+      s.on('disconnect', (reason) => {
+        if (reason === 'io server disconnect') reconnectLater();
+      });
+      setSocket(s);
     });
-    s.on('auth_error', reconnectLater);
-    s.on('disconnect', (reason) => {
-      if (reason === 'io server disconnect') reconnectLater();
-    });
-    setSocket(s);
     return () => {
+      closed = true;
       clearTimeout(retry);
-      s.removeAllListeners();
-      s.disconnect();
+      s?.removeAllListeners();
+      s?.disconnect();
       setSocket(null);
     };
   }, [status, api]);
