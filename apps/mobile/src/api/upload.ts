@@ -19,8 +19,8 @@ export async function pickPhoto(source: 'camera' | 'library'): Promise<{ uri: st
       ? await ImagePicker.requestCameraPermissionsAsync()
       : await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!permission.granted) return null;
-  // Full quality here: the photo is compressed once, below, as it is saved as JPEG.
-  const options: ImagePicker.ImagePickerOptions = { mediaTypes: 'images', quality: 1, allowsEditing: false };
+  // Compressed here too, so a photo the phone can't convert below is still small enough to send as it is.
+  const options: ImagePicker.ImagePickerOptions = { mediaTypes: 'images', quality: 0.7, allowsEditing: false };
   const result =
     source === 'camera'
       ? await ImagePicker.launchCameraAsync(options)

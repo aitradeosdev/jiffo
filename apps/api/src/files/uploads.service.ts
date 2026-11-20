@@ -28,7 +28,10 @@ const TYPES: Record<string, string> = {
 
 /** Where the apps' uploads land. Nobody is shown anything here, and the server deletes each once it has its copy. */
 const INCOMING = 'incoming/';
-/** Where the server keeps its own copy of an upload, re-encoded: the only one anybody is shown. */
+/**
+ * Where the server keeps its own copy of an upload, re-encoded: the only one anybody is shown. A photo
+ * uploaded before these checks (not under incoming/) keeps its key, and its copy is written over it.
+ */
 export const keptKey = (key: string) =>
   key.startsWith(INCOMING) ? `errands/${key.slice(INCOMING.length).replace(/\.[a-z]+$/, '')}.jpg` : key;
 
@@ -146,11 +149,14 @@ export class UploadsService {
       if (!(error instanceof UnreadablePhoto)) throw error;
       throw unprocessable('photo_unreadable', 'That photo couldn’t be read. Take it again.', { key });
     }
-    await this.storage.put(keptKey(key), photo, 'image/jpeg');
+    const kept = keptKey(key);
+    await this.storage.put(kept, photo, 'image/jpeg');
     await this.db
       .update(uploads)
       .set({ checkedAt: new Date(), contentType: 'image/jpeg', sha256: sha256(photo), size: photo.length })
       .where(eq(uploads.key, key));
+    // A photo uploaded before these checks has its copy written where it was: that is the only file left.
+    if (kept === key) return;
     await this.storage.delete(key).catch((error: Error) => {
       // The copy is kept and is all anybody sees; the store's own expiry for incoming/ removes this later.
       this.logger.warn(`The original of ${key} wasn't deleted: ${error.message}`);

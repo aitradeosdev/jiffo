@@ -5,6 +5,7 @@ import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { canonicalJson } from '../common/canonical-json';
 import { notFound } from '../common/errors';
 import { DB, type Db, type Tx } from '../db/database.module';
+import { keptKey } from '../files/uploads.service';
 import {
   admins,
   conversations,
@@ -285,7 +286,8 @@ export class EvidenceService {
       pinEntries: events.filter((e) => PIN_EVENTS.has(e.event)),
       conversations: convos,
       messages: chat,
-      uploads: files,
+      // storedKey is the server's copy, which the fingerprint is of; key is what the app sent (C1).
+      uploads: files.map((f) => ({ ...f, storedKey: keptKey(f.key) })),
       calls,
       trail: {
         points: points.length,

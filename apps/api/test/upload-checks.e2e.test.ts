@@ -149,8 +149,10 @@ describe('upload checks', () => {
     expect(Buffer.compare(kept(key)!.bytes, copy)).toBe(0);
     await act(t, customer, errandId, 'open_dispute', { reason: 'The receipt looks wrong' });
     const [pack] = await t.db.select().from(disputeEvidence).where(eq(disputeEvidence.errandId, errandId));
-    const listed = (pack!.content as { uploads: Array<{ key: string; sha256: string | null }> }).uploads;
-    expect(listed.find((u) => u.key === key)?.sha256).toBe(row!.sha256);
+    const listed = (pack!.content as { uploads: Array<{ key: string; storedKey: string; sha256: string | null }> })
+      .uploads;
+    // Named by the copy the fingerprint is of: the original is gone.
+    expect(listed.find((u) => u.key === key)).toMatchObject({ storedKey: keptKey(key), sha256: row!.sha256 });
     store().files.delete(keptKey(key));
     await expect(check()).rejects.toMatchObject({ response: { error: { code: 'photo_not_uploaded' } } });
   });
@@ -177,5 +179,22 @@ describe('upload checks', () => {
       );
     });
     expect(Math.abs((await lasts()) - 2 * 60)).toBeLessThan(5);
+  });
+
+  it('keeps a photo uploaded before these checks where it was, and shows it to staff as before', async () => {
+    const errandId = await running();
+    const key = `errands/${errandId}/receipt/${randomUUID()}.jpg`;
+    await t.db
+      .insert(uploads)
+      .values({ key, ownerId: agent.userId, errandId, purpose: 'receipt', contentType: 'image/jpeg' });
+    store().files.set(key, { bytes: await photoWithLocation(), contentType: 'image/jpeg' });
+    const support = await adminAs(t, 'support');
+    const photos = async () =>
+      (await request(t.http).get(`/v1/admin/errands/${errandId}`).set(support.headers).expect(200)).body.photos;
+    expect(await photos()).toHaveLength(1);
+    await useAsReceipt(errandId, [key]);
+    const copy = store().files.get(key);
+    expect(copy && (await sharp(copy.bytes).metadata()).exif).toBeUndefined();
+    expect(await photos()).toHaveLength(1);
   });
 });

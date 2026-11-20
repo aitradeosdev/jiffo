@@ -40,15 +40,19 @@ export function formatOf(bytes: Buffer): PhotoFormat | null {
 
 let running = 0;
 const waiting: Array<() => void> = [];
-/** Runs `work` once fewer than AT_ONCE photos are being opened in this process. */
-async function inTurn<T>(work: () => Promise<T>): Promise<T> {
+/**
+ * Runs `work` once fewer than AT_ONCE photos are being opened in this process. A finished one hands its turn
+ * straight to the next in line, so nothing arriving in between can take it as well.
+ */
+export async function inTurn<T>(work: () => Promise<T>): Promise<T> {
   if (running >= AT_ONCE) await new Promise<void>((go) => waiting.push(go));
-  running += 1;
+  else running += 1;
   try {
     return await work();
   } finally {
-    running -= 1;
-    waiting.shift()?.();
+    const next = waiting.shift();
+    if (next) next();
+    else running -= 1;
   }
 }
 

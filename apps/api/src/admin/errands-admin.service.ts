@@ -21,7 +21,7 @@ import {
 import { notFound } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
 import { ADMIN_ERRAND_EVENTS, ErrandsService, type AdminErrandEvent } from '../errands/errands.service';
-import { UploadsService } from '../files/uploads.service';
+import { keptKey, UploadsService } from '../files/uploads.service';
 import { chargeableItemsKobo, WalletService, type DisputeSplit } from '../money/wallet.service';
 import { AuditService } from './audit.service';
 import { FlagsAdminService } from './flags-admin.service';
@@ -379,10 +379,11 @@ export class ErrandsAdminService {
           createdAt: m.createdAt,
         })),
       ),
-      // Only photos the server has opened and kept its own copy of (C1): nothing else was ever sent or shown.
+      // Not an upload the server hasn't opened and kept its own copy of yet (C1): nobody has been sent it. One
+      // from before these checks is shown as it always was.
       photos: await Promise.all(
         files
-          .filter((f) => f.checkedAt)
+          .filter((f) => f.checkedAt || keptKey(f.key) === f.key)
           .map(async (f) => ({
             purpose: f.purpose,
             from: roleOf(f.ownerId),

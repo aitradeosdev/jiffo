@@ -1,6 +1,6 @@
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
-import { formatOf, MAX_SIDE, rewritePhoto, UnreadablePhoto } from '../src/files/photo-check';
+import { formatOf, inTurn, MAX_SIDE, rewritePhoto, UnreadablePhoto } from '../src/files/photo-check';
 import { heicPhoto, photoWithLocation, pixelBomb, pngPhoto } from './images';
 
 /** The server's own copy of every photo (docs/security-plan.md, C1). */
@@ -60,5 +60,34 @@ describe('photo check', () => {
     expect(await refused(Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('<html>')]))).toBe('broken');
     // A HEIC box with nothing in it.
     expect(await refused(Buffer.concat([heicPhoto().subarray(0, 40)]))).toBe('broken');
+  });
+
+  it('never opens more than two photos at once, however the requests line up', async () => {
+    let now = 0;
+    let most = 0;
+    const gates: Array<() => void> = [];
+    const task = () =>
+      inTurn(async () => {
+        now += 1;
+        most = Math.max(most, now);
+        await new Promise<void>((open) => gates.push(open));
+        now -= 1;
+      });
+    const all = [task(), task(), task()];
+    await new Promise((r) => setImmediate(r));
+    gates.shift()!();
+    // New photos arriving at every point while the first finishes and the waiting one starts.
+    for (let hops = 0; hops < 12; hops++) {
+      let p = Promise.resolve();
+      for (let i = 0; i < hops; i++) p = p.then(() => undefined);
+      void p.then(() => all.push(task()));
+    }
+    while (gates.length || now) {
+      await new Promise((r) => setImmediate(r));
+      gates.shift()?.();
+    }
+    await Promise.all(all);
+    expect(all).toHaveLength(15);
+    expect(most).toBe(2);
   });
 });
