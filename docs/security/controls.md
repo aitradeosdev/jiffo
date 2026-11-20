@@ -119,8 +119,16 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 - **When an errand is finished,** on the finishing agent's own positions only (an agent who gave the errand back left theirs on it too):
   - **No movement (E6):** the trail stayed within 150 m of where it started, over at least three positions and five minutes, while the pickup and drop-off are more than twice that apart. Only a trail that covers the errand from accepted to delivered with no gap of more than three minutes is judged: positions that stopped coming say nothing about where the agent went meanwhile.
   - **Along a ruler (G1):** eight positions in a row over at least 300 m, every one within a metre and a half of the straight line, at a speed even to within 3%. A phone's GPS wanders a few metres and a driver's speed changes; an app faking a route doesn't.
-- **Deleted after 90 days (G4):** a daily job deletes older positions, except for an errand in dispute or with a flag still open.
+- **Deleted after the days in Settings, Security (G4, X10):** 90 unless changed, between 30 and 365. A daily job deletes older positions, country by country, except for an errand in dispute or with a flag still open.
+- **Shown to staff:** the errand's page draws the trail to scale with the stops, mocked positions in red.
 - **Limits:** the positions, their times and their accuracy are the phone's own word. These checks catch the ways faking usually shows, and with the app checks (MB3) and the mock flag (MB4) make it harder; they don't prove where someone was.
+
+## Dispute evidence packs (E8)
+
+- **When:** a pack is made as the errand goes into dispute, whether a side opened it or too many wrong PINs froze it. Staff who handle errands or disputes can take another, for instance after more was said in the chat; that is logged with a reason.
+- **What it holds:** the errand and its stops; every event in order, with offers, item amounts and PIN entries (also listed on their own); the chat; the receipts and photos (which file, who sent it, when); the calls through Jiffo (who called whom, when; nothing of the call itself); the flags; and the money that moved.
+- **The GPS trail is fingerprinted, not copied:** the pack holds how many positions there were, the first and last, and a SHA-256 of them as kept then. The trail itself stays with the errand for as long as G4 allows, so a pack doesn't keep where someone was for longer.
+- **Fixed:** the database refuses any change to a pack, or its deletion (`dispute_evidence`, append-only, as the audit log is). Each pack carries a SHA-256 of its content as canonical JSON (keys in order): download it from the errand's page, and anyone can work the hash out again to show nothing changed since.
 
 ## The apps on the phone
 

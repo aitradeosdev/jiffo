@@ -9,12 +9,23 @@ import { api, ApiError, getCountry, getMe } from '@/lib/api';
 import { ACCOUNT, EVENT, getCategories, JOURNAL, nameOf, STATUS, type PersonRef } from '@/lib/errands';
 import { dateTime, money } from '@/lib/format';
 import { ActionsForm } from './actions-form';
+import { EvidenceForm } from './evidence-form';
+import { TrailMap } from './trail-map';
 
 export const metadata: Metadata = { title: 'Errand' };
 
 interface Detail {
   /** Fraud flags on the errand (E5, E6). */
   flags: Array<{ id: string; queue: string; kind: string; label: string; status: string }>;
+  /** Who called whom through Jiffo (E8). */
+  calls: Array<{ id: string; callerRole: 'customer' | 'agent'; provider: string; createdAt: string }>;
+  /** The GPS trail as kept now (G1, G4). */
+  trail: {
+    points: Array<{ lat: number; lng: number; mocked: boolean; accuracy: number | null; at: string }>;
+    more: boolean;
+  };
+  /** Dispute evidence packs, newest first (E8). */
+  evidence: Array<{ id: string; reason: string; sha256: string; createdAt: string; takenBy: string | null }>;
   errand: {
     id: string;
     countryCode: string;
@@ -34,7 +45,7 @@ interface Detail {
   };
   customer: (PersonRef & { status: string }) | null;
   agent: (PersonRef & { status: string; tier: string }) | null;
-  stops: Array<{ seq: number; kind: string; label: string | null; address: string }>;
+  stops: Array<{ seq: number; kind: string; label: string | null; address: string; lat: number; lng: number }>;
   events: Array<{
     id: number;
     event: string;
@@ -76,6 +87,14 @@ const DONE: Record<string, string> = {
   redeliver: 'Redelivery arranged. Both sides have been told.',
   resolve_complete: 'Settled as complete. Both sides have been told.',
   resolve_cancel: 'Settled as cancelled. Both sides have been told.',
+  evidence: 'Evidence pack taken.',
+};
+
+/** Why each evidence pack was made. */
+const PACK: Record<string, string> = {
+  open_dispute: 'When the dispute opened',
+  pin_locked: 'When too many wrong PINs froze it',
+  staff: 'Taken by staff',
 };
 
 const STOP: Record<string, string> = { pickup: 'Pickup', stop: 'Extra stop', dropoff: 'Drop-off' };
@@ -107,6 +126,8 @@ export default async function ErrandPage({
   // Only the actions this admin's role allows: stepping in needs errands, settling a dispute needs disputes.
   const actions = d.actions.filter((a) => me.permissions.includes(adminErrandPermission(a)));
   const canAct = actions.length > 0;
+  // Taking another evidence pack needs either: whoever handles errands or disputes.
+  const canSnapshot = me.permissions.includes('errands') || me.permissions.includes('disputes');
 
   /** The useful facts an event carried, in words. */
   const factsOf = (ev: Detail['events'][number]): ReactNode[] => {
@@ -194,6 +215,40 @@ export default async function ErrandPage({
             <ChatList chat={d.chat} time={time} />
           </Card>
 
+          <Card title={`Calls (${d.calls.length})`}>
+            {d.calls.length === 0 ? (
+              <p className="text-sm text-ink-3">No calls through Jiffo.</p>
+            ) : (
+              <ul className="space-y-1.5 text-sm">
+                {d.calls.map((c) => (
+                  <li key={c.id}>
+                    {c.callerRole === 'customer' ? 'Customer called the agent' : 'Agent called the customer'}{' '}
+                    <span className="text-ink-3">· {time(c.createdAt)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card title={`GPS trail (${d.trail.points.length}${d.trail.more ? '+' : ''} positions)`}>
+            {d.trail.points.length === 0 ? (
+              <p className="text-sm text-ink-3">
+                No positions kept. They are kept while the agent is out on the errand, and deleted after the days in
+                Settings, Security, unless a dispute or flag is open.
+              </p>
+            ) : (
+              <>
+                <TrailMap points={d.trail.points} stops={d.stops} />
+                <p className="mt-2 text-[13px] text-ink-3">
+                  {time(d.trail.points[0]!.at)} to {time(d.trail.points.at(-1)!.at)}
+                  {d.trail.points.some((p) => p.mocked)
+                    ? ` · ${d.trail.points.filter((p) => p.mocked).length} the phone said were mocked, in red`
+                    : ''}
+                </p>
+              </>
+            )}
+          </Card>
+
           <Card title={`Photos (${d.photos.length})`}>
             {d.photos.length === 0 ? (
               <p className="text-sm text-ink-3">No photos.</p>
@@ -224,6 +279,34 @@ export default async function ErrandPage({
         </div>
 
         <div className="space-y-6">
+          {d.evidence.length || canSnapshot ? (
+            <Card title="Evidence packs">
+              {d.evidence.length === 0 ? (
+                <p className="text-sm text-ink-3">One is made when a dispute opens.</p>
+              ) : (
+                <ul className="space-y-2 text-sm">
+                  {d.evidence.map((p) => (
+                    <li key={p.id}>
+                      <a
+                        href={`/errands/${encodeURIComponent(e.id)}/evidence/${encodeURIComponent(p.id)}`}
+                        className="font-semibold underline"
+                      >
+                        {PACK[p.reason] ?? p.reason}
+                      </a>{' '}
+                      <span className="text-ink-3">
+                        · {time(p.createdAt)}
+                        {p.takenBy ? ` · ${p.takenBy}` : ''}
+                      </span>
+                      <span className="num block truncate text-[12px] text-ink-3" title={p.sha256}>
+                        SHA-256 {p.sha256}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {canSnapshot ? <EvidenceForm id={e.id} /> : null}
+            </Card>
+          ) : null}
           {canAct ? (
             <Card title="Support actions">
               {/* A new version (after any change) starts the form afresh with the actions allowed now. */}

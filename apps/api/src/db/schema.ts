@@ -1141,6 +1141,30 @@ export const errandTrail = pgTable(
 );
 
 /**
+ * A dispute's evidence pack (docs/security-plan.md, E8): a fixed copy of what the errand held when it went
+ * into dispute, or when staff took another: its events (offers, item amounts and PIN entries among them),
+ * chat, uploads, calls, flags and money, and a fingerprint of its GPS trail, which G4 keeps only so long.
+ * Append-only, enforced by the database, with a SHA-256 of the pack as made.
+ */
+export const disputeEvidence = pgTable(
+  'dispute_evidence',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    errandId: uuid('errand_id')
+      .notNull()
+      .references(() => errands.id),
+    /** What made it: the dispute opening, too many wrong PINs, or staff taking another. */
+    reason: text('reason', { enum: ['open_dispute', 'pin_locked', 'staff'] }).notNull(),
+    takenBy: uuid('taken_by').references(() => admins.id),
+    content: jsonb('content').$type<Record<string, unknown>>().notNull(),
+    /** SHA-256 of the content as canonical JSON (keys in order): anyone can work it out again. */
+    sha256: text('sha256').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('dispute_evidence_errand_idx').on(t.errandId, t.createdAt)],
+);
+
+/**
  * Which account each identity check was for, by our reference (docs/security-plan.md, I3): a provider that
  * finds the same face on an earlier check names that check by its reference, which may be long replaced on
  * the account. Kept for a little over a year, as providers look back that far at most.
