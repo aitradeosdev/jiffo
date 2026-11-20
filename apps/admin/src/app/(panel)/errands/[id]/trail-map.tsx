@@ -1,12 +1,14 @@
 interface Point {
+  agentId: string;
   lat: number;
   lng: number;
   mocked: boolean;
 }
 
 /**
- * The agent's GPS trail drawn to scale, with the errand's stops (docs/security-plan.md, G1, E8): the line is
- * where the phone said it was; red dots are positions the phone said were mocked.
+ * The agent's GPS trail drawn to scale, with the errand's stops (docs/security-plan.md, G1, E8): a line for
+ * each agent who was out on it, where their phone said they were; red dots are positions the phone said were
+ * mocked.
  */
 export function TrailMap({
   points,
@@ -31,11 +33,14 @@ export function TrailMap({
     x: pad + (p.lng * scale - minX) * fit,
     y: H - pad - (p.lat - minY) * fit,
   });
-  const line = points
-    .filter((p) => !p.mocked)
-    .map((p) => at(p))
-    .map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`)
-    .join(' ');
+  // One line per agent: an agent who gave the errand back and the next one aren't joined into a jump.
+  const lines = [...new Set(points.map((p) => p.agentId))].map((agentId) =>
+    points
+      .filter((p) => p.agentId === agentId && !p.mocked)
+      .map((p) => at(p))
+      .map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`)
+      .join(' '),
+  );
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
@@ -43,7 +48,17 @@ export function TrailMap({
       aria-label={`The agent's trail: ${points.length} positions, with the errand's stops`}
       className="w-full rounded-xl bg-surface-2"
     >
-      <polyline points={line} fill="none" stroke="currentColor" strokeWidth={2} className="text-chart" />
+      {lines.map((line, i) => (
+        <polyline
+          key={`l${i}`}
+          points={line}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeDasharray={i ? '5 3' : undefined}
+          className="text-chart"
+        />
+      ))}
       {points
         .filter((p) => p.mocked)
         .map((p, i) => {

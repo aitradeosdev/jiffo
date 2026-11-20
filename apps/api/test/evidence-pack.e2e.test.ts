@@ -51,9 +51,7 @@ describe('dispute evidence packs', () => {
   });
   afterAll(() => t.close());
 
-  const settled = () => t.app.get(EvidenceService).settled();
   const page = async (errandId: string, who = ops) => {
-    await settled();
     return (await request(t.http).get(`/v1/admin/errands/${errandId}`).set(who.headers).expect(200)).body;
   };
   const pack = async (errandId: string, packId: string) =>
@@ -140,6 +138,46 @@ describe('dispute evidence packs', () => {
       t.db.execute(sql`update dispute_evidence set content = '{}'::jsonb where id = ${made.id}`),
     ).rejects.toThrow(/append-only/);
     await expect(t.db.execute(sql`delete from dispute_evidence where id = ${made.id}`)).rejects.toThrow(/append-only/);
+  });
+
+  it('holds the errand as it was the moment the dispute opened, not what came after', async () => {
+    const { customer, errand } = await disputed();
+    await openDispute(customer, errand.id);
+    await request(t.http)
+      .post(`/v1/errands/${errand.id}/messages`)
+      .set(customer.headers)
+      .send({ body: 'Sent after the dispute opened', clientId: randomUUID() })
+      .expect(201);
+    const [made] = (await page(errand.id)).evidence;
+    const { content } = await pack(errand.id, made.id);
+    expect(content.messages.map((m) => m.body)).not.toContain('Sent after the dispute opened');
+    expect((content.errand as { status: string }).status).toBe('disputed');
+  });
+
+  it('makes one whichever way the errand goes into dispute, staff stepping in too', async () => {
+    const { errand } = await disputed();
+    const view = await page(errand.id);
+    await request(t.http)
+      .post(`/v1/admin/errands/${errand.id}/actions`)
+      .set(ops.headers)
+      .send({ event: 'admin_intervene', version: view.errand.version, note: 'Customer called support' })
+      .expect(200);
+    expect((await page(errand.id)).evidence.map((e: { reason: string }) => e.reason)).toEqual(['admin_intervene']);
+  });
+
+  it("still opens the dispute when its pack can't be made, and says so", async () => {
+    const { customer, errand } = await disputed();
+    vi.spyOn(t.app.get(EvidenceService), 'take').mockRejectedValueOnce(new Error('database away'));
+    await openDispute(customer, errand.id);
+    const view = await page(errand.id);
+    expect(view.errand.status).toBe('disputed');
+    expect(view.evidence).toEqual([]);
+    const [alert] = await t.db
+      .execute<{ kind: string }>(
+        sql`select kind from alerts where kind = 'evidence_failed' and dedupe_key = ${errand.id}`,
+      )
+      .then((r) => r.rows);
+    expect(alert).toEqual({ kind: 'evidence_failed' });
   });
 
   it('makes one when too many wrong PINs freeze the errand', async () => {

@@ -26,7 +26,8 @@ export class AgentsModule implements OnModuleInit {
   onModuleInit() {
     // Every 10 minutes, delete positions that stopped being refreshed.
     this.jobs.register('presence.sweep', '*/10 * * * *', () => this.presence.sweep());
-    // Daily, delete trails older than 90 days that no dispute or open flag still needs (G4).
+    // Daily, delete trails older than each country's Settings, Security say, unless a dispute or open flag
+    // still needs them (G4, X10).
     this.jobs.register('trail.prune', '53 3 * * *', () => this.trail.prune());
   }
 }

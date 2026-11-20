@@ -77,17 +77,21 @@ export class ErrandsAdminService {
   async snapshot(admin: AdminContext, id: string) {
     const [errand] = await this.db.select({ countryCode: errands.countryCode }).from(errands).where(eq(errands.id, id));
     if (!errand) throw notFound('errand_not_found', 'Errand not found');
-    return this.db.transaction(async (tx) => {
-      const made = await this.evidence.take(id, 'staff', admin.adminId, tx);
-      await this.audit.record(tx, admin, {
-        action: 'errand.evidence',
-        targetType: 'errand',
-        targetId: id,
-        countryCode: errand.countryCode,
-        data: { pack: made.id, sha256: made.sha256 },
-      });
-      return made;
-    });
+    // Read as of one moment, so the pack never mixes what was there before and after a change.
+    return this.db.transaction(
+      async (tx) => {
+        const made = await this.evidence.take(id, 'staff', admin.adminId, tx);
+        await this.audit.record(tx, admin, {
+          action: 'errand.evidence',
+          targetType: 'errand',
+          targetId: id,
+          countryCode: errand.countryCode,
+          data: { pack: made.id, sha256: made.sha256 },
+        });
+        return made;
+      },
+      { isolationLevel: 'repeatable read' },
+    );
   }
 
   /** One evidence pack in full, for download. */

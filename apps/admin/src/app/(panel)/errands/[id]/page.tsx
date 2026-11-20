@@ -21,7 +21,7 @@ interface Detail {
   calls: Array<{ id: string; callerRole: 'customer' | 'agent'; provider: string; createdAt: string }>;
   /** The GPS trail as kept now (G1, G4). */
   trail: {
-    points: Array<{ lat: number; lng: number; mocked: boolean; accuracy: number | null; at: string }>;
+    points: Array<{ agentId: string; lat: number; lng: number; mocked: boolean; accuracy: number | null; at: string }>;
     more: boolean;
   };
   /** Dispute evidence packs, newest first (E8). */
@@ -94,6 +94,9 @@ const DONE: Record<string, string> = {
 const PACK: Record<string, string> = {
   open_dispute: 'When the dispute opened',
   pin_locked: 'When too many wrong PINs froze it',
+  item_lock_timeout: "When the item amount wasn't locked in time",
+  unreachable_timeout: 'When the customer stayed unreachable',
+  admin_intervene: 'When staff stepped in',
   staff: 'Taken by staff',
 };
 
@@ -282,7 +285,13 @@ export default async function ErrandPage({
           {d.evidence.length || canSnapshot ? (
             <Card title="Evidence packs">
               {d.evidence.length === 0 ? (
-                <p className="text-sm text-ink-3">One is made when a dispute opens.</p>
+                e.status === 'disputed' ? (
+                  <Notice tone="warn">
+                    No pack was made when this went into dispute. Take one now, before anything more changes.
+                  </Notice>
+                ) : (
+                  <p className="text-sm text-ink-3">One is made when the errand goes into dispute.</p>
+                )
               ) : (
                 <ul className="space-y-2 text-sm">
                   {d.evidence.map((p) => (

@@ -1113,8 +1113,8 @@ export const userNetworks = pgTable(
 
 /**
  * Where the agent was while out on an errand (docs/security-plan.md, G1, G4, E6), from their phone's
- * reports: for the fake-GPS checks and a dispute's evidence. Deleted after 90 days, unless the errand is in
- * dispute or a flag on it is still open.
+ * reports: for the fake-GPS checks and a dispute's evidence. Deleted after the days in Settings, Security
+ * (90 unless changed), unless the errand is in dispute or a flag on it is still open.
  */
 export const errandTrail = pgTable(
   'errand_trail',
@@ -1153,8 +1153,10 @@ export const disputeEvidence = pgTable(
     errandId: uuid('errand_id')
       .notNull()
       .references(() => errands.id),
-    /** What made it: the dispute opening, too many wrong PINs, or staff taking another. */
-    reason: text('reason', { enum: ['open_dispute', 'pin_locked', 'staff'] }).notNull(),
+    /** What made it: the event that put the errand into dispute, or staff taking another. */
+    reason: text('reason', {
+      enum: ['open_dispute', 'pin_locked', 'item_lock_timeout', 'unreachable_timeout', 'admin_intervene', 'staff'],
+    }).notNull(),
     takenBy: uuid('taken_by').references(() => admins.id),
     content: jsonb('content').$type<Record<string, unknown>>().notNull(),
     /** SHA-256 of the content as canonical JSON (keys in order): anyone can work it out again. */

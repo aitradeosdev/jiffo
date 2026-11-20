@@ -33,6 +33,7 @@ import { CustomerIdentityService } from '../identity/customer-identity.service';
 import { MAPS, type MapsAdapter } from '../adapters/maps';
 import { UploadsService } from '../files/uploads.service';
 import { RiskFlagsService } from '../risk/risk-flags.service';
+import { EvidenceService } from './evidence.service';
 import { participantRole } from './access';
 import { ErrandNotifier, type TransitionResult } from './errand-notifier';
 import { EVENT_DATA, type CreateErrandInput, type ErrandEventInput } from './errand-input';
@@ -124,6 +125,7 @@ export class ErrandsService implements OnModuleInit {
     private readonly applications: AgentApplicationService,
     private readonly customerIdentity: CustomerIdentityService,
     private readonly risk: RiskFlagsService,
+    private readonly evidence: EvidenceService,
   ) {}
 
   onModuleInit() {
@@ -940,6 +942,9 @@ export class ErrandsService implements OnModuleInit {
       .returning();
     if (!after) throw conflict('errand_changed', 'This errand changed. Refresh and try again.');
     await this.logEvent(tx, errand, event, to, actorRole, actorId, effect.record);
+    // Going into dispute, however it happens, makes its evidence pack in this same transaction: the errand
+    // exactly as it was at that moment (E8).
+    if (to === 'disputed' && errand.status !== 'disputed') await this.evidence.onDispute(tx, after, event);
     return after;
   }
 

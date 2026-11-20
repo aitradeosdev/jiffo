@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { DEFAULT_SECURITY_SETTINGS } from '@jiffo/shared';
 import { sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { countries, errandTrail } from '../db/schema';
@@ -22,6 +23,8 @@ export interface TrailPosition {
  */
 @Injectable()
 export class TrailService {
+  private readonly logger = new Logger(TrailService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly countriesService: CountriesService,
@@ -40,11 +43,19 @@ export class TrailService {
    */
   async prune() {
     let deleted = 0;
+    const failed: string[] = [];
     for (const { code } of await this.db.select({ code: countries.code }).from(countries)) {
-      const current = await this.countriesService.currentSettingsIfAny(code);
-      if (current) deleted += await this.pruneCountry(code, current.settings.security.trailDays);
+      // One country's settings that can't be read leaves the others to be pruned, and its own at 90 days.
+      try {
+        const current = await this.countriesService.currentSettingsIfAny(code);
+        if (current) deleted += await this.pruneCountry(code, current.settings.security.trailDays);
+      } catch (error) {
+        failed.push(code);
+        this.logger.error(`Pruning ${code}'s trails by its settings failed: ${(error as Error).message}`);
+        deleted += await this.pruneCountry(code, DEFAULT_SECURITY_SETTINGS.trailDays).catch(() => 0);
+      }
     }
-    return { deleted };
+    return { deleted, failed };
   }
 
   private async pruneCountry(countryCode: string, days: number) {

@@ -7,7 +7,6 @@ import { ChatService } from '../chat/chat.service';
 import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { RiskFlagsService } from '../risk/risk-flags.service';
-import { EvidenceService } from './evidence.service';
 import type { ErrandRow } from './errand-view';
 
 export interface TransitionResult {
@@ -216,7 +215,6 @@ export class ErrandNotifier {
     private readonly chat: ChatService,
     private readonly push: PushService,
     private readonly risk: RiskFlagsService,
-    private readonly evidence: EvidenceService,
   ) {}
 
   /**
@@ -247,9 +245,6 @@ export class ErrandNotifier {
   async transitioned(r: TransitionResult) {
     // Pairings and finished errands are checked for fraud flags beside this (E6).
     this.risk.errandChanged(r.before, r.after);
-    // Going into dispute makes its evidence pack, beside this too (E8).
-    if (r.after.status === 'disputed' && r.before.status !== 'disputed')
-      this.evidence.disputeOpened(r.after.id, r.event);
     try {
       await this.run(r);
     } catch (error) {
