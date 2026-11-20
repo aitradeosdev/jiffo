@@ -15,6 +15,9 @@ const PresenceBody = z
     lng: z.number().min(-180).max(180).optional(),
     /** The phone says the position is mocked (MB4); it then can't place the agent at a drop-off. */
     mocked: z.boolean().optional(),
+    /** How far off the phone says the fix might be, in metres, and when it took it (ms), for the GPS checks (G1). */
+    accuracy: z.number().min(0).max(1_000_000).optional(),
+    fixedAt: z.number().int().positive().optional(),
   })
   .refine((b) => (b.lat === undefined) === (b.lng === undefined), 'Send lat and lng together');
 

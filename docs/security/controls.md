@@ -80,7 +80,8 @@ Google Play Integrity on Android and Apple App Attest on iOS show that a request
   - a rooted or jailbroken phone (su binaries, Magisk, jailbreak files, writing outside the sandbox);
   - an emulator or simulator;
   - a hooking tool (Frida's libraries or server, Xposed, Substrate);
-  - an attached debugger.
+  - an attached debugger;
+  - on Android, a known fake-location app installed, such as Lockito (G1). The app names those apps in its manifest, so Android lets it see only them, not the rest of what is installed.
 
   They send what they find with each app check (`x-jiffo-risk`), even when no check can be made. The check covers what is sent, so it can be neither dropped nor changed on the way.
 - **On the server:** a phone with signals counts as doubtful. On Enforce, that means a selfie first, as for a phone Google or Apple doubts. Each check keeps the signals (`device_attestations.signals`), the account's device keeps the latest, and staff see them on the person's page under Devices.
@@ -106,7 +107,20 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 - **The phone's id:** both apps send it at sign-in (iOS's id for the vendor, Android's id for apps signed with one key). The server keeps only a keyed hash, as it does for payout accounts (`phone_fingerprint`, `account_fingerprint`, with keys derived from the ID fingerprint key).
 - **Deciding:** the Flags page has the Risk queue, for operations (the `risk` permission), and shared accounts, for the verification team. Each flag is cleared, confirmed as fraud, or reopened, with a reason in the audit log; a button must be pressed, so Enter in the note decides nothing. Nobody decides a flag about their own app account. The errand's page shows its flags, and the person's page links to theirs.
 - **Tier counts (F3):** the counts on a person's page, and the errand count in the People list, leave out errands with a flag that isn't cleared, and show them as Flagged.
-- **Not yet:** errands with no GPS movement need the location trail (fix 11, the trail part).
+- **GPS (G1, E6):** see "The GPS trail" below for impossible jumps, trails along a ruler and agents who never moved.
+
+## The GPS trail (G1, G3, G4, E6)
+
+- **What is kept:** each position the agent's phone reports while they are out on an errand is kept for the errands whose customer follows them then (`errand_trail`): an errand held while they carry out another gets none until it is under way (G2). Mocked positions are kept but marked. With each position the app sends when the phone took the fix and how far off it might be. Being online on no errand leaves no trail; only the latest position is kept then, as before (G3). A trail point that can't be written is logged; it never fails the agent's report.
+- **Impossible jumps (G1):** each reported position is compared with the one before. A move of at least 1 km faster than 150 km/h (Settings, Risk flags) is flagged for the Risk queue: on each errand that follows the agent, or for the agent once a day (by the country's day) when on none.
+  - The time is when the phone took each fix, when both reports say and the phone's clock is believable (within ten minutes of ours), so reports held up on the network don't look like jumps.
+  - How far off each fix might be is taken off the distance: a cell tower's fix can be a kilometre or more out.
+  - Smaller moves are a phone's GPS wandering, however fast they look. A move to or from a mocked position isn't judged, as the phone already said it was mocked (MB4).
+- **When an errand is finished,** on the finishing agent's own positions only (an agent who gave the errand back left theirs on it too):
+  - **No movement (E6):** the trail stayed within 150 m of where it started, over at least three positions and five minutes, while the pickup and drop-off are more than twice that apart. Only a trail that covers the errand from accepted to delivered with no gap of more than three minutes is judged: positions that stopped coming say nothing about where the agent went meanwhile.
+  - **Along a ruler (G1):** eight positions in a row over at least 300 m, every one within a metre and a half of the straight line, at a speed even to within 3%. A phone's GPS wanders a few metres and a driver's speed changes; an app faking a route doesn't.
+- **Deleted after 90 days (G4):** a daily job deletes older positions, except for an errand in dispute or with a flag still open.
+- **Limits:** the positions, their times and their accuracy are the phone's own word. These checks catch the ways faking usually shows, and with the app checks (MB3) and the mock flag (MB4) make it harder; they don't prove where someone was.
 
 ## The apps on the phone
 

@@ -43,7 +43,7 @@ const STATUS: Record<RiskFlagStatus, { label: string; tone: 'warn' | 'neutral' |
 };
 
 const QUEUE_ABOUT: Record<RiskQueue, string> = {
-  risk: "Errands that look like fraud: cash runs, money sent to accounts, a customer and agent who share a phone, a network or a bank, the same pair again and again, high-value errands finished too fast. A flag refuses nothing: you decide. Flagged errands are left out of the agent's counts for tiers until cleared.",
+  risk: "Errands that look like fraud: cash runs, money sent to accounts, a customer and agent who share a phone, a network or a bank, the same pair again and again, high-value errands finished too fast, and agents' positions that look faked. A flag refuses nothing: you decide. Flagged errands are left out of the agent's counts for tiers until cleared.",
   verification:
     "Accounts that share a phone, where at least one is an agent's, bank accounts two agents saved, and a face the identity provider found on another account. Look at both accounts before deciding: family members do share phones.",
 };
@@ -83,6 +83,12 @@ function finding(f: Flag, naira: (kobo: number) => string) {
       return d.sameIdNumber
         ? 'The identity provider found this face, with the same ID number, on the other account'
         : "The identity provider found this face on the other account's check, with another ID";
+    case 'gps_jump':
+      return `Moved ${(Number(d.metres) / 1000).toFixed(1)} km in ${Number(d.seconds)} seconds: ${Number(d.kmh)} km/h`;
+    case 'gps_straight':
+      return `${Number(d.points)} positions in a straight line over ${Number(d.metres)} m, at an even ${Number(d.kmh)} km/h`;
+    case 'no_movement':
+      return `Stayed within ${Number(d.metres)} m for ${Number(d.minutes)} minutes; the stops are ${(Number(d.routeMetres) / 1000).toFixed(1)} km apart`;
     case 'repeat_pairing':
       return `${f.errandCount} errands together within ${Number(d.days)} days`;
     case 'fast_high_value':

@@ -19,18 +19,32 @@ describe('background location', () => {
         { timestamp: 5, coords: { latitude: 6.5, longitude: 3.5 } },
         { timestamp: 4, coords: { latitude: 6.4, longitude: 3.4 } },
       ]),
-    ).toEqual({ lat: 6.5, lng: 3.5 });
+    ).toEqual({ lat: 6.5, lng: 3.5, fixedAt: 5 });
+  });
+
+  it("sends when the phone took the fix and how sure it is, for the server's GPS checks (G1)", () => {
+    expect(
+      latestPosition([{ timestamp: 1_700_000_000_000, coords: { latitude: 6.4, longitude: 3.4, accuracy: 12.5 } }]),
+    ).toEqual({ lat: 6.4, lng: 3.4, fixedAt: 1_700_000_000_000, accuracy: 12.5 });
+    // Unknown accuracy is left out.
+    expect(latestPosition([{ timestamp: 2, coords: { latitude: 6.4, longitude: 3.4, accuracy: null } }])).toEqual({
+      lat: 6.4,
+      lng: 3.4,
+      fixedAt: 2,
+    });
   });
 
   it('says when the phone reports a position as mocked (MB4)', () => {
     expect(latestPosition([{ timestamp: 1, coords: { latitude: 6.4, longitude: 3.4 }, mocked: true }])).toEqual({
       lat: 6.4,
       lng: 3.4,
+      fixedAt: 1,
       mocked: true,
     });
     expect(latestPosition([{ timestamp: 1, coords: { latitude: 6.4, longitude: 3.4 }, mocked: false }])).toEqual({
       lat: 6.4,
       lng: 3.4,
+      fixedAt: 1,
     });
   });
 });

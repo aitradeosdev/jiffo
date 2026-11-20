@@ -51,6 +51,9 @@ export const DEFAULT_RISK_SETTINGS = {
   fastErrandMinutes: 10,
   sharedNetworkDays: 30,
   busyNetworkAccounts: 10,
+  gpsMaxSpeedKmh: 150,
+  gpsJumpMeters: 1_000,
+  noMovementMeters: 150,
 };
 
 /**
@@ -239,6 +242,18 @@ export const CountrySettingsSchema = z.object({
        * Wi-Fi, and isn't counted.
        */
       busyNetworkAccounts: z.number().int().min(2).max(1_000).default(10),
+      /**
+       * An agent's phone moving at least gpsJumpMeters between two reports, faster than this, is flagged: no
+       * one travels that fast in a city (G1).
+       */
+      gpsMaxSpeedKmh: z.number().int().min(50).max(1_000).default(150),
+      /** Smaller moves are a phone's GPS wandering, however fast they look. */
+      gpsJumpMeters: z.number().int().min(100).max(50_000).default(1_000),
+      /**
+       * An errand whose trail stayed within this of where it started, over at least five minutes, while its
+       * pickup and drop-off are more than twice this apart, is flagged (E6). 0 turns it off.
+       */
+      noMovementMeters: z.number().int().min(0).max(5_000).default(150),
       /** Errands worth at least this (fee and items) finished unusually fast are flagged. */
       fastHighValueKobo: kobo.default(5_000_000),
       /**

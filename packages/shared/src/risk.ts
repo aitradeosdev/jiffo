@@ -2,7 +2,7 @@
  * What the apps look for on a phone and send the server (docs/security-plan.md, MB4). The app's own word, so
  * it adds to Google's and Apple's checks (MB3) rather than standing in for them.
  */
-export const RISK_SIGNALS = ['rooted', 'emulator', 'hooking', 'debugger'] as const;
+export const RISK_SIGNALS = ['rooted', 'emulator', 'hooking', 'debugger', 'location_spoofer'] as const;
 export type RiskSignal = (typeof RISK_SIGNALS)[number];
 
 /** Each signal in words, for staff and the reasons kept with a check. */
@@ -11,6 +11,7 @@ export const RISK_LABELS: Record<RiskSignal, string> = {
   emulator: 'An emulator',
   hooking: 'A hooking tool such as Frida',
   debugger: 'A debugger attached',
+  location_spoofer: 'A fake-location app installed',
 };
 
 /** The known signals in a comma-separated list, each once; anything else is dropped. */
@@ -41,6 +42,9 @@ export const RISK_FLAG_KINDS = [
   'pair_shared_network',
   'repeat_pairing',
   'fast_high_value',
+  'gps_jump',
+  'gps_straight',
+  'no_movement',
   'shared_phone',
   'shared_payout_account',
   'same_face',
@@ -87,6 +91,21 @@ export const RISK_FLAG_INFO: Record<RiskFlagKind, { queue: RiskQueue; label: str
     queue: 'risk',
     label: 'High value, finished fast',
     about: 'A high-value errand was finished faster than its route can be travelled (E6).',
+  },
+  gps_jump: {
+    queue: 'risk',
+    label: 'Impossible jump in position',
+    about: "The agent's phone reported moving faster than anyone can travel (G1).",
+  },
+  gps_straight: {
+    queue: 'risk',
+    label: 'Trail along a ruler',
+    about: "The agent's trail ran perfectly straight at a perfectly even speed, as an app faking a route makes (G1).",
+  },
+  no_movement: {
+    queue: 'risk',
+    label: 'Agent never moved',
+    about: "The agent's trail stayed in one spot through the errand, though its stops are far apart (E6).",
   },
   shared_phone: {
     queue: 'verification',
