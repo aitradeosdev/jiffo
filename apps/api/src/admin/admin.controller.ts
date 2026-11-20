@@ -680,6 +680,13 @@ export class AdminController {
     return this.errands.disputes(query.country);
   }
 
+  /** Drop-off photos waiting for the customer's approval, with their timers (docs/security-plan.md, X2). */
+  @Get('dropoffs')
+  @Needs('read')
+  dropoffs(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
+    return this.errands.dropoffs(query.country);
+  }
+
   @Get('errands/:id')
   @Needs('read')
   errand(@Param('id', ErrandId) id: string) {

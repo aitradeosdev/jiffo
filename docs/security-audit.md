@@ -60,7 +60,8 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 11d. Dispute evidence packs: made as an errand goes into dispute, and by staff on demand; fixed and hashed; with events, offers, PIN entries, chat, photos, calls, flags, money and the trail's fingerprint. The errand page shows the call log and the trail; trail retention is a Security setting (E8, X10's trail days) | aitradeosdev/jiffo#75 | merged |
 | 11e. The emergency button and the Safety queue: dials the country's emergency number, then logs who, which errand and where, following the person's position for ten minutes; handled by the safety team with a reason (E9) | aitradeosdev/jiffo#76 | merged |
 | 11f. Uploads: JPEG, PNG and HEIC only, told apart by their bytes; each photo re-encoded on the server without location or camera details, broken files and pixel bombs refused; the original deleted; each copy's SHA-256 in the evidence pack; photo links last the Security setting's minutes (5) (C1, X10's link expiry) | aitradeosdev/jiffo#77 | merged |
-| 11g. Chat warnings: links, phone numbers, bank account numbers and "pay outside the app" flagged by the server as a message is sent, shown under it in both apps and marked for staff; no link previews (C3) | this pull request | open |
+| 11g. Chat warnings: links, phone numbers, bank account numbers and "pay outside the app" flagged by the server as a message is sent, shown under it in both apps and marked for staff; no link previews (C3) | aitradeosdev/jiffo#78 | merged |
+| 11h. Drop-off photos: reminders by push and SMS at 2, 12 and 20 hours (a Security setting); the Drop-offs queue with each photo's timer; staff can pause and resume the automatic approval, or step in to freeze the money and decide (X1–X3, X10's reminder times) | this pull request | open |
 
 ## Summary
 
@@ -275,9 +276,9 @@ The owner asked for anything in the plan that contradicts what was built to be c
 
 | ID | Status | Files | What is missing | Decision |
 |---|---|---|---|---|
-| X1 | partly | `packages/shared/src/settings.ts` (`autoReleaseHours` 24); test: `errands.e2e` | Auto-release is 24 hours for both escrows. No reminders. | implement (fix 11) |
-| X2 | missing | | Drop-off photo queue: pause, freeze, decide. | implement (fix 11) |
-| X3 | missing | `adapters/messaging.ts` (codes only) | Reminders at 2, 12 and 20 hours by push and SMS. | implement (fix 11) |
+| X1 | done | `packages/shared/src/settings.ts` (`autoReleaseHours` 24, `security.releaseReminderHours`), `errands/errands.service.ts`; tests: `errands.e2e`, `release-reminders` | Auto-release at 24 hours for both escrows, with reminders at 2, 12 and 20 hours after the photo, set in Settings, Security. | done (fix 11h) |
+| X2 | done | `admin/errands-admin.service.ts` (`dropoffs`), the panel's Drop-offs page; tests: `release-reminders` | The queue of drop-off photos awaiting approval with each one's timer. Staff pause and resume the timer, or step in, which freezes the money in a dispute, and then release, refund or split from the errand's page. | done (fix 11h) |
+| X3 | done | `errands/errand-notifier.ts` (`remindRelease`); tests: `release-reminders` | Three reminders, at 2, 12 and 20 hours, each by push and SMS, saying how long is left. | done (fix 11h) |
 | X4 | missing | | See A4 and A6. | implement for agents (fix 10) |
 | X5 | n/a | | Referrals aren't built. | apply when built |
 | X6 | missing | | See D2. | implement (fix 9) |

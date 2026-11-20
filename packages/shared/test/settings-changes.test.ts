@@ -15,6 +15,12 @@ describe('settingChanges', () => {
     ]);
   });
 
+  it('keeps a list of numbers in number order', () => {
+    expect(settingChanges({ hours: [2, 12, 20] }, { hours: [2, 12, 18] })).toEqual([
+      { path: 'hours', from: [2, 12, 20], to: [2, 12, 18] },
+    ]);
+  });
+
   it('reports the service fee rule on the minimum', () => {
     const bad = structuredClone(NIGERIA_DEFAULT_SETTINGS);
     bad.fees.serviceFeeMinKobo = bad.fees.serviceFeeCapKobo + 1;

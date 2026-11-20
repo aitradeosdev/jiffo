@@ -1,8 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
+import { MESSAGING, type MessagingAdapter } from '../adapters/messaging';
 import { DB, type Db } from '../db/database.module';
-import { errands } from '../db/schema';
-import { formatNaira, TERMINAL_STATES, type CountrySettings, type ErrandEvent } from '@jiffo/shared';
+import { errands, users } from '../db/schema';
+import { formatNaira, releaseIn, TERMINAL_STATES, type CountrySettings, type ErrandEvent } from '@jiffo/shared';
 import { ChatService } from '../chat/chat.service';
 import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -29,7 +30,6 @@ interface Note {
 }
 
 const amount = (r: Record<string, unknown>) => formatNaira(Number(r.amountKobo ?? 0));
-
 /** What each event tells the other side. Events missing here only update the screens. */
 function noteFor(event: ErrandEvent, r: TransitionResult): Note | null {
   switch (event) {
@@ -191,6 +191,20 @@ function noteFor(event: ErrandEvent, r: TransitionResult): Note | null {
         body: 'Jiffo support cancelled this errand. Check your wallet for the details.',
         chat: 'Support settled this errand as cancelled',
       };
+    case 'pause_release':
+      return {
+        to: 'both',
+        title: 'Approval paused',
+        body: 'Jiffo support paused the automatic approval of the drop-off while they check it. The money stays held.',
+        chat: 'Support paused the automatic approval of the drop-off',
+      };
+    case 'resume_release':
+      return {
+        to: 'both',
+        title: 'Approval timer running again',
+        body: `The drop-off is approved automatically in ${r.after.releaseDueAt ? releaseIn(r.after.releaseDueAt) : 'a while'} unless the customer reports a problem.`,
+        chat: 'Support started the automatic approval of the drop-off again',
+      };
     case 'open_dispute':
       return {
         to: r.record.by === 'customer' ? 'agent' : 'customer',
@@ -215,7 +229,31 @@ export class ErrandNotifier {
     private readonly chat: ChatService,
     private readonly push: PushService,
     private readonly risk: RiskFlagsService,
+    @Inject(MESSAGING) private readonly sms: MessagingAdapter,
   ) {}
+
+  /**
+   * Reminds the customer that a drop-off photo waits for them, by push and SMS (X3): what to do, and when it
+   * is approved by itself. Each goes on its own, so a failed one never stops the other.
+   */
+  async remindRelease(errand: ErrandRow, dueAt: Date) {
+    const left = releaseIn(dueAt);
+    const body = `Your agent left your items and sent a drop-off photo. Check it in Jiffo and approve it, or report a problem. It's approved automatically in ${left} and your agent is paid.`;
+    // One SMS, not two: each reminder is a paid text.
+    const text = `Jiffo: Check your drop-off photo in the app and approve it, or report a problem. Approved automatically in ${left}.`;
+    const [customer] = await this.db.select({ phone: users.phone }).from(users).where(eq(users.id, errand.customerId));
+    const sent = await Promise.allSettled([
+      this.push.notifyUser(errand.customerId, 'customer', {
+        title: 'Check your drop-off photo',
+        body,
+        data: { type: 'errand.release_reminder', errandId: errand.id },
+      }),
+      customer ? this.sms.sendText(customer.phone, text) : Promise.resolve(),
+    ]);
+    for (const r of sent) {
+      if (r.status === 'rejected') this.logger.warn(`A reminder for ${errand.id} didn't go: ${String(r.reason)}`);
+    }
+  }
 
   /**
    * An agent is ready, but the wallet no longer covers the errand. Sent at most once per errand every

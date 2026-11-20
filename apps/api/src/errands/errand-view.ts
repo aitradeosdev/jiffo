@@ -16,6 +16,7 @@ export const transitionContext = (errand: ErrandRow, actor: Actor): TransitionCo
   actor,
   buy: errand.buy,
   pendingOffer: errand.pendingOfferKobo !== null,
+  releasePaused: errand.releasePausedAt !== null,
 });
 
 export function eventsFor(errand: ErrandRow, role: ViewerRole): ErrandEvent[] {
@@ -90,6 +91,11 @@ export function errandView(
     acceptedAt: errand.acceptedAt,
     startedAt: errand.startedAt,
     deliveredAt: errand.deliveredAt,
+    /** While a drop-off photo waits: when it is approved by itself, and since when support has that paused (X1, X2). */
+    release:
+      errand.status === 'photo_pending' && errand.releaseDueAt
+        ? { dueAt: errand.releaseDueAt, pausedAt: errand.releasePausedAt }
+        : null,
     completedAt: errand.completedAt,
     cancelledAt: errand.cancelledAt,
     createdAt: errand.createdAt,

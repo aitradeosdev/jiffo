@@ -15,6 +15,15 @@ const ACTIONS: Record<string, { label: string; about: string }> = {
     label: 'Step in',
     about: 'Moves it into dispute and keeps the money held while you look into it.',
   },
+  pause_release: {
+    label: 'Pause the automatic approval',
+    about:
+      'The drop-off photo waits while you look into it: nothing is approved or paid by itself. The customer can still approve it.',
+  },
+  resume_release: {
+    label: 'Start the automatic approval again',
+    about: 'With the time that was left when it was paused, and any reminders still to come.',
+  },
   redeliver: { label: 'Arrange a redelivery', about: 'Back to the agent to deliver again, at the same fee.' },
   resolve_complete: { label: 'Settle as complete', about: 'The errand counts as done.' },
   resolve_cancel: { label: 'Settle as cancelled', about: 'The errand counts as not done.' },

@@ -1,3 +1,4 @@
+import type { Release } from './release';
 import type { ErrandEvent, ErrandState } from '@jiffo/shared';
 
 export interface StopView {
@@ -34,6 +35,8 @@ export interface ErrandView {
   acceptedAt: string | null;
   startedAt: string | null;
   deliveredAt: string | null;
+  /** While a drop-off photo waits: when it approves itself, or since when support has paused that. */
+  release?: Release | null;
   completedAt: string | null;
   cancelledAt: string | null;
   /** Only on a single errand's view, for its customer and agent: short-lived photo links. */

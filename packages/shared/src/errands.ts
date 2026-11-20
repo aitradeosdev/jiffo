@@ -47,6 +47,8 @@ export interface TransitionContext {
   buy: boolean;
   /** A new price from the agent is waiting for the customer's answer. */
   pendingOffer: boolean;
+  /** Support paused the automatic approval of the drop-off photo (docs/security-plan.md, X2). */
+  releasePaused?: boolean;
 }
 
 interface Rule {
@@ -120,7 +122,28 @@ export const ERRAND_EVENTS = {
   confirm_pin: { from: ['delivered'], to: 'completed', actors: ['agent'] },
   send_dropoff_photo: { from: ['delivered'], to: 'photo_pending', actors: ['agent'] },
   approve_photo: { from: ['photo_pending'], to: 'completed', actors: ['customer'] },
-  auto_release: { from: ['photo_pending'], to: 'completed', actors: ['system'] },
+  auto_release: {
+    from: ['photo_pending'],
+    to: 'completed',
+    actors: ['system'],
+    guard: (c) => (c.releasePaused ? 'Support paused the automatic approval' : null),
+  },
+  /**
+   * Support stops the drop-off photo's automatic approval while they look into it, and starts it again with the
+   * time that was left (X2). The customer can still approve it, or open a dispute, meanwhile.
+   */
+  pause_release: {
+    from: ['photo_pending'],
+    to: 'photo_pending',
+    actors: ['admin'],
+    guard: (c) => (c.releasePaused ? 'The automatic approval is already paused' : null),
+  },
+  resume_release: {
+    from: ['photo_pending'],
+    to: 'photo_pending',
+    actors: ['admin'],
+    guard: (c) => (c.releasePaused ? null : 'The automatic approval isn’t paused'),
+  },
 
   report_unreachable: { from: ['delivered'], to: 'unreachable', actors: ['agent'] },
   /** Redelivery at the same agreed fee. */
@@ -189,6 +212,17 @@ export function allowedEvents(from: ErrandState, ctx: TransitionContext): Errand
       return false;
     }
   });
+}
+
+/**
+ * How long until a drop-off photo is approved by itself, for people (X1, X3): "22 hours", to the nearest hour,
+ * and "less than an hour" in its last hour.
+ */
+export function releaseIn(dueAt: Date | string, now = Date.now()): string {
+  const ms = new Date(dueAt).getTime() - now;
+  if (!(ms >= 3_600_000)) return 'less than an hour';
+  const hours = Math.round(ms / 3_600_000);
+  return hours === 1 ? '1 hour' : `${hours} hours`;
 }
 
 /** The customer sees their hand-off PIN only once the agent has marked the errand delivered. */

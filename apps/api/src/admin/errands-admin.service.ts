@@ -27,6 +27,7 @@ import {
 } from '../db/schema';
 import { notFound } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
+import { transitionContext } from '../errands/errand-view';
 import { ADMIN_ERRAND_EVENTS, ErrandsService, type AdminErrandEvent } from '../errands/errands.service';
 import { keptKey, UploadsService } from '../files/uploads.service';
 import { chargeableItemsKobo, WalletService, type DisputeSplit } from '../money/wallet.service';
@@ -64,6 +65,9 @@ const customerFields = {
 const agentFields = { id: agent.id, firstName: agent.firstName, lastName: agent.lastName, phone: agent.phone };
 
 /** Errands as support sees them: every errand, its whole history, and support's own actions. */
+/** The most drop-off photos the queue lists at once; it says how many more there are. */
+const DROPOFFS_SHOWN = 200;
+
 @Injectable()
 export class ErrandsAdminService {
   constructor(
@@ -221,6 +225,70 @@ export class ErrandsAdminService {
             typeof o?.data.reason === 'string' ? o.data.reason : typeof o?.data.note === 'string' ? o.data.note : null,
         };
       }),
+    };
+  }
+
+  /**
+   * Drop-off photos waiting for the customer's approval (docs/security-plan.md, X2): each with when it is
+   * approved by itself, or since when support has that paused, and the photo. Paused ones first, as someone
+   * is looking at them and they mustn't fall off a long list; then the soonest to be approved.
+   */
+  async dropoffs(country: string) {
+    const waiting = and(eq(errands.countryCode, country), eq(errands.status, 'photo_pending'));
+    const [count] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(errands)
+      .where(waiting);
+    const total = count?.n ?? 0;
+    const rows = await this.db
+      .select({
+        id: errands.id,
+        description: errands.description,
+        feeKobo: errands.feeKobo,
+        itemAmountKobo: errands.itemAmountKobo,
+        version: errands.version,
+        dueAt: errands.releaseDueAt,
+        pausedAt: errands.releasePausedAt,
+        customer: customerFields,
+        agent: agentFields,
+      })
+      .from(errands)
+      .innerJoin(customer, eq(customer.id, errands.customerId))
+      .leftJoin(agent, eq(agent.id, errands.agentId))
+      .where(waiting)
+      .orderBy(sql`${errands.releasePausedAt} is null`, asc(errands.releaseDueAt), asc(errands.id))
+      .limit(DROPOFFS_SHOWN);
+    if (rows.length === 0) return { dropoffs: [], total };
+    const photos = await this.db
+      .select({ errandId: errandEvents.errandId, data: errandEvents.data, createdAt: errandEvents.createdAt })
+      .from(errandEvents)
+      .where(
+        and(
+          inArray(
+            errandEvents.errandId,
+            rows.map((r) => r.id),
+          ),
+          eq(errandEvents.event, 'send_dropoff_photo'),
+        ),
+      )
+      .orderBy(desc(errandEvents.id));
+    const latest = new Map<string, (typeof photos)[number]>();
+    for (const p of photos) if (!latest.has(p.errandId)) latest.set(p.errandId, p);
+    const link = await this.uploads.links(country);
+    return {
+      total,
+      dropoffs: await Promise.all(
+        rows.map(async (r) => {
+          const sent = latest.get(r.id);
+          const key = typeof sent?.data.photo === 'string' ? sent.data.photo : null;
+          return {
+            ...r,
+            agent: r.agent?.id ? r.agent : null,
+            sentAt: sent?.createdAt ?? null,
+            photoUrl: key ? await link(key) : null,
+          };
+        }),
+      ),
     };
   }
 
@@ -415,11 +483,9 @@ export class ErrandsAdminService {
         comment: r.comment,
         createdAt: r.createdAt,
       })),
-      actions: allowedEvents(errand.status as ErrandState, {
-        actor: 'admin',
-        buy: errand.buy,
-        pendingOffer: errand.pendingOfferKobo !== null,
-      }).filter((e): e is AdminErrandEvent => (ADMIN_ERRAND_EVENTS as readonly string[]).includes(e)),
+      actions: allowedEvents(errand.status as ErrandState, transitionContext(errand, 'admin')).filter(
+        (e): e is AdminErrandEvent => (ADMIN_ERRAND_EVENTS as readonly string[]).includes(e),
+      ),
     };
   }
 

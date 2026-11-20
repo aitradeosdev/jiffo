@@ -46,6 +46,8 @@ export const EVENT: Record<string, string> = {
   open_dispute: 'Dispute opened',
   admin_cancel: 'Support cancelled it',
   admin_intervene: 'Support stepped in',
+  pause_release: 'Support paused the automatic approval',
+  resume_release: 'Support started the automatic approval again',
   pin_wrong: 'Agent entered a wrong PIN',
   pin_locked: 'Too many wrong PINs: held for support',
   resolve_complete: 'Support settled it as complete',

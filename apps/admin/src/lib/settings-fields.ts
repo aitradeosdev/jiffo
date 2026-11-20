@@ -17,7 +17,9 @@ export type FieldKind =
   | 'multi'
   | 'optionalText'
   /** A number dialled, such as an emergency number: kept as the digits typed, never as a quantity. */
-  | 'digits';
+  | 'digits'
+  /** Whole hours, several, typed with commas between them: 2, 12, 20. */
+  | 'hoursList';
 
 export interface Field {
   path: string;
@@ -291,6 +293,12 @@ export const SECTIONS: Section[] = [
         help: 'Days, between 30 and 365. Then deleted, unless the errand is in dispute or a flag on it is still open.',
       },
       {
+        path: 'security.releaseReminderHours',
+        label: 'Remind customers of a drop-off photo after',
+        kind: 'hoursList',
+        help: 'Hours after the photo, soonest first, with commas between them. Each reminder goes by push and SMS (a paid text). One at or after the automatic approval is never sent.',
+      },
+      {
         path: 'security.signedLinkMinutes',
         label: 'Links to see a photo last',
         kind: 'minutes',
@@ -438,6 +446,8 @@ export function shown(field: Field | undefined, value: unknown): string {
       return field.options?.find((o) => o.value === value)?.label ?? String(value);
     case 'multi':
       return (value as string[]).map((v) => field.options?.find((o) => o.value === v)?.label ?? v).join(', ');
+    case 'hoursList':
+      return (value as number[]).map((h) => `${h} h`).join(', ') || 'none';
     default:
       return String(value);
   }

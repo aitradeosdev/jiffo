@@ -4,7 +4,7 @@ import IORedis from 'ioredis';
 import type { ErrandState } from '@jiffo/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 
-export type TimerEvent = 'expire' | 'item_lock_timeout' | 'auto_release' | 'unreachable_timeout';
+export type TimerEvent = 'expire' | 'item_lock_timeout' | 'auto_release' | 'unreachable_timeout' | 'release_reminder';
 
 /**
  * A system event due later. It only applies if the errand is still exactly as it was when the timer
@@ -12,9 +12,12 @@ export type TimerEvent = 'expire' | 'item_lock_timeout' | 'auto_release' | 'unre
  */
 export interface ErrandTimerJob {
   errandId: string;
+  /** A system event, or release_reminder: a reminder to the customer, which changes nothing (X3). */
   event: TimerEvent;
   status: ErrandState;
   version: number;
+  /** For a reminder: the hours after the drop-off photo it is for. */
+  remindAt?: number;
 }
 
 export type TimerHandler = (job: ErrandTimerJob) => Promise<void>;
@@ -41,8 +44,13 @@ export class MemoryErrandTimers implements ErrandTimers {
   }
 
   /** Fires every pending timer for the errand, as if its time had come. */
-  async fireAll(errandId?: string) {
-    const due = this.pending.filter((p) => !errandId || p.job.errandId === errandId);
+  fireAll(errandId?: string) {
+    return this.fireWhere((job) => !errandId || job.errandId === errandId);
+  }
+
+  /** Fires the pending timers that match, as if their time had come. */
+  async fireWhere(match: (job: ErrandTimerJob) => boolean) {
+    const due = this.pending.filter((p) => match(p.job));
     for (const p of due) this.pending.splice(this.pending.indexOf(p), 1);
     for (const p of due) await this.handler?.(p.job);
     return due.map((p) => p.job);
@@ -67,7 +75,7 @@ export class BullMqErrandTimers implements ErrandTimers, OnApplicationBootstrap,
   async schedule(job: ErrandTimerJob, delayMs: number) {
     await this.queue.add(job.event, job, {
       delay: Math.max(0, delayMs),
-      jobId: `${job.errandId}-${job.version}-${job.event}`,
+      jobId: `${job.errandId}-${job.version}-${job.event}${job.remindAt ? `-${job.remindAt}` : ''}`,
       attempts: 5,
       backoff: { type: 'exponential', delay: 5_000 },
       removeOnComplete: true,

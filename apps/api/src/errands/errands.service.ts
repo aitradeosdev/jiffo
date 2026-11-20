@@ -82,11 +82,28 @@ export interface Settlement {
 export const ADMIN_ERRAND_EVENTS = [
   'admin_cancel',
   'admin_intervene',
+  'pause_release',
+  'resume_release',
   'redeliver',
   'resolve_complete',
   'resolve_cancel',
 ] as const;
 export type AdminErrandEvent = (typeof ADMIN_ERRAND_EVENTS)[number];
+
+/**
+ * Pausing a drop-off photo's automatic approval keeps when it was paused; resuming moves the time it is due
+ * on by however long it was paused, so the customer and agent lose none of it (X2).
+ */
+function releasePatch(errand: ErrandRow, event: AdminErrandEvent, settings: CountrySettings): Patch {
+  const now = new Date();
+  if (event === 'pause_release') return { releasePausedAt: now };
+  if (event !== 'resume_release') return {};
+  const left =
+    errand.releaseDueAt && errand.releasePausedAt
+      ? Math.max(0, errand.releaseDueAt.getTime() - errand.releasePausedAt.getTime())
+      : settings.timers.autoReleaseHours * HOUR_MS;
+  return { releasePausedAt: null, releaseDueAt: new Date(now.getTime() + left) };
+}
 
 /** How far from the pickup the matching screen counts online agents. */
 const NEARBY_RADIUS_KM = 3;
@@ -804,6 +821,7 @@ export class ErrandsService implements OnModuleInit {
 
   /** A timer came due. It applies only if the errand has not moved since the timer was set. */
   async applyTimer(job: ErrandTimerJob) {
+    if (job.event === 'release_reminder') return this.remindRelease(job);
     const money = await this.settingsOf(job.errandId);
     if (!money) return;
     const { settings } = money;
@@ -854,7 +872,7 @@ export class ErrandsService implements OnModuleInit {
       }
       const to = nextState(errand.status, input.event, transitionContext(errand, 'admin'));
       const effect: EventEffect = {
-        patch: { pendingOfferKobo: null },
+        patch: { pendingOfferKobo: null, ...releasePatch(errand, input.event, settings) },
         record: { note: input.note, by: 'support', ...(input.split ? { split: input.split } : {}) },
       };
       const after = await this.write(tx, errand, input.event, to, effect, 'admin', adminId);
@@ -938,6 +956,10 @@ export class ErrandsService implements OnModuleInit {
         ...(to === 'cancelled' ? { cancelledAt: now } : {}),
         // Once the errand is over, nobody needs its PIN again.
         ...(TERMINAL_STATES.has(to) ? { pinCipher: null, pinHmac: null } : {}),
+        // The drop-off photo's timer is over once the errand moves on, however it does.
+        ...(errand.status === 'photo_pending' && to !== 'photo_pending'
+          ? { releaseDueAt: null, releasePausedAt: null }
+          : {}),
       })
       .where(and(eq(errands.id, errand.id), eq(errands.version, errand.version)))
       .returning();
@@ -1123,7 +1145,14 @@ export class ErrandsService implements OnModuleInit {
             { secondsLeft: Math.ceil((waitMs - waited) / 1000) },
           );
         }
-        return { patch: {}, record: this.parse('send_dropoff_photo', data) };
+        return {
+          // Approved by itself after the errand's set hours unless the customer acts first (X1).
+          patch: {
+            releaseDueAt: new Date(now.getTime() + settings.timers.autoReleaseHours * HOUR_MS),
+            releasePausedAt: null,
+          },
+          record: this.parse('send_dropoff_photo', data),
+        };
       }
       case 'report_unreachable':
         return { patch: {}, record: this.parse('report_unreachable', data) };
@@ -1132,6 +1161,21 @@ export class ErrandsService implements OnModuleInit {
       default:
         return { patch: {}, record: {} };
     }
+  }
+
+  /**
+   * A reminder to the customer that a drop-off photo waits for them (X3), if it still does: the errand is as
+   * it was when the reminder was set, so not approved, disputed or paused since.
+   */
+  private async remindRelease(job: ErrandTimerJob) {
+    // Waits for a change in progress (a resume setting this very reminder) to commit, as applyTimer does.
+    const errand = await this.db.transaction(async (tx) => {
+      const [row] = await tx.select().from(errands).where(eq(errands.id, job.errandId)).for('share');
+      return row;
+    });
+    if (!errand || errand.version !== job.version || errand.status !== 'photo_pending') return;
+    if (errand.releasePausedAt || !errand.releaseDueAt) return;
+    await this.notifier.remindRelease(errand, errand.releaseDueAt);
   }
 
   /**
@@ -1150,11 +1194,34 @@ export class ErrandsService implements OnModuleInit {
         ? { requested: ['expire', t.urgentExpiryMinutes * MINUTE_MS] as [ErrandTimerJob['event'], number] }
         : {}),
     };
+    if (errand.status === 'photo_pending') return this.scheduleRelease(errand, settings);
     const due = plan[errand.status];
     if (!due) return;
     await this.timers.schedule(
       { errandId: errand.id, event: due[0], status: errand.status, version: errand.version },
       due[1],
     );
+  }
+
+  /**
+   * A drop-off photo's timers (X1, X3): the automatic approval when it is due, and each reminder still to come,
+   * at the hours Settings, Security give now, counted from the photo (moved on by any pause). None while
+   * support has it paused.
+   */
+  private async scheduleRelease(errand: ErrandRow, settings: CountrySettings) {
+    if (errand.releasePausedAt) return;
+    const now = Date.now();
+    const hours = settings.timers.autoReleaseHours;
+    const due = errand.releaseDueAt?.getTime() ?? now + hours * HOUR_MS;
+    const job = { errandId: errand.id, status: errand.status, version: errand.version };
+    await this.timers.schedule({ ...job, event: 'auto_release' }, due - now);
+    const live = await this.countries.currentSettingsIfAny(errand.countryCode);
+    const reminders = live?.settings.security.releaseReminderHours ?? DEFAULT_SECURITY_SETTINGS.releaseReminderHours;
+    const sent = due - hours * HOUR_MS;
+    for (const h of reminders) {
+      const at = sent + h * HOUR_MS;
+      if (h >= hours || at <= now) continue;
+      await this.timers.schedule({ ...job, event: 'release_reminder', remindAt: h }, at - now);
+    }
   }
 }

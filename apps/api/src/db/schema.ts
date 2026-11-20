@@ -492,6 +492,12 @@ export const errands = pgTable(
     acceptedAt: timestamp('accepted_at', { withTimezone: true }),
     startedAt: timestamp('started_at', { withTimezone: true }),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    /**
+     * While a drop-off photo waits for the customer: when it is approved automatically (X1), and, while support
+     * has that paused, since when (X2). Both cleared once the errand moves on.
+     */
+    releaseDueAt: timestamp('release_due_at', { withTimezone: true }),
+    releasePausedAt: timestamp('release_paused_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
     createdAt: createdAt(),
