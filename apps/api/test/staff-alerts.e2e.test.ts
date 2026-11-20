@@ -36,8 +36,8 @@ describe('alerts about staff', () => {
   const security = (over: Record<string, unknown>) => {
     const countries = t.app.get(CountriesService);
     const real = countries.currentSettingsIfAny.bind(countries);
-    vi.spyOn(countries, 'currentSettingsIfAny').mockImplementation(async (code) => {
-      const saved = await real(code);
+    vi.spyOn(countries, 'currentSettingsIfAny').mockImplementation(async (code, db) => {
+      const saved = await real(code, db);
       return saved && { ...saved, settings: { ...saved.settings, security: { ...saved.settings.security, ...over } } };
     });
   };
@@ -246,5 +246,28 @@ describe('alerts about staff', () => {
       .set(verification.headers)
       .send({ note: 'Checking the ID against the selfie' })
       .expect(200);
+  });
+
+  it("needs no second database connection inside the action's transaction, so a busy server never stalls", async () => {
+    const verification = await adminAs(t, 'verification');
+    const person = await signIn(t, 'customer');
+    security({ ...outOfHoursNow(), idRevealAlertAt: 1 });
+    // Nine of the ten connections held, as by nine requests waiting on the same row: one left for this one.
+    let release!: () => void;
+    const gate = new Promise<void>((done) => (release = done));
+    const held = Array.from({ length: 9 }, () => t.db.transaction(() => gate));
+    try {
+      const res = await Promise.race([
+        request(t.http)
+          .post(`/v1/admin/people/${person.userId}/reveal`)
+          .set(verification.headers)
+          .send({ note: 'Checking the ID against the selfie' }),
+        new Promise<'stalled'>((done) => setTimeout(() => done('stalled'), 5_000)),
+      ]);
+      expect(res === 'stalled' ? res : res.status).toBe(200);
+    } finally {
+      release();
+      await Promise.all(held);
+    }
   });
 });

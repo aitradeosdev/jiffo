@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { CountrySettingsSchema, type CountrySettings } from '@jiffo/shared';
-import { DB, type Db } from '../db/database.module';
+import { DB, type Db, type Tx } from '../db/database.module';
 import { categories, countries, settingsVersions, states } from '../db/schema';
 import { notFound } from '../common/errors';
 
@@ -22,10 +22,10 @@ export class CountriesService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   /** A country's currency and time zone. They never change once set, so they are kept in memory. */
-  async basics(code: string): Promise<{ currency: string; timezone: string }> {
+  async basics(code: string, db: Db | Tx = this.db): Promise<{ currency: string; timezone: string }> {
     let cached = this.countryBasics.get(code);
     if (!cached) {
-      const [row] = await this.db
+      const [row] = await db
         .select({ currency: countries.currency, timezone: countries.timezone })
         .from(countries)
         .where(eq(countries.code, code));
@@ -49,34 +49,37 @@ export class CountriesService {
     return current;
   }
 
-  /** The current settings, or null for a country with none saved yet (so nothing runs there). */
-  async currentSettingsIfAny(countryCode: string): Promise<VersionedSettings | null> {
-    const [row] = await this.db
+  /**
+   * The current settings, or null for a country with none saved yet (so nothing runs there). Pass the caller's
+   * transaction as `db` to read inside it: a transaction waiting on a second connection can stall a busy server.
+   */
+  async currentSettingsIfAny(countryCode: string, db: Db | Tx = this.db): Promise<VersionedSettings | null> {
+    const [row] = await db
       .select({ version: settingsVersions.version })
       .from(settingsVersions)
       .where(eq(settingsVersions.countryCode, countryCode))
       .orderBy(desc(settingsVersions.version))
       .limit(1);
-    return row ? { version: row.version, settings: await this.settingsAt(countryCode, row.version) } : null;
+    return row ? { version: row.version, settings: await this.settingsAt(countryCode, row.version, db) } : null;
   }
 
   /**
    * The settings an errand was created under, so its timers and limits never change mid-errand.
    * A saved version never changes, so each one is read and checked once and then kept in memory.
    */
-  settingsAt(countryCode: string, version: number): Promise<CountrySettings> {
+  settingsAt(countryCode: string, version: number, db: Db | Tx = this.db): Promise<CountrySettings> {
     const key = `${countryCode}:${version}`;
     let cached = this.versions.get(key);
     if (!cached) {
-      cached = this.loadVersion(countryCode, version);
+      cached = this.loadVersion(countryCode, version, db);
       this.versions.set(key, cached);
       cached.catch(() => this.versions.delete(key));
     }
     return cached;
   }
 
-  private async loadVersion(countryCode: string, version: number): Promise<CountrySettings> {
-    const [row] = await this.db
+  private async loadVersion(countryCode: string, version: number, db: Db | Tx): Promise<CountrySettings> {
+    const [row] = await db
       .select()
       .from(settingsVersions)
       .where(and(eq(settingsVersions.countryCode, countryCode), eq(settingsVersions.version, version)));

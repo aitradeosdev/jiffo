@@ -59,7 +59,7 @@ export class StaffOversightService {
       (entry.action === 'money.adjust' && !admin.approval);
     if (entry.action !== 'person.reveal' && !money && !adjustment) return;
 
-    const clock = await this.clock(country);
+    const clock = await this.clock(country, tx);
     if (entry.action === 'person.reveal') await this.reveals(tx, admin, country, clock);
     if (money && clock.outOfHours) await this.outOfHours(tx, admin, country, clock, entry.action);
     if (adjustment) await this.staffAccount(tx, admin, country, entry, await people());
@@ -70,7 +70,7 @@ export class StaffOversightService {
    * updates the day's alert about this staff member's reveals.
    */
   async revealLimit(admin: AdminContext, country: string, limit: number) {
-    const clock = await this.clock(country);
+    const clock = await this.clock(country, this.db);
     await this.db.transaction((tx) =>
       this.revealAlert(tx, admin, country, clock, (before) => ({ ...before, count: limit, refusedAt: limit })),
     );
@@ -206,9 +206,12 @@ export class StaffOversightService {
   }
 
   /** The country's settings and local time now: the day, the time, and whether it is out of working hours. */
-  private async clock(country: string): Promise<Clock> {
+  private async clock(country: string, db: Db | Tx): Promise<Clock> {
     // Defaults for a stored version that no longer reads, as the actions themselves do.
-    const [security, basics] = await Promise.all([securityOf(this.countries, country), this.countries.basics(country)]);
+    // Read through the action's own transaction: waiting on a second connection inside it can stall a busy
+    // server, every connection held by a transaction waiting for another.
+    const security = await securityOf(this.countries, country, db);
+    const basics = await this.countries.basics(country, db);
     const parts = Object.fromEntries(
       new Intl.DateTimeFormat('en-GB', {
         timeZone: basics.timezone,
