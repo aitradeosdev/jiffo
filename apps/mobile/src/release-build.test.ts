@@ -145,3 +145,15 @@ describe('the API address in a build', () => {
     }
   });
 });
+
+/**
+ * The apps use the shared package's compiled output (packages/shared/dist), which isn't in the repository. CI builds
+ * it first; on Expo's servers the app's own `eas-build-post-install` script does, right after installing, or the
+ * JavaScript can't be bundled.
+ */
+describe("builds on Expo's servers", () => {
+  it('compile the shared package before bundling', async () => {
+    const { scripts } = (await import('../package.json')).default as { scripts: Record<string, string> };
+    expect(scripts['eas-build-post-install']).toMatch(/--filter @jiffo\/shared (run )?build/);
+  });
+});
