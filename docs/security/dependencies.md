@@ -22,12 +22,9 @@ How Jiffo keeps track of the code it uses from others (docs/security-plan.md, R1
 
 ## Advisories we've accepted for now
 
-Each one is listed under `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml` and `allow-ghsas` in
-`security.yml`, so the gates pass. Take it off both lists once it's fixed.
-
-| Advisory | Package | Why it doesn't reach Jiffo today | Fix |
-| --- | --- | --- | --- |
-| [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) | `zod` < 4.6.6 | Zod can use a lot of memory checking a very large list against a size limit. JSON request bodies are capped at Express's 100 kB before zod sees them, so no list can be large, and every route is rate limited. | Upgrade to zod 4 in its own pull request. It's a major version, with changes to error messages and some schema methods. |
+None. To accept one for a while, list it under `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml` and `allow-ghsas`
+in `security.yml`, so the gates pass, with a row here saying why it doesn't reach Jiffo and how it will be fixed.
+Take it off all three once it's fixed.
 
 The test tools (`vitest` and what it pulls in, `vite` and `tinypool`) also have advisories. `vitest` is on 3.2.7,
 the newest 3.x. The rest goes away with the move to `vitest` 4. None of them is in what the apps ship.

@@ -35,7 +35,7 @@ const VerifyCodeBody = z.object({
 });
 const RefreshBody = z.object({ refreshToken: z.string().min(20).max(200) });
 /** `forgetPhone`: for a phone being handed on (A6). */
-const LogoutBody = z.object({ forgetPhone: z.boolean().optional() }).default({});
+const LogoutBody = z.object({ forgetPhone: z.boolean().optional() }).default(() => ({}));
 
 @Controller('auth')
 @RateLimit('auth')

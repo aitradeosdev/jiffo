@@ -59,7 +59,7 @@ export const ErrandEventBody = z.object({
   event: z.string().min(1).max(40),
   /** The errand version the app was showing. If the errand changed since, the event is refused. */
   version: z.number().int().nonnegative().optional(),
-  data: z.record(z.unknown()).default({}),
+  data: z.record(z.string(), z.unknown()).default(() => ({})),
 });
 export type ErrandEventInput = z.infer<typeof ErrandEventBody>;
 

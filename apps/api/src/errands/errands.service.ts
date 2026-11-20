@@ -975,7 +975,10 @@ export class ErrandsService implements OnModuleInit {
     const parsed = EVENT_DATA[event].safeParse(data);
     if (!parsed.success) {
       throw badRequest('invalid_request', 'The request is not valid', {
-        issues: parsed.error.issues.map((i) => ({ path: ['data', ...i.path].join('.'), message: i.message })),
+        issues: parsed.error.issues.map((i) => ({
+          path: ['data', ...i.path.map(String)].join('.'),
+          message: i.message,
+        })),
       });
     }
     return parsed.data as z.infer<(typeof EVENT_DATA)[E]>;

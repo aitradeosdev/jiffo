@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { CountrySettingsSchema, NIGERIA_DEFAULT_SETTINGS, settingChanges } from '../src/settings';
+import {
+  CountrySettingsSchema,
+  DEFAULT_RISK_SETTINGS,
+  DEFAULT_SAFETY_SETTINGS,
+  DEFAULT_SECURITY_SETTINGS,
+  NIGERIA_DEFAULT_SETTINGS,
+  settingChanges,
+} from '../src/settings';
 
 describe('settingChanges', () => {
   it('lists each changed setting by path, and treats lists as sets', () => {
@@ -19,6 +26,35 @@ describe('settingChanges', () => {
     expect(settingChanges({ hours: [2, 12, 20] }, { hours: [2, 12, 18] })).toEqual([
       { path: 'hours', from: [2, 12, 20], to: [2, 12, 18] },
     ]);
+  });
+
+  it('fills a group a saved version never had with its whole default, as parsing it would', () => {
+    const defaults = {
+      topUps: { oneTimeAccount: true, fixedAccount: false },
+      security: DEFAULT_SECURITY_SETTINGS,
+      risk: DEFAULT_RISK_SETTINGS,
+      safety: DEFAULT_SAFETY_SETTINGS,
+    };
+    for (const [group, value] of Object.entries(defaults)) {
+      const without: Record<string, unknown> = structuredClone(NIGERIA_DEFAULT_SETTINGS);
+      delete without[group];
+      const given = { ...structuredClone(NIGERIA_DEFAULT_SETTINGS), [group]: structuredClone(value) };
+      const filled = CountrySettingsSchema.parse(without) as Record<string, unknown>;
+      expect(filled[group], group).toEqual((CountrySettingsSchema.parse(given) as Record<string, unknown>)[group]);
+    }
+  });
+
+  it("gives each parse its own copy of a group's default, so changing one changes no other", () => {
+    const without: Record<string, unknown> = structuredClone(NIGERIA_DEFAULT_SETTINGS);
+    for (const group of ['topUps', 'security', 'risk', 'safety']) delete without[group];
+    const a = CountrySettingsSchema.parse(without);
+    const b = CountrySettingsSchema.parse(without);
+    expect(a.security).not.toBe(b.security);
+    expect(a.security.releaseReminderHours).not.toBe(b.security.releaseReminderHours);
+    expect(a.security.releaseReminderHours).not.toBe(DEFAULT_SECURITY_SETTINGS.releaseReminderHours);
+    expect(a.topUps).not.toBe(b.topUps);
+    expect(a.risk).not.toBe(b.risk);
+    expect(a.safety).not.toBe(b.safety);
   });
 
   it('reports the service fee rule on the minimum', () => {

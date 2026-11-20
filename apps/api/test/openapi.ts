@@ -9,31 +9,7 @@ import {
 import { RequestMethod } from '@nestjs/common/enums/request-method.enum';
 import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum';
 import { ModulesContainer } from '@nestjs/core';
-import {
-  ZodArray,
-  ZodBoolean,
-  ZodBranded,
-  ZodCatch,
-  ZodDate,
-  ZodDefault,
-  ZodDiscriminatedUnion,
-  ZodEffects,
-  ZodEnum,
-  ZodIntersection,
-  ZodLiteral,
-  ZodNativeEnum,
-  ZodNullable,
-  ZodNumber,
-  ZodObject,
-  ZodOptional,
-  ZodPipeline,
-  ZodReadonly,
-  ZodRecord,
-  ZodString,
-  ZodTuple,
-  ZodUnion,
-  type ZodTypeAny,
-} from 'zod';
+import { toJSONSchema, type ZodType } from 'zod';
 import { AdminGuard, PERMISSION_KEY } from '../src/admin/admin.guard';
 import { API_PREFIX, UNPREFIXED } from '../src/app.setup';
 import { APPS_KEY, AuthGuard } from '../src/auth/auth.guard';
@@ -42,67 +18,22 @@ import { ZodBody } from '../src/common/zod-body';
 
 type JsonSchema = Record<string, unknown>;
 
-/** A request schema as JSON Schema: what the API accepts, for the routes' document. */
-export function jsonSchema(s: ZodTypeAny): JsonSchema {
-  const describe = (out: JsonSchema) => (s.description ? { ...out, description: s.description } : out);
-  if (s instanceof ZodEffects) return jsonSchema(s.innerType());
-  if (s instanceof ZodOptional) return jsonSchema(s.unwrap());
-  if (s instanceof ZodNullable) return { anyOf: [jsonSchema(s.unwrap()), { type: 'null' }] };
-  if (s instanceof ZodDefault) return { ...jsonSchema(s.removeDefault()), default: s._def.defaultValue() };
-  if (s instanceof ZodCatch) return jsonSchema(s.removeCatch());
-  if (s instanceof ZodBranded) return jsonSchema(s.unwrap());
-  if (s instanceof ZodReadonly) return jsonSchema(s._def.innerType);
-  if (s instanceof ZodPipeline) return jsonSchema(s._def.in);
-  if (s instanceof ZodString) {
-    const out: JsonSchema = { type: 'string' };
-    for (const check of s._def.checks) {
-      if (check.kind === 'min') out.minLength = check.value;
-      else if (check.kind === 'max') out.maxLength = check.value;
-      else if (check.kind === 'length') out.minLength = out.maxLength = check.value;
-      else if (check.kind === 'regex') out.pattern = check.regex.source;
-      else if (check.kind === 'uuid' || check.kind === 'email' || check.kind === 'url') {
-        out.format = check.kind === 'url' ? 'uri' : check.kind;
-      } else if (check.kind === 'datetime') out.format = 'date-time';
-    }
-    return describe(out);
-  }
-  if (s instanceof ZodNumber) {
-    const out: JsonSchema = { type: s.isInt ? 'integer' : 'number' };
-    for (const check of s._def.checks) {
-      if (check.kind === 'min') out[check.inclusive ? 'minimum' : 'exclusiveMinimum'] = check.value;
-      else if (check.kind === 'max') out[check.inclusive ? 'maximum' : 'exclusiveMaximum'] = check.value;
-    }
-    return describe(out);
-  }
-  if (s instanceof ZodBoolean) return describe({ type: 'boolean' });
-  if (s instanceof ZodDate) return describe({ type: 'string', format: 'date-time' });
-  if (s instanceof ZodLiteral) return describe({ const: s.value });
-  if (s instanceof ZodEnum) return describe({ type: 'string', enum: [...s.options] });
-  if (s instanceof ZodNativeEnum) return describe({ enum: Object.values(s.enum) });
-  if (s instanceof ZodArray) {
-    const out: JsonSchema = { type: 'array', items: jsonSchema(s.element) };
-    if (s._def.minLength) out.minItems = s._def.minLength.value;
-    if (s._def.maxLength) out.maxItems = s._def.maxLength.value;
-    if (s._def.exactLength) out.minItems = out.maxItems = s._def.exactLength.value;
-    return describe(out);
-  }
-  if (s instanceof ZodTuple) return describe({ type: 'array', prefixItems: s.items.map(jsonSchema) });
-  if (s instanceof ZodRecord) return describe({ type: 'object', additionalProperties: jsonSchema(s.valueSchema) });
-  if (s instanceof ZodObject) {
-    const shape = s.shape as Record<string, ZodTypeAny>;
-    const required = Object.keys(shape).filter((k) => !shape[k]!.isOptional());
-    return describe({
-      type: 'object',
-      properties: Object.fromEntries(Object.entries(shape).map(([k, v]) => [k, jsonSchema(v)])),
-      ...(required.length ? { required } : {}),
+/** A request schema as JSON Schema: what the API accepts, for the routes' document. Zod's own conversion. */
+export function jsonSchema(s: ZodType): JsonSchema {
+  const out = toJSONSchema(s, {
+    // What a client may send: a field with a default can be left out.
+    io: 'input',
+    // A transform or a date has no JSON Schema of its own; it is described as taking anything.
+    unrepresentable: 'any',
+    override: (ctx) => {
+      const def = ctx.zodSchema._zod.def as { type: string; catchall?: unknown };
       // Unknown fields are refused (common/zod-body.ts), unless the schema says otherwise.
-      additionalProperties: s._def.unknownKeys === 'passthrough',
-    });
-  }
-  if (s instanceof ZodDiscriminatedUnion) return describe({ oneOf: [...s.options.values()].map(jsonSchema) });
-  if (s instanceof ZodUnion) return describe({ anyOf: (s.options as ZodTypeAny[]).map(jsonSchema) });
-  if (s instanceof ZodIntersection) return describe({ allOf: [jsonSchema(s._def.left), jsonSchema(s._def.right)] });
-  return describe({});
+      if (def.type === 'object' && !def.catchall) ctx.jsonSchema.additionalProperties = false;
+      if (def.type === 'date') Object.assign(ctx.jsonSchema, { type: 'string', format: 'date-time' });
+    },
+  }) as JsonSchema;
+  delete out.$schema;
+  return out;
 }
 
 const METHODS: Partial<Record<RequestMethod, string>> = {
@@ -119,7 +50,7 @@ const listOf = (value: unknown): string[] => (value === undefined ? [] : Array.i
 const clean = (path: string) => path.replace(/^\/+|\/+$/g, '');
 const joined = (...parts: string[]) => parts.map(clean).filter(Boolean).join('/');
 const schemaOf = (pipes: unknown[] | undefined) =>
-  (pipes ?? []).find((p): p is ZodBody<unknown> => p instanceof ZodBody)?.schema as ZodTypeAny | undefined;
+  (pipes ?? []).find((p): p is ZodBody<unknown> => p instanceof ZodBody)?.schema as ZodType | undefined;
 
 interface RouteArg {
   index: number;

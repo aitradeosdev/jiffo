@@ -247,7 +247,7 @@ export const APP_CONFIG = Symbol('APP_CONFIG');
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = EnvSchema.safeParse(env);
   if (!parsed.success) {
-    const problems = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+    const problems = parsed.error.issues.map((i) => `${i.path.map(String).join('.')}: ${i.message}`).join('; ');
     throw new Error(`Invalid environment: ${problems}`);
   }
   return parsed.data;

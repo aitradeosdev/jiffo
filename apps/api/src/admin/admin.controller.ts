@@ -90,7 +90,7 @@ const CategoryId = new ParseUUIDPipe({ exceptionFactory: () => notFound('categor
 const StateId = new ParseUUIDPipe({ exceptionFactory: () => notFound('state_not_found', 'State not found') });
 const SaveSettingsBody = z.object({
   basedOn: z.number().int().positive(),
-  settings: z.record(z.unknown()),
+  settings: z.record(z.string(), z.unknown()),
   note: z.string().trim().min(5, 'Say why, in a few words').max(1000),
 });
 const CategoryFields = z.object({
@@ -138,14 +138,14 @@ const ApprovalsQuery = z.object({
     .transform((v) => v === 'true'),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
-const ApproveBody = z.object({ note: z.string().trim().max(1000).optional() }).default({});
+const ApproveBody = z.object({ note: z.string().trim().max(1000).optional() }).default(() => ({}));
 const RejectBody = z.object({ note: z.string().trim().min(5, 'Say why, in a few words').max(1000) });
 const ProviderCategory = z.enum(PROVIDER_CATEGORIES);
 const ProviderParams = z.object({ category: ProviderCategory, provider: z.string().min(1).max(40) });
 const ProviderBody = z.object({
-  config: z.record(z.string(), z.string().max(2000)).default({}),
+  config: z.record(z.string(), z.string().max(2000)).default(() => ({})),
   /** A secret left empty keeps the one saved before. A service account key file can be long. */
-  secrets: z.record(z.string(), z.string().max(20_000)).default({}),
+  secrets: z.record(z.string(), z.string().max(20_000)).default(() => ({})),
 });
 const ActivateBody = z.object({ provider: z.string().min(1).max(40).nullable() });
 const IdChecksQuery = z.object({

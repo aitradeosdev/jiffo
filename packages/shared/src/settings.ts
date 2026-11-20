@@ -154,7 +154,8 @@ export const CountrySettingsSchema = z.object({
   topUps: z
     .object({ oneTimeAccount: z.boolean(), fixedAccount: z.boolean() })
     .refine((t) => t.oneTimeAccount || t.fixedAccount, 'Keep at least one way to add money')
-    .default({ oneTimeAccount: true, fixedAccount: false }),
+    // Each default is made afresh: zod hands a default back as it is, and one parse's copy mustn't be another's.
+    .default(() => ({ oneTimeAccount: true, fixedAccount: false })),
   profiles: z.object({
     showCustomerPhotoBeforeAccept: z.boolean(),
   }),
@@ -252,9 +253,9 @@ export const CountrySettingsSchema = z.object({
         )
         .max(6)
         .refine((h) => h.every((v, i) => i === 0 || v > h[i - 1]!), 'List the hours from soonest to latest, once each')
-        .default([2, 12, 20]),
+        .default(() => [2, 12, 20]),
     })
-    .default(DEFAULT_SECURITY_SETTINGS),
+    .default(() => structuredClone(DEFAULT_SECURITY_SETTINGS)),
   /**
    * When errands are flagged for the Risk queue (docs/security-plan.md, E5, E6). A flag asks a person to look;
    * it refuses nothing.
@@ -298,7 +299,7 @@ export const CountrySettingsSchema = z.object({
         .max(24 * 60)
         .default(10),
     })
-    .default(DEFAULT_RISK_SETTINGS),
+    .default(() => structuredClone(DEFAULT_RISK_SETTINGS)),
   /** The emergency button (docs/security-plan.md, E9). */
   safety: z
     .object({
@@ -308,7 +309,7 @@ export const CountrySettingsSchema = z.object({
         .regex(/^\d{2,6}$/, 'An emergency number is 2 to 6 digits')
         .default('112'),
     })
-    .default(DEFAULT_SAFETY_SETTINGS),
+    .default(() => structuredClone(DEFAULT_SAFETY_SETTINGS)),
 });
 
 export type CountrySettings = z.infer<typeof CountrySettingsSchema>;
