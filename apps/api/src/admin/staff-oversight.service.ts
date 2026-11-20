@@ -1,16 +1,19 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { and, count, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { DEFAULT_SECURITY_SETTINGS, type StaffAlertKind } from '@jiffo/shared';
 import { AlertsService } from '../alerts/alerts.service';
 import { CountriesService } from '../countries/countries.service';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { adminAudit, admins, alerts, users } from '../db/schema';
 import type { AdminContext } from './admin.types';
+import { securityOf } from './security-of';
 
 /** Staff actions that move or decide money, for the out-of-hours alert. */
 const MONEY_ACTIONS: ReadonlySet<string> = new Set([
   'money.adjust',
   'money.reconciliation_clear',
+  'money.payout_account_approve',
+  'money.payout_account_decline',
   'errand.resolve_complete',
   'errand.resolve_cancel',
 ]);
@@ -44,7 +47,9 @@ export class StaffOversightService {
     if (!country) return;
     const kind = typeof entry.data?.kind === 'string' ? entry.data.kind : null;
     const money =
-      MONEY_ACTIONS.has(entry.action) ||
+      // A change a second admin approved runs as the person who asked: asking and approving are counted as each
+      // was done, by whoever did it, and the change itself not again.
+      (MONEY_ACTIONS.has(entry.action) && !admin.approval) ||
       ((entry.action === 'approval.request' || entry.action === 'approval.approve') &&
         !!kind &&
         MONEY_APPROVALS.has(kind));
@@ -66,13 +71,9 @@ export class StaffOversightService {
    */
   async revealLimit(admin: AdminContext, country: string, limit: number) {
     const clock = await this.clock(country);
-    await this.alerts.raise({
-      countryCode: country,
-      kind: 'unusual_id_reveals' satisfies StaffAlertKind,
-      dedupeKey: `${admin.adminId}:${clock.day}`,
-      message: `${await this.nameOf(this.db, admin)} reached the daily limit of ${limit} ID reveals, and was refused another`,
-      data: { adminId: admin.adminId, count: limit, limit, refused: true },
-    });
+    await this.db.transaction((tx) =>
+      this.revealAlert(tx, admin, country, clock, (before) => ({ ...before, count: limit, refusedAt: limit })),
+    );
   }
 
   private async reveals(tx: Tx, admin: AdminContext, country: string, clock: Clock) {
@@ -88,18 +89,47 @@ export class StaffOversightService {
         ),
       );
     const n = today?.n ?? 0;
-    if (n < clock.security.idRevealAlertAt && !clock.outOfHours) return;
-    const name = await this.nameOf(tx, admin);
+    const many = n >= clock.security.idRevealAlertAt;
+    // Nothing to tell yet, unless there is already an alert today to keep counting on.
+    const open = await this.open(tx, 'unusual_id_reveals', `${admin.adminId}:${clock.day}`, country);
+    if (!many && !clock.outOfHours && !open) return;
+    await this.revealAlert(tx, admin, country, clock, (before) => ({
+      ...before,
+      count: n,
+      outOfHoursAt: clock.outOfHours ? [...(before.outOfHoursAt ?? []), clock.time].slice(-20) : before.outOfHoursAt,
+    }));
+  }
+
+  /**
+   * The day's alert about one staff member's reveals, with everything seen so far: how many, any out of hours,
+   * and a refusal at the limit. A later reveal adds to it, never wipes out what it said.
+   */
+  private async revealAlert(
+    tx: Tx,
+    admin: AdminContext,
+    country: string,
+    clock: Clock,
+    next: (before: RevealFacts) => RevealFacts,
+  ) {
+    const dedupeKey = `${admin.adminId}:${clock.day}`;
+    await this.lock(tx, 'unusual_id_reveals', country, dedupeKey);
+    const before = ((await this.open(tx, 'unusual_id_reveals', dedupeKey, country)) ?? {}) as RevealFacts;
+    const facts = next(before);
+    const n = facts.count ?? 1;
+    const parts = [
+      `${await this.nameOf(tx, admin)} revealed ${n} ${n === 1 ? "person's" : "people's"} personal details in the last day`,
+    ];
+    if (facts.outOfHoursAt?.length) {
+      parts.push(`${facts.outOfHoursAt.length} out of hours, the latest at ${facts.outOfHoursAt.at(-1)}`);
+    }
+    if (facts.refusedAt) parts.push(`and was refused another at the daily limit of ${facts.refusedAt}`);
     await this.alerts.raise(
       {
         countryCode: country,
         kind: 'unusual_id_reveals' satisfies StaffAlertKind,
-        dedupeKey: `${admin.adminId}:${clock.day}`,
-        message:
-          n >= clock.security.idRevealAlertAt
-            ? `${name} revealed ${n} people's personal details in the last day`
-            : `${name} revealed a person's personal details out of hours, at ${clock.time}`,
-        data: { adminId: admin.adminId, count: n, outOfHours: clock.outOfHours },
+        dedupeKey,
+        message: parts.join(', '),
+        data: { ...facts, adminId: admin.adminId },
       },
       tx,
     );
@@ -108,18 +138,12 @@ export class StaffOversightService {
   /** One alert a day for each staff member, counting the money actions they took out of hours. */
   private async outOfHours(tx: Tx, admin: AdminContext, country: string, clock: Clock, action: string) {
     const dedupeKey = `${admin.adminId}:${clock.day}`;
-    const [open] = await tx
-      .select({ data: alerts.data })
-      .from(alerts)
-      .where(
-        and(
-          eq(alerts.countryCode, country),
-          eq(alerts.kind, 'out_of_hours_money'),
-          eq(alerts.dedupeKey, dedupeKey),
-          isNull(alerts.resolvedAt),
-        ),
-      );
-    const before = (open?.data ?? {}) as { count?: number; actions?: string[] };
+    // Two money actions at once each count: the second waits for the first to write its count.
+    await this.lock(tx, 'out_of_hours_money', country, dedupeKey);
+    const before = ((await this.open(tx, 'out_of_hours_money', dedupeKey, country)) ?? {}) as {
+      count?: number;
+      actions?: string[];
+    };
     const n = (before.count ?? 0) + 1;
     await this.alerts.raise(
       {
@@ -155,6 +179,27 @@ export class StaffOversightService {
     }
   }
 
+  /** The open alert's data, if there is one. */
+  private async open(tx: Tx, kind: StaffAlertKind, dedupeKey: string, country: string) {
+    const [row] = await tx
+      .select({ data: alerts.data })
+      .from(alerts)
+      .where(
+        and(
+          eq(alerts.countryCode, country),
+          eq(alerts.kind, kind),
+          eq(alerts.dedupeKey, dedupeKey),
+          isNull(alerts.resolvedAt),
+        ),
+      );
+    return row ? (row.data as Record<string, unknown>) : null;
+  }
+
+  /** One update at a time to an alert, until this transaction ends. */
+  private async lock(tx: Tx, kind: StaffAlertKind, country: string, dedupeKey: string) {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`staff-alert:${kind}:${country}:${dedupeKey}`}))`);
+  }
+
   private async nameOf(db: Db | Tx, admin: AdminContext) {
     const [row] = await db.select({ name: admins.name }).from(admins).where(eq(admins.id, admin.adminId));
     return row?.name ?? 'A staff member';
@@ -162,11 +207,8 @@ export class StaffOversightService {
 
   /** The country's settings and local time now: the day, the time, and whether it is out of working hours. */
   private async clock(country: string): Promise<Clock> {
-    const [current, basics] = await Promise.all([
-      this.countries.currentSettingsIfAny(country),
-      this.countries.basics(country),
-    ]);
-    const security = current?.settings.security ?? DEFAULT_SECURITY_SETTINGS;
+    // Defaults for a stored version that no longer reads, as the actions themselves do.
+    const [security, basics] = await Promise.all([securityOf(this.countries, country), this.countries.basics(country)]);
     const parts = Object.fromEntries(
       new Intl.DateTimeFormat('en-GB', {
         timeZone: basics.timezone,
@@ -188,6 +230,13 @@ export class StaffOversightService {
       outOfHours: hour < security.staffHoursStart || hour >= security.staffHoursEnd,
     };
   }
+}
+
+/** What the day's reveal alert says about one staff member. */
+interface RevealFacts {
+  count?: number;
+  outOfHoursAt?: string[];
+  refusedAt?: number;
 }
 
 interface Clock {

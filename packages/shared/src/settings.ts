@@ -273,6 +273,10 @@ export const CountrySettingsSchema = z.object({
       path: ['staffHoursEnd'],
       message: 'Working hours end after they start',
     })
+    .refine((s) => s.idRevealAlertAt < s.dailyIdReveals, {
+      path: ['idRevealAlertAt'],
+      message: 'Tell owners before the daily limit is reached: set this below it',
+    })
     .default(() => structuredClone(DEFAULT_SECURITY_SETTINGS)),
   /**
    * When errands are flagged for the Risk queue (docs/security-plan.md, E5, E6). A flag asks a person to look;

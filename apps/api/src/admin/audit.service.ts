@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { and, desc, eq, inArray, lt } from 'drizzle-orm';
 import { forbidden } from '../common/errors';
 import { DB, type Db, type Tx } from '../db/database.module';
@@ -21,6 +21,8 @@ export interface AuditEntry {
  */
 @Injectable()
 export class AuditService {
+  private readonly logger = new Logger(AuditService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     // Always there in the app; the command line, which only records with recordCli, has none.
@@ -41,8 +43,16 @@ export class AuditService {
       ip: admin.ip,
       userAgent: admin.userAgent,
     });
-    // Alerts about staff for owners, in this transaction (D8).
-    await this.oversight?.recorded(tx, admin, entry, () => this.peopleIn(tx, entry.targetType, entry.targetId));
+    // Alerts about staff for owners, in this transaction (D8). In a savepoint of its own: an alert that can't be
+    // raised is logged, and never undoes the change itself.
+    if (this.oversight) {
+      const oversight = this.oversight;
+      await tx
+        .transaction((inner) =>
+          oversight.recorded(inner, admin, entry, () => this.peopleIn(inner, entry.targetType, entry.targetId)),
+        )
+        .catch((error: Error) => this.logger.error(`A staff alert for ${entry.action} failed: ${error.message}`));
+    }
     return written;
   }
 

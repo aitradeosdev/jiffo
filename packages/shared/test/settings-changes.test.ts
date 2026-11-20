@@ -57,6 +57,14 @@ describe('settingChanges', () => {
     expect(a.safety).not.toBe(b.safety);
   });
 
+  it('refuses an ID reveal alert at or above the daily reveal limit, which it would never reach', () => {
+    const bad = structuredClone(NIGERIA_DEFAULT_SETTINGS);
+    bad.security.idRevealAlertAt = bad.security.dailyIdReveals;
+    const res = CountrySettingsSchema.safeParse(bad);
+    expect(res.success).toBe(false);
+    expect(res.error?.issues[0]?.path).toEqual(['security', 'idRevealAlertAt']);
+  });
+
   it('reports the service fee rule on the minimum', () => {
     const bad = structuredClone(NIGERIA_DEFAULT_SETTINGS);
     bad.fees.serviceFeeMinKobo = bad.fees.serviceFeeCapKobo + 1;

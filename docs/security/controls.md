@@ -161,9 +161,10 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 ## Alerts about staff (D8)
 
 - **What raises one:** checked as each staff action is written to the audit log, in the same transaction, so an alert stands only for what was done, whichever route did it:
-  - **Unusual ID reveals:** a staff member revealing many people's details in a day (Settings, Security: 10, below the daily limit of 20), reaching the limit and being refused another, or revealing any out of working hours. One alert a day for each staff member, saying the latest.
+  - **Unusual ID reveals:** a staff member revealing many people's details in a day (Settings, Security: 10, which must be below the daily limit of 20), reaching the limit and being refused another, or revealing any out of working hours. One alert a day for each staff member, keeping everything it has said: how many, those out of hours, and a refusal.
   - **An adjustment to a staff member's account:** an adjustment asked for on an app account whose phone is a staff member's (the link D3 uses), raised as it is asked for, so owners see it before it is approved.
-  - **Money actions out of hours:** adjustments, dispute settlements, clearing a nightly check, and asking for or approving a money change, outside working hours in the country's own time (Settings, Security: 7:00 to 21:00). One alert a day for each staff member, counting them.
+  - **Money actions out of hours:** adjustments, dispute settlements, clearing a nightly check, approving or declining a payout account, and asking for or approving a money change, outside working hours in the country's own time (Settings, Security: 7:00 to 21:00). A change a second admin approved counts once for whoever asked and once for whoever approved, each at the time they did it. One alert a day for each staff member, counting them.
+- **Never in the way:** the checks run in a savepoint of their own, with the defaults when a country's stored settings can't be read: an alert that can't be raised is logged and never undoes the action. Alerts raised this way aren't sent to the error log, which would page for one whose action was then undone.
 - **Who sees them:** owners, on the Audit log page. They are kept out of finance's alerts and the overview's count, as the person one is about may be in finance. An owner closes one with what they found, in the audit log, and never one about themselves.
 
 ## Jiffo never asks for a code or PIN (C7)

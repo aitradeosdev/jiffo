@@ -195,11 +195,12 @@ export default async function AuditPage({
   const params = await searchParams;
   const before = Number(params.before);
   const query = Number.isInteger(before) && before > 0 ? `?before=${before}` : '';
-  const country = await getCountry();
-  const [log, team, staff] = await Promise.all([
+  const [log, team, [country, staff]] = await Promise.all([
     api<{ entries: Entry[]; more: boolean }>(`/admin/audit${query}`),
     api<Array<{ id: string; name: string }>>('/admin/team'),
-    api<{ alerts: StaffAlert[] }>(`/admin/staff-alerts?country=${country.code}`),
+    getCountry().then(
+      async (c) => [c, await api<{ alerts: StaffAlert[] }>(`/admin/staff-alerts?country=${c.code}`)] as const,
+    ),
   ]);
   const openStaff = staff.alerts.filter((a) => !a.resolvedAt);
   const names = new Map(team.map((t) => [t.id, t.name]));

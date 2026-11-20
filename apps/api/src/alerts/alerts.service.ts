@@ -51,7 +51,9 @@ export class AlertsService {
       })
       .returning();
     if (row) {
-      this.logger.error(`Alert ${input.kind} in ${input.countryCode}: ${input.message}`);
+      // One raised in the caller's transaction may yet be undone with it: it isn't logged, which would page for
+      // something that didn't happen. Those are read in the panel.
+      if (db === this.db) this.logger.error(`Alert ${input.kind} in ${input.countryCode}: ${input.message}`);
       return row;
     }
     // Already open: it shows the latest news, e.g. how far below zero revenue is now.

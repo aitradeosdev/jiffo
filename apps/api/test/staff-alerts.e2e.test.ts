@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { AdminContext } from '../src/admin/admin.types';
+import { StaffOversightService } from '../src/admin/staff-oversight.service';
 import { CountriesService } from '../src/countries/countries.service';
 import { adminAs, createTestApp, fund, signIn, type TestApp } from './helpers';
 
@@ -39,12 +41,15 @@ describe('alerts about staff', () => {
       return saved && { ...saved, settings: { ...saved.settings, security: { ...saved.settings.security, ...over } } };
     });
   };
-  /** Working hours that leave out the hour it is now in Lagos, so whatever happens now is out of hours. */
+  /**
+   * Working hours that leave out the hour it is now in Lagos and the next, so whatever happens during the test
+   * is out of hours even if it runs across the hour.
+   */
   const outOfHoursNow = () => {
     const hour = Number(
       new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lagos', hour: '2-digit', hourCycle: 'h23' }).format(),
     );
-    return hour < 12 ? { staffHoursStart: 13, staffHoursEnd: 20 } : { staffHoursStart: 1, staffHoursEnd: 11 };
+    return hour <= 10 ? { staffHoursStart: hour + 2, staffHoursEnd: 24 } : { staffHoursStart: 1, staffHoursEnd: hour };
   };
   const allDay = { staffHoursStart: 0, staffHoursEnd: 24 };
   const staffAlerts = async (who: Admin = owner) =>
@@ -170,5 +175,76 @@ describe('alerts about staff', () => {
       .send({ note: 'It was me, all fine' });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('own_alert');
+  });
+
+  it('counts an approved change against whoever approved it out of hours, not the asker as well', async () => {
+    const asker = await adminAs(t, 'finance');
+    security(allDay);
+    const asked = await request(t.http)
+      .post('/v1/admin/money/adjustments')
+      .set(asker.headers)
+      .send({
+        requestId: randomUUID(),
+        note: 'Goodwill for a late delivery',
+        personId: (await signIn(t, 'customer')).userId,
+        account: 'customer_wallet',
+        direction: 'credit',
+        amountKobo: 10_000,
+      });
+    expect(asked.status).toBe(202);
+    vi.restoreAllMocks();
+    security(outOfHoursNow());
+    const approver = await adminAs(t, 'owner');
+    await request(t.http)
+      .post(`/v1/admin/approvals/${asked.body.approval.id}/approve`)
+      .set(approver.headers)
+      .send({})
+      .expect(200);
+    expect(await about(asker, 'out_of_hours_money')).toEqual([]);
+    const [theirs] = await about(approver, 'out_of_hours_money');
+    expect(theirs!.data.count).toBe(1);
+  });
+
+  it('counts deciding a payout account out of hours as a money action', async () => {
+    security(outOfHoursNow());
+    const decider = await adminAs(t, 'finance');
+    const context = {
+      adminId: decider.id,
+      role: 'finance',
+      phone: null,
+      ip: '127.0.0.1',
+      userAgent: 'test',
+    } as unknown as AdminContext;
+    await t.db.transaction((tx) =>
+      t.app
+        .get(StaffOversightService)
+        .recorded(tx, context, { action: 'money.payout_account_approve', countryCode: 'NG' }, async () => []),
+    );
+    expect(await about(decider, 'out_of_hours_money')).toHaveLength(1);
+  });
+
+  it("keeps an out-of-hours reveal on the day's alert when more reveals come after", async () => {
+    const verification = await adminAs(t, 'verification');
+    security({ ...outOfHoursNow(), idRevealAlertAt: 2, dailyIdReveals: 5 });
+    await reveal(verification).then((r) => expect(r.status).toBe(200));
+    vi.restoreAllMocks();
+    security({ ...allDay, idRevealAlertAt: 2, dailyIdReveals: 5 });
+    await reveal(verification).then((r) => expect(r.status).toBe(200));
+    const [raised] = await about(verification, 'unusual_id_reveals');
+    expect(raised!.message).toMatch(/revealed 2 people/);
+    expect(raised!.message).toMatch(/out of hours/);
+  });
+
+  it("never stops a reveal over settings that can't be read", async () => {
+    const verification = await adminAs(t, 'verification');
+    const person = await signIn(t, 'customer');
+    const countries = t.app.get(CountriesService);
+    const broken = Object.assign(new Error('Unreadable settings'), { name: 'ZodError' });
+    vi.spyOn(countries, 'currentSettingsIfAny').mockRejectedValue(broken);
+    await request(t.http)
+      .post(`/v1/admin/people/${person.userId}/reveal`)
+      .set(verification.headers)
+      .send({ note: 'Checking the ID against the selfie' })
+      .expect(200);
   });
 });
