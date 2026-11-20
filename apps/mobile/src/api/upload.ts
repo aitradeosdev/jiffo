@@ -1,6 +1,8 @@
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import type { ApiClient } from './client';
 import { ApiError } from './client';
+import { PHOTO_COMPRESS, photoResize } from './photo-size';
 
 export type UploadPurpose = 'receipt' | 'item_photo' | 'dropoff_photo' | 'chat_photo';
 
@@ -17,14 +19,33 @@ export async function pickPhoto(source: 'camera' | 'library'): Promise<{ uri: st
       ? await ImagePicker.requestCameraPermissionsAsync()
       : await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!permission.granted) return null;
-  const options: ImagePicker.ImagePickerOptions = { mediaTypes: 'images', quality: 0.7, allowsEditing: false };
+  // Full quality here: the photo is compressed once, below, as it is saved as JPEG.
+  const options: ImagePicker.ImagePickerOptions = { mediaTypes: 'images', quality: 1, allowsEditing: false };
   const result =
     source === 'camera'
       ? await ImagePicker.launchCameraAsync(options)
       : await ImagePicker.launchImageLibraryAsync(options);
   const asset = result.canceled ? null : result.assets[0];
   if (!asset) return null;
-  return { uri: asset.uri, mimeType: asset.mimeType ?? 'image/jpeg' };
+  return asJpeg(asset);
+}
+
+/**
+ * The photo as a JPEG no bigger than the server keeps (docs/security-plan.md, C1): quicker to send, and never
+ * a type the server refuses (a WebP from the gallery, say). The server still opens and re-encodes it.
+ */
+async function asJpeg(asset: ImagePicker.ImagePickerAsset) {
+  try {
+    const context = ImageManipulator.manipulate(asset.uri);
+    const resize = photoResize(asset.width, asset.height);
+    if (resize) context.resize(resize);
+    const image = await context.renderAsync();
+    const saved = await image.saveAsync({ format: SaveFormat.JPEG, compress: PHOTO_COMPRESS });
+    return { uri: saved.uri, mimeType: 'image/jpeg' };
+  } catch {
+    // Sent as it is: the server says if it can't take it.
+    return { uri: asset.uri, mimeType: asset.mimeType ?? 'image/jpeg' };
+  }
 }
 
 /**

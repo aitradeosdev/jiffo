@@ -291,6 +291,12 @@ export const SECTIONS: Section[] = [
         help: 'Days, between 30 and 365. Then deleted, unless the errand is in dispute or a flag on it is still open.',
       },
       {
+        path: 'security.signedLinkMinutes',
+        label: 'Links to see a photo last',
+        kind: 'minutes',
+        help: 'Minutes, at most 60. Photos are never public: the apps and this panel get a fresh link each time they show one.',
+      },
+      {
         path: 'security.appPinTries',
         label: 'Wrong app PINs before it locks',
         kind: 'count',

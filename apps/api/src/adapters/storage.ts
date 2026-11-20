@@ -1,5 +1,12 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client, HeadBucketCommand } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export interface PresignedUpload {
@@ -27,6 +34,12 @@ export interface StorageAdapter {
   presignDownload(key: string, ttlSeconds: number): Promise<string>;
   /** Size and type of a stored file, or null if nothing was uploaded under the key. */
   head(key: string): Promise<{ size: number; contentType: string } | null>;
+  /** A stored file's bytes; null if there is none, too_large (unread) if it is over maxBytes. */
+  get(key: string, maxBytes: number): Promise<Buffer | 'too_large' | null>;
+  /** Stores a file the server made itself, such as a photo it re-encoded (docs/security-plan.md, C1). */
+  put(key: string, bytes: Buffer, contentType: string): Promise<void>;
+  /** Removes a file; nothing happens if there is none. */
+  delete(key: string): Promise<void>;
 }
 
 export const STORAGE = Symbol('STORAGE');
@@ -86,12 +99,53 @@ export class S3StorageAdapter implements StorageAdapter {
       const res = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
       return { size: res.ContentLength ?? 0, contentType: res.ContentType ?? 'application/octet-stream' };
     } catch (error) {
-      const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-      if (status === 404 || status === 403) return null;
+      if (missing(error)) return null;
       throw error;
     }
   }
+
+  async get(key: string, maxBytes: number) {
+    let res;
+    try {
+      res = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    } catch (error) {
+      if (missing(error) || (error as { name?: string }).name === 'NoSuchKey') return null;
+      throw error;
+    }
+    const body = res.Body as (NodeJS.ReadableStream & { destroy?: () => void }) | undefined;
+    if (!body) return null;
+    if ((res.ContentLength ?? 0) > maxBytes) {
+      body.destroy?.();
+      return 'too_large' as const;
+    }
+    // Read as it comes, so a file that says one size and sends more is still stopped at maxBytes.
+    const parts: Buffer[] = [];
+    let size = 0;
+    for await (const part of body as AsyncIterable<Buffer>) {
+      size += part.length;
+      if (size > maxBytes) {
+        body.destroy?.();
+        return 'too_large' as const;
+      }
+      parts.push(part);
+    }
+    return Buffer.concat(parts);
+  }
+
+  async put(key: string, bytes: Buffer, contentType: string) {
+    await this.s3.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: bytes, ContentType: contentType }));
+  }
+
+  async delete(key: string) {
+    await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
 }
+
+/** S3 answers 403 rather than 404 for a missing key when the keys can't list the bucket. */
+const missing = (error: unknown) => {
+  const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+  return status === 404 || status === 403;
+};
 
 /**
  * Development and tests: files kept in memory and served by the API itself under /v1/dev-files, with
@@ -140,5 +194,19 @@ export class MemoryStorageAdapter implements StorageAdapter {
   async head(key: string) {
     const file = this.files.get(key);
     return file ? { size: file.bytes.length, contentType: file.contentType } : null;
+  }
+
+  async get(key: string, maxBytes: number) {
+    const file = this.files.get(key);
+    if (!file) return null;
+    return file.bytes.length > maxBytes ? ('too_large' as const) : file.bytes;
+  }
+
+  async put(key: string, bytes: Buffer, contentType: string) {
+    this.files.set(key, { bytes, contentType });
+  }
+
+  async delete(key: string) {
+    this.files.delete(key);
   }
 }

@@ -68,14 +68,16 @@ export class ChatService {
         open: !conversation.closedAt && !TERMINAL_STATES.has(errand.status),
         access: await this.chat.clientAccess(conversation.id, auth.userId),
       },
-      messages: await Promise.all(rows.map((m) => this.view(m))),
+      messages: await Promise.all(rows.map(this.view(await this.uploads.links(errand.countryCode)))),
     };
   }
 
-  /** A message as the apps see it: a photo message carries a short-lived link to the photo. */
-  private async view(m: ChatMessage) {
-    const key = m.kind === 'photo' ? (m.data.key as string | undefined) : undefined;
-    return { ...messageView(m), photoUrl: key ? await this.uploads.url(key) : null };
+  /** Messages as the apps see them, a photo message with a short-lived link to the photo, made with `link`. */
+  private view(link: (key: string) => Promise<string>) {
+    return async (m: ChatMessage) => {
+      const key = m.kind === 'photo' ? (m.data.key as string | undefined) : undefined;
+      return { ...messageView(m), photoUrl: key ? await link(key) : null };
+    };
   }
 
   async send(errandId: string, auth: AuthContext, input: { body?: string; photo?: string; clientId: string }) {
@@ -96,7 +98,7 @@ export class ChatService {
       data: input.photo ? { key: input.photo } : {},
       clientId: input.clientId,
     });
-    const view = await this.view(message);
+    const view = await this.view(await this.uploads.links(errand.countryCode))(message);
     if (!duplicate) {
       this.realtime.toErrand(errandId, 'message.created', { errandId, message: view });
       const [sender] = await this.db

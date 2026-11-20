@@ -1,25 +1,40 @@
-import { randomUUID } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { createHash, randomUUID } from 'node:crypto';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, count, eq, inArray } from 'drizzle-orm';
-import { TERMINAL_STATES } from '@jiffo/shared';
+import { DEFAULT_SECURITY_SETTINGS, TERMINAL_STATES } from '@jiffo/shared';
 import { DB, type Db } from '../db/database.module';
 import { errands, uploads, type UploadPurpose } from '../db/schema';
 import { STORAGE, type StorageAdapter } from '../adapters/storage';
 import type { AuthContext } from '../auth/auth.types';
 import { conflict, forbidden, notFound, tooMany, unprocessable } from '../common/errors';
+import { CountriesService } from '../countries/countries.service';
 import { participantRole } from '../errands/access';
+import { rewritePhoto, UnreadablePhoto } from './photo-check';
 
 const UPLOAD_TTL_SECONDS = 10 * 60;
-const DOWNLOAD_TTL_SECONDS = 15 * 60;
 const MAX_BYTES = 10 * 1024 * 1024;
 /** Enough for any real errand; stops one person filling storage through one errand. */
 const MAX_UPLOADS_PER_ERRAND = 50;
+/**
+ * The photo types the apps may say they send (docs/security-plan.md, C1). What a file really is comes from
+ * its bytes, when it is used: these only name the upload.
+ */
 const TYPES: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
-  'image/webp': 'webp',
   'image/heic': 'heic',
+  'image/heif': 'heic',
 };
+
+/** Where the apps' uploads land. Nobody is shown anything here, and the server deletes each once it has its copy. */
+const INCOMING = 'incoming/';
+/** Where the server keeps its own copy of an upload, re-encoded: the only one anybody is shown. */
+export const keptKey = (key: string) =>
+  key.startsWith(INCOMING) ? `errands/${key.slice(INCOMING.length).replace(/\.[a-z]+$/, '')}.jpg` : key;
+
+const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+const notUploaded = (key: string) =>
+  unprocessable('photo_not_uploaded', 'A photo didn’t finish uploading. Take it again.', { key });
 
 /** Who may upload what: the agent sends receipts, item and drop-off photos; both sides can send chat photos. */
 const PURPOSES_BY_ROLE: Record<'customer' | 'agent', UploadPurpose[]> = {
@@ -29,9 +44,12 @@ const PURPOSES_BY_ROLE: Record<'customer' | 'agent', UploadPurpose[]> = {
 
 @Injectable()
 export class UploadsService {
+  private readonly logger = new Logger(UploadsService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(STORAGE) private readonly storage: StorageAdapter,
+    private readonly countries: CountriesService,
   ) {}
 
   /** A signed link to upload one photo for an errand, straight to storage. */
@@ -59,8 +77,8 @@ export class UploadsService {
     if (!PURPOSES_BY_ROLE[role].includes(input.purpose))
       throw forbidden('upload_not_allowed', 'You can’t add this kind of photo');
     const ext = TYPES[input.contentType];
-    if (!ext) throw unprocessable('unsupported_file', 'Send a JPEG, PNG, WebP or HEIC photo');
-    const key = `errands/${input.errandId}/${input.purpose}/${randomUUID()}.${ext}`;
+    if (!ext) throw unprocessable('unsupported_file', 'Send a JPEG, PNG or HEIC photo');
+    const key = `${INCOMING}${input.errandId}/${input.purpose}/${randomUUID()}.${ext}`;
     await this.db.insert(uploads).values({
       key,
       ownerId: auth.userId,
@@ -79,13 +97,13 @@ export class UploadsService {
 
   /**
    * Checks that every key is a photo this person uploaded for this errand, for one of the allowed
-   * purposes, and that the file actually arrived (and isn't too big). Run before the errand transaction:
-   * it may call the store.
+   * purposes, and that it is a photo: the first time a key is used, the server opens the file and keeps its
+   * own copy, re-encoded (C1). Run before the errand transaction: it calls the store.
    */
   async assertUploaded(keys: string[], input: { ownerId: string; errandId: string; purposes: UploadPurpose[] }) {
     if (keys.length === 0) return;
     const rows = await this.db
-      .select({ key: uploads.key })
+      .select({ key: uploads.key, checkedAt: uploads.checkedAt })
       .from(uploads)
       .where(
         and(
@@ -95,17 +113,57 @@ export class UploadsService {
           inArray(uploads.purpose, input.purposes),
         ),
       );
-    const known = new Set(rows.map((r) => r.key));
-    for (const key of keys) {
-      const stored = known.has(key) ? await this.storage.head(key) : null;
-      if (!stored)
-        throw unprocessable('photo_not_uploaded', 'A photo didn’t finish uploading. Take it again.', { key });
-      if (stored.size > MAX_BYTES) throw unprocessable('photo_too_large', 'That photo is too large', { key });
-    }
+    const known = new Map(rows.map((r) => [r.key, r]));
+    await Promise.all(
+      [...new Set(keys)].map(async (key) => {
+        const row = known.get(key);
+        if (!row) throw notUploaded(key);
+        if (!row.checkedAt) return this.check(key);
+        // Checked before (sent again after a dropped connection, say): the copy must still be there.
+        if (!(await this.storage.head(keptKey(key)))) throw notUploaded(key);
+      }),
+    );
   }
 
-  /** A short-lived link to view a photo. Callers check the viewer may see the errand first. */
-  url(key: string) {
-    return this.storage.presignDownload(key, DOWNLOAD_TTL_SECONDS);
+  /**
+   * Opens an upload and keeps the server's own copy: a plain JPEG with only the pixels, so no location,
+   * camera details or anything hidden in the file, and nothing that isn't really a photo. Then the
+   * original goes.
+   */
+  private async check(key: string) {
+    const original = await this.storage.get(key, MAX_BYTES);
+    if (original === 'too_large') throw unprocessable('photo_too_large', 'That photo is too large', { key });
+    if (!original) {
+      // Another request may just have kept its copy and deleted the original.
+      const [row] = await this.db.select({ checkedAt: uploads.checkedAt }).from(uploads).where(eq(uploads.key, key));
+      if (row?.checkedAt) return;
+      throw notUploaded(key);
+    }
+    let photo: Buffer;
+    try {
+      photo = await rewritePhoto(original);
+    } catch (error) {
+      if (!(error instanceof UnreadablePhoto)) throw error;
+      throw unprocessable('photo_unreadable', 'That photo couldn’t be read. Take it again.', { key });
+    }
+    await this.storage.put(keptKey(key), photo, 'image/jpeg');
+    await this.db
+      .update(uploads)
+      .set({ checkedAt: new Date(), contentType: 'image/jpeg', sha256: sha256(photo), size: photo.length })
+      .where(eq(uploads.key, key));
+    await this.storage.delete(key).catch((error: Error) => {
+      // The copy is kept and is all anybody sees; the store's own expiry for incoming/ removes this later.
+      this.logger.warn(`The original of ${key} wasn't deleted: ${error.message}`);
+    });
+  }
+
+  /**
+   * Makes short-lived links to see photos of an errand in this country: they last the minutes Settings,
+   * Security give (C1, X10). Callers check the viewer may see the errand first.
+   */
+  async links(countryCode: string) {
+    const current = await this.countries.currentSettingsIfAny(countryCode);
+    const minutes = current?.settings.security.signedLinkMinutes ?? DEFAULT_SECURITY_SETTINGS.signedLinkMinutes;
+    return (key: string) => this.storage.presignDownload(keptKey(key), minutes * 60);
   }
 }

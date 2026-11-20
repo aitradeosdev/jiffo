@@ -39,6 +39,9 @@ export class NotConfiguredStorage implements StorageAdapter {
   presignUpload = refuse('storage');
   presignDownload = refuse('storage');
   head = refuse('storage');
+  get = refuse('storage');
+  put = refuse('storage');
+  delete = refuse('storage');
 }
 
 export class NotConfiguredPayments implements PaymentsAdapter {

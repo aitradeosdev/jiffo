@@ -321,7 +321,7 @@ export class ErrandsAdminService {
     const agentIds = new Set([...convos.map((c) => c.agentId), ...(errand.agentId ? [errand.agentId] : [])]);
     const roleOf = (userId: string | null) =>
       userId === errand.customerId ? 'customer' : userId && agentIds.has(userId) ? 'agent' : null;
-    const signed = async (key: string) => this.uploads.url(key);
+    const signed = await this.uploads.links(errand.countryCode);
 
     // The share-out a normal hand-off would make, as the starting point for settling a dispute.
     const standard = splitFeeEscrow({
@@ -379,13 +379,16 @@ export class ErrandsAdminService {
           createdAt: m.createdAt,
         })),
       ),
+      // Only photos the server has opened and kept its own copy of (C1): nothing else was ever sent or shown.
       photos: await Promise.all(
-        files.map(async (f) => ({
-          purpose: f.purpose,
-          from: roleOf(f.ownerId),
-          url: await signed(f.key),
-          createdAt: f.createdAt,
-        })),
+        files
+          .filter((f) => f.checkedAt)
+          .map(async (f) => ({
+            purpose: f.purpose,
+            from: roleOf(f.ownerId),
+            url: await signed(f.key),
+            createdAt: f.createdAt,
+          })),
       ),
       money: {
         heldFeeKobo: held.feeKobo,

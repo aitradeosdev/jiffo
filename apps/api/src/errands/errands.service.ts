@@ -602,11 +602,12 @@ export class ErrandsService implements OnModuleInit {
       ]);
     const items = (photoEvents.find((e) => e.event === 'send_item_amount')?.data.photos as string[] | undefined) ?? [];
     const dropoff = photoEvents.find((e) => e.event === 'send_dropoff_photo')?.data.photo as string | undefined;
+    const link = items.length || dropoff ? await this.uploads.links(errand.countryCode) : null;
     return {
       ...view!,
       photos: {
-        items: await Promise.all(items.map((k) => this.uploads.url(k))),
-        dropoff: dropoff ? await this.uploads.url(dropoff) : null,
+        items: link ? await Promise.all(items.map(link)) : [],
+        dropoff: link && dropoff ? await link(dropoff) : null,
       },
       ratedByMe: !!rating,
       tipped: !!tip,

@@ -221,6 +221,10 @@ export class EvidenceService {
           ownerId: uploads.ownerId,
           contentType: uploads.contentType,
           key: uploads.key,
+          // The server's copy (C1): its fingerprint shows a photo shown later is the one that was sent.
+          checkedAt: uploads.checkedAt,
+          sha256: uploads.sha256,
+          size: uploads.size,
           createdAt: uploads.createdAt,
         })
         .from(uploads)

@@ -43,7 +43,7 @@ const SignedQuery = z.object({
  * With S3 configured these routes refuse everything, and in production they aren't there at all.
  */
 /** Photo types the development store serves as images. */
-const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/heic', 'image/heif']);
 
 @Controller('dev-files')
 @UseGuards(DevelopmentOnlyGuard)

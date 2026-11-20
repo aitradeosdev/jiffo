@@ -102,6 +102,15 @@ export class SwitchingStorage implements StorageAdapter {
   head(...a: Parameters<StorageAdapter['head']>) {
     return this.providers.current('storage').head(...a);
   }
+  get(...a: Parameters<StorageAdapter['get']>) {
+    return this.providers.current('storage').get(...a);
+  }
+  put(...a: Parameters<StorageAdapter['put']>) {
+    return this.providers.current('storage').put(...a);
+  }
+  delete(...a: Parameters<StorageAdapter['delete']>) {
+    return this.providers.current('storage').delete(...a);
+  }
 }
 
 export class SwitchingIdentity implements IdentityAdapter {
