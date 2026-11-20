@@ -27,4 +27,14 @@ describe('ChatList', () => {
       expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
     }
   });
+
+  it("marks the messages the apps warned about, and shows a photo's caption (C3)", () => {
+    const warned = { ...message('agent', 'Pay me directly, 0123456789'), warnings: ['account_number', 'pay_outside'] };
+    const plain = { ...message('customer', 'On my way'), warnings: [] };
+    const captioned = { ...message('customer', 'my opay'), kind: 'photo', photoUrl: 'https://x/p.jpg', warnings: [] };
+    const html = renderToStaticMarkup(<ChatList chat={[warned, plain, captioned]} time={time} />);
+    expect(html).toContain('Warned: account number, pay outside the app');
+    expect(html.match(/Warned:/g)).toHaveLength(1);
+    expect(html).toContain('my opay');
+  });
 });

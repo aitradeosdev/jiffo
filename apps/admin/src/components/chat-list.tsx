@@ -1,3 +1,5 @@
+import { CHAT_WARNING_LABELS, warningsOf } from '@jiffo/shared';
+
 /** One message in an errand's chat, as the admin API returns it. */
 export interface ChatMessage {
   id: number;
@@ -5,6 +7,8 @@ export interface ChatMessage {
   kind: string;
   body: string;
   photoUrl: string | null;
+  /** What the apps warned about beside it (docs/security-plan.md, C3). */
+  warnings?: string[];
   createdAt: string;
 }
 
@@ -36,14 +40,26 @@ export function ChatList({ chat, time }: { chat: ChatMessage[]; time: (iso: stri
                 <a href={m.photoUrl} target="_blank" rel="noreferrer">
                   <img src={m.photoUrl} alt="Photo sent in chat" className="mt-1 max-h-48 rounded-lg" />
                 </a>
-              ) : (
-                <p className="text-[15px] whitespace-pre-wrap">{m.body}</p>
-              )}
+              ) : null}
+              {m.body ? <p className="text-[15px] whitespace-pre-wrap">{m.body}</p> : null}
+              <Warned warnings={m.warnings} />
               <p className="mt-0.5 text-[11px] opacity-60">{time(m.createdAt)}</p>
             </div>
           </li>
         ),
       )}
     </ol>
+  );
+}
+
+/** The apps' warning beside a message, named for staff. */
+function Warned({ warnings }: { warnings?: string[] }) {
+  const known = warningsOf({ warnings });
+  if (!known.length) return null;
+  const words = known.map((w) => CHAT_WARNING_LABELS[w]).join(', ');
+  return (
+    <p className="mt-1 inline-block rounded-md bg-warn-soft px-1.5 py-0.5 text-[12px] font-semibold text-warn">
+      Warned: {words}
+    </p>
   );
 }
