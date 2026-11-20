@@ -177,7 +177,10 @@ describe('admin audit log and personal details', () => {
     const now = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
     const settings = structuredClone(now.settings);
     const before = settings.security.dailyIdReveals;
+    const alertBefore = settings.security.idRevealAlertAt;
     settings.security.dailyIdReveals = 2;
+    // Owners are told before the limit is reached (D8), so the alert comes below it.
+    settings.security.idRevealAlertAt = 1;
     const save = (s: unknown, basedOn: number) =>
       approved(t, 'owner', (h) =>
         request(t.http)
@@ -210,6 +213,7 @@ describe('admin audit log and personal details', () => {
       const latest = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
       const back = structuredClone(latest.settings);
       back.security.dailyIdReveals = before;
+      back.security.idRevealAlertAt = alertBefore;
       expect((await save(back, latest.version)).status).toBe(200);
     }
   });
