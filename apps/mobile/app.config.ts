@@ -73,6 +73,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: v.name,
     slug: v.slug,
+    // The Expo account the projects belong to (eas-projects.json): development's now, the production account's
+    // before the store builds.
+    ...(EAS_PROJECTS.owner ? { owner: EAS_PROJECTS.owner } : {}),
     scheme: v.scheme,
     version: '0.1.0',
     orientation: 'portrait',

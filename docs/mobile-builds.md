@@ -25,7 +25,7 @@ All the commands below run in a terminal in the repository's `apps/mobile` folde
    eas login
    ```
 
-4. Make an Expo project for each app. Each command makes the project; as the app's settings are in `app.config.ts`, which it can't change, it shows the project's `projectId` for you to copy:
+4. The development builds' Expo projects are made already, under the `cl-agents-team` account, and named in `apps/mobile/eas-projects.json`, with the account. Sign in with that account to build them. To build under another account (the production one, before the store builds), put its name as `owner` in that file, then make a project for each app in it. Each command makes the project; as the app's settings are in `app.config.ts`, which it can't change, it shows the project's `projectId` for you to copy:
 
    ```bash
    eas init
@@ -35,7 +35,7 @@ All the commands below run in a terminal in the repository's `apps/mobile` folde
    APP_VARIANT=agent eas init
    ```
 
-   Put the two ids in `apps/mobile/eas-projects.json`, `customer` first, `agent` second, and commit the file. The ids aren't secret.
+   Put the two ids in `apps/mobile/eas-projects.json` as `customer` and `agent`, and commit the file. The ids aren't secret. The build settings below (`eas env:create`) are kept per account, so set them again in the new one.
 
 5. Optional: real maps on Android need a Google Maps key with the Maps SDK for Android turned on. Without one, the maps are blank and everything else works. Save it for every build, both apps:
 
