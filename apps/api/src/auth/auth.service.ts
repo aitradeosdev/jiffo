@@ -9,6 +9,7 @@ import { sha256 } from '../common/crypto';
 import { forbidden, unauthorized } from '../common/errors';
 import { PushService } from '../push/push.service';
 import { RiskFlagsService } from '../risk/risk-flags.service';
+import { SignInRiskService } from '../risk/sign-in-risk.service';
 import { WithdrawalHoldsService } from '../money/withdrawal-holds.service';
 import { normalisePhone } from './phone';
 import { OtpService } from './otp.service';
@@ -56,6 +57,7 @@ export class AuthService {
     private readonly holds: WithdrawalHoldsService,
     private readonly attestation: AttestationService,
     private readonly risk: RiskFlagsService,
+    private readonly signInRisk: SignInRiskService,
   ) {}
 
   /** How long a session lasts from now, never past its absolute end (SESSION_MAX_DAYS after sign-in). */
@@ -84,6 +86,7 @@ export class AuthService {
       evidence: {},
       request: { method: 'POST', path: '/v1/auth/otp/verify', body: undefined },
     },
+    client: { ip: string | null; network?: string } = { ip: null },
   ) {
     // The apps' web builds keep tokens in the browser's storage, not the phone's keychain (docs/security-plan.md,
     // MB2): they are for development only. Refused before the code is checked, so it still works in the app.
@@ -108,6 +111,18 @@ export class AuthService {
     });
 
     const phoneFingerprint = this.risk.phoneFingerprint(device.platform, device.phoneId);
+    // How risky this sign-up or sign-in looks (A10). A high score asks for more, never refuses: a selfie before
+    // an agent's money moves, and a person to look in the Risk queue.
+    const risk = await this.signInRisk.assess({
+      countryCode: country,
+      app,
+      userId: known?.id ?? null,
+      deviceKey: device.key,
+      phoneFingerprint,
+      signals: attest.evidence.signals ?? [],
+      network: client.network,
+      ip: client.ip,
+    });
     const signedIn = await this.db.transaction(async (tx) => {
       const inserted = await tx
         .insert(users)
@@ -130,7 +145,7 @@ export class AuthService {
               .where(and(eq(devices.userId, user.id), eq(devices.app, 'agent')))
           : [];
       const newPhone = known.length > 0 && !known.some((d) => d.key === device.key && !d.forgottenAt);
-      const doubtful = attested === 'doubtful' && app === 'agent';
+      const doubtful = (attested === 'doubtful' || risk.stepUp) && app === 'agent';
       const heldUntil = newPhone ? await this.holds.start(tx, user.id, 'new_device') : null;
 
       const [deviceRow] = await tx
@@ -146,6 +161,8 @@ export class AuthService {
           // What the app found on the phone (MB4), as it said at this sign-in.
           riskSignals: attest.evidence.signals ?? [],
           riskSignalsAt: new Date(),
+          signInRiskScore: risk.score,
+          signInRiskReasons: risk.reasons,
           phoneFingerprint,
         })
         .onConflictDoUpdate({
@@ -158,6 +175,8 @@ export class AuthService {
             ...(newPhone || doubtful ? { selfieNeeded: true } : {}),
             riskSignals: attest.evidence.signals ?? [],
             riskSignalsAt: new Date(),
+            signInRiskScore: risk.score,
+            signInRiskReasons: risk.reasons,
             // An app that sends none (an older version) keeps the one it sent before.
             ...(phoneFingerprint ? { phoneFingerprint } : {}),
           },
@@ -210,6 +229,9 @@ export class AuthService {
     });
     // Another account on this phone is flagged for verification, beside the sign-in (I3).
     this.risk.phoneUsed(signedIn.device.userId, signedIn.device.id);
+    if (risk.stepUp) {
+      this.risk.riskySignIn({ countryCode: country, userId: signedIn.device.userId, app, ...risk });
+    }
     const { device: _signedInOn, ...out } = signedIn;
     return out;
   }

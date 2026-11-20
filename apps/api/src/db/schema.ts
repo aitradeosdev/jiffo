@@ -4,6 +4,7 @@ import {
   boolean,
   char,
   check,
+  cidr,
   customType,
   doublePrecision,
   index,
@@ -189,6 +190,12 @@ export const devices = pgTable(
     /** What the app last found on this phone (MB4): root, an emulator, hooking tools, a debugger. */
     riskSignals: jsonb('risk_signals').$type<string[]>().notNull().default([]),
     riskSignalsAt: timestamp('risk_signals_at', { withTimezone: true }),
+    /**
+     * How risky the latest sign-in on this device looked, and why (docs/security-plan.md, A10): the app's signals,
+     * a phone several accounts have used, a VPN, a cloud provider's address. A high one asks for more checks.
+     */
+    signInRiskScore: smallint('sign_in_risk_score').notNull().default(0),
+    signInRiskReasons: jsonb('sign_in_risk_reasons').$type<string[]>().notNull().default([]),
     /**
      * A keyed hash of the phone's own id, the same in both apps on one phone (iOS's id for the vendor,
      * Android's id for apps signed with one key), so accounts sharing a phone can be flagged (I3, E6). The id
@@ -1663,5 +1670,25 @@ export const providerSettings = pgTable(
     uniqueIndex('provider_settings_active_uq')
       .on(t.category)
       .where(sql`${t.active}`),
+  ],
+);
+
+/* ---------- Cloud providers' address ranges ---------- */
+
+/**
+ * The address ranges cloud providers publish (AWS, Google Cloud, Azure, Oracle, DigitalOcean, Linode, Vultr),
+ * refreshed daily (docs/security-plan.md, A10). A sign-in from one is from a server, not a phone: a risk
+ * signal for more checks, never a refusal. Nothing about anyone is sent to get them.
+ */
+export const cloudIpRanges = pgTable(
+  'cloud_ip_ranges',
+  {
+    provider: text('provider').notNull(),
+    range: cidr('range').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.provider, t.range] }),
+    // Finding the range an address is in.
+    index('cloud_ip_ranges_range_idx').using('gist', t.range.op('inet_ops')),
   ],
 );

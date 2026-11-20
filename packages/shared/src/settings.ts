@@ -60,6 +60,8 @@ export const DEFAULT_RISK_SETTINGS = {
   gpsMaxSpeedKmh: 150,
   gpsJumpMeters: 1_000,
   noMovementMeters: 150,
+  signInRiskAccounts: 3,
+  signInRiskStepUpAt: 2,
 };
 
 /** The Safety group's starting values (E9): Nigeria's emergency number. */
@@ -320,6 +322,14 @@ export const CountrySettingsSchema = z.object({
         .min(1)
         .max(24 * 60)
         .default(10),
+      /** A phone this many accounts have signed in on, in 90 days, counts as risky at sign-in (A10). */
+      signInRiskAccounts: z.number().int().min(2).max(100).default(3),
+      /**
+       * The sign-in risk score that asks for more (A10): a selfie before an agent's money moves, and a person to
+       * look in the Risk queue. Never a refusal. At 2, any one signal does but a VPN or a debugger on its own;
+       * at 1, those too.
+       */
+      signInRiskStepUpAt: z.number().int().min(1).max(20).default(2),
     })
     .default(() => structuredClone(DEFAULT_RISK_SETTINGS)),
   /** The emergency button (docs/security-plan.md, E9). */

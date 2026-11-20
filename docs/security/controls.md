@@ -158,6 +158,18 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 - **Freeze and decide:** stepping in moves the errand into dispute, which freezes the money and makes its evidence pack. Staff then decide on the errand's page: release to the agent, refund the customer, or split. A split above the set amount needs a second admin's approval (D4). Staff's decision replaces the automatic one.
 - **Timers:** each timer acts only on the errand exactly as it was when the timer was set. A pause, a resume, the customer's answer or a dispute leaves the old timers doing nothing.
 
+## Sign-in risk (A10)
+
+- **The score:** each sign-up and sign-in adds up what makes it risky:
+  - an emulator or a hooking tool, 3 each;
+  - a rooted phone, 2;
+  - a phone several accounts have signed in on in 90 days (Settings, Risk: 3, this one included), 2;
+  - an address in a cloud provider's published ranges, a server rather than a phone, 2;
+  - a VPN or a debugger, 1 each.
+- **What a high score does:** at the step-up score (Settings, Risk: 2), an agent needs a selfie before their money moves on that phone, as a doubtful app check does, and the sign-in is flagged for the Risk queue for a person to look at. A sign-in is never refused for its score. At 2, a VPN or a debugger on its own asks for nothing more; at 1, it does.
+- **Cloud providers' ranges:** fetched daily from each provider's own published list (AWS, Google Cloud, Azure, Oracle, DigitalOcean, Linode, Vultr). Nothing about anyone is sent to get them, and a list that can't be fetched keeps that provider's last ranges.
+- **For staff:** each device on a person's page shows its latest sign-in's score and why.
+
 ## Alerts about staff (D8)
 
 - **What raises one:** checked as each staff action is written to the audit log, in the same transaction, so an alert stands only for what was done, whichever route did it:
