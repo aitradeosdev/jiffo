@@ -28,6 +28,22 @@ const VARIANTS = {
 } as const;
 
 /**
+ * The API's address, from EXPO_PUBLIC_API_URL, or the computer running the bundler for development. A preview
+ * or store build talks to the API over HTTPS only, so one built on Expo's servers without an HTTPS address stops
+ * there, rather than ship an app that calls the phone itself (docs/mobile-builds.md).
+ */
+export const apiUrlFor = (env: Record<string, string | undefined>) => {
+  const url = env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+  const profile = env.EAS_BUILD_PROFILE ?? '';
+  if (env.EAS_BUILD === 'true' && /^(preview|production)/.test(profile) && !url.startsWith('https://')) {
+    throw new Error(
+      `The ${profile} build needs EXPO_PUBLIC_API_URL set to the API's https:// address in its EAS environment (docs/mobile-builds.md)`,
+    );
+  }
+  return url;
+};
+
+/**
  * The Expo project of the app being built, for EAS builds: each store app is its own project, named in
  * eas-projects.json once `eas init` has made it (docs/mobile-builds.md). Not a secret.
  */
@@ -142,7 +158,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     experiments: { typedRoutes: false },
     extra: {
       variant,
-      apiUrl: process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000',
+      apiUrl: apiUrlFor(process.env),
       country: process.env.EXPO_PUBLIC_COUNTRY ?? 'NG',
       // The Google Cloud project linked to the apps in Play Console, for Play Integrity (MB3). Not a secret.
       playCloudProjectNumber: process.env.PLAY_CLOUD_PROJECT_NUMBER ?? '',

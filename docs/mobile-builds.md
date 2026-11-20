@@ -9,6 +9,8 @@ There are two kinds of build. Each exists for both apps: put `-customer` or `-ag
 | `development-agent`, `development-customer` | A debug build with Expo's launcher. It loads the JavaScript from your computer, so changes show without a new build | Try the native parts while working on the app |
 | `preview-agent`, `preview-customer` | A release build, as the store app is built: R8 obfuscation on (MB7), JavaScript inside the app. It talks to the API only over HTTPS | Check a release build on a real phone before it ships |
 
+All the commands below run in a terminal in the repository's `apps/mobile` folder (`cd apps/mobile` from the repository's top folder, once).
+
 ## Once, on your computer
 
 1. Follow the README's **Getting started** to install Node 22 and pnpm, clone the repository and run `pnpm install`.
@@ -26,11 +28,11 @@ There are two kinds of build. Each exists for both apps: put `-customer` or `-ag
 4. Make an Expo project for each app. Each command makes the project; as the app's settings are in `app.config.ts`, which it can't change, it shows the project's `projectId` for you to copy:
 
    ```bash
-   cd apps/mobile && eas init
+   eas init
    ```
 
    ```bash
-   cd apps/mobile && APP_VARIANT=agent eas init
+   APP_VARIANT=agent eas init
    ```
 
    Put the two ids in `apps/mobile/eas-projects.json`, `customer` first, `agent` second, and commit the file. The ids aren't secret.
@@ -38,14 +40,14 @@ There are two kinds of build. Each exists for both apps: put `-customer` or `-ag
 5. Optional: real maps on Android need a Google Maps key with the Maps SDK for Android turned on. Without one, the maps are blank and everything else works. Save it for every build, both apps:
 
    ```bash
-   cd apps/mobile && eas env:create --scope account --name GOOGLE_MAPS_ANDROID_API_KEY --value <your key> --environment development --environment preview --environment production --visibility sensitive
+   eas env:create --scope account --name GOOGLE_MAPS_ANDROID_API_KEY --value <your key> --environment development --environment preview --environment production --visibility sensitive
    ```
 
 ## The API the app talks to
 
 Start the backend as the README says. With the console providers, sign-in codes are printed in the API's log.
 
-- **Development builds:** the phone and your computer must be on the same Wi-Fi. Find your computer's address on that network (on a Mac: System Settings, Wi-Fi, Details; on Windows: `ipconfig`), such as `192.168.1.20`. It goes in the start command, in step 4 of each phone's steps.
+- **Development builds:** the phone and your computer must be on the same Wi-Fi. Find your computer's address on that network (on a Mac: System Settings, Wi-Fi, Details; on Windows: `ipconfig`), such as `192.168.1.20`. It goes in the bundler's start command: step 4 for an Android phone, step 6 for an iPhone.
 - **Preview builds:** a release build talks to the API only over HTTPS. Until there is a staging server, open a temporary HTTPS address to the API on your computer, and leave it running while you test:
 
   ```bash
@@ -55,17 +57,21 @@ Start the backend as the README says. With the console providers, sign-in codes 
   It prints an address ending in `trycloudflare.com`. Save it for preview builds, then build. A new tunnel has a new address, which needs a new build:
 
   ```bash
-  cd apps/mobile && eas env:create --scope account --name EXPO_PUBLIC_API_URL --value https://<the address> --environment preview --visibility plaintext
+  eas env:create --scope account --name EXPO_PUBLIC_API_URL --value https://<the address> --environment preview --visibility plaintext
   ```
 
   Next time, change it with `eas env:update` instead. Once staging exists, set it to the staging API's address once.
+
+- **Store builds:** before the first `production-agent` or `production-customer` build, set `EXPO_PUBLIC_API_URL` to the live API's `https://` address the same way, with `--environment production`.
+
+  A preview or store build made on Expo's servers without an `https://` address stops with an error naming `EXPO_PUBLIC_API_URL`. Without the check, it would ship an app that calls the phone itself for everything.
 
 ## Android phone
 
 1. Build. For the agent app (use `-customer` for the customer app):
 
    ```bash
-   cd apps/mobile && eas build --profile development-agent --platform android
+   eas build --profile development-agent --platform android
    ```
 
    For the release check, use `--profile preview-agent`. The first time, EAS asks to make the app's signing key: say yes, and EAS keeps it. A build takes 10 to 30 minutes.
@@ -74,7 +80,7 @@ Start the backend as the README says. With the console providers, sign-in codes 
 4. **Development build:** on your computer, start the bundler for that app with the address from above:
 
    ```bash
-   cd apps/mobile && EXPO_PUBLIC_API_URL=http://192.168.1.20:3000 pnpm start:agent
+   EXPO_PUBLIC_API_URL=http://192.168.1.20:3000 pnpm start:agent
    ```
 
    (`pnpm start` for the customer app.) Open the app on the phone: it lists the bundler under **Development servers**. Tap it, or scan the QR code in the terminal.
@@ -88,7 +94,7 @@ An app can be installed on an iPhone outside the App Store only with a paid Appl
 2. Register the iPhone with Expo, once for each phone:
 
    ```bash
-   cd apps/mobile && eas device:create
+   eas device:create
    ```
 
    Choose **Website**, open the link it shows on the iPhone in Safari, and allow the profile download. Then on the iPhone open **Settings**, tap **Profile Downloaded** near the top and install it. This tells Apple the phone may run your builds.
@@ -96,7 +102,7 @@ An app can be installed on an iPhone outside the App Store only with a paid Appl
 4. Build. For the agent app:
 
    ```bash
-   cd apps/mobile && eas build --profile development-agent --platform ios
+   eas build --profile development-agent --platform ios
    ```
 
    The first time, EAS asks you to sign in to your Apple account and offers to make the certificates and the provisioning profile, with your registered phones: say yes to each. It also sets up the app id with App Attest. A phone registered after a build needs a new build.
