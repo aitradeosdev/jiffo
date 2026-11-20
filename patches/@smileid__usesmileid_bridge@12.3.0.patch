@@ -1,0 +1,15 @@
+diff --git a/android/build.gradle b/android/build.gradle
+index 12c8d695707ea25c04bbf32b698e1bc612e97477..b65dd76daef793accd0d00f53dc56147410fe880 100644
+--- a/android/build.gradle
++++ b/android/build.gradle
+@@ -17,7 +17,9 @@ group = 'com.usesmileid.bridge'
+ version = '12.3.0'
+ 
+ android {
+-  namespace 'com.usesmileid.bridge'
++  // The Smile ID library this wraps (com.usesmileid:bridge) has the same namespace, which AGP 9 refuses. This
++  // module's code uses neither of the classes a namespace names (R and BuildConfig), so its own is safe.
++  namespace 'com.usesmileid.bridge.reactnative'
+ 
+   // `expo-module-gradle-plugin` requires versionName + versionCode on
+   // the library's defaultConfig — concrete failure without these:
