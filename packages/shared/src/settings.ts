@@ -57,6 +57,9 @@ export const DEFAULT_RISK_SETTINGS = {
   noMovementMeters: 150,
 };
 
+/** The Safety group's starting values (E9): Nigeria's emergency number. */
+export const DEFAULT_SAFETY_SETTINGS = { emergencyNumber: '112' };
+
 /**
  * Everything admin can change for a country. Each saved change becomes a new version,
  * so an errand can always be explained by the settings that applied when it ran.
@@ -274,6 +277,16 @@ export const CountrySettingsSchema = z.object({
         .default(10),
     })
     .default(DEFAULT_RISK_SETTINGS),
+  /** The emergency button (docs/security-plan.md, E9). */
+  safety: z
+    .object({
+      /** The number the apps' emergency button dials from the phone. */
+      emergencyNumber: z
+        .string()
+        .regex(/^\d{2,6}$/, 'An emergency number is 2 to 6 digits')
+        .default('112'),
+    })
+    .default(DEFAULT_SAFETY_SETTINGS),
 });
 
 export type CountrySettings = z.infer<typeof CountrySettingsSchema>;
@@ -336,6 +349,7 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
   profiles: { showCustomerPhotoBeforeAccept: false },
   security: DEFAULT_SECURITY_SETTINGS,
   risk: DEFAULT_RISK_SETTINGS,
+  safety: DEFAULT_SAFETY_SETTINGS,
 };
 
 /** The part of the settings the apps may read. Limits and identity provider details stay on the server. */
@@ -360,6 +374,8 @@ export function publicSettings(s: CountrySettings) {
       customerIdTypes: s.identity.customerIdTypes,
       agentIdTypes: s.identity.agentIdTypes,
     },
+    /** What the emergency button dials (E9). */
+    safety: { emergencyNumber: s.safety.emergencyNumber },
   };
 }
 export type PublicSettings = ReturnType<typeof publicSettings>;

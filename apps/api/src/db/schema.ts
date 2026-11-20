@@ -1167,6 +1167,48 @@ export const disputeEvidence = pgTable(
 );
 
 /**
+ * An emergency pressed in an app (docs/security-plan.md, E9): who, from which app, on which errand, and
+ * where the phone was, with the positions it sent after, for the Safety queue. The app dials the emergency
+ * number itself; this is Jiffo's record, for the safety team to follow up.
+ */
+export const safetyEvents = pgTable(
+  'safety_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    countryCode: char('country_code', { length: 2 })
+      .notNull()
+      .references(() => countries.code),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    app: text('app', { enum: APPS }).notNull(),
+    errandId: uuid('errand_id').references(() => errands.id),
+    lat: doublePrecision('lat'),
+    lng: doublePrecision('lng'),
+    accuracy: doublePrecision('accuracy'),
+    /** Where the phone was after, as the app keeps sending it for a while: the latest few hundred. */
+    positions: jsonb('positions')
+      .$type<Array<{ lat: number; lng: number; accuracy: number | null; at: string }>>()
+      .notNull()
+      .default([]),
+    status: text('status', { enum: ['open', 'handled'] })
+      .notNull()
+      .default('open'),
+    /** The latest press: presses within half an hour of it are this emergency, and it is followed that long. */
+    lastPressedAt: timestamp('last_pressed_at', { withTimezone: true }).notNull().defaultNow(),
+    handledBy: uuid('handled_by').references(() => admins.id),
+    handledAt: timestamp('handled_at', { withTimezone: true }),
+    note: text('note'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('safety_events_queue_idx').on(t.countryCode, t.status, t.createdAt),
+    index('safety_events_user_idx').on(t.userId, t.createdAt),
+  ],
+);
+
+/**
  * Which account each identity check was for, by our reference (docs/security-plan.md, I3): a provider that
  * finds the same face on an earlier check names that check by its reference, which may be long replaced on
  * the account. Kept for a little over a year, as providers look back that far at most.

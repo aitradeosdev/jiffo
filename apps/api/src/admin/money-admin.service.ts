@@ -53,6 +53,9 @@ export interface AdjustmentInput {
 }
 
 /** Money as finance sees it: what Jiffo holds and earns, top-ups, withdrawals, the nightly check, adjustments. */
+/** Alerts the Safety queue owns, not finance (E9). */
+const SAFETY_ALERTS: ReadonlySet<string> = new Set(['emergency']);
+
 @Injectable()
 export class MoneyAdminService {
   constructor(
@@ -434,7 +437,8 @@ export class MoneyAdminService {
 
   /** Open alerts first, then the latest resolved ones. */
   async alerts(country: string) {
-    const rows = await this.alertsService.list(country);
+    // Emergencies are the safety team's, in the Safety queue, and are closed there.
+    const rows = (await this.alertsService.list(country)).filter((a) => !SAFETY_ALERTS.has(a.kind));
     return {
       alerts: rows.map((a) => ({
         id: a.id,
@@ -449,6 +453,10 @@ export class MoneyAdminService {
   }
 
   async resolveAlert(admin: AdminContext, id: string, note: string) {
+    const [kind] = await this.db.select({ kind: alerts.kind }).from(alerts).where(eq(alerts.id, id));
+    if (kind && SAFETY_ALERTS.has(kind.kind)) {
+      throw conflict('safety_alert', 'An emergency is closed in the Safety queue, by the safety team');
+    }
     return this.db.transaction(async (tx) => {
       const [alert] = await tx
         .update(alerts)

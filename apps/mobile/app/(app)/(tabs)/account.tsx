@@ -14,6 +14,7 @@ import { fonts } from '@/theme/tokens';
 import { Text } from '@/ui/kit';
 import { Avatar, Icon } from '@/ui/parts';
 import { TabPage } from '@/ui/tab-page';
+import { useEmergency } from '@/safety/use-emergency';
 
 interface Stats {
   ratingAvg: number | null;
@@ -114,6 +115,8 @@ export default function Account() {
         </View>
       ) : null}
 
+      <EmergencyMenu />
+
       <View style={[styles.minor, { borderTopColor: c.line }]}>
         <MinorRow
           label={othersDone ? 'Signed out of your other phones' : 'Sign out of other phones'}
@@ -160,6 +163,16 @@ function CustomerIdRow() {
         ? 'ID being checked'
         : 'Verify your ID';
   return <MenuRow icon="verified" label={label} onPress={() => router.push('/verify')} />;
+}
+
+/** The emergency button, at any time, on no errand (docs/security-plan.md, E9). */
+function EmergencyMenu() {
+  const { number, press } = useEmergency();
+  return (
+    <View style={styles.menu}>
+      <MenuRow icon="alert" label={`Emergency: call ${number}`} onPress={() => press()} />
+    </View>
+  );
 }
 
 /** .mrow: a big settings row with an icon. */

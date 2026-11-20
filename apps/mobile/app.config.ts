@@ -88,7 +88,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'expo-location',
         variant === 'agent'
           ? {
-              locationWhenInUsePermission: 'Jiffo Agent uses your location to show errands near you.',
+              locationWhenInUsePermission:
+                "Jiffo Agent uses your location to show errands near you, and to tell Jiffo's safety team where you are if you press Emergency.",
               locationAlwaysAndWhenInUsePermission:
                 "Jiffo Agent shares your location while you're online or on an errand, also when you switch to your maps app, so customers can follow their errand.",
               // While online or on an errand, the phone keeps sending the agent's location from the background.
@@ -96,7 +97,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
               isAndroidForegroundServiceEnabled: true,
               isIosBackgroundLocationEnabled: true,
             }
-          : { locationWhenInUsePermission: 'Jiffo uses your location to show where you are on the map.' },
+          : {
+              locationWhenInUsePermission:
+                "Jiffo uses your location to show where you are on the map, and to tell Jiffo's safety team where you are if you press Emergency.",
+            },
       ],
       // Android draws Google Maps and needs a key at build time; iOS uses Apple Maps, which needs none.
       ['react-native-maps', { androidGoogleMapsApiKey: process.env.GOOGLE_MAPS_ANDROID_API_KEY }],

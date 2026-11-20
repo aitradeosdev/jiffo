@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, inArray, lt } from 'drizzle-orm';
 import { forbidden } from '../common/errors';
 import { DB, type Db, type Tx } from '../db/database.module';
-import { adminApprovals, adminAudit, admins, errands, riskFlags, users } from '../db/schema';
+import { adminApprovals, adminAudit, admins, errands, riskFlags, safetyEvents, users } from '../db/schema';
 import type { AdminContext } from './admin.types';
 
 export interface AuditEntry {
@@ -55,6 +55,13 @@ export class AuditService {
         .from(errands)
         .where(eq(errands.id, targetId));
       return errand ? [errand.customerId, errand.agentId].filter((id): id is string => !!id) : [];
+    }
+    if (targetType === 'safety') {
+      const [event] = await tx
+        .select({ userId: safetyEvents.userId })
+        .from(safetyEvents)
+        .where(eq(safetyEvents.id, targetId));
+      return event ? [event.userId] : [];
     }
     if (targetType === 'flag') {
       const [flag] = await tx

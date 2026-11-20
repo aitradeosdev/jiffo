@@ -116,6 +116,13 @@ export const IdChecksIcon = () => (
   </Icon>
 );
 
+export const SafetyIcon = () => (
+  <Icon>
+    <path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6l7-3z" />
+    <path d="M12 8v4M12 15.5v.5" />
+  </Icon>
+);
+
 export const FlagsIcon = () => (
   <Icon>
     <path d="M5 21V4" />

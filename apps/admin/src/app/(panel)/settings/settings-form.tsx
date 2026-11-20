@@ -27,6 +27,8 @@ function fromText(field: Field, text: string): unknown {
     return null;
   }
   if (field.kind === 'optionalText') return t;
+  // Digits stay text: an emergency number like 112 is dialled, not counted. A wrong one is the API's to refuse.
+  if (field.kind === 'digits') return text.trim();
   if (!/^\d+(\.\d{1,2})?$/.test(t)) return NaN;
   const n = Number(t);
   if (
@@ -201,7 +203,7 @@ export function SettingsForm({
                         {UNIT[f.kind] === '₦' ? <span className="text-ink-3">₦</span> : null}
                         <input
                           id={id}
-                          inputMode={f.kind === 'optionalText' ? 'text' : 'decimal'}
+                          inputMode={f.kind === 'optionalText' ? 'text' : f.kind === 'digits' ? 'numeric' : 'decimal'}
                           value={texts[f.path] ?? ''}
                           aria-invalid={problem ? true : undefined}
                           aria-describedby={f.help || problem ? `${id}-help` : undefined}

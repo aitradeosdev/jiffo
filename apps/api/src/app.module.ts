@@ -24,6 +24,7 @@ import { RatingsModule } from './ratings/ratings.module';
 import { PushModule } from './push/push.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { RiskModule } from './risk/risk.module';
+import { SafetyModule } from './safety/safety.module';
 import { TimersModule } from './timers/timers.module';
 import { UsersModule } from './users/users.module';
 
@@ -46,6 +47,7 @@ import { UsersModule } from './users/users.module';
     CallsModule,
     AlertsModule,
     RiskModule,
+    SafetyModule,
     MoneyModule,
     PlacesModule,
     FilesModule,

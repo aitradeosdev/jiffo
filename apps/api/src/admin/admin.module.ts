@@ -14,6 +14,7 @@ import { AdminController } from './admin.controller';
 import { AdminGuard } from './admin.guard';
 import { AuditService } from './audit.service';
 import { FlagsAdminService } from './flags-admin.service';
+import { SafetyAdminService } from './safety-admin.service';
 import { OverviewService } from './overview.service';
 import { ApprovalRequests } from './approval-requests';
 import { ApprovalsService } from './approvals.service';
@@ -33,6 +34,7 @@ import { TeamService } from './team.service';
     AuditService,
     ErrandsAdminService,
     FlagsAdminService,
+    SafetyAdminService,
     MoneyAdminService,
     OverviewService,
     PeopleAdminService,
