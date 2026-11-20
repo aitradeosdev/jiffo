@@ -40,6 +40,7 @@ export const DEFAULT_SECURITY_SETTINGS = {
   dailySelfie: true,
   randomSelfiePercent: 0,
   attestation: 'record' as 'off' | 'record' | 'enforce',
+  trailDays: 90,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -222,6 +223,11 @@ export const CountrySettingsSchema = z.object({
        * online, and asks a doubtful one for a selfie. Turn enforce on once both are set up.
        */
       attestation: z.enum(['off', 'record', 'enforce']).default('record'),
+      /**
+       * How long agents' GPS trails are kept (G4, X10), in days. Then they are deleted, unless the errand is
+       * in dispute or a flag on it is still open.
+       */
+      trailDays: z.number().int().min(30).max(365).default(90),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
   /**

@@ -25,6 +25,7 @@ import { UploadsService } from '../files/uploads.service';
 import { chargeableItemsKobo, WalletService, type DisputeSplit } from '../money/wallet.service';
 import { AuditService } from './audit.service';
 import { FlagsAdminService } from './flags-admin.service';
+import { EvidenceService } from '../errands/evidence.service';
 import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
 
@@ -66,7 +67,37 @@ export class ErrandsAdminService {
     private readonly countries: CountriesService,
     private readonly audit: AuditService,
     private readonly flags: FlagsAdminService,
+    private readonly evidence: EvidenceService,
   ) {}
+
+  /**
+   * Another evidence pack of what the errand holds now (E8), taken by staff, for instance after more was
+   * said in the chat during the dispute. Logged, and refused for the staff member's own errand.
+   */
+  async snapshot(admin: AdminContext, id: string) {
+    const [errand] = await this.db.select({ countryCode: errands.countryCode }).from(errands).where(eq(errands.id, id));
+    if (!errand) throw notFound('errand_not_found', 'Errand not found');
+    // Read as of one moment, so the pack never mixes what was there before and after a change.
+    return this.db.transaction(
+      async (tx) => {
+        const made = await this.evidence.take(id, 'staff', admin.adminId, tx);
+        await this.audit.record(tx, admin, {
+          action: 'errand.evidence',
+          targetType: 'errand',
+          targetId: id,
+          countryCode: errand.countryCode,
+          data: { pack: made.id, sha256: made.sha256 },
+        });
+        return made;
+      },
+      { isolationLevel: 'repeatable read' },
+    );
+  }
+
+  /** One evidence pack in full, for download. */
+  evidencePack(errandId: string, packId: string) {
+    return this.evidence.get(errandId, packId);
+  }
 
   /** Newest first, filtered by status and searched by errand id, phone number, name or description. */
   async list(query: { country: string; filter: ErrandFilter; q?: string; before?: string; limit: number }) {
@@ -319,6 +350,12 @@ export class ErrandsAdminService {
       errand: fields,
       /** Fraud flags on it, in the Risk queue (E5, E6). */
       flags: await this.flags.forErrand(errand.id),
+      /** Who called whom through Jiffo, and when (E8). */
+      calls: await this.evidence.calls(errand.id),
+      /** The GPS trail as kept now (G1, G4). */
+      trail: await this.evidence.trailShown(errand.id),
+      /** Its dispute evidence packs, newest first (E8). */
+      evidence: await this.evidence.list(errand.id),
       customer: byId.get(errand.customerId) ?? null,
       agent: errand.agentId ? { ...byId.get(errand.agentId)!, tier: tier[0]?.tier ?? 'bronze' } : null,
       stops,

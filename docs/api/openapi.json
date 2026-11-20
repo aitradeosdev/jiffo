@@ -1740,6 +1740,88 @@
         ]
       }
     },
+    "/v1/admin/errands/{id}/evidence": {
+      "post": {
+        "operationId": "AdminController.snapshot",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "admin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default",
+        "x-permission": [
+          "disputes",
+          "errands"
+        ]
+      }
+    },
+    "/v1/admin/errands/{id}/evidence/{pack}": {
+      "get": {
+        "operationId": "AdminController.evidencePack",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "admin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "pack",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default",
+        "x-permission": [
+          "read"
+        ]
+      }
+    },
     "/v1/admin/flags": {
       "get": {
         "operationId": "AdminController.listFlags",

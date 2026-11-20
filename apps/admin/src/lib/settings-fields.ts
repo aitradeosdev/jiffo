@@ -283,6 +283,12 @@ export const SECTIONS: Section[] = [
         help: 'Whether sign-in and money actions must come from the store app on a real phone. Record only keeps each result for staff. Enforce refuses a failed one and asks a doubtful one for a selfie: turn it on once both are set up for the apps.',
       },
       {
+        path: 'security.trailDays',
+        label: "Agents' GPS trails are kept for",
+        kind: 'count',
+        help: 'Days, between 30 and 365. Then deleted, unless the errand is in dispute or a flag on it is still open.',
+      },
+      {
         path: 'security.appPinTries',
         label: 'Wrong app PINs before it locks',
         kind: 'count',

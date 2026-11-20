@@ -1113,8 +1113,8 @@ export const userNetworks = pgTable(
 
 /**
  * Where the agent was while out on an errand (docs/security-plan.md, G1, G4, E6), from their phone's
- * reports: for the fake-GPS checks and a dispute's evidence. Deleted after 90 days, unless the errand is in
- * dispute or a flag on it is still open.
+ * reports: for the fake-GPS checks and a dispute's evidence. Deleted after the days in Settings, Security
+ * (90 unless changed), unless the errand is in dispute or a flag on it is still open.
  */
 export const errandTrail = pgTable(
   'errand_trail',
@@ -1138,6 +1138,32 @@ export const errandTrail = pgTable(
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('errand_trail_errand_idx').on(t.errandId, t.at), index('errand_trail_at_idx').on(t.at)],
+);
+
+/**
+ * A dispute's evidence pack (docs/security-plan.md, E8): a fixed copy of what the errand held when it went
+ * into dispute, or when staff took another: its events (offers, item amounts and PIN entries among them),
+ * chat, uploads, calls, flags and money, and a fingerprint of its GPS trail, which G4 keeps only so long.
+ * Append-only, enforced by the database, with a SHA-256 of the pack as made.
+ */
+export const disputeEvidence = pgTable(
+  'dispute_evidence',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    errandId: uuid('errand_id')
+      .notNull()
+      .references(() => errands.id),
+    /** What made it: the event that put the errand into dispute, or staff taking another. */
+    reason: text('reason', {
+      enum: ['open_dispute', 'pin_locked', 'item_lock_timeout', 'unreachable_timeout', 'admin_intervene', 'staff'],
+    }).notNull(),
+    takenBy: uuid('taken_by').references(() => admins.id),
+    content: jsonb('content').$type<Record<string, unknown>>().notNull(),
+    /** SHA-256 of the content as canonical JSON (keys in order): anyone can work it out again. */
+    sha256: text('sha256').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('dispute_evidence_errand_idx').on(t.errandId, t.createdAt)],
 );
 
 /**

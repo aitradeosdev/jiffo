@@ -171,6 +171,9 @@ const FlagsQuery = z.object({
   before: z.string().max(80).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });
+const EvidenceId = new ParseUUIDPipe({
+  exceptionFactory: () => notFound('evidence_not_found', 'Evidence pack not found'),
+});
 const FlagCountsQuery = FlagsQuery.pick({ country: true, person: true, errand: true });
 const FlagId = new ParseUUIDPipe({ exceptionFactory: () => notFound('flag_not_found', 'Flag not found') });
 const FlagDecisionBody = z.object({ decision: z.enum(['clear', 'confirm', 'reopen']), note: Note });
@@ -645,6 +648,20 @@ export class AdminController {
   @Needs('read')
   errand(@Param('id', ErrandId) id: string) {
     return this.errands.detail(id);
+  }
+
+  /** One dispute evidence pack in full, as made, with its SHA-256 (E8). */
+  @Get('errands/:id/evidence/:pack')
+  @Needs('read')
+  evidencePack(@Param('id', ErrandId) id: string, @Param('pack', EvidenceId) pack: string) {
+    return this.errands.evidencePack(id, pack);
+  }
+
+  /** Another evidence pack of what the errand holds now (E8). */
+  @Post('errands/:id/evidence')
+  @Needs('disputes', 'errands')
+  snapshot(@CurrentAdmin() admin: AdminContext, @Param('id', ErrandId) id: string) {
+    return this.errands.snapshot(admin, id);
   }
 
   /** Step in, arrange a redelivery, or settle a dispute. */

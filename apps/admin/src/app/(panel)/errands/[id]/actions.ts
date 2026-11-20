@@ -39,3 +39,17 @@ export async function actOnErrand(_: ActState, form: FormData): Promise<ActState
   // Back to the errand with a note of what happened: the actions card itself may be gone now.
   redirect(`/errands/${encodeURIComponent(id)}?done=${encodeURIComponent(event)}`);
 }
+
+/** Another evidence pack of what the errand holds now (docs/security-plan.md, E8). */
+export async function takeEvidence(_: ActState, form: FormData): Promise<ActState> {
+  const id = String(form.get('id') ?? '');
+  try {
+    await api(`/admin/errands/${encodeURIComponent(id)}/evidence`, {
+      method: 'POST',
+      reason: String(form.get('note') ?? '').trim() || undefined,
+    });
+  } catch (error) {
+    return { error: messageOf(error) };
+  }
+  redirect(`/errands/${encodeURIComponent(id)}?done=evidence`);
+}
