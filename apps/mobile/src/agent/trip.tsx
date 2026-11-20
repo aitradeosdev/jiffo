@@ -24,6 +24,7 @@ import { Lines, StageChip } from '../errands/trip';
 import { stepsFor, type ErrandView } from '../errands/types';
 import { km } from './board';
 import { usePresence } from './presence';
+import { approvalLine } from '../errands/release';
 import { agentStage } from './stage';
 
 const PIN_KIND = { pickup: 'pick', stop: 'stop', dropoff: 'drop' } as const;
@@ -406,7 +407,7 @@ function NextStep({
     );
   }
   if (errand.status === 'photo_pending') {
-    return waiting('camera', `Waiting for ${name} to approve your photo`, 'It approves itself in 24 hours');
+    return waiting('camera', `Waiting for ${name} to approve your photo`, approvalLine(errand.release));
   }
   if (errand.status === 'unreachable') {
     return waiting('clock', `Waiting for ${name} to answer`, 'They can ask for redelivery within 24 hours');

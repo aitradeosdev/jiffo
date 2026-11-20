@@ -1,5 +1,6 @@
 import { naira } from '../money';
 import type { Stage } from '../errands/stage';
+import { approvalLine } from '../errands/release';
 import { stepOf, type ErrandView } from '../errands/types';
 
 const place = (e: ErrandView, kind: 'pickup' | 'dropoff') => {
@@ -77,7 +78,7 @@ export function agentStage(e: ErrandView): Stage {
         step,
         chip: waiting,
         big: 'Photo sent',
-        sub: `${c} approves it, or it approves itself in 24 hours.`,
+        sub: `${c} approves it. ${approvalLine(e.release)}.`,
         doing: 'Looking at your photo',
       };
     case 'unreachable':

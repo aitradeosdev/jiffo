@@ -7,6 +7,7 @@ import { fonts } from '@/theme/tokens';
 import { Button, Field, Text } from '@/ui/kit';
 import { Badge, Icon } from '@/ui/parts';
 import { Lines, PinBody, type ErrandActions } from './trip';
+import { approvalLine } from './release';
 import type { ErrandView } from './types';
 
 /**
@@ -217,7 +218,10 @@ function PhotoCard({ errand, actions }: { errand: ErrandView; actions: ErrandAct
         right={<Badge label="Pending" tone="urgent" />}
       />
       <Text variant="note" tone="ink3">
-        Nothing is paid until you approve. If you don&apos;t respond, it approves itself in 24 hours.
+        Nothing is paid until you approve.{' '}
+        {errand.release?.pausedAt
+          ? `${approvalLine(errand.release)}.`
+          : `If you don’t respond, ${approvalLine(errand.release).replace(/^It/, 'it')}.`}
       </Text>
       {disputing ? (
         <>

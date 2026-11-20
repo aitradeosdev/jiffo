@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { MESSAGING, type MessagingAdapter } from '../adapters/messaging';
 import { DB, type Db } from '../db/database.module';
 import { errands, users } from '../db/schema';
-import { formatNaira, TERMINAL_STATES, type CountrySettings, type ErrandEvent } from '@jiffo/shared';
+import { formatNaira, releaseIn, TERMINAL_STATES, type CountrySettings, type ErrandEvent } from '@jiffo/shared';
 import { ChatService } from '../chat/chat.service';
 import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -30,12 +30,6 @@ interface Note {
 }
 
 const amount = (r: Record<string, unknown>) => formatNaira(Number(r.amountKobo ?? 0));
-/** "22 hours" until a time, rounded up; "less than an hour" near the end. */
-const hoursLeft = (due: Date | null) => {
-  const hours = due ? Math.ceil((due.getTime() - Date.now()) / 3_600_000) : 0;
-  return hours <= 1 ? (hours === 1 ? '1 hour' : 'less than an hour') : `${hours} hours`;
-};
-
 /** What each event tells the other side. Events missing here only update the screens. */
 function noteFor(event: ErrandEvent, r: TransitionResult): Note | null {
   switch (event) {
@@ -208,7 +202,7 @@ function noteFor(event: ErrandEvent, r: TransitionResult): Note | null {
       return {
         to: 'both',
         title: 'Approval timer running again',
-        body: `The drop-off is approved automatically in ${hoursLeft(r.after.releaseDueAt)} unless the customer reports a problem.`,
+        body: `The drop-off is approved automatically in ${r.after.releaseDueAt ? releaseIn(r.after.releaseDueAt) : 'a while'} unless the customer reports a problem.`,
         chat: 'Support started the automatic approval of the drop-off again',
       };
     case 'open_dispute':
@@ -243,8 +237,10 @@ export class ErrandNotifier {
    * is approved by itself. Each goes on its own, so a failed one never stops the other.
    */
   async remindRelease(errand: ErrandRow, dueAt: Date) {
-    const left = hoursLeft(dueAt);
+    const left = releaseIn(dueAt);
     const body = `Your agent left your items and sent a drop-off photo. Check it in Jiffo and approve it, or report a problem. It's approved automatically in ${left} and your agent is paid.`;
+    // One SMS, not two: each reminder is a paid text.
+    const text = `Jiffo: Check your drop-off photo in the app and approve it, or report a problem. Approved automatically in ${left}.`;
     const [customer] = await this.db.select({ phone: users.phone }).from(users).where(eq(users.id, errand.customerId));
     const sent = await Promise.allSettled([
       this.push.notifyUser(errand.customerId, 'customer', {
@@ -252,7 +248,7 @@ export class ErrandNotifier {
         body,
         data: { type: 'errand.release_reminder', errandId: errand.id },
       }),
-      customer ? this.sms.sendText(customer.phone, `Jiffo: ${body}`) : Promise.resolve(),
+      customer ? this.sms.sendText(customer.phone, text) : Promise.resolve(),
     ]);
     for (const r of sent) {
       if (r.status === 'rejected') this.logger.warn(`A reminder for ${errand.id} didn't go: ${String(r.reason)}`);

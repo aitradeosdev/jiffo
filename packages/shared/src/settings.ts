@@ -412,7 +412,19 @@ export interface SettingChange {
 /** Every value by its dotted path. Lists are kept whole, in sorted order: they are sets of choices. */
 function flattenSettings(value: unknown, prefix = '', out = new Map<string, unknown>()) {
   if (Array.isArray(value)) {
-    out.set(prefix, [...value].sort());
+    // Compared as sets; numbers in number order, so 2, 12, 20 doesn't read as 12, 2, 20.
+    out.set(
+      prefix,
+      [...value].sort((x, y) =>
+        typeof x === 'number' && typeof y === 'number'
+          ? x - y
+          : String(x) < String(y)
+            ? -1
+            : String(x) > String(y)
+              ? 1
+              : 0,
+      ),
+    );
   } else if (value && typeof value === 'object') {
     for (const [k, v] of Object.entries(value)) flattenSettings(v, prefix ? `${prefix}.${k}` : k, out);
   } else {

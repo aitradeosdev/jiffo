@@ -87,7 +87,9 @@ describe('drop-off photos awaiting approval', () => {
     await fire(id, (j) => j.event === 'release_reminder' && j.remindAt === 2);
     const sms = smsTo(customer).slice(texts);
     expect(sms).toHaveLength(1);
-    expect(sms[0]!.text).toMatch(/Jiffo: .*drop-off photo.*approved automatically in 22 hours/);
+    expect(sms[0]!.text).toMatch(/Jiffo: .*drop-off photo.*approved automatically in 22 hours/i);
+    // One text, not two: a reminder is a paid SMS.
+    expect(sms[0]!.text.length).toBeLessThanOrEqual(160);
     expect(pushesTo(customer).at(-1)).toMatchObject({ data: { type: 'errand.release_reminder', errandId: id } });
     expect((await row(id)).status).toBe('photo_pending');
   });
@@ -174,6 +176,32 @@ describe('drop-off photos awaiting approval', () => {
     expect((await row(id)).status).toBe('completed');
   });
 
+  it('shows the apps when it is approved by itself, or that it is paused', async () => {
+    const id = await awaiting();
+    const view = async () =>
+      (await request(t.http).get(`/v1/errands/${id}`).set(customer.headers).expect(200)).body.release;
+    expect(await view()).toEqual({ dueAt: expect.any(String), pausedAt: null });
+    const { version } = await row(id);
+    await adminAct(id, { event: 'pause_release', version, note: 'Checking' }).expect(200);
+    expect(await view()).toEqual({ dueAt: expect.any(String), pausedAt: expect.any(String) });
+    await act(t, customer, id, 'approve_photo');
+    expect(await view()).toBeNull();
+  });
+
+  it("says less than an hour when that's all that was left", async () => {
+    const id = await awaiting();
+    const { version } = await row(id);
+    const paused = (await adminAct(id, { event: 'pause_release', version, note: 'Checking' })).body;
+    const at = new Date();
+    await t.db
+      .update(errands)
+      .set({ releaseDueAt: new Date(at.getTime() + 5 * 60_000), releasePausedAt: at })
+      .where(eq(errands.id, id));
+    const pushes = pushesTo(customer).length;
+    await adminAct(id, { event: 'resume_release', version: paused.version, note: 'Photo is fine' }).expect(200);
+    expect(pushesTo(customer).slice(pushes).at(-1)?.body).toMatch(/in less than an hour/);
+  });
+
   it('lets staff step in on a paused one, which ends the pause', async () => {
     const id = await awaiting();
     const { version } = await row(id);
@@ -199,8 +227,12 @@ describe('drop-off photos awaiting approval', () => {
     const done = await awaiting();
     await act(t, customer, done, 'approve_photo');
 
+    const page = (await request(t.http).get('/v1/admin/dropoffs?country=NG').set(ops.headers).expect(200)).body;
+    expect(page.total).toBeGreaterThanOrEqual(3);
     const listed = await queue();
     const ids = listed.map((d) => d.id);
+    // Paused ones first: someone is looking at them, and they mustn't fall off a long list.
+    expect(listed[0]?.pausedAt).toEqual(expect.any(String));
     expect(ids).not.toContain(done);
     expect(ids.indexOf(sooner)).toBeLessThan(ids.indexOf(later));
     expect(listed.find((d) => d.id === pausedId)?.pausedAt).toEqual(expect.any(String));

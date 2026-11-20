@@ -30,13 +30,15 @@ function inTime(iso: string) {
 }
 
 /**
- * Drop-off photos waiting for the customer's approval (docs/security-plan.md, X2), each with its timer: the
- * soonest to be approved by itself first, then those staff paused. Open one to pause its timer, step in
- * (which freezes the money for a dispute), or decide.
+ * Drop-off photos waiting for the customer's approval (docs/security-plan.md, X2), each with its timer: those
+ * staff paused first, then the soonest to be approved by itself. Open one to pause its timer, step in (which
+ * freezes the money for a dispute), or decide.
  */
 export default async function DropoffsPage() {
   const country = await getCountry();
-  const { dropoffs } = await api<{ dropoffs: Dropoff[] }>(`/admin/dropoffs?country=${country.code}`);
+  const { dropoffs, total } = await api<{ dropoffs: Dropoff[]; total: number }>(
+    `/admin/dropoffs?country=${country.code}`,
+  );
   const time = (iso: string) => dateTime(iso, country.timezone);
   const naira = (kobo: number) => money(kobo, country.currency);
 
@@ -46,6 +48,11 @@ export default async function DropoffsPage() {
         title="Drop-offs"
         subtitle="Drop-off photos waiting for the customer to approve them. Each is approved by itself when its timer ends, and the agent is paid. Open one to pause its timer, step in, or decide."
       />
+      {total > dropoffs.length ? (
+        <p className="mb-3 text-sm text-ink-3">
+          Showing the first {dropoffs.length} of {total}: paused ones, then the soonest.
+        </p>
+      ) : null}
       <Card padded={false}>
         {dropoffs.length === 0 ? (
           <Empty title="No drop-off photos waiting" />

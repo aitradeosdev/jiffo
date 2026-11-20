@@ -214,6 +214,17 @@ export function allowedEvents(from: ErrandState, ctx: TransitionContext): Errand
   });
 }
 
+/**
+ * How long until a drop-off photo is approved by itself, for people (X1, X3): "22 hours", to the nearest hour,
+ * and "less than an hour" in its last hour.
+ */
+export function releaseIn(dueAt: Date | string, now = Date.now()): string {
+  const ms = new Date(dueAt).getTime() - now;
+  if (!(ms >= 3_600_000)) return 'less than an hour';
+  const hours = Math.round(ms / 3_600_000);
+  return hours === 1 ? '1 hour' : `${hours} hours`;
+}
+
 /** The customer sees their hand-off PIN only once the agent has marked the errand delivered. */
 export function canRevealPin(state: ErrandState): boolean {
   return state === 'delivered';

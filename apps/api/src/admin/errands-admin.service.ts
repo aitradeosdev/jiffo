@@ -65,6 +65,9 @@ const customerFields = {
 const agentFields = { id: agent.id, firstName: agent.firstName, lastName: agent.lastName, phone: agent.phone };
 
 /** Errands as support sees them: every errand, its whole history, and support's own actions. */
+/** The most drop-off photos the queue lists at once; it says how many more there are. */
+const DROPOFFS_SHOWN = 200;
+
 @Injectable()
 export class ErrandsAdminService {
   constructor(
@@ -227,9 +230,16 @@ export class ErrandsAdminService {
 
   /**
    * Drop-off photos waiting for the customer's approval (docs/security-plan.md, X2): each with when it is
-   * approved by itself, or since when support has that paused, and the photo. Soonest first; paused ones last.
+   * approved by itself, or since when support has that paused, and the photo. Paused ones first, as someone
+   * is looking at them and they mustn't fall off a long list; then the soonest to be approved.
    */
   async dropoffs(country: string) {
+    const waiting = and(eq(errands.countryCode, country), eq(errands.status, 'photo_pending'));
+    const [count] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(errands)
+      .where(waiting);
+    const total = count?.n ?? 0;
     const rows = await this.db
       .select({
         id: errands.id,
@@ -245,10 +255,10 @@ export class ErrandsAdminService {
       .from(errands)
       .innerJoin(customer, eq(customer.id, errands.customerId))
       .leftJoin(agent, eq(agent.id, errands.agentId))
-      .where(and(eq(errands.countryCode, country), eq(errands.status, 'photo_pending')))
-      .orderBy(sql`${errands.releasePausedAt} is not null`, asc(errands.releaseDueAt), asc(errands.id))
-      .limit(200);
-    if (rows.length === 0) return { dropoffs: [] };
+      .where(waiting)
+      .orderBy(sql`${errands.releasePausedAt} is null`, asc(errands.releaseDueAt), asc(errands.id))
+      .limit(DROPOFFS_SHOWN);
+    if (rows.length === 0) return { dropoffs: [], total };
     const photos = await this.db
       .select({ errandId: errandEvents.errandId, data: errandEvents.data, createdAt: errandEvents.createdAt })
       .from(errandEvents)
@@ -266,6 +276,7 @@ export class ErrandsAdminService {
     for (const p of photos) if (!latest.has(p.errandId)) latest.set(p.errandId, p);
     const link = await this.uploads.links(country);
     return {
+      total,
       dropoffs: await Promise.all(
         rows.map(async (r) => {
           const sent = latest.get(r.id);

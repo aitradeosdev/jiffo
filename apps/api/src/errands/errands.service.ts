@@ -1168,7 +1168,11 @@ export class ErrandsService implements OnModuleInit {
    * it was when the reminder was set, so not approved, disputed or paused since.
    */
   private async remindRelease(job: ErrandTimerJob) {
-    const [errand] = await this.db.select().from(errands).where(eq(errands.id, job.errandId));
+    // Waits for a change in progress (a resume setting this very reminder) to commit, as applyTimer does.
+    const errand = await this.db.transaction(async (tx) => {
+      const [row] = await tx.select().from(errands).where(eq(errands.id, job.errandId)).for('share');
+      return row;
+    });
     if (!errand || errand.version !== job.version || errand.status !== 'photo_pending') return;
     if (errand.releasePausedAt || !errand.releaseDueAt) return;
     await this.notifier.remindRelease(errand, errand.releaseDueAt);
