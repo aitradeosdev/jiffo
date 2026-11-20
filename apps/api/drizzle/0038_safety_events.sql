@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS "safety_events" (
 	"accuracy" double precision,
 	"positions" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"status" text DEFAULT 'open' NOT NULL,
+	"last_pressed_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"handled_by" uuid,
 	"handled_at" timestamp with time zone,
 	"note" text,

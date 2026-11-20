@@ -18,11 +18,11 @@
 | Role         | Can                                                                |
 | ------------ | ------------------------------------------------------------------ |
 | Owner        | Everything, including the team, settings, providers and audit log  |
-| Operations   | Errands, disputes, suspending accounts and agent tiers             |
+| Operations   | Errands, disputes, the Risk and Safety queues, suspending accounts and agent tiers |
 | Disputes     | Settling disputes                                                  |
-| Verification | Agent applications and customers' ID checks                        |
+| Verification | Agent applications, customers' ID checks and shared-account flags  |
 | Finance      | Money: refunds, wallet adjustments, payout accounts and the checks |
-| Safety       | Suspending accounts that put people at risk                        |
+| Safety       | The Safety queue, and suspending accounts that put people at risk  |
 | Support      | Look at everything, change nothing                                 |
 
 ## Signing in

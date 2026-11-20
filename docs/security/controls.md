@@ -133,8 +133,10 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 ## The emergency button and Safety queue (E9)
 
 - **In the apps:** both apps have an Emergency row in an errand's Help sheet and on the Account tab. Pressing it dials the country's emergency number from the phone at once (Settings, Safety: 112 in Nigeria); nothing waits on the network first.
-- **Then the app tells Jiffo:** who pressed, from which app, on which errand (the person's own only), and where the phone is, asking for location permission if it hasn't been asked. It keeps sending where the person is every 30 seconds for ten minutes, while the app runs. Presses within half an hour are one emergency.
-- **The Safety queue:** the panel's Safety page lists open emergencies oldest first, with the person, their errand, a map of where they were last and how many positions came after. Opening one raises an alert. The safety team (and operations, and owners) mark it handled with what they did, in the audit log, once; nobody handles one about their own account.
+- **Then the app tells Jiffo, at once:** who pressed, from which app, and on which errand. The report waits on nothing, not a location and not a permission prompt, and is tried again for about four minutes on a weak signal; if Jiffo is never reached, the person is told to give the emergency service their location themselves.
+- **Where they are:** as soon as the phone can say, asking for location permission once if it hasn't been asked, then every 30 seconds for ten minutes while the app runs, never asking again.
+- **One emergency:** a double tap is one press. Presses within half an hour of the latest are one emergency, which keeps the errand a later press names, and is followed for half an hour from the latest press. A press is never refused: an errand that isn't the person's own is left off.
+- **The Safety queue:** the panel's Safety page lists open emergencies oldest first, with the person, their errand, a map of where they were last and how many positions came after. Opening one raises an alert, which stays off the money pages and is closed only from the Safety queue. The safety team (and operations, and owners) mark it handled with what they did, in the audit log, once; nobody handles one about their own account.
 - **Limits:** the app can only send where the person is while it runs; the emergency call itself is the phone's.
 
 ## The apps on the phone

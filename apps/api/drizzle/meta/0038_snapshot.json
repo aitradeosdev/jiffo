@@ -1,5 +1,5 @@
 {
-  "id": "5ebd9a4d-39ea-44c0-b3dc-447b7a8526c2",
+  "id": "6ea8d034-73c7-41fc-ba8c-29ce4ce4ac85",
   "prevId": "432ab146-5c96-479f-9bcd-f67378a4ce6d",
   "version": "7",
   "dialect": "postgresql",
@@ -6803,6 +6803,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'open'"
+        },
+        "last_pressed_at": {
+          "name": "last_pressed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         },
         "handled_by": {
           "name": "handled_by",

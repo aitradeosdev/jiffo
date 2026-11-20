@@ -165,7 +165,6 @@ function CustomerIdRow() {
   return <MenuRow icon="verified" label={label} onPress={() => router.push('/verify')} />;
 }
 
-/** .mrow: a big settings row with an icon. */
 /** The emergency button, at any time, on no errand (docs/security-plan.md, E9). */
 function EmergencyMenu() {
   const { number, press } = useEmergency();
@@ -176,6 +175,7 @@ function EmergencyMenu() {
   );
 }
 
+/** .mrow: a big settings row with an icon. */
 function MenuRow({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) {
   const c = useColors();
   return (

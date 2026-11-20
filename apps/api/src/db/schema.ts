@@ -1194,6 +1194,8 @@ export const safetyEvents = pgTable(
     status: text('status', { enum: ['open', 'handled'] })
       .notNull()
       .default('open'),
+    /** The latest press: presses within half an hour of it are this emergency, and it is followed that long. */
+    lastPressedAt: timestamp('last_pressed_at', { withTimezone: true }).notNull().defaultNow(),
     handledBy: uuid('handled_by').references(() => admins.id),
     handledAt: timestamp('handled_at', { withTimezone: true }),
     note: text('note'),

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { AlertsService } from '../alerts/alerts.service';
 import { conflict, notFound } from '../common/errors';
@@ -14,6 +14,8 @@ import { requireCountry } from './countries';
  */
 @Injectable()
 export class SafetyAdminService {
+  private readonly logger = new Logger(SafetyAdminService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly alerts: AlertsService,
@@ -94,7 +96,10 @@ export class SafetyAdminService {
         .returning({ id: safetyEvents.id, status: safetyEvents.status, countryCode: safetyEvents.countryCode });
       return after!;
     });
-    await this.alerts.settle(out.countryCode, 'emergency', id, `Handled: ${note}`);
+    // The emergency is handled whatever happens to its alert: a settle that fails is logged, not the handling.
+    await this.alerts
+      .settle(out.countryCode, 'emergency', id, `Handled: ${note}`)
+      .catch((error: Error) => this.logger.error(`Settling the alert for emergency ${id} failed: ${error.message}`));
     return { id: out.id, status: out.status };
   }
 }

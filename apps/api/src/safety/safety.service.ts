@@ -9,7 +9,7 @@ import type { AuthContext } from '../auth/auth.types';
 
 /** Presses this close together are one emergency: a person pressing again, or the app sending it again. */
 const SAME_EMERGENCY_MS = 30 * 60_000;
-/** How long after a press the app may keep sending where the person is. */
+/** How long after the latest press the app may keep sending where the person is. */
 const FOLLOW_FOR_MS = 30 * 60_000;
 /** The positions kept with one emergency, the latest. */
 const POSITIONS_KEPT = 300;
@@ -36,61 +36,79 @@ export class SafetyService {
   ) {}
 
   /**
-   * A press. An errand named must be the person's own. A press soon after another is the same emergency,
-   * and only adds where they are now.
+   * A press, never refused: an errand that isn't the person's own is left off rather than turning them away.
+   * Presses within half an hour of the latest are one emergency (a double tap, or the app sending it again):
+   * they add where the person is, and the errand if the first press had none. One at a time per person.
    */
   async press(auth: AuthContext, input: Partial<Position> & { errandId?: string }) {
-    if (input.errandId) {
-      const [errand] = await this.db
-        .select({ customerId: errands.customerId, agentId: errands.agentId })
-        .from(errands)
-        .where(eq(errands.id, input.errandId));
-      if (!errand || (errand.customerId !== auth.userId && errand.agentId !== auth.userId)) {
-        throw notFound('errand_not_found', 'Errand not found');
-      }
-    }
+    const errandId = input.errandId ? await this.ownErrand(auth.userId, input.errandId) : null;
     const { settings } = await this.countries.currentSettings(auth.countryCode);
     const emergencyNumber = settings.safety.emergencyNumber;
     const located = input.lat !== undefined && input.lng !== undefined;
-    const [recent] = await this.db
-      .select({ id: safetyEvents.id })
-      .from(safetyEvents)
-      .where(
-        and(
-          eq(safetyEvents.userId, auth.userId),
-          eq(safetyEvents.status, 'open'),
-          gt(safetyEvents.createdAt, new Date(Date.now() - SAME_EMERGENCY_MS)),
-        ),
-      )
-      .orderBy(desc(safetyEvents.createdAt))
-      .limit(1);
-    if (recent) {
-      if (located) await this.follow(auth, recent.id, { lat: input.lat!, lng: input.lng!, accuracy: input.accuracy });
-      return { id: recent.id, emergencyNumber };
+    const { id, created } = await this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'emergency:' + auth.userId}))`);
+      const [recent] = await tx
+        .select({ id: safetyEvents.id, errandId: safetyEvents.errandId })
+        .from(safetyEvents)
+        .where(
+          and(
+            eq(safetyEvents.userId, auth.userId),
+            eq(safetyEvents.status, 'open'),
+            gt(safetyEvents.lastPressedAt, new Date(Date.now() - SAME_EMERGENCY_MS)),
+          ),
+        )
+        .orderBy(desc(safetyEvents.lastPressedAt))
+        .limit(1);
+      if (recent) {
+        await tx
+          .update(safetyEvents)
+          .set({
+            lastPressedAt: new Date(),
+            updatedAt: new Date(),
+            ...(!recent.errandId && errandId ? { errandId } : {}),
+          })
+          .where(eq(safetyEvents.id, recent.id));
+        return { id: recent.id, created: false };
+      }
+      const [made] = await tx
+        .insert(safetyEvents)
+        .values({
+          countryCode: auth.countryCode,
+          userId: auth.userId,
+          app: auth.app,
+          errandId,
+          lat: located ? input.lat! : null,
+          lng: located ? input.lng! : null,
+          accuracy: located ? (input.accuracy ?? null) : null,
+        })
+        .returning({ id: safetyEvents.id });
+      return { id: made!.id, created: true };
+    });
+    if (!created && located) {
+      await this.follow(auth, id, { lat: input.lat!, lng: input.lng!, accuracy: input.accuracy });
     }
-    const [made] = await this.db
-      .insert(safetyEvents)
-      .values({
-        countryCode: auth.countryCode,
-        userId: auth.userId,
-        app: auth.app,
-        errandId: input.errandId ?? null,
-        lat: located ? input.lat! : null,
-        lng: located ? input.lng! : null,
-        accuracy: located ? (input.accuracy ?? null) : null,
-      })
-      .returning({ id: safetyEvents.id });
-    this.logger.error(`Emergency ${made!.id} pressed in the ${auth.app} app`);
-    await this.alerts
-      .raise({
-        countryCode: auth.countryCode,
-        kind: 'emergency',
-        dedupeKey: made!.id,
-        message: `Someone pressed the emergency button in the ${auth.app} app. See the Safety queue.`,
-        data: { emergencyId: made!.id, errandId: input.errandId ?? null },
-      })
-      .catch(() => undefined);
-    return { id: made!.id, emergencyNumber };
+    if (created) {
+      this.logger.error(`Emergency ${id} pressed in the ${auth.app} app`);
+      await this.alerts
+        .raise({
+          countryCode: auth.countryCode,
+          kind: 'emergency',
+          dedupeKey: id,
+          message: `Someone pressed the emergency button in the ${auth.app} app. See the Safety queue.`,
+          data: { emergencyId: id, errandId },
+        })
+        .catch((error: Error) => this.logger.error(`Raising the alert for emergency ${id} failed: ${error.message}`));
+    }
+    return { id, emergencyNumber };
+  }
+
+  /** The errand, if it is the person's own; else none. */
+  private async ownErrand(userId: string, errandId: string) {
+    const [errand] = await this.db
+      .select({ customerId: errands.customerId, agentId: errands.agentId })
+      .from(errands)
+      .where(eq(errands.id, errandId));
+    return errand && (errand.customerId === userId || errand.agentId === userId) ? errandId : null;
   }
 
   /** Where the person is now, sent by the app for a while after the press. Theirs only. */
@@ -115,7 +133,7 @@ export class SafetyService {
         and(
           eq(safetyEvents.id, id),
           eq(safetyEvents.userId, auth.userId),
-          gt(safetyEvents.createdAt, new Date(Date.now() - FOLLOW_FOR_MS)),
+          gt(safetyEvents.lastPressedAt, new Date(Date.now() - FOLLOW_FOR_MS)),
         ),
       )
       .returning({ id: safetyEvents.id });

@@ -1,6 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { AlertsService } from '../src/alerts/alerts.service';
 import { adminAudit, alerts, safetyEvents } from '../src/db/schema';
 import { act, adminAs, createErrand, createTestApp, fund, signIn, type Person, type TestApp } from './helpers';
 
@@ -26,6 +27,9 @@ describe('emergencies', () => {
   beforeAll(async () => {
     t = await createTestApp();
     safety = await adminAs(t, 'safety');
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
   afterAll(() => t.close());
 
@@ -92,13 +96,81 @@ describe('emergencies', () => {
       .expect(404);
   });
 
-  it("works with no errand and no location, but not with someone else's errand", async () => {
+  it("is never refused: no errand, no location, or an errand that isn't theirs (kept without it)", async () => {
     const lone = await signIn(t, 'customer');
     await press(lone, {}).expect(201);
     const { errand } = await onErrand();
-    const res = await press(await signIn(t, 'customer'), { errandId: errand.id });
-    expect(res.status).toBe(404);
-    expect(res.body.error.code).toBe('errand_not_found');
+    const stranger = await signIn(t, 'customer');
+    const res = await press(stranger, { errandId: errand.id }).expect(201);
+    const [found] = (await queue()).filter((e) => e.id === res.body.id);
+    expect(found).toMatchObject({ person: { id: stranger.userId }, errand: null });
+  });
+
+  it('keeps a double tap as one emergency, and adds the errand a later press names', async () => {
+    const { customer, errand } = await onErrand();
+    const [a, b] = await Promise.all([press(customer, {}), press(customer, {})]);
+    expect(a.body.id).toBe(b.body.id);
+    const later = await press(customer, { errandId: errand.id }).expect(201);
+    expect(later.body.id).toBe(a.body.id);
+    const mine = (await queue()).filter((e) => e.person.id === customer.userId);
+    expect(mine).toEqual([
+      expect.objectContaining({
+        errand: { id: errand.id, status: expect.any(String), description: expect.any(String) },
+      }),
+    ]);
+    const raised = await t.db.execute(sql`select 1 from alerts where kind = 'emergency' and dedupe_key = ${a.body.id}`);
+    expect(raised.rows).toHaveLength(1);
+  });
+
+  it('follows the person for half an hour from their latest press', async () => {
+    const customer = await signIn(t, 'customer');
+    const { body } = await press(customer, {}).expect(201);
+    const ago = (minutes: number) => sql`now() - make_interval(mins => ${minutes})`;
+    await t.db
+      .update(safetyEvents)
+      .set({ createdAt: ago(28), lastPressedAt: ago(28) })
+      .where(eq(safetyEvents.id, body.id));
+    expect((await press(customer, {}).expect(201)).body.id).toBe(body.id);
+    // Forty-five minutes after the first press, but just after the second.
+    await t.db
+      .update(safetyEvents)
+      .set({ createdAt: ago(45) })
+      .where(eq(safetyEvents.id, body.id));
+    await request(t.http)
+      .post(`/v1/safety/emergencies/${body.id}/positions`)
+      .set(customer.headers)
+      .send({ lat: 6.5, lng: 3.4 })
+      .expect(204);
+  });
+
+  it("keeps emergencies' alerts out of the money pages", async () => {
+    const customer = await signIn(t, 'customer');
+    const { body } = await press(customer, {}).expect(201);
+    const finance = await adminAs(t, 'finance');
+    const listed = (await request(t.http).get('/v1/admin/alerts?country=NG').set(finance.headers).expect(200)).body;
+    const all = JSON.stringify(listed);
+    expect(all).not.toContain(body.id);
+    const [alert] = (
+      await t.db.execute<{ id: string }>(
+        sql`select id from alerts where kind = 'emergency' and dedupe_key = ${body.id}`,
+      )
+    ).rows;
+    const resolve = await request(t.http)
+      .post(`/v1/admin/alerts/${alert!.id}/resolve`)
+      .set(finance.headers)
+      .send({ note: 'Clearing the list' });
+    expect(resolve.status).toBe(409);
+  });
+
+  it("is handled even when its alert can't be settled", async () => {
+    const customer = await signIn(t, 'customer');
+    const { body } = await press(customer, {}).expect(201);
+    vi.spyOn(t.app.get(AlertsService), 'settle').mockRejectedValueOnce(new Error('database away'));
+    await request(t.http)
+      .post(`/v1/admin/safety/${body.id}/handle`)
+      .set(safety.headers)
+      .send({ note: 'Called back, all safe' })
+      .expect(200);
   });
 
   it('is handled by the safety team, with a reason in the audit log, once', async () => {
