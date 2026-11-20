@@ -446,7 +446,7 @@ export function PinBody({ errand, pin, hidden }: { errand: ErrandView; pin: stri
         ))}
       </View>
       <Text variant="small" tone="ink3">
-        Give it to {name} only when you have everything. Entering it pays {naira(errand.feeKobo)} for the errand
+        Entering it pays {naira(errand.feeKobo)} for the errand
         {items ? ` and ${naira(items)} for the items` : ''}. {NEVER_ASK.handoffPin}
       </Text>
     </View>

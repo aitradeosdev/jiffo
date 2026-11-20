@@ -211,7 +211,7 @@ The owner asked for anything in the plan that contradicts what was built to be c
 | C4 | partly | `realtime/realtime.gateway.ts`; tests: `chat-realtime` | Token checked at connection, and rooms only for the two parties. Missing: the Redis adapter, dropping connections on suspension, re-checking, and CORS. | implement (fix 5) |
 | C5 | done differently | `calls/calls.service.ts`, `adapters/calls.ts`; tests: `calls.e2e` | Masked calls between the two parties only, while the errand is live; real numbers never appear. | keep (see differences) |
 | C6 | done | the admin panel renders chat as text | A test that markup shows as text. | implement (fix 8) |
-| C7 | done | the apps' `safety/never-ask.ts`, the sign-in code, app PIN and hand-off PIN screens; test: the apps' `never-ask` | Both apps say Jiffo will never ask for a sign-in code or PIN where each is entered or shown: the sign-in code, creating the app PIN and entering it for a money action, and the customer's hand-off PIN (given to the agent in person, and nobody else). | done (after launch, built early) |
+| C7 | done | the apps' `safety/never-ask.ts`, the sign-in code, app PIN and hand-off PIN screens; test: the apps' `never-ask` | Both apps say Jiffo will never ask for a sign-in code or PIN where each is entered or shown: the sign-in code, creating the app PIN and entering it for a money action, the customer's hand-off PIN (said to the agent in person, never through the app), and the agent's hand-off keypad. | done (after launch, built early) |
 
 ## Location (G)
 

@@ -160,7 +160,7 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 
 ## Jiffo never asks for a code or PIN (C7)
 
-- Wherever a sign-in code or PIN is entered or shown, both apps say Jiffo will never ask for it: on the sign-in code screen, when an agent creates their app PIN or enters it for a money action, and on the customer's hand-off PIN, which goes to the agent in person and nobody else. The sign-in text message says never to share the code too.
+- Wherever a sign-in code or PIN is entered or shown, both apps say Jiffo will never ask for it: on the sign-in code screen, when an agent creates their app PIN or enters it for a money action, on the customer's hand-off PIN, and on the agent's hand-off keypad. The customer is told to say the hand-off PIN to the agent in person, never by call, text or chat, not even to the agent; the agent, to ask for it in person. The sign-in text message says never to share the code too. A test fails if a screen stops showing its notice.
 
 ## Chat warnings (C3)
 
