@@ -34,11 +34,11 @@ the newest 3.x. The rest goes away with the move to `vitest` 4. None of them is 
 
 ## Patched packages
 
-Each one is a file in `patches/`, listed under `patchedDependencies` in `pnpm-workspace.yaml`, and applied on every install. When the package is upgraded, check that the patch is still needed, and make it again for the new version (`pnpm patch`).
+Each one is a file in `patches/`, listed under `patchedDependencies` in `pnpm-workspace.yaml`, and applied on every install. The package is pinned to the exact version the patch is for, so an upgrade (a Dependabot one too) fails to install until the patch is made again for the new version with `pnpm patch`, or dropped if it's no longer needed.
 
 | Package | What the patch changes | Why |
 | --- | --- | --- |
-| `drizzle-orm` 0.45.4 | A failed query's message is the database's reason followed by the query (with `$1`-style placeholders), not the query followed by every value sent with it. The values stay on the error's `params`, which nothing logs. | Since 0.44 drizzle puts the values in the message, so any logged database error would carry people's phone numbers, names or places into the logs, which must have none (R10, S7). Test: `db-errors`. |
+| `drizzle-orm` 0.45.4 (pinned exactly, so the patch always matches) | A failed query's message is the database's reason followed by the query (with `$1`-style placeholders), not the query followed by every value sent with it. For a value the database couldn't read (SQLSTATE class 22, such as invalid input syntax), whose reason quotes it, only the code is given. The values stay on the error's `params`, which the server never logs: it logs messages and stacks only. | Since 0.44 drizzle puts the values in the message, so any logged database error would carry people's phone numbers, names or places into the logs, which must have none (R10, S7). Test: `db-errors`, which fails if the patch is missing. |
 
 ## Adding a package
 

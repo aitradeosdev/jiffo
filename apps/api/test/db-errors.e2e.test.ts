@@ -64,4 +64,13 @@ describe('database errors', () => {
     expect(error.message).toMatch(/relation "no_such_table" does not exist/);
     expect(error.message).not.toContain(secret);
   });
+
+  it("leaves out a value the database itself would quote back, in one it can't read", async () => {
+    const secret = `+2348${Date.now()}`;
+    for (const query of [sql`select ${secret}::uuid`, sql`select ${secret}::int`, sql`select ${secret}::timestamptz`]) {
+      const error = (await t.db.execute(query).catch((e) => e)) as Error;
+      expect(error.message).toMatch(/invalid value \(22[0-9A-Z]{3}\)/);
+      expect(error.message).not.toContain(secret);
+    }
+  });
 });

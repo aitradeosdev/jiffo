@@ -28,7 +28,7 @@
     "@simplewebauthn/server": "14.0.3",
     "@socket.io/redis-adapter": "8.3.0",
     "bullmq": "^5.81.5",
-    "drizzle-orm": "~0.45.4",
+    "drizzle-orm": "0.45.4",
     "heic-decode": "2.1.0",
     "ioredis": "^5.11.1",
     "jose": "^5.10.0",
