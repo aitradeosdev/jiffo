@@ -256,7 +256,7 @@ Where this plan differs from what was deliberately built, `docs/security-audit.m
 - **MB4** Rooted or jailbroken phones, emulators, hooking tools such as Frida and virtual cameras are detected and sent to the server as risk signals.
 - **MB5** Deep links are validated, and no screen can be opened without login.
 - **MB6** Only a few vetted SDKs are used.
-- **MB7** *After launch:* certificate pinning with a backup pin and a remote switch, plus code obfuscation.
+- **MB7** *After launch:* certificate pinning with a backup pin and a remote switch, plus code obfuscation (obfuscation built early).
 - **MB8** Targets: OWASP MASVS level 2 plus resilience, the OWASP Mobile Top 10 (2024) and the OWASP API Security Top 10 (2023).
 
 ## Changes to features already built (X)

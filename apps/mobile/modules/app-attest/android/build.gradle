@@ -1,13 +1,11 @@
-apply plugin: 'com.android.library'
+plugins {
+  id 'com.android.library'
+  // Sets the SDK versions, Kotlin and Expo's own dependencies, as Expo 58's modules do.
+  id 'expo-module-gradle-plugin'
+}
 
 group = 'com.jiffo.appattest'
 version = '1.0.0'
-
-def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
-apply from: expoModulesCorePlugin
-applyKotlinExpoModulesCorePlugin()
-useCoreDependencies()
-useExpoPublishing()
 
 android {
   namespace "com.jiffo.appattest"

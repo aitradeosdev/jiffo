@@ -36,6 +36,7 @@ Each one is a file in `patches/`, listed under `patchedDependencies` in `pnpm-wo
 | Package | What the patch changes | Why |
 | --- | --- | --- |
 | `drizzle-orm` 0.45.4 (pinned exactly, so the patch always matches) | A failed query's message is the database's reason followed by the query (with `$1`-style placeholders), not the query followed by every value sent with it. For a value the database couldn't read (SQLSTATE class 22, such as invalid input syntax), whose reason quotes it, only the code is given. The values stay on the error's `params`, which the server never logs: it logs messages and stacks only. | Since 0.44 drizzle puts the values in the message, so any logged database error would carry people's phone numbers, names or places into the logs, which must have none (R10, S7). Test: `db-errors`, which fails if the patch is missing. |
+| `@smileid/kamera` 1.2.0 (Smile ID's camera glue, which `@smileid/usesmileid` 12.3.0, pinned exactly, pins exactly) | The Kotlin Android plugin is applied below AGP 9, as before, and also when the app has turned AGP 9's built-in Kotlin off (`android.builtInKotlin=false`). | Expo 58's Android template turns built-in Kotlin off, and kamera's `kotlin {}` block then has nothing to configure it, so every Android build of the apps stopped while Gradle was being set up. 12.4.0 (kamera 1.3.0) has the same check. Checked by building a release APK (docs/mobile-builds.md). |
 
 ## Adding a package
 

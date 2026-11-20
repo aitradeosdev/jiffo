@@ -44,6 +44,21 @@ uses it.
 
 Smile ID's optional peers that only add device metadata (`expo-battery`, `expo-cellular`, `expo-network`, `expo-sensors`, `@react-native-async-storage/async-storage`) aren't installed.
 
+### Keep rules for R8 (MB7)
+
+Android release builds are shrunk and obfuscated with R8 (`expo-build-properties` in `app.config.ts`, a build setting that ships no code). R8 renames and removes whatever nothing in the Java and Kotlin reaches, so code reached only by name, from C++ or from JavaScript, needs a keep rule. Each library ships its own, applied to the app's build automatically:
+
+| Library | Its keep rules |
+| --- | --- |
+| Expo's modules, including Jiffo's `modules/app-attest` and `modules/device-key` | `expo-modules-core`'s rules keep every module's constructor and definition, records, shared objects and views. Jiffo's modules reach nothing else by name. |
+| React Native, `react-native-screens`, `react-native-svg`, `react-native-safe-area-context` | Their own consumer rules, and React Native's `@DoNotStrip` |
+| `react-native-nitro-modules`, `react-native-quick-crypto` | Nitro marks the classes its C++ reaches with `@Keep` and `@DoNotStrip`; quick-crypto's are in C++ |
+| Smile ID (`usesmileid_bridge`, `usesmileid_mlkit_face`, kamera) and Google's ML Kit | Smile ID's own consumer rules, which keep their module and analyser classes, and ML Kit's in its library |
+| Play Integrity, Google Maps, Lottie | Their own consumer rules, in their libraries |
+| `expo-notifications`, `expo-location`, `expo-task-manager` | Their own consumer rules |
+
+A library added later is checked the same way: its rules, or one added to `ANDROID_KEEP_RULES` in `app.config.ts`, with a release build tried on a phone before it ships.
+
 ## Admin panel (`apps/admin`)
 
 | Package | What it's for |

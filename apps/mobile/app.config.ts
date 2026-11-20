@@ -1,4 +1,5 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
+import EAS_PROJECTS from './eas-projects.json';
 
 /**
  * One codebase, two store apps. APP_VARIANT picks which one is built:
@@ -26,11 +27,29 @@ const VARIANTS = {
   },
 } as const;
 
+/**
+ * The Expo project of the app being built, for EAS builds: each store app is its own project, named in
+ * eas-projects.json once `eas init` has made it (docs/mobile-builds.md). Not a secret.
+ */
+export const easProject = (projects: Record<Variant, string>, which: Variant) =>
+  projects[which] ? { eas: { projectId: projects[which] } } : {};
+
 /** Smile ID's face detectors' build settings: ML Kit on Android, Apple's Vision on iOS. KSP as their samples use. */
 const SMILE_ID_PLUGINS: NonNullable<ExpoConfig['plugins']> = [
   ['@smileid/usesmileid_mlkit_face', { kspVersion: '2.3.6' }],
   '@smileid/usesmileid_vision_face',
 ];
+
+/**
+ * Release builds of both Android apps are shrunk and obfuscated with R8 (docs/security-plan.md, MB7). Each
+ * native library ships its own keep rules for what it reaches by name (docs/security/sdks.md lists them), and
+ * our two modules need none beyond Expo's. These keep the file and line numbers, so a crash report can be read
+ * back with the build's mapping file, with every file named the same.
+ */
+const ANDROID_KEEP_RULES = `
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
+`;
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const v = VARIANTS[variant];
@@ -107,6 +126,18 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // Smile ID's selfie checks (docs/security-plan.md, I2, I8). Only the agent app uses them, but native
       // modules are linked into both builds, which compile only with these settings.
       ...SMILE_ID_PLUGINS,
+      // Lets Smile ID's plugin pin its Kotlin version in Expo 58's template; listed after it so it runs first.
+      './plugins/with-plain-kotlin-classpath.cjs',
+      [
+        'expo-build-properties',
+        {
+          android: {
+            enableMinifyInReleaseBuilds: true,
+            enableShrinkResourcesInReleaseBuilds: true,
+            extraProguardRules: ANDROID_KEEP_RULES,
+          },
+        },
+      ],
     ],
     experiments: { typedRoutes: false },
     extra: {
@@ -115,6 +146,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       country: process.env.EXPO_PUBLIC_COUNTRY ?? 'NG',
       // The Google Cloud project linked to the apps in Play Console, for Play Integrity (MB3). Not a secret.
       playCloudProjectNumber: process.env.PLAY_CLOUD_PROJECT_NUMBER ?? '',
+      ...easProject(EAS_PROJECTS, variant),
     },
   };
 };
