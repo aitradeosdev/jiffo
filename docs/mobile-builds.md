@@ -35,12 +35,12 @@ All the commands below run in a terminal in the repository's `apps/mobile` folde
    APP_VARIANT=agent eas init
    ```
 
-   Put the two ids in `apps/mobile/eas-projects.json` as `customer` and `agent`, and commit the file. The ids aren't secret. The build settings below (`eas env:create`) are kept per account, so set them again in the new one.
+   Put the two ids in `apps/mobile/eas-projects.json` as `customer` and `agent`, and commit the file. The ids aren't secret. The build settings below (`eas env:set`) are kept per account, so set them again in the new one.
 
 5. Optional: real maps on Android need a Google Maps key with the Maps SDK for Android turned on. Without one, the maps are blank and everything else works. Save it for every build, both apps:
 
    ```bash
-   eas env:create --scope account --name GOOGLE_MAPS_ANDROID_API_KEY --value <your key> --environment development --environment preview --environment production --visibility sensitive
+   eas env:set --scope account --name GOOGLE_MAPS_ANDROID_API_KEY --value <your key> --environment development --environment preview --environment production --visibility sensitive
    ```
 
 ## The API the app talks to
@@ -57,10 +57,10 @@ Start the backend as the README says. With the console providers, sign-in codes 
   It prints an address ending in `trycloudflare.com`. Save it for preview builds, then build. A new tunnel has a new address, which needs a new build:
 
   ```bash
-  eas env:create --scope account --name EXPO_PUBLIC_API_URL --value https://<the address> --environment preview --visibility plaintext
+  eas env:set --scope account --name EXPO_PUBLIC_API_URL --value https://<the address> --environment preview --visibility plaintext
   ```
 
-  Next time, change it with `eas env:update` instead. Once staging exists, set it to the staging API's address once.
+  Running it again with a new address changes it. Once staging exists, set it to the staging API's address once.
 
 - **Store builds:** before the first `production-agent` or `production-customer` build, set `EXPO_PUBLIC_API_URL` to the live API's `https://` address the same way, with `--environment production`.
 
