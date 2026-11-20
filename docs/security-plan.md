@@ -77,7 +77,7 @@ Where this plan differs from what was deliberately built, `docs/security-audit.m
   - Refresh tokens change on every use. A refresh token used twice ends every session for that user.
   - A new phone number, PIN or device signs out all other devices.
 - **A9** PIN, wallet and ID screens block screenshots and screen recording (`expo-screen-capture` on those screens).
-- **A10** *After launch:* risk scoring at sign-up and login, from emulator signals, many accounts on one device, and VPN or data-centre IP addresses.
+- **A10** *After launch (built early):* risk scoring at sign-up and login, from emulator signals, many accounts on one device, and VPN or data-centre IP addresses.
 
 ## Identity (I)
 

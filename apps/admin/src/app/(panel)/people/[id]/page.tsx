@@ -1,7 +1,14 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { agentTierLabel, RISK_LABELS, WITHDRAWAL_HOLD_INFO, type RiskSignal } from '@jiffo/shared';
+import {
+  agentTierLabel,
+  RISK_LABELS,
+  WITHDRAWAL_HOLD_INFO,
+  type RiskSignal,
+  SIGN_IN_RISK_INFO,
+  type SignInRisk,
+} from '@jiffo/shared';
 import { birth } from './birth';
 import { RevealCard } from './reveal';
 import { notFound } from 'next/navigation';
@@ -48,6 +55,9 @@ interface Detail {
     /** What the app last found on the phone (MB4). */
     riskSignals: string[];
     riskSignalsAt: string | null;
+    /** How risky its latest sign-in looked, and why (A10). */
+    signInRiskScore: number;
+    signInRiskReasons: string[];
   }>;
   agent: {
     tier: string;
@@ -426,6 +436,12 @@ export default async function PersonPage({
                       <p className="text-[13px] font-semibold text-danger">
                         The app found: {dev.riskSignals.map((s) => RISK_LABELS[s as RiskSignal] ?? s).join('; ')}
                         {dev.riskSignalsAt ? ` (${ago(dev.riskSignalsAt, country.timezone)})` : ''}
+                      </p>
+                    ) : null}
+                    {dev.signInRiskReasons.length ? (
+                      <p className="text-[13px] font-semibold text-warn">
+                        Latest sign-in scored {dev.signInRiskScore}:{' '}
+                        {dev.signInRiskReasons.map((r) => SIGN_IN_RISK_INFO[r as SignInRisk]?.label ?? r).join('; ')}
                       </p>
                     ) : null}
                   </li>

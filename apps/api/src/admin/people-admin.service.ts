@@ -169,6 +169,8 @@ export class PeopleAdminService {
           lastSeenAt: devices.lastSeenAt,
           riskSignals: devices.riskSignals,
           riskSignalsAt: devices.riskSignalsAt,
+          signInRiskScore: devices.signInRiskScore,
+          signInRiskReasons: devices.signInRiskReasons,
           activeSessions: sql<number>`(select count(*)::int from sessions s
               where s.device_id = "devices"."id" and s.revoked_at is null and s.expires_at > now())`,
         })

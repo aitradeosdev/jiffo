@@ -412,6 +412,18 @@ export const SECTIONS: Section[] = [
         kind: 'minutes',
         help: 'Of being accepted, or faster than the route takes at 60 km/h, whichever is longer.',
       },
+      {
+        path: 'risk.signInRiskAccounts',
+        label: 'A sign-in is risky on a phone this many accounts have used',
+        kind: 'count',
+        help: 'Counting the account signing in, over 90 days.',
+      },
+      {
+        path: 'risk.signInRiskStepUpAt',
+        label: 'Ask for more checks at a sign-in risk score of',
+        kind: 'count',
+        help: 'An emulator or a hooking tool counts 3; a rooted phone, a shared phone or a server address 2; a VPN or a debugger 1. More checks: a selfie before an agent’s money moves, and a flag in the Risk queue. A sign-in is never refused.',
+      },
     ],
   },
   {

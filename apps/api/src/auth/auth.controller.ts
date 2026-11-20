@@ -6,6 +6,7 @@ import { unauthorized } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { evidenceOf } from '../attestation/evidence';
+import { NETWORK_HEADER } from '../risk/networks.service';
 import { AuthService, RefreshReused } from './auth.service';
 import { AuthGuard, CurrentAuth } from './auth.guard';
 import type { AuthContext, AuthedRequest } from './auth.types';
@@ -60,6 +61,8 @@ export class AuthController {
       body.app,
       body.device,
       evidenceOf(req),
+      // Where it comes from, for its risk score (A10).
+      { ip: req.ip ?? null, network: req.header(NETWORK_HEADER) },
     );
     this.realtime.disconnectSessions(replacedSessionIds);
     this.auth.tellSignedOut(signedOutDevices, heldUntil);

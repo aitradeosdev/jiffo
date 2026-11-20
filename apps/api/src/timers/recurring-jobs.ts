@@ -4,10 +4,17 @@ import IORedis from 'ioredis';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 
 export type RecurringHandler = () => Promise<unknown>;
+export interface RecurringOptions {
+  /**
+   * Asked as the server starts: when it says yes, the job also runs once then, rather than waiting for its
+   * time (a table the job fills that is still empty). Not in tests, where nothing runs by itself.
+   */
+  runAtStartIf?: () => Promise<boolean>;
+}
 
 /** Work that runs on a schedule (daily payouts, reconciliation). Each run happens once across all API instances. */
 export interface RecurringJobs {
-  register(name: string, cron: string, handler: RecurringHandler): void;
+  register(name: string, cron: string, handler: RecurringHandler, options?: RecurringOptions): void;
 }
 
 export const RECURRING_JOBS = Symbol('RECURRING_JOBS');
@@ -15,9 +22,9 @@ const QUEUE = 'recurring';
 
 /** Tests: nothing runs by itself; a test calls run(name). */
 export class MemoryRecurringJobs implements RecurringJobs {
-  readonly jobs = new Map<string, { cron: string; handler: RecurringHandler }>();
-  register(name: string, cron: string, handler: RecurringHandler) {
-    this.jobs.set(name, { cron, handler });
+  readonly jobs = new Map<string, { cron: string; handler: RecurringHandler } & RecurringOptions>();
+  register(name: string, cron: string, handler: RecurringHandler, options: RecurringOptions = {}) {
+    this.jobs.set(name, { cron, handler, ...options });
   }
   run(name: string) {
     const job = this.jobs.get(name);
@@ -29,15 +36,15 @@ export class MemoryRecurringJobs implements RecurringJobs {
 @Injectable()
 export class BullMqRecurringJobs implements RecurringJobs, OnApplicationBootstrap, OnApplicationShutdown {
   private readonly logger = new Logger('RecurringJobs');
-  private readonly handlers = new Map<string, { cron: string; handler: RecurringHandler }>();
+  private readonly handlers = new Map<string, { cron: string; handler: RecurringHandler } & RecurringOptions>();
   private queue: Queue | null = null;
   private worker: Worker | null = null;
   private connections: IORedis[] = [];
 
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
-  register(name: string, cron: string, handler: RecurringHandler) {
-    this.handlers.set(name, { cron, handler });
+  register(name: string, cron: string, handler: RecurringHandler, options: RecurringOptions = {}) {
+    this.handlers.set(name, { cron, handler, ...options });
   }
 
   async onApplicationBootstrap() {
@@ -66,6 +73,13 @@ export class BullMqRecurringJobs implements RecurringJobs, OnApplicationBootstra
       { connection: connect(), concurrency: 1 },
     );
     this.worker.on('failed', (job, error) => this.logger.error(`${job?.name} failed: ${error.message}`));
+    // Jobs that should run now as well, queued so one instance runs each. Asked beside the start, not before it.
+    for (const [name, { runAtStartIf }] of this.handlers) {
+      if (!runAtStartIf) continue;
+      void runAtStartIf()
+        .then((yes) => (yes ? this.queue?.add(name, {}, { removeOnComplete: 100, removeOnFail: 100 }) : undefined))
+        .catch((error: Error) => this.logger.error(`${name} couldn't be queued at start: ${error.message}`));
+    }
   }
 
   async onApplicationShutdown() {

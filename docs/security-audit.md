@@ -136,7 +136,7 @@ The owner asked for anything in the plan that contradicts what was built to be c
 | A7 | missing | | App PIN or biometric for wallet actions. | implement (fix 10) |
 | A8 | partly | `auth/auth.service.ts`, `auth/tokens.service.ts`; test: `auth.e2e` | Access tokens last 15 minutes and refresh tokens rotate. **Missing:** a reused refresh token ends only that session, not all of them. Session expiry slides forward with no absolute limit. Signing in on a new device leaves other devices signed in. | implement (fix 7) |
 | A9 | missing | | Block screenshots on wallet, ID and PIN screens. | implement (fix 10) |
-| A10 | after launch | | | after launch |
+| A10 | done | `risk/sign-in-risk.service.ts`, `risk/cloud-ranges.service.ts`, `auth/auth.service.ts`; test: `sign-in-risk` | Each sign-up and sign-in is scored from the app's signals (emulator, root, hooking, debugger), a phone several accounts have used, a VPN, and an address in a cloud provider's published ranges (AWS, Google Cloud, Azure, Oracle, DigitalOcean, Linode, Vultr, refreshed daily). A high score asks for a selfie before an agent's money moves and flags the sign-in for the Risk queue; it never refuses one. No paid IP-data provider. | done (after launch, built early) |
 
 ## Identity (I)
 
@@ -442,7 +442,7 @@ One area per pull request, abuse tests first. Every one that touches login, mone
 
     Covers X1–X3, E5, E6, E8, E9, C1, C3, G1, G4, I3, F3.
 
-**After launch:** A10, F4, MB7 (C7 and D8 are done), and referrals and promos (F1, F2, X5) when they are built.
+**After launch:** F4, MB7 (A10, C7 and D8 are done), and referrals and promos (F1, F2, X5) when they are built.
 
 ## Owner's tasks
 
@@ -466,6 +466,7 @@ What each needs from the code is provided as noted.
   - a write-once copy of the audit log
   - TLS
   - zero-trust access with SSO in front of the admin panel and admin API
+- **Outgoing addresses for A10:** let the API's servers reach the cloud providers' published lists, fetched daily: `ip-ranges.amazonaws.com`, `www.gstatic.com`, `www.microsoft.com` and `download.microsoft.com`, `docs.oracle.com`, `www.digitalocean.com`, `geoip.linode.com` and `geofeed.constant.com`. A list that can't be fetched keeps its last ranges.
 - **Google and Apple:** Play Integrity and App Attest setup (fix 10), and the Maps key restricted to the apps.
   - **Google:** in Play Console, link the apps to a Google Cloud project and turn on the Play Integrity API. Then give the API a service account key for that project (`PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON`) and the apps' signing certificate digests (`ANDROID_CERT_SHA256`, from Play Console, App integrity).
   - **Apple:** turn on App Attest for both App IDs, and give the API the team id (`APPLE_TEAM_ID`).

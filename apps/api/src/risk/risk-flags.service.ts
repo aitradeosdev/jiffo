@@ -172,6 +172,29 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
     this.later(`position of ${input.agentId}`, () => this.checkMove({ ...input, before }));
   }
 
+  /**
+   * A sign-up or sign-in that scored high (A10): a person looks, in the Risk queue. One flag a day for each
+   * account, saying why.
+   */
+  riskySignIn(input: {
+    countryCode: string;
+    userId: string;
+    app: string;
+    score: number;
+    reasons: string[];
+    details: object;
+  }) {
+    this.later(`sign-in of ${input.userId}`, () =>
+      this.raise({
+        countryCode: input.countryCode,
+        kind: 'risky_sign_in',
+        dedupeKey: `${input.userId}:${new Date().toISOString().slice(0, 10)}`,
+        userId: input.userId,
+        details: { app: input.app, score: input.score, reasons: input.reasons, ...input.details },
+      }),
+    );
+  }
+
   /** A sign-in, or a phone key saved: the phone may be another account's too (I3). */
   phoneUsed(userId: string, deviceId: string) {
     this.later(`phone ${deviceId}`, () => this.checkSharedPhone(userId, deviceId));

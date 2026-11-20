@@ -21,6 +21,32 @@ export const riskSignalsOf = (list: string | undefined): RiskSignal[] =>
   );
 
 /**
+ * What makes a sign-up or sign-in risky (docs/security-plan.md, A10), each with what it adds to the score: what
+ * the app found on the phone, a phone several accounts have used, a VPN, and an address in a cloud provider's
+ * published ranges (a server, not a phone). A high score asks for more checks; it never stops a sign-in.
+ */
+export const SIGN_IN_RISKS = [
+  'emulator',
+  'rooted',
+  'hooking',
+  'debugger',
+  'shared_phone',
+  'data_centre',
+  'vpn',
+] as const;
+export type SignInRisk = (typeof SIGN_IN_RISKS)[number];
+
+export const SIGN_IN_RISK_INFO: Record<SignInRisk, { points: number; label: string }> = {
+  emulator: { points: 3, label: 'An emulator' },
+  hooking: { points: 3, label: 'A hooking tool such as Frida' },
+  rooted: { points: 2, label: 'A rooted or jailbroken phone' },
+  shared_phone: { points: 2, label: 'A phone several accounts have signed in on' },
+  data_centre: { points: 2, label: "An address in a cloud provider's ranges" },
+  debugger: { points: 1, label: 'A debugger attached' },
+  vpn: { points: 1, label: 'A VPN' },
+};
+
+/**
  * The queues flags go to (docs/security-plan.md, E6, I3): errands that look like fraud to the Risk queue,
  * accounts that share a phone or a bank account to verification. Each needs its own permission to decide.
  */
@@ -48,6 +74,7 @@ export const RISK_FLAG_KINDS = [
   'shared_phone',
   'shared_payout_account',
   'same_face',
+  'risky_sign_in',
 ] as const;
 export type RiskFlagKind = (typeof RISK_FLAG_KINDS)[number];
 
@@ -111,6 +138,12 @@ export const RISK_FLAG_INFO: Record<RiskFlagKind, { queue: RiskQueue; label: str
     queue: 'verification',
     label: 'Phone shared between accounts',
     about: 'Two accounts, at least one of them an agent, have been used on one phone (I3).',
+  },
+  risky_sign_in: {
+    queue: 'risk',
+    label: 'Risky sign-in',
+    about:
+      "A sign-up or sign-in scored high (A10): what the app found on the phone (an emulator, root, hooking tools, a debugger), many accounts on one phone, a VPN, or an address in a cloud provider's ranges.",
   },
   shared_payout_account: {
     queue: 'verification',

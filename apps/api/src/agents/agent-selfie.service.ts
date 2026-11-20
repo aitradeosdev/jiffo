@@ -24,14 +24,7 @@ import {
 } from '../db/schema';
 import { IdentityChecksService, type SelfieOwner } from '../identity/identity-checks.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-
-const WHY: Record<SelfieReason, string> = {
-  daily: 'Take a quick selfie to go online today',
-  random: 'Take a quick selfie to go online',
-  new_device: 'Take a quick selfie to use money on this phone',
-  payout_change: 'Take a quick selfie to change your payout account',
-  device_check: "Take a quick selfie: we couldn't fully check this phone",
-};
+import { phoneSelfieReason, SELFIE_WHY } from './phone-selfie';
 
 /** A selfie passed this recently counts as fresh, for changing the payout account (P8). */
 export const FRESH_SELFIE_MS = 10 * 60_000;
@@ -118,13 +111,16 @@ export class AgentSelfieService implements SelfieOwner {
     return null;
   }
 
-  /** This phone needs a selfie before money actions: a new phone, or one whose key was replaced (A4, X4). */
+  /**
+   * Why this phone needs a selfie before money actions, if it does: a new phone, one whose key was replaced
+   * (A4, X4), or a sign-in a check doubted (MB3, A10).
+   */
   private async neededOnThisPhone(auth: AuthContext) {
     const [device] = await this.db
-      .select({ needed: devices.selfieNeeded })
+      .select({ selfieNeeded: devices.selfieNeeded, selfieFor: devices.selfieFor })
       .from(devices)
       .where(eq(devices.id, auth.deviceId));
-    return !!device?.needed;
+    return device ? phoneSelfieReason(device) : null;
   }
 
   /** A selfie passed in the last few minutes. */
@@ -134,17 +130,17 @@ export class AgentSelfieService implements SelfieOwner {
 
   /** What the agent app asks before going online, a money action, or changing the payout account. */
   async status(auth: AuthContext) {
-    const [toGoOnline, onThisPhone, fresh] = await Promise.all([
+    const [toGoOnline, phone, fresh] = await Promise.all([
       this.reasonToGoOnline(auth, false),
       this.neededOnThisPhone(auth),
       this.fresh(auth.userId),
     ]);
-    return { toGoOnline, onThisPhone, fresh };
+    return { toGoOnline, onThisPhone: !!phone, fresh };
   }
 
   /** The answer an action gets while a selfie is still to take, with what it is for. */
   needed(reason: SelfieReason) {
-    return forbidden('selfie_needed', WHY[reason], { reason });
+    return forbidden('selfie_needed', SELFIE_WHY[reason], { reason });
   }
 
   /**
@@ -200,8 +196,7 @@ export class AgentSelfieService implements SelfieOwner {
       );
     }
     const reason: SelfieReason =
-      asked ??
-      ((await this.neededOnThisPhone(auth)) ? 'new_device' : ((await this.reasonToGoOnline(auth, false)) ?? 'daily'));
+      asked ?? (await this.neededOnThisPhone(auth)) ?? (await this.reasonToGoOnline(auth, false)) ?? 'daily';
     const reference = `${SELFIE_PREFIX}-${randomUUID()}`;
     const enrolledId = app.reference;
     const session = await this.checks.call(
@@ -388,7 +383,7 @@ export class AgentSelfieService implements SelfieOwner {
       if (!row) return null;
       if (status === 'passed') {
         await tx.update(users).set({ selfieFailures: 0, selfieDue: false }).where(eq(users.id, check.userId));
-        await tx.update(devices).set({ selfieNeeded: false }).where(eq(devices.id, check.deviceId));
+        await tx.update(devices).set({ selfieNeeded: false, selfieFor: null }).where(eq(devices.id, check.deviceId));
         return { suspended: false, failures: 0, open: [] as string[] };
       }
       if (status === 'unclear') return { suspended: false, failures: 0, open: [] as string[] };
