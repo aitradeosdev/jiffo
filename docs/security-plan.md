@@ -179,7 +179,7 @@ Where this plan differs from what was deliberately built, `docs/security-audit.m
 - **C4** Socket.IO connections authenticate with the access token. A user joins an errand's room only as one of its two parties, and every message re-checks this.
 - **C5** Agora call tokens are issued by the server for each errand's channel, only to its two parties, and expire when the errand closes. Real phone numbers never appear in any API response.
 - **C6** The admin panel shows chat as escaped text only (R7), so a message can't run code in a staff member's browser.
-- **C7** *After launch:* show "Jiffo will never ask for your PIN or code" in both apps.
+- **C7** *After launch (built early):* show "Jiffo will never ask for your PIN or code" in both apps.
 
 ## Location (G)
 

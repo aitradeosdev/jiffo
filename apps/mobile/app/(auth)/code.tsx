@@ -10,6 +10,7 @@ import { fonts } from '@/theme/tokens';
 import { noWebOutline, Text } from '@/ui/kit';
 import { List, Row } from '@/ui/parts';
 import { ObScreen, Question } from '@/ui/onboarding';
+import { NEVER_ASK } from '@/safety/never-ask';
 
 /** 75 → "1:15". */
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
@@ -142,6 +143,9 @@ export default function Code() {
           {error}
         </Text>
       ) : null}
+      <Text variant="small" tone="ink3">
+        {NEVER_ASK.code}
+      </Text>
       <List>
         <Row
           icon="history"

@@ -12,6 +12,7 @@ import { Icon } from '@/ui/parts';
 import { PageHeader } from '@/ui/floating';
 import { useErrandId } from '@/errands/use-errand-id';
 import { useNoScreenCapture } from '@/ui/no-screen-capture';
+import { NEVER_ASK } from '@/safety/never-ask';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'back'];
 
@@ -71,6 +72,9 @@ export default function Handoff() {
             {actionError}
           </Text>
         ) : null}
+        <Text variant="small" tone="ink3" style={{ textAlign: 'center' }}>
+          {NEVER_ASK.agentHandoff}
+        </Text>
       </View>
       <View style={styles.pad}>
         {KEYS.map((k, i) =>
