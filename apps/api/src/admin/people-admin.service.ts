@@ -36,6 +36,7 @@ import { ApplicationsAdminService } from './applications-admin.service';
 import { IdChecksAdminService } from './id-checks-admin.service';
 import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
 import type { AdminContext } from './admin.types';
+import { StaffOversightService } from './staff-oversight.service';
 
 export const PEOPLE_ROLES = ['customer', 'agent'] as const;
 export type PeopleRole = (typeof PEOPLE_ROLES)[number];
@@ -59,6 +60,7 @@ export class PeopleAdminService {
     private readonly applications: ApplicationsAdminService,
     private readonly idChecks: IdChecksAdminService,
     private readonly realtime: RealtimeGateway,
+    private readonly oversight: StaffOversightService,
   ) {}
 
   /** What each tier means under the country's current settings: commission, and when earnings can be withdrawn. */
@@ -427,33 +429,41 @@ export class PeopleAdminService {
     if (!application && !identity) throw notFound('nothing_to_reveal', 'This person has no application or ID check');
     // The cap and the count are both the person's country's: each country sets its own (X10).
     const cap = (await securityOf(this.countries, person.countryCode)).dailyIdReveals;
-    await this.db.transaction(async (tx) => {
-      // One reveal at a time per admin, so a burst can't pass the cap before any is counted.
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'reveal:' + admin.adminId}))`);
-      const [today] = await tx
-        .select({ n: count() })
-        .from(adminAudit)
-        .where(
-          and(
-            eq(adminAudit.adminId, admin.adminId),
-            eq(adminAudit.action, 'person.reveal'),
-            eq(adminAudit.countryCode, person.countryCode),
-            gt(adminAudit.createdAt, new Date(Date.now() - 24 * 3_600_000)),
-          ),
-        );
-      if ((today?.n ?? 0) >= cap) {
-        throw tooMany(
-          'reveal_limit',
-          `You've revealed ${cap} people's details in this country in the last day, the most allowed`,
-        );
-      }
-      await this.audit.record(tx, admin, {
-        action: 'person.reveal',
-        targetType: 'person',
-        targetId: id,
-        countryCode: person.countryCode,
+    let refused = false;
+    await this.db
+      .transaction(async (tx) => {
+        // One reveal at a time per admin, so a burst can't pass the cap before any is counted.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'reveal:' + admin.adminId}))`);
+        const [today] = await tx
+          .select({ n: count() })
+          .from(adminAudit)
+          .where(
+            and(
+              eq(adminAudit.adminId, admin.adminId),
+              eq(adminAudit.action, 'person.reveal'),
+              eq(adminAudit.countryCode, person.countryCode),
+              gt(adminAudit.createdAt, new Date(Date.now() - 24 * 3_600_000)),
+            ),
+          );
+        if ((today?.n ?? 0) >= cap) {
+          refused = true;
+          throw tooMany(
+            'reveal_limit',
+            `You've revealed ${cap} people's details in this country in the last day, the most allowed`,
+          );
+        }
+        await this.audit.record(tx, admin, {
+          action: 'person.reveal',
+          targetType: 'person',
+          targetId: id,
+          countryCode: person.countryCode,
+        });
+      })
+      .catch(async (error: unknown) => {
+        // Owners hear of a staff member reaching the limit (D8), after the refused attempt is undone.
+        if (refused) await this.oversight.revealLimit(admin, person.countryCode, cap).catch(() => undefined);
+        throw error;
       });
-    });
     return {
       application: application
         ? {

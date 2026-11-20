@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Pager } from '@/components/list-controls';
-import { Card, Empty, PageHeader, tableClass, tdClass, thClass } from '@/components/ui';
+import { Badge, Card, Empty, Notice, PageHeader, tableClass, tdClass, thClass } from '@/components/ui';
 import {
   adminRoleLabel,
   agentTierLabel,
@@ -9,7 +9,9 @@ import {
   PROVIDER_CATEGORY_INFO,
   providerInfo,
 } from '@jiffo/shared';
+import { STAFF_ALERT_LABELS, type StaffAlertKind } from '@jiffo/shared';
 import { api, getCountry, getMe } from '@/lib/api';
+import { ResolveStaffAlertForm } from './staff-alerts';
 import { dateTime, money } from '@/lib/format';
 import { FIELD_BY_PATH } from '@/lib/settings-fields';
 
@@ -168,7 +170,20 @@ function describe(entry: Entry, names: Map<string, string>, currencyOf: (code: s
   }
 }
 
-export default async function AuditPage({ searchParams }: { searchParams: Promise<{ before?: string }> }) {
+interface StaffAlert {
+  id: string;
+  kind: string;
+  message: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolveNote: string | null;
+}
+
+export default async function AuditPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ before?: string; done?: string }>;
+}) {
   const me = await getMe();
   if (!me.permissions.includes('team')) {
     return (
@@ -177,13 +192,17 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
       </Card>
     );
   }
-  const before = Number((await searchParams).before);
+  const params = await searchParams;
+  const before = Number(params.before);
   const query = Number.isInteger(before) && before > 0 ? `?before=${before}` : '';
-  const [log, team, country] = await Promise.all([
+  const [log, team, [country, staff]] = await Promise.all([
     api<{ entries: Entry[]; more: boolean }>(`/admin/audit${query}`),
     api<Array<{ id: string; name: string }>>('/admin/team'),
-    getCountry(),
+    getCountry().then(
+      async (c) => [c, await api<{ alerts: StaffAlert[] }>(`/admin/staff-alerts?country=${c.code}`)] as const,
+    ),
   ]);
+  const openStaff = staff.alerts.filter((a) => !a.resolvedAt);
   const names = new Map(team.map((t) => [t.id, t.name]));
   const currencyOf = (code: string | null) => me.countries.find((c) => c.code === code)?.currency ?? country.currency;
   const last = log.entries.at(-1);
@@ -194,6 +213,30 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
         title="Audit log"
         subtitle="Every change made in the admin panel or with the server's command line, newest first, with why and from where. Nothing here can be changed or deleted."
       />
+      {params.done ? (
+        <div className="mb-4">
+          <Notice tone="brand">Alert closed.</Notice>
+        </div>
+      ) : null}
+      <Card title="Alerts about staff" padded={false}>
+        {openStaff.length === 0 ? (
+          <Empty title="No open alerts about staff" />
+        ) : (
+          <ul className="divide-y divide-line">
+            {openStaff.map((a) => (
+              <li key={a.id} className="px-5 py-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone="warn">{STAFF_ALERT_LABELS[a.kind as StaffAlertKind] ?? a.kind}</Badge>
+                  <span className="text-[13px] text-ink-3">{dateTime(a.createdAt, country.timezone)}</span>
+                </div>
+                <p className="mt-1 text-sm">{a.message}</p>
+                <ResolveStaffAlertForm id={a.id} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+      <div className="h-6" />
       <Card padded={false}>
         {log.entries.length === 0 ? (
           <Empty title={query ? 'No older entries' : 'Nothing has been changed yet'} />

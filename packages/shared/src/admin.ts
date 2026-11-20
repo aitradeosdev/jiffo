@@ -121,3 +121,15 @@ export const APPROVAL_STATUSES = [
   'expired',
 ] as const;
 export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+
+/**
+ * Alerts about staff, for owners (docs/security-plan.md, D8): kept out of finance's alerts, since the person
+ * they are about may be in finance, and never closed by the person they are about.
+ */
+export const STAFF_ALERT_KINDS = ['unusual_id_reveals', 'staff_account_adjustment', 'out_of_hours_money'] as const;
+export type StaffAlertKind = (typeof STAFF_ALERT_KINDS)[number];
+export const STAFF_ALERT_LABELS: Record<StaffAlertKind, string> = {
+  unusual_id_reveals: 'Unusual ID reveals',
+  staff_account_adjustment: "Adjustment to a staff member's account",
+  out_of_hours_money: 'Money actions out of hours',
+};

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { asc, desc, eq, sql, type SQL } from 'drizzle-orm';
-import { AGENT_OUT_STATES } from '@jiffo/shared';
+import { AGENT_OUT_STATES, STAFF_ALERT_KINDS } from '@jiffo/shared';
 import { DB, type Db } from '../db/database.module';
 import { countries, reconciliationRuns } from '../db/schema';
 import { notFound } from '../common/errors';
@@ -45,7 +45,8 @@ export class OverviewService {
     const one = async (query: SQL) => (await this.db.execute(query)).rows[0] ?? {};
 
     const [openAlerts, instantPaused] = await Promise.all([
-      this.alerts.openCount(countryCode),
+      // Money alerts only: emergencies are the Safety queue's, alerts about staff owners' (D8).
+      this.alerts.openCount(countryCode, { except: ['emergency', ...STAFF_ALERT_KINDS] }),
       this.payouts.instantPaused(countryCode),
     ]);
     const [errands, agents, money, balances, attention, week, reconciliation] = await Promise.all([

@@ -241,7 +241,7 @@ The owner asked for anything in the plan that contradicts what was built to be c
 | D5 | partly | `admin/people-admin.service.ts`, `admin/applications-admin.service.ts` | No NIN, BVN or selfie to show. Legal name, date of birth, home address and emergency contacts are shown to every role, read-only Support included. | implement masking with reveal-and-reason (fix 9) |
 | D6 | partly | `admin/admin-auth.service.ts`; test: `admin.e2e` | 30 minutes idle and 12 hours total, not 15 and 8. No fresh sign-in before money actions. | implement (fix 9) |
 | D7 | partly | `admin/audit.service.ts`; tests: `admin.e2e` | Who, what, when, IP and data are recorded. Missing: append-only enforcement, the user agent, before-and-after values for adjustments and suspensions, a reason on every change, and auditing of the admin command line. The write-once copy is hosting (owner). | implement (fix 9); owner |
-| D8 | after launch | | | after launch |
+| D8 | done | `admin/staff-oversight.service.ts` (run as each staff action is audited), `admin/staff-alerts-admin.service.ts`, the panel's Audit log page; test: `staff-alerts` | Owners are alerted when a staff member reveals many people's details in a day (Settings, Security, 10) or reaches the limit, reveals one out of hours, asks for an adjustment to an app account a staff member uses, or takes money actions out of working hours (7:00 to 21:00 by default). These alerts are kept out of finance's, and never closed by the person they are about. | done (after launch, built early) |
 
 ## Servers and data (S)
 
@@ -442,7 +442,7 @@ One area per pull request, abuse tests first. Every one that touches login, mone
 
     Covers X1–X3, E5, E6, E8, E9, C1, C3, G1, G4, I3, F3.
 
-**After launch:** A10, D8, F4, MB7 (C7 is done), and referrals and promos (F1, F2, X5) when they are built.
+**After launch:** A10, F4, MB7 (C7 and D8 are done), and referrals and promos (F1, F2, X5) when they are built.
 
 ## Owner's tasks
 

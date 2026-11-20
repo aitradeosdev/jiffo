@@ -21,6 +21,8 @@ import { ApprovalsService } from './approvals.service';
 import { PasskeysService } from './passkeys.service';
 import { StaffMail } from './staff-mail';
 import { TeamService } from './team.service';
+import { StaffOversightService } from './staff-oversight.service';
+import { StaffAlertsAdminService } from './staff-alerts-admin.service';
 
 /** Everything the admin panel calls, under /v1/admin. */
 @Module({
@@ -45,6 +47,8 @@ import { TeamService } from './team.service';
     PasskeysService,
     ApprovalsService,
     ApprovalRequests,
+    StaffOversightService,
+    StaffAlertsAdminService,
   ],
   exports: [AdminAuthService, AdminGuard, AuditService],
 })

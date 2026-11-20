@@ -1,9 +1,10 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { and, desc, eq, inArray, lt } from 'drizzle-orm';
 import { forbidden } from '../common/errors';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { adminApprovals, adminAudit, admins, errands, riskFlags, safetyEvents, users } from '../db/schema';
 import type { AdminContext } from './admin.types';
+import { StaffOversightService } from './staff-oversight.service';
 
 export interface AuditEntry {
   action: string;
@@ -20,11 +21,17 @@ export interface AuditEntry {
  */
 @Injectable()
 export class AuditService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  private readonly logger = new Logger(AuditService.name);
+
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    // Always there in the app; the command line, which only records with recordCli, has none.
+    @Optional() private readonly oversight?: StaffOversightService,
+  ) {}
 
   async record(tx: Tx, admin: AdminContext, entry: AuditEntry) {
     await this.refuseOwnAccount(tx, admin, entry.targetType, entry.targetId);
-    return tx.insert(adminAudit).values({
+    const written = await tx.insert(adminAudit).values({
       adminId: admin.adminId,
       action: entry.action,
       targetType: entry.targetType ?? null,
@@ -36,6 +43,17 @@ export class AuditService {
       ip: admin.ip,
       userAgent: admin.userAgent,
     });
+    // Alerts about staff for owners, in this transaction (D8). In a savepoint of its own: an alert that can't be
+    // raised is logged, and never undoes the change itself.
+    if (this.oversight) {
+      const oversight = this.oversight;
+      await tx
+        .transaction((inner) =>
+          oversight.recorded(inner, admin, entry, () => this.peopleIn(inner, entry.targetType, entry.targetId)),
+        )
+        .catch((error: Error) => this.logger.error(`A staff alert for ${entry.action} failed: ${error.message}`));
+    }
+    return written;
   }
 
   /**

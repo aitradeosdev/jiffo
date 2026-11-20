@@ -1,13 +1,6 @@
 import { HttpException, Inject, Injectable, Logger } from '@nestjs/common';
 import { and, count, desc, eq, gt, inArray, isNotNull, lt, ne, or, sql } from 'drizzle-orm';
-import {
-  APPROVAL_KIND_INFO,
-  DEFAULT_SECURITY_SETTINGS,
-  rolesWith,
-  type AdminPermission,
-  type AdminRole,
-  type ApprovalKind,
-} from '@jiffo/shared';
+import { APPROVAL_KIND_INFO, rolesWith, type AdminPermission, type AdminRole, type ApprovalKind } from '@jiffo/shared';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
 import { conflict, forbidden, notFound } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
@@ -36,21 +29,9 @@ export interface ApprovalRequest {
 /** Runs an approved change as the person who asked for it. */
 export type Executor = (as: AdminContext, payload: Record<string, unknown>) => Promise<unknown>;
 
-/**
- * A country's Security settings, or the defaults when it has none or its stored version can't be read: a
- * broken version must not stop the change that fixes it.
- */
-export async function securityOf(countries: CountriesService, countryCode: string) {
-  try {
-    const current = await countries.currentSettingsIfAny(countryCode);
-    return current?.settings.security ?? DEFAULT_SECURITY_SETTINGS;
-  } catch (error) {
-    // Only a stored version that no longer reads; anything else (the database being down) is an error.
-    // Checked by name: the settings schema may come from another copy of zod (@jiffo/shared's build).
-    if (error instanceof Error && error.name === 'ZodError') return DEFAULT_SECURITY_SETTINGS;
-    throw error;
-  }
-}
+import { securityOf } from './security-of';
+
+export { securityOf };
 
 /** What an API error said, for the record. */
 const messageOf = (error: unknown) => {

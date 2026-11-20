@@ -43,6 +43,9 @@ export const DEFAULT_SECURITY_SETTINGS = {
   trailDays: 90,
   signedLinkMinutes: 5,
   releaseReminderHours: [2, 12, 20],
+  idRevealAlertAt: 10,
+  staffHoursStart: 7,
+  staffHoursEnd: 21,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -254,6 +257,25 @@ export const CountrySettingsSchema = z.object({
         .max(6)
         .refine((h) => h.every((v, i) => i === 0 || v > h[i - 1]!), 'List the hours from soonest to latest, once each')
         .default(() => [2, 12, 20]),
+      /**
+       * How many people's personal details one staff member reveals in a day before owners are told (D8). Below
+       * dailyIdReveals, which refuses any more.
+       */
+      idRevealAlertAt: z.number().int().min(1).max(500).default(10),
+      /**
+       * Staff working hours, in the country's own time: a money action or ID reveal before staffHoursStart or
+       * from staffHoursEnd on raises an alert for owners (D8). 0 and 24 mean all day.
+       */
+      staffHoursStart: z.number().int().min(0).max(23).default(7),
+      staffHoursEnd: z.number().int().min(1).max(24).default(21),
+    })
+    .refine((s) => s.staffHoursStart < s.staffHoursEnd, {
+      path: ['staffHoursEnd'],
+      message: 'Working hours end after they start',
+    })
+    .refine((s) => s.idRevealAlertAt < s.dailyIdReveals, {
+      path: ['idRevealAlertAt'],
+      message: 'Tell owners before the daily limit is reached: set this below it',
     })
     .default(() => structuredClone(DEFAULT_SECURITY_SETTINGS)),
   /**

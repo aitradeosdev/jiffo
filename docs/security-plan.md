@@ -218,7 +218,7 @@ Where this plan differs from what was deliberately built, `docs/security-audit.m
 - **D7 Audit log:**
   - Records who, what, when, from which IP, the values before and after, and the reason.
   - It is append-only and copied to write-once storage (S3 Object Lock) in a separate AWS account that admins can't change.
-- **D8** *After launch:* alerts on unusual ID reveals, adjustments to accounts linked to staff, and money actions out of hours.
+- **D8** *After launch (built early):* alerts on unusual ID reveals, adjustments to accounts linked to staff, and money actions out of hours.
 
 ## Servers and data (S)
 
