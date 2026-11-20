@@ -90,7 +90,7 @@ const CategoryId = new ParseUUIDPipe({ exceptionFactory: () => notFound('categor
 const StateId = new ParseUUIDPipe({ exceptionFactory: () => notFound('state_not_found', 'State not found') });
 const SaveSettingsBody = z.object({
   basedOn: z.number().int().positive(),
-  settings: z.record(z.unknown()),
+  settings: z.record(z.string(), z.unknown()),
   note: z.string().trim().min(5, 'Say why, in a few words').max(1000),
 });
 const CategoryFields = z.object({

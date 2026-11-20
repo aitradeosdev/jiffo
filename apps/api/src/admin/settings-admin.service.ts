@@ -20,8 +20,8 @@ import type { AdminContext } from './admin.types';
 /** How many versions the settings page lists. */
 const HISTORY = 50;
 
-const issuesOf = (error: { issues: Array<{ path: Array<string | number>; message: string }> }) =>
-  error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
+const issuesOf = (error: { issues: Array<{ path: PropertyKey[]; message: string }> }) =>
+  error.issues.map((i) => ({ path: i.path.map(String).join('.'), message: i.message }));
 
 /** Country settings, categories and states. Changing them is for owners; every change is audited. */
 @Injectable()

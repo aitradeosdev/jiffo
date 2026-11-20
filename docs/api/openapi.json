@@ -92,8 +92,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           }
         ],
@@ -186,14 +186,15 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           },
           {
             "name": "status",
             "in": "query",
             "schema": {
+              "default": "review",
               "type": "string",
               "enum": [
                 "review",
@@ -201,8 +202,7 @@
                 "draft",
                 "approved",
                 "rejected"
-              ],
-              "default": "review"
+              ]
             }
           },
           {
@@ -225,10 +225,10 @@
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 30,
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
-              "default": 30
+              "maximum": 100
             }
           }
         ],
@@ -264,8 +264,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           }
         ],
@@ -299,22 +299,22 @@
             "name": "done",
             "in": "query",
             "schema": {
+              "default": "false",
               "type": "string",
               "enum": [
                 "true",
                 "false"
-              ],
-              "default": "false"
+              ]
             }
           },
           {
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 50,
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
-              "default": 50
+              "maximum": 100
             }
           }
         ],
@@ -384,6 +384,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "default": {},
                 "type": "object",
                 "properties": {
                   "note": {
@@ -391,8 +392,7 @@
                     "maxLength": 1000
                   }
                 },
-                "additionalProperties": false,
-                "default": {}
+                "additionalProperties": false
               }
             }
           }
@@ -521,17 +521,18 @@
             "in": "query",
             "schema": {
               "type": "integer",
-              "exclusiveMinimum": 0
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
             }
           },
           {
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 50,
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
-              "default": 50
+              "maximum": 100
             }
           },
           {
@@ -647,6 +648,7 @@
                         "maxLength": 1000
                       },
                       "type": {
+                        "type": "string",
                         "const": "public-key"
                       },
                       "response": {
@@ -677,12 +679,15 @@
                           "authenticatorData",
                           "signature"
                         ],
-                        "additionalProperties": true
+                        "additionalProperties": {}
                       },
                       "clientExtensionResults": {
+                        "default": {},
                         "type": "object",
-                        "additionalProperties": {},
-                        "default": {}
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
                       }
                     },
                     "required": [
@@ -691,7 +696,7 @@
                       "type",
                       "response"
                     ],
-                    "additionalProperties": true
+                    "additionalProperties": {}
                   }
                 },
                 "additionalProperties": false
@@ -855,6 +860,7 @@
                         "maxLength": 1000
                       },
                       "type": {
+                        "type": "string",
                         "const": "public-key"
                       },
                       "response": {
@@ -885,12 +891,15 @@
                           "authenticatorData",
                           "signature"
                         ],
-                        "additionalProperties": true
+                        "additionalProperties": {}
                       },
                       "clientExtensionResults": {
+                        "default": {},
                         "type": "object",
-                        "additionalProperties": {},
-                        "default": {}
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
                       }
                     },
                     "required": [
@@ -899,7 +908,7 @@
                       "type",
                       "response"
                     ],
-                    "additionalProperties": true
+                    "additionalProperties": {}
                   }
                 },
                 "required": [
@@ -1016,6 +1025,7 @@
                         "maxLength": 1000
                       },
                       "type": {
+                        "type": "string",
                         "const": "public-key"
                       },
                       "response": {
@@ -1032,24 +1042,27 @@
                             "maxLength": 20000
                           },
                           "transports": {
+                            "maxItems": 10,
                             "type": "array",
                             "items": {
                               "type": "string",
                               "maxLength": 20
-                            },
-                            "maxItems": 10
+                            }
                           }
                         },
                         "required": [
                           "clientDataJSON",
                           "attestationObject"
                         ],
-                        "additionalProperties": true
+                        "additionalProperties": {}
                       },
                       "clientExtensionResults": {
+                        "default": {},
                         "type": "object",
-                        "additionalProperties": {},
-                        "default": {}
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
                       }
                     },
                     "required": [
@@ -1058,12 +1071,12 @@
                       "type",
                       "response"
                     ],
-                    "additionalProperties": true
+                    "additionalProperties": {}
                   },
                   "name": {
+                    "default": "",
                     "type": "string",
-                    "maxLength": 60,
-                    "default": ""
+                    "maxLength": 60
                   }
                 },
                 "required": [
@@ -1204,8 +1217,9 @@
                 "properties": {
                   "email": {
                     "type": "string",
+                    "maxLength": 200,
                     "format": "email",
-                    "maxLength": 200
+                    "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                   },
                   "password": {
                     "type": "string",
@@ -1276,8 +1290,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           }
         ],
@@ -1322,24 +1336,24 @@
                     "maxLength": 40
                   },
                   "description": {
+                    "default": "",
                     "type": "string",
-                    "maxLength": 200,
-                    "default": ""
+                    "maxLength": 200
                   },
                   "buyDefault": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "sort": {
+                    "default": 0,
                     "type": "integer",
                     "minimum": 0,
-                    "maximum": 1000,
-                    "default": 0
+                    "maximum": 1000
                   },
                   "country": {
                     "type": "string",
-                    "maxLength": 2,
-                    "minLength": 2
+                    "minLength": 2,
+                    "maxLength": 2
                   },
                   "key": {
                     "type": "string",
@@ -1445,19 +1459,19 @@
                     "maxLength": 40
                   },
                   "description": {
+                    "default": "",
                     "type": "string",
-                    "maxLength": 200,
-                    "default": ""
+                    "maxLength": 200
                   },
                   "buyDefault": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "sort": {
+                    "default": 0,
                     "type": "integer",
                     "minimum": 0,
-                    "maximum": 1000,
-                    "default": 0
+                    "maximum": 1000
                   },
                   "active": {
                     "type": "boolean"
@@ -1500,8 +1514,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           }
         ],
@@ -1537,8 +1551,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           }
         ],
@@ -1574,14 +1588,15 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           },
           {
             "name": "filter",
             "in": "query",
             "schema": {
+              "default": "all",
               "type": "string",
               "enum": [
                 "all",
@@ -1590,8 +1605,7 @@
                 "disputed",
                 "completed",
                 "cancelled"
-              ],
-              "default": "all"
+              ]
             }
           },
           {
@@ -1614,10 +1628,10 @@
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 30,
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
-              "default": 30
+              "maximum": 100
             }
           }
         ],
@@ -1714,7 +1728,8 @@
                   },
                   "version": {
                     "type": "integer",
-                    "minimum": 0
+                    "minimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "note": {
                     "type": "string",
@@ -1879,33 +1894,33 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           },
           {
             "name": "queue",
             "in": "query",
             "schema": {
+              "default": "risk",
               "type": "string",
               "enum": [
                 "risk",
                 "verification"
-              ],
-              "default": "risk"
+              ]
             }
           },
           {
             "name": "status",
             "in": "query",
             "schema": {
+              "default": "open",
               "type": "string",
               "enum": [
                 "open",
                 "cleared",
                 "confirmed"
-              ],
-              "default": "open"
+              ]
             }
           },
           {
@@ -1913,7 +1928,8 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             }
           },
           {
@@ -1921,7 +1937,8 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             }
           },
           {
@@ -1936,10 +1953,10 @@
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 30,
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
-              "default": 30
+              "maximum": 100
             }
           }
         ],
@@ -1975,8 +1992,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           },
           {
@@ -1984,7 +2001,8 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             }
           },
           {
@@ -1992,7 +2010,8 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             }
           }
         ],
@@ -2095,14 +2114,15 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           },
           {
             "name": "status",
             "in": "query",
             "schema": {
+              "default": "review",
               "type": "string",
               "enum": [
                 "review",
@@ -2110,8 +2130,7 @@
                 "failed",
                 "verified",
                 "declined"
-              ],
-              "default": "review"
+              ]
             }
           },
           {
@@ -2134,10 +2153,10 @@
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 50,
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
-              "default": 50
+              "maximum": 100
             }
           }
         ],
@@ -2173,8 +2192,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           }
         ],
@@ -2237,7 +2256,8 @@
                 "properties": {
                   "personId": {
                     "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                   },
                   "account": {
                     "type": "string",
@@ -2265,11 +2285,13 @@
                   },
                   "errandId": {
                     "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                   },
                   "requestId": {
                     "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                   }
                 },
                 "required": [
@@ -2317,8 +2339,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           },
           {
@@ -2341,16 +2363,17 @@
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 30,
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
-              "default": 30
+              "maximum": 100
             }
           },
           {
             "name": "filter",
             "in": "query",
             "schema": {
+              "default": "all",
               "type": "string",
               "enum": [
                 "all",
@@ -2358,8 +2381,7 @@
                 "expired",
                 "failed",
                 "mismatch"
-              ],
-              "default": "all"
+              ]
             }
           }
         ],
@@ -2395,8 +2417,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           }
         ],
@@ -2497,8 +2519,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           },
           {
@@ -2521,23 +2543,23 @@
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 30,
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
-              "default": 30
+              "maximum": 100
             }
           },
           {
             "name": "filter",
             "in": "query",
             "schema": {
+              "default": "all",
               "type": "string",
               "enum": [
                 "all",
                 "pending",
                 "failed"
-              ],
-              "default": "all"
+              ]
             }
           }
         ],
@@ -2573,8 +2595,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           }
         ],
@@ -2667,18 +2689,18 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           },
           {
             "name": "days",
             "in": "query",
             "schema": {
+              "default": 30,
               "type": "integer",
               "minimum": 1,
-              "maximum": 90,
-              "default": 30
+              "maximum": 90
             }
           }
         ],
@@ -2714,8 +2736,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           }
         ],
@@ -2751,20 +2773,20 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           },
           {
             "name": "role",
             "in": "query",
             "schema": {
+              "default": "customer",
               "type": "string",
               "enum": [
                 "customer",
                 "agent"
-              ],
-              "default": "customer"
+              ]
             }
           },
           {
@@ -2787,10 +2809,10 @@
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 30,
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
-              "default": 30
+              "maximum": 100
             }
           }
         ],
@@ -3380,20 +3402,26 @@
                 "type": "object",
                 "properties": {
                   "config": {
+                    "default": {},
                     "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
                     "additionalProperties": {
                       "type": "string",
                       "maxLength": 2000
-                    },
-                    "default": {}
+                    }
                   },
                   "secrets": {
+                    "default": {},
                     "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
                     "additionalProperties": {
                       "type": "string",
                       "maxLength": 20000
-                    },
-                    "default": {}
+                    }
                   }
                 },
                 "additionalProperties": false
@@ -3519,30 +3547,30 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           },
           {
             "name": "status",
             "in": "query",
             "schema": {
+              "default": "open",
               "type": "string",
               "enum": [
                 "open",
                 "handled"
-              ],
-              "default": "open"
+              ]
             }
           },
           {
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 50,
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
-              "default": 50
+              "maximum": 100
             }
           }
         ],
@@ -3578,8 +3606,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           }
         ],
@@ -3672,8 +3700,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           }
         ],
@@ -3707,8 +3735,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           }
         ],
@@ -3721,10 +3749,14 @@
                 "properties": {
                   "basedOn": {
                     "type": "integer",
-                    "exclusiveMinimum": 0
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "settings": {
                     "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
                     "additionalProperties": {}
                   },
                   "note": {
@@ -3775,8 +3807,8 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 2,
-              "minLength": 2
+              "minLength": 2,
+              "maxLength": 2
             }
           }
         ],
@@ -3896,8 +3928,9 @@
                 "properties": {
                   "email": {
                     "type": "string",
+                    "maxLength": 200,
                     "format": "email",
-                    "maxLength": 200
+                    "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                   },
                   "name": {
                     "type": "string",
@@ -4232,6 +4265,7 @@
                     "maxLength": 20
                   },
                   "consent": {
+                    "type": "boolean",
                     "const": true
                   }
                 },
@@ -4326,6 +4360,7 @@
                 "type": "object",
                 "properties": {
                   "accepted": {
+                    "type": "boolean",
                     "const": true
                   }
                 },
@@ -4415,7 +4450,8 @@
                   },
                   "fixedAt": {
                     "type": "integer",
-                    "exclusiveMinimum": 0
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   }
                 },
                 "additionalProperties": false
@@ -4481,14 +4517,14 @@
                   "categoryKeys": {
                     "anyOf": [
                       {
+                        "minItems": 1,
+                        "maxItems": 50,
                         "type": "array",
                         "items": {
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 40
-                        },
-                        "minItems": 1,
-                        "maxItems": 50
+                        }
                       },
                       {
                         "type": "null"
@@ -4741,14 +4777,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "default": {},
                 "type": "object",
                 "properties": {
                   "forgetPhone": {
                     "type": "boolean"
                   }
                 },
-                "additionalProperties": false,
-                "default": {}
+                "additionalProperties": false
               }
             }
           }
@@ -5046,7 +5082,8 @@
             "required": true,
             "schema": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           {
@@ -5113,7 +5150,8 @@
             "required": true,
             "schema": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           {
@@ -5285,10 +5323,10 @@
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 20,
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
-              "default": 20
+              "maximum": 100
             }
           }
         ],
@@ -5338,8 +5376,8 @@
                     "type": "boolean"
                   },
                   "urgent": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "scheduledFor": {
                     "type": "string",
@@ -5351,6 +5389,8 @@
                     "maximum": 100000000000
                   },
                   "stops": {
+                    "minItems": 2,
+                    "maxItems": 10,
                     "type": "array",
                     "items": {
                       "type": "object",
@@ -5390,9 +5430,7 @@
                         "lng"
                       ],
                       "additionalProperties": false
-                    },
-                    "minItems": 2,
-                    "maxItems": 10
+                    }
                   }
                 },
                 "required": [
@@ -5457,20 +5495,20 @@
             "name": "radiusKm",
             "in": "query",
             "schema": {
+              "default": 10,
               "type": "number",
               "exclusiveMinimum": 0,
-              "maximum": 50,
-              "default": 10
+              "maximum": 50
             }
           },
           {
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 50,
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
-              "default": 50
+              "maximum": 100
             }
           }
         ],
@@ -5507,6 +5545,8 @@
                 "type": "object",
                 "properties": {
                   "stops": {
+                    "minItems": 2,
+                    "maxItems": 10,
                     "type": "array",
                     "items": {
                       "type": "object",
@@ -5527,9 +5567,7 @@
                         "lng"
                       ],
                       "additionalProperties": false
-                    },
-                    "minItems": 2,
-                    "maxItems": 10
+                    }
                   }
                 },
                 "required": [
@@ -5687,12 +5725,16 @@
                   },
                   "version": {
                     "type": "integer",
-                    "minimum": 0
+                    "minimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "data": {
+                    "default": {},
                     "type": "object",
-                    "additionalProperties": {},
-                    "default": {}
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
                   }
                 },
                 "required": [
@@ -5740,17 +5782,18 @@
             "in": "query",
             "schema": {
               "type": "integer",
-              "exclusiveMinimum": 0
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
             }
           },
           {
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 50,
               "type": "integer",
               "minimum": 1,
-              "maximum": 200,
-              "default": 50
+              "maximum": 200
             }
           }
         ],
@@ -6056,8 +6099,9 @@
                     "anyOf": [
                       {
                         "type": "string",
+                        "maxLength": 254,
                         "format": "email",
-                        "maxLength": 254
+                        "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                       },
                       {
                         "type": "null"
@@ -6131,6 +6175,7 @@
                     "maxLength": 40
                   },
                   "consent": {
+                    "type": "boolean",
                     "const": true
                   }
                 },
@@ -6476,7 +6521,8 @@
                 "properties": {
                   "errandId": {
                     "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                   },
                   "lat": {
                     "type": "number",
@@ -6595,7 +6641,8 @@
                 "properties": {
                   "errandId": {
                     "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                   },
                   "purpose": {
                     "type": "string",
@@ -6612,7 +6659,8 @@
                   },
                   "size": {
                     "type": "integer",
-                    "exclusiveMinimum": 0
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   }
                 },
                 "required": [
@@ -6707,7 +6755,8 @@
                   },
                   "requestId": {
                     "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                   }
                 },
                 "required": [
@@ -6861,17 +6910,18 @@
             "in": "query",
             "schema": {
               "type": "integer",
-              "exclusiveMinimum": 0
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
             }
           },
           {
             "name": "limit",
             "in": "query",
             "schema": {
+              "default": 30,
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
-              "default": 30
+              "maximum": 100
             }
           }
         ],
@@ -6941,7 +6991,8 @@
                   },
                   "requestId": {
                     "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                   }
                 },
                 "required": [
@@ -7012,7 +7063,7 @@
                     "maxLength": 200
                   }
                 },
-                "additionalProperties": true
+                "additionalProperties": {}
               }
             }
           }

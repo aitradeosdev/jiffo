@@ -6,13 +6,9 @@ onlyBuiltDependencies:
   - '@swc/core'
   - esbuild
 
-# Advisories accepted for now, each with its reason in docs/security/dependencies.md. CI fails on any other
-# high or critical advisory in what the apps ship.
-auditConfig:
-  ignoreGhsas:
-    # zod < 4.6.6: oversized collections can exhaust memory. Request bodies are capped in size. zod 4 is a
-    # major upgrade, planned.
-    - GHSA-mrhx-c7xc-m3w5
+# No advisories are accepted: CI fails on any high or critical one in what the apps ship. To accept one for a
+# while, list it under auditConfig.ignoreGhsas here and allow-ghsas in security.yml, with its reason in
+# docs/security/dependencies.md.
 
 # Changes to packages, each with its reason in docs/security/dependencies.md.
 patchedDependencies:
