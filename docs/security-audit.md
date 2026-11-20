@@ -144,7 +144,7 @@ The owner asked for anything in the plan that contradicts what was built to be c
 |---|---|---|---|---|
 | I1 | partly | `identity/identity-checks.service.ts`, `identity/customer-identity.service.ts`, `agents/application.service.ts` | Verified only when both the ID and the selfie pass. **But** the legal name from the ID record is saved and shown even when the selfie fails, and starting a check is unlimited. That makes a name lookup by NIN or BVN. | implement (fix 6) |
 | I2 | partly | `adapters/identity-providers.ts`, `apps/mobile/src/identity/check.tsx` | Hosted pages in the system browser (see differences). Their links never expire and aren't tied to the account's session, so a link can be forwarded to someone else. | keep hosted pages; implement link expiry and binding (fix 6); owner picks a certified provider |
-| I3 | partly | fingerprints and unique indexes in `db/schema.ts`; tests: `agent-application`, `admin-id-checks`, `identity-types` | The same ID on two accounts is caught. Missing: flags for the same face on different IDs, and for devices or payout accounts shared between accounts. | implement (fix 11) |
+| I3 | done | fingerprints and unique indexes in `db/schema.ts`, `risk/risk-flags.service.ts`, `risk/networks.service.ts`, the identity port's `related` matches; tests: `agent-application`, `admin-id-checks`, `identity-types`, `risk-flags`, `network-face-flags` | The same ID on two accounts is refused. A phone or payout account shared between accounts, and a face the identity provider found on another account's check with another ID (Smile Secure for Smile ID), go to the verification queue. | done (fixes 11a, 11b) |
 | I4 | partly | `money/payouts.service.ts` (`setAccount`), `common/names.ts`; test: `money.e2e` | Payout names must match the legal name exactly, word by word. Near matches are refused rather than sent to review, and a later account change isn't re-reviewed. | implement (fix 6) |
 | I5 | partly | `identity/identity-checks.service.ts` | ID numbers are kept only as an HMAC, but its key comes from `PIN_KEY`, which also encrypts admin sign-in secrets and hand-off PINs. No BVN digits are kept (stricter than the plan). | implement separate keys (fix 6); KMS is hosting (owner) |
 | I6 | partly | `db/schema.ts` | NIN, BVN and selfies are not stored. Stored unencrypted: legal name, date of birth, home address, emergency contacts and full payout account numbers. | implement field encryption (fix 6) |
@@ -195,11 +195,11 @@ The owner asked for anything in the plan that contradicts what was built to be c
 | E2 | done | random UUIDs; a malformed ID gets 404; test: `errands.e2e` | | |
 | E3 | partly | `packages/shared/src/errands.ts`; test: `errands.e2e` | Prices change only through confirmed offers, and chat never sets one. No limit of 5 offers a minute. | implement (fix 3) |
 | E4 | partly | `common/crypto.ts`, `errands/errands.service.ts`; tests: `errands.e2e` | **Already done:** a secure random PIN, shown only to the customer once the errand is delivered, single use, locked after 5 wrong entries, and the app warns the customer. **Missing:** the PIN is encrypted under one global key and kept after the errand ends. A lock sends the agent to the photo route, which pays out after 24 hours, and the photo route is open without any PIN attempt. There is no 200 m check, and wrong entries aren't logged. | implement (fix 3) |
-| E5 | missing | `errands/errand-input.ts` | Flags for cash delivery, "send money to my account", and pickup equal to drop-off. | implement (fix 11) |
-| E6 | missing | | Collusion flags and a Risk queue. | implement (fix 11) |
+| E5 | done | `risk/moderation.ts`, `risk/risk-flags.service.ts`; tests: `moderation`, `risk-flags` | Errands to carry or withdraw cash, to send money to an account, and whose drop-off is the pickup are flagged for the Risk queue, and still run. | done (fix 11a) |
+| E6 | done | `risk/risk-flags.service.ts`, `risk/networks.service.ts`, `risk/gps.ts`, the panel's Flags page; tests: `risk-flags`, `network-face-flags`, `gps-trail` | The Risk queue, with flags for a customer and agent sharing a phone, a Wi-Fi network or address, or a bank account; the same pairing again and again; a high-value errand finished too fast; and an agent who never moved. Staff decide each with a reason, in the audit log. | done (fixes 11a–11c) |
 | E7 | missing | `admin/errands-admin.service.ts` | A second admin for splits above a set amount. | implement (fix 9) |
-| E8 | partly | `admin/errands-admin.service.ts` | The admin errand page shows events, chat (up to 1,000 messages), photos, money and ratings. Missing: wrong PIN entries, the call log, the GPS trail, and a fixed snapshot. | implement (fix 11) |
-| E9 | missing | | Emergency button and a Safety queue. | implement (fix 11) |
+| E8 | done | `errands/evidence.service.ts`, `admin/errands-admin.service.ts`; tests: `evidence-pack`, `upload-checks`, `chat-warnings` | An evidence pack is made as an errand goes into dispute, however it happens, and by staff on demand. It holds events, offers, PIN entries, chat (with its warnings), photos (with their fingerprints), calls, flags, money and the trail's fingerprint. It is fixed, hashed and downloadable. | done (fix 11d) |
+| E9 | done | `safety/safety.service.ts`, `admin/safety-admin.service.ts`, the apps' `safety/emergency.ts`, the panel's Safety page; tests: `safety`, the apps' `emergency` | The emergency button dials the country's number, then reports who, which errand and where, following the person for ten minutes; the safety team handles it with a reason. | done (fix 11e) |
 
 ## Chat, calls and uploads (C)
 
@@ -217,17 +217,17 @@ The owner asked for anything in the plan that contradicts what was built to be c
 
 | ID | Status | Files | What is missing | Decision |
 |---|---|---|---|---|
-| G1 | missing | `apps/mobile/src/agent/presence.tsx`, `agents/presence.service.ts` | Mock-location and root checks in the app, and speed and jump checks on the server (these need a trail). | implement (fix 11) |
+| G1 | done | `agents/presence.service.ts`, `agents/trail.service.ts`, `risk/gps.ts`, the agent app's risk signals; tests: `risk-signals`, `gps`, `gps-trail` | Mocked positions and fake-location apps are risk signals, and a mocked position can't place an agent at a drop-off. The server flags impossible jumps, perfectly straight runs and agents who never moved, judged by each fix's time and accuracy. | done (fixes 10d, 11c) |
 | G2 | partly | `agents/presence.service.ts`, `errands/errands.service.ts`; test: `presence.e2e` | The customer sees the agent only on their own errand. **But** sharing continues after a drop-off photo, for up to 24 hours. An agent holding two errands is visible to both customers throughout. | implement (fix 5) |
 | G3 | done | `apps/mobile/src/agent/background-location.ts`, `agents/presence.service.ts`; test: `presence.e2e` | | |
-| G4 | n/a today | only the latest point is kept | Once fix 11 adds a trail, it needs 90-day deletion with a hold for open disputes. | implement with the trail (fix 11) |
+| G4 | done | `agents/trail.service.ts`; test: `gps-trail` | Trails are kept while the agent is out on an errand, and deleted after the Security setting's days (90), unless the errand is in dispute or a flag on it is open. | done (fix 11c) |
 
 ## Referrals and promos (F)
 
 | ID | Status | Files | What is missing | Decision |
 |---|---|---|---|---|
 | F1–F2 | n/a | not built | | Apply when built. |
-| F3 | missing | `admin/people-admin.service.ts` | Errand counts for tiers leave out errands flagged for fraud (needs E6's flags). | implement (fix 11) |
+| F3 | done | `risk/flagged.ts`, `admin/people-admin.service.ts`; test: `risk-flags` | Tier counts leave out errands with an open or confirmed fraud flag. | done (fix 11a) |
 | F4 | after launch | | | after launch |
 
 ## Admin panel and staff (D)
