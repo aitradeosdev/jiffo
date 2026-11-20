@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  drizzle-orm@0.45.4:
+    hash: 259cc75e01a8f3479165c7463827323719a500fd4b6fed822d13dc3c2b877b5e
+    path: patches/drizzle-orm@0.45.4.patch
+
 importers:
 
   .:
@@ -116,7 +121,7 @@ importers:
         version: 5.81.5
       drizzle-orm:
         specifier: ~0.45.4
-        version: 0.45.4(@types/pg@8.23.1)(pg@8.23.1)
+        version: 0.45.4(patch_hash=259cc75e01a8f3479165c7463827323719a500fd4b6fed822d13dc3c2b877b5e)(@types/pg@8.23.1)(pg@8.23.1)
       heic-decode:
         specifier: 2.1.0
         version: 2.1.0
@@ -10620,7 +10625,7 @@ snapshots:
       esbuild: 0.25.12
       tsx: 4.23.15
 
-  drizzle-orm@0.45.4(@types/pg@8.23.1)(pg@8.23.1):
+  drizzle-orm@0.45.4(patch_hash=259cc75e01a8f3479165c7463827323719a500fd4b6fed822d13dc3c2b877b5e)(@types/pg@8.23.1)(pg@8.23.1):
     optionalDependencies:
       '@types/pg': 8.23.1
       pg: 8.23.1

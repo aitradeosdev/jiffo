@@ -32,6 +32,14 @@ Each one is listed under `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml` and 
 The test tools (`vitest` and what it pulls in, `vite` and `tinypool`) also have advisories. `vitest` is on 3.2.7,
 the newest 3.x. The rest goes away with the move to `vitest` 4. None of them is in what the apps ship.
 
+## Patched packages
+
+Each one is a file in `patches/`, listed under `patchedDependencies` in `pnpm-workspace.yaml`, and applied on every install. When the package is upgraded, check that the patch is still needed, and make it again for the new version (`pnpm patch`).
+
+| Package | What the patch changes | Why |
+| --- | --- | --- |
+| `drizzle-orm` 0.45.4 | A failed query's message is the database's reason followed by the query (with `$1`-style placeholders), not the query followed by every value sent with it. The values stay on the error's `params`, which nothing logs. | Since 0.44 drizzle puts the values in the message, so any logged database error would carry people's phone numbers, names or places into the logs, which must have none (R10, S7). Test: `db-errors`. |
+
 ## Adding a package
 
 Before adding one, check the list in [sdks.md](sdks.md) and whether something already there does the job. If it
