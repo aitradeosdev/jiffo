@@ -27,7 +27,6 @@ Each one is listed under `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml` and 
 
 | Advisory | Package | Why it doesn't reach Jiffo today | Fix |
 | --- | --- | --- | --- |
-| [GHSA-gpj5-g38j-94v9](https://github.com/advisories/GHSA-gpj5-g38j-94v9) | `drizzle-orm` < 0.45.2 | It's about SQL identifiers built from untrusted input. Jiffo's table and column names come only from the schema and constants in the code, never from a request. Values always go through parameters. | Upgrade to 0.45.2 or later in its own pull request. The query builder changed between 0.36 and 0.45, so every query needs retesting. |
 | [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) | `zod` < 4.6.6 | Zod can use a lot of memory checking a very large list against a size limit. JSON request bodies are capped at Express's 100 kB before zod sees them, so no list can be large, and every route is rate limited. | Upgrade to zod 4 in its own pull request. It's a major version, with changes to error messages and some schema methods. |
 
 The test tools (`vitest` and what it pulls in, `vite` and `tinypool`) also have advisories. `vitest` is on 3.2.7,
