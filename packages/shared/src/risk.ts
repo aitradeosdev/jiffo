@@ -143,7 +143,7 @@ export const RISK_FLAG_INFO: Record<RiskFlagKind, { queue: RiskQueue; label: str
     queue: 'risk',
     label: 'Risky sign-in',
     about:
-      'A sign-up or sign-in scored high: an emulator, a changed phone, many accounts on one phone, or a server address (A10).',
+      "A sign-up or sign-in scored high (A10): what the app found on the phone (an emulator, root, hooking tools, a debugger), many accounts on one phone, a VPN, or an address in a cloud provider's ranges.",
   },
   shared_payout_account: {
     queue: 'verification',

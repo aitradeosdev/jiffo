@@ -13,6 +13,7 @@ import { Badge, Card, Empty, Notice, PageHeader } from '@/components/ui';
 import { api, getCountry, getMe } from '@/lib/api';
 import { nameOf, type PersonRef } from '@/lib/errands';
 import { dateTime, money } from '@/lib/format';
+import { signInFinding } from '@/lib/flags';
 import { listLink } from '@/lib/links';
 import { FlagDecisionForm } from './decision';
 
@@ -95,6 +96,8 @@ function finding(f: Flag, naira: (kobo: number) => string) {
       return `Worth ${naira(Number(d.valueKobo))}, delivered ${Number(d.minutes)} min after accepting; the route needs at least ${Number(d.leastMinutes)} min`;
     case 'shared_payout_account':
       return `${String(d.bankName ?? 'Bank')} account ending ${String(d.last4 ?? '????')}`;
+    case 'risky_sign_in':
+      return signInFinding(d);
     default:
       return f.about;
   }

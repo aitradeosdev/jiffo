@@ -1,11 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { cloudIpRanges, devices, riskFlags } from '../src/db/schema';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { cloudIpRanges, devices, otpChallenges, riskFlags } from '../src/db/schema';
 import { CloudRangesService } from '../src/risk/cloud-ranges.service';
 import { RiskFlagsService } from '../src/risk/risk-flags.service';
-import { createTestApp, randomIp, randomPhone, type TestApp } from './helpers';
+import { SignInRiskService } from '../src/risk/sign-in-risk.service';
+import {
+  createTestApp,
+  passSelfie,
+  randomIp,
+  randomPhone,
+  signed,
+  signIn as signInAs,
+  type Person,
+  type TestApp,
+} from './helpers';
 
 /**
  * Risk at sign-up and sign-in (docs/security-plan.md, A10): what the app found on the phone, how many accounts
@@ -19,6 +29,34 @@ describe('sign-in risk', () => {
     t = await createTestApp();
   });
   afterAll(() => t.close());
+
+  const withdrawal = () => ({ amountKobo: 100_000, speed: 'scheduled', requestId: randomUUID() });
+
+  /** A phone number's last code is long past, so another can be asked for. */
+  const codeWaitOver = (phone: string) =>
+    t.db
+      .update(otpChallenges)
+      .set({ createdAt: sql`${otpChallenges.createdAt} - interval '1 hour'` })
+      .where(eq(otpChallenges.phone, phone));
+
+  /** Signs in again on the same phone, with these headers: the device keeps its key, so money actions reach it. */
+  const signInOn = async (who: Person, headers: Record<string, string>): Promise<Person> => {
+    await codeWaitOver(who.phone);
+    await request(t.http).post('/v1/auth/otp/request').send({ phone: who.phone }).expect(200);
+    const code = t.messaging.lastCodeFor(who.phone);
+    const res = await request(t.http)
+      .post('/v1/auth/otp/verify')
+      .set(headers)
+      .send({ phone: who.phone, code, app: 'agent', device: { key: who.installKey, platform: 'android' } })
+      .expect(200);
+    const accessToken = res.body.accessToken as string;
+    return {
+      ...who,
+      accessToken,
+      refreshToken: res.body.refreshToken,
+      headers: { Authorization: `Bearer ${accessToken}` },
+    };
+  };
 
   /** Signs in as the app does, with what it says about the phone and the connection. */
   const signIn = async (
@@ -145,5 +183,72 @@ describe('sign-in risk', () => {
       expect(await ranges.providerOf('192.0.2.9')).toBeNull();
       expect(await ranges.providerOf('not an address')).toBeNull();
     });
+  });
+
+  it('reads an IPv4 address written the IPv6 way, and an address it would choke on is no address', async () => {
+    const ranges = t.app.get(CloudRangesService);
+    await ranges.replace('oracle', ['198.18.77.0/24']);
+    expect(await ranges.providerOf('::ffff:198.18.77.9')).toBe('oracle');
+    expect(await ranges.providerOf('fe80::1%eth0')).toBeNull();
+  });
+
+  it("never fails a sign-in over its score: one that can't be worked out counts as none", async () => {
+    vi.spyOn(t.app.get(SignInRiskService), 'assess').mockRejectedValueOnce(new Error('database away'));
+    const { device } = await signIn('agent', { signals: 'emulator' });
+    expect(device.signInRiskScore).toBe(0);
+    vi.restoreAllMocks();
+  });
+
+  it('tells an agent the selfie a risky sign-in asks for is a check on the phone, not a new phone', async () => {
+    const agent = await signInAs(t, 'agent');
+    // The same phone signing in again, now looking like an emulator.
+    const again = await signInOn(agent, { 'x-jiffo-risk': 'emulator' });
+    const status = (await request(t.http).get('/v1/agent/selfie').set(again.headers).expect(200)).body;
+    expect(status.onThisPhone).toBe(true);
+    const money = await signed(t, again).post('/v1/wallet/withdrawals').send(withdrawal());
+    expect(money.status, JSON.stringify(money.body)).toBe(403);
+    expect(money.body.error).toMatchObject({ code: 'selfie_needed', reason: 'device_check' });
+    const started = await request(t.http).post('/v1/agent/selfie').set(again.headers).send({}).expect(200);
+    expect(started.body.reason).toBe('device_check');
+    // Passing it clears both.
+    await passSelfie(t, again);
+    const [device] = await t.db.select().from(devices).where(eq(devices.userId, agent.userId));
+    expect(device).toMatchObject({ selfieNeeded: false, selfieFor: null });
+  });
+
+  it("keeps a new phone's selfie reason when a risky sign-in asks for the same selfie", async () => {
+    const agent = await signInAs(t, 'agent');
+    await codeWaitOver(agent.phone);
+    const newPhone = await signInAs(t, 'agent', { phone: agent.phone, noSelfie: true });
+    const again = await signInOn(newPhone, { 'x-jiffo-risk': 'emulator' });
+    const money = await signed(t, again).post('/v1/wallet/withdrawals').send(withdrawal());
+    expect(money.body.error).toMatchObject({ code: 'selfie_needed', reason: 'new_device' });
+  });
+
+  it("stops reading a list that's bigger than any provider's, without holding it all", async () => {
+    const ranges = t.app.get(CloudRangesService);
+    await ranges.replace('aws', ['198.18.99.0/24']);
+    let pulled = 0;
+    const huge = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        if (pulled > 200) controller.close();
+        else controller.enqueue(new Uint8Array(1024 * 1024).fill(32));
+      },
+    });
+    const fetcher = (async (url: string) =>
+      String(url).includes('amazonaws') ? new Response(huge) : new Response('', { status: 503 })) as typeof fetch;
+    const kept = await ranges.refresh(fetcher);
+    expect(kept.aws).toBeUndefined();
+    expect(pulled).toBeLessThan(40);
+    expect(await ranges.providerOf('198.18.99.1')).toBe('aws');
+  });
+
+  it('fetches the ranges as the server starts while there are none, and not once there are', async () => {
+    const job = t.jobs.jobs.get('cloud_ranges.refresh')!;
+    await t.db.delete(cloudIpRanges);
+    expect(await job.runAtStartIf!()).toBe(true);
+    await t.app.get(CloudRangesService).replace('aws', ['198.18.5.0/24']);
+    expect(await job.runAtStartIf!()).toBe(false);
   });
 });

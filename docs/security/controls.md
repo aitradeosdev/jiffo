@@ -166,8 +166,8 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
   - a phone several accounts have signed in on in 90 days (Settings, Risk: 3, this one included), 2;
   - an address in a cloud provider's published ranges, a server rather than a phone, 2;
   - a VPN or a debugger, 1 each.
-- **What a high score does:** at the step-up score (Settings, Risk: 2), an agent needs a selfie before their money moves on that phone, as a doubtful app check does, and the sign-in is flagged for the Risk queue for a person to look at. A sign-in is never refused for its score. At 2, a VPN or a debugger on its own asks for nothing more; at 1, it does.
-- **Cloud providers' ranges:** fetched daily from each provider's own published list (AWS, Google Cloud, Azure, Oracle, DigitalOcean, Linode, Vultr). Nothing about anyone is sent to get them, and a list that can't be fetched keeps that provider's last ranges.
+- **What a high score does:** at the step-up score (Settings, Risk: 2), an agent needs a selfie before their money moves on that phone, as a doubtful app check does, and the sign-in is flagged for the Risk queue for a person to look at. The app tells the agent the selfie is a check on the phone; one already asked for on a new phone stays that, and the same selfie answers both. A sign-in is never refused for its score, and one whose score can't be worked out counts as scoring nothing, with an error logged. At 2, a VPN or a debugger on its own asks for nothing more; at 1, it does.
+- **Cloud providers' ranges:** fetched daily from each provider's own published list (AWS, Google Cloud, Azure, Oracle, DigitalOcean, Linode, Vultr), and as the server starts while none are kept yet. Nothing about anyone is sent to get them. A list that can't be fetched, or is bigger than 30 MB, keeps that provider's last ranges; the download stops at the limit rather than being read whole. An IPv4 address written the IPv6 way is read as the IPv4 address it is.
 - **For staff:** each device on a person's page shows its latest sign-in's score and why.
 
 ## Alerts about staff (D8)

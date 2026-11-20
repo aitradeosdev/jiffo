@@ -1,5 +1,5 @@
 {
-  "id": "a04757d3-a36b-456f-a6b1-2e81fe1e99a0",
+  "id": "610703b1-3eaf-4c4e-a915-95cfe24738b1",
   "prevId": "67b74595-b941-4458-b839-689c42ef7801",
   "version": "7",
   "dialect": "postgresql",
@@ -3105,6 +3105,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "selfie_for": {
+          "name": "selfie_for",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "risk_signals": {
           "name": "risk_signals",

@@ -64,6 +64,12 @@ export class CloudRangesService {
     return kept;
   }
 
+  /** Whether any provider's ranges are kept yet. */
+  async any() {
+    const { rows } = await this.db.execute(sql`select 1 from ${cloudIpRanges} limit 1`);
+    return rows.length > 0;
+  }
+
   /** The ranges in one provider's list, as it publishes it. Anything that isn't a range is left out. */
   parse(provider: CloudProvider, text: string): string[] {
     const ranges: unknown[] = [];
@@ -107,11 +113,16 @@ export class CloudRangesService {
     return ranges.length;
   }
 
-  /** The provider whose published ranges the address is in, or null. */
+  /**
+   * The provider whose published ranges the address is in, or null. An IPv4 address written the IPv6 way
+   * (::ffff:1.2.3.4, as a server listening on both sees one) is read as the IPv4 address it is.
+   */
   async providerOf(ip: string | null | undefined, db: Db = this.db): Promise<string | null> {
-    if (!ip || !isIP(ip)) return null;
+    const address = ip?.toLowerCase().startsWith('::ffff:') && isIP(ip.slice(7)) === 4 ? ip.slice(7) : ip;
+    // Only plain addresses: one with a zone (fe80::1%eth0) is a local link, and Postgres wouldn't read it.
+    if (!address || address.includes('%') || !isIP(address)) return null;
     const { rows } = await db.execute<{ provider: string }>(
-      sql`select provider from ${cloudIpRanges} where range >>= ${ip}::inet limit 1`,
+      sql`select provider from ${cloudIpRanges} where range >>= ${address}::inet limit 1`,
     );
     return rows[0]?.provider ?? null;
   }
@@ -127,13 +138,29 @@ export class CloudRangesService {
     return this.read(url, fetcher);
   }
 
+  /** A list's text, read a piece at a time: one past the limit is stopped there, not read whole first. */
   private async read(url: string, fetcher: typeof fetch) {
     const res = await fetcher(url, { headers: { accept: 'application/json, text/csv, text/plain, */*' } });
     if (!res.ok) throw new Error(`${url} answered ${res.status}`);
     const length = Number(res.headers.get('content-length') ?? 0);
-    if (length > MAX_BYTES) throw new Error(`${url} is too big (${length} bytes)`);
-    const text = await res.text();
-    if (text.length > MAX_BYTES) throw new Error(`${url} is too big`);
-    return text;
+    if (length > MAX_BYTES) {
+      await res.body?.cancel();
+      throw new Error(`${url} is too big (${length} bytes)`);
+    }
+    if (!res.body) return '';
+    const reader = res.body.getReader();
+    const pieces: Uint8Array[] = [];
+    let bytes = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_BYTES) {
+        await reader.cancel();
+        throw new Error(`${url} is too big (over ${MAX_BYTES} bytes)`);
+      }
+      pieces.push(value);
+    }
+    return Buffer.concat(pieces).toString('utf8');
   }
 }

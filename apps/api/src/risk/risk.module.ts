@@ -21,7 +21,10 @@ export class RiskModule implements OnModuleInit {
   onModuleInit() {
     // Daily, forget the networks not used for 90 days.
     this.jobs.register('networks.prune', '41 3 * * *', () => this.networks.prune());
-    // Daily, the cloud providers' published address ranges (A10).
-    this.jobs.register('cloud_ranges.refresh', '17 4 * * *', () => this.cloud.refresh());
+    // Daily, the cloud providers' published address ranges (A10), and at the start while there are none yet, so
+    // a new server doesn't wait for the first night to see them.
+    this.jobs.register('cloud_ranges.refresh', '17 4 * * *', () => this.cloud.refresh(), {
+      runAtStartIf: async () => !(await this.cloud.any()),
+    });
   }
 }

@@ -2,6 +2,7 @@ import { createHash, createHmac, createPublicKey, randomBytes, timingSafeEqual, 
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, gt, isNull, lt } from 'drizzle-orm';
 import { DEFAULT_SECURITY_SETTINGS } from '@jiffo/shared';
+import { phoneSelfieReason, SELFIE_WHY } from '../agents/phone-selfie';
 import { badRequest, forbidden } from '../common/errors';
 import { subKey } from '../common/keys';
 import { APP_CONFIG, type AppConfig } from '../config/app-config';
@@ -120,7 +121,7 @@ export class DeviceSecurityService {
         .set({
           publicKey: spki,
           keyAddedAt: new Date(),
-          ...(replaced && auth.app === 'agent' ? { selfieNeeded: true } : {}),
+          ...(replaced && auth.app === 'agent' ? { selfieNeeded: true, selfieFor: 'new_device' as const } : {}),
         })
         .where(eq(devices.id, auth.deviceId));
       return replaced ? this.holds.start(tx, auth.userId, 'new_device') : null;
@@ -151,14 +152,13 @@ export class DeviceSecurityService {
    */
   async precheck(auth: AuthContext, request: { nonce?: string; signature?: string }, pin: string | undefined | false) {
     const [device] = await this.db
-      .select({ key: devices.publicKey, selfieNeeded: devices.selfieNeeded })
+      .select({ key: devices.publicKey, selfieNeeded: devices.selfieNeeded, selfieFor: devices.selfieFor })
       .from(devices)
       .where(eq(devices.id, auth.deviceId));
     if (!device?.key) throw forbidden('device_key_needed', 'Set up this phone for money actions first');
-    // A new phone first shows it's the agent holding it (A4, X4).
-    if (device.selfieNeeded && auth.app === 'agent') {
-      throw forbidden('selfie_needed', 'Take a quick selfie to use money on this phone', { reason: 'new_device' });
-    }
+    // A new phone, or one a sign-in check doubted, first shows it's the agent holding it (A4, X4, MB3, A10).
+    const selfie = phoneSelfieReason(device);
+    if (selfie && auth.app === 'agent') throw forbidden('selfie_needed', SELFIE_WHY[selfie], { reason: selfie });
     if (!request.nonce || !request.signature) throw forbidden('signature_needed', 'Confirm this on your phone');
     if (pin !== false && !pin) throw forbidden('pin_missing', 'Enter your app PIN');
     return { key: device.key, nonce: request.nonce, signature: request.signature };

@@ -24,6 +24,9 @@ export interface SignInAssessment {
   details: { accounts?: number; provider?: string };
 }
 
+/** A sign-in with nothing found, and what one counts as when its score can't be worked out. */
+export const NO_SIGN_IN_RISK: SignInAssessment = Object.freeze({ score: 0, reasons: [], stepUp: false, details: {} });
+
 /**
  * How risky a sign-up or sign-in looks (docs/security-plan.md, A10), from what the app found on the phone, how
  * many accounts have used the phone, a VPN, and an address in a cloud provider's published ranges. Each adds

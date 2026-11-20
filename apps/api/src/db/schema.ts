@@ -187,6 +187,11 @@ export const devices = pgTable(
      * selfie check there first (docs/security-plan.md, A4, X4).
      */
     selfieNeeded: boolean('selfie_needed').notNull().default(false),
+    /**
+     * Why it's needed, for what the app tells the agent: a new phone, or a sign-in a check doubted (MB3, A10).
+     * Empty on phones from before it was kept, which were new phones.
+     */
+    selfieFor: text('selfie_for').$type<PhoneSelfieReason>(),
     /** What the app last found on this phone (MB4): root, an emulator, hooking tools, a debugger. */
     riskSignals: jsonb('risk_signals').$type<string[]>().notNull().default([]),
     riskSignalsAt: timestamp('risk_signals_at', { withTimezone: true }),
@@ -311,6 +316,8 @@ export const deviceAttestations = pgTable(
  */
 export const SELFIE_REASONS = ['daily', 'random', 'new_device', 'payout_change', 'device_check'] as const;
 export type SelfieReason = (typeof SELFIE_REASONS)[number];
+/** What asks for a selfie on one phone before money actions on it. */
+export type PhoneSelfieReason = Extract<SelfieReason, 'new_device' | 'device_check'>;
 
 /**
  * An agent's selfie check against the face their identity provider kept from their first check (Smile ID's

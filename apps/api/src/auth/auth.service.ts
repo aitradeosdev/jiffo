@@ -1,15 +1,15 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, gte, isNull, ne } from 'drizzle-orm';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { and, asc, eq, gte, isNull, ne, sql } from 'drizzle-orm';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { AttestationService, type AttestContext } from '../attestation/attestation.service';
 import { DB, type Db, type Tx } from '../db/database.module';
-import { devices, refreshTokens, sessions, users, type AppName } from '../db/schema';
+import { devices, refreshTokens, sessions, users, type AppName, type PhoneSelfieReason } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
 import { sha256 } from '../common/crypto';
 import { forbidden, unauthorized } from '../common/errors';
 import { PushService } from '../push/push.service';
 import { RiskFlagsService } from '../risk/risk-flags.service';
-import { SignInRiskService } from '../risk/sign-in-risk.service';
+import { NO_SIGN_IN_RISK, SignInRiskService } from '../risk/sign-in-risk.service';
 import { WithdrawalHoldsService } from '../money/withdrawal-holds.service';
 import { normalisePhone } from './phone';
 import { OtpService } from './otp.service';
@@ -47,6 +47,8 @@ export const publicUser = (u: typeof users.$inferSelect) => ({
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -113,16 +115,23 @@ export class AuthService {
     const phoneFingerprint = this.risk.phoneFingerprint(device.platform, device.phoneId);
     // How risky this sign-up or sign-in looks (A10). A high score asks for more, never refuses: a selfie before
     // an agent's money moves, and a person to look in the Risk queue.
-    const risk = await this.signInRisk.assess({
-      countryCode: country,
-      app,
-      userId: known?.id ?? null,
-      deviceKey: device.key,
-      phoneFingerprint,
-      signals: attest.evidence.signals ?? [],
-      network: client.network,
-      ip: client.ip,
-    });
+    // The code is used up by now, so a score that can't be worked out counts as none rather than failing the
+    // sign-in, and is logged.
+    const risk = await this.signInRisk
+      .assess({
+        countryCode: country,
+        app,
+        userId: known?.id ?? null,
+        deviceKey: device.key,
+        phoneFingerprint,
+        signals: attest.evidence.signals ?? [],
+        network: client.network,
+        ip: client.ip,
+      })
+      .catch((error: unknown) => {
+        this.logger.error(`A sign-in's risk couldn't be scored: ${(error as Error).message}`);
+        return NO_SIGN_IN_RISK;
+      });
     const signedIn = await this.db.transaction(async (tx) => {
       const inserted = await tx
         .insert(users)
@@ -156,8 +165,10 @@ export class AuthService {
           app,
           platform: device.platform,
           name: device.name ?? null,
-          // A new phone, or one the app check doubts, needs a selfie before money actions (A4, X4, MB3).
+          // A new phone, or one the app check or the sign-in's score doubts, needs a selfie before money actions
+          // (A4, X4, MB3, A10), and the agent is told which.
           selfieNeeded: newPhone || doubtful,
+          selfieFor: newPhone ? 'new_device' : doubtful ? 'device_check' : null,
           // What the app found on the phone (MB4), as it said at this sign-in.
           riskSignals: attest.evidence.signals ?? [],
           riskSignalsAt: new Date(),
@@ -172,7 +183,15 @@ export class AuthService {
             name: device.name ?? null,
             lastSeenAt: new Date(),
             forgottenAt: null,
-            ...(newPhone || doubtful ? { selfieNeeded: true } : {}),
+            ...(newPhone || doubtful
+              ? {
+                  selfieNeeded: true,
+                  // A selfie still to take for a new phone stays one: the same selfie answers both.
+                  selfieFor: newPhone
+                    ? ('new_device' as const)
+                    : sql<PhoneSelfieReason>`case when ${devices.selfieNeeded} then coalesce(${devices.selfieFor}, 'new_device') else 'device_check' end`,
+                }
+              : {}),
             riskSignals: attest.evidence.signals ?? [],
             riskSignalsAt: new Date(),
             signInRiskScore: risk.score,
