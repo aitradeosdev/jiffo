@@ -148,6 +148,15 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 - **Fingerprinted:** each upload's row keeps when it was checked and its copy's SHA-256 and size. Dispute evidence packs list them, so a photo shown later can be shown to be the one that was sent (E8). The admin errand page shows only checked photos.
 - **Seen through short links:** the bucket is private. The apps and the panel get a signed link each time they show a photo, which lasts the minutes Settings, Security give (5; at most 60).
 
+## Drop-off photos awaiting approval (X1–X3)
+
+- **Approved by itself:** when an agent leaves the items with a drop-off photo, the errand is approved automatically after 24 hours (Settings, Timers), for both the errand fee and the item money, unless the customer approves it, or reports a problem, first.
+- **Reminders:** the customer is reminded by push and SMS at 2, 12 and 20 hours after the photo (Settings, Security: the hours, each a paid SMS). Each says how long is left. None is sent once the customer has acted, support has stepped in, or the timer is paused, and none at or after the automatic approval.
+- **The Drop-offs queue:** the panel's Drop-offs page lists every drop-off photo waiting, the soonest to be approved first, with its photo, its timer, the customer, the agent and the money. Paused ones come last.
+- **Pause:** staff who handle errands can pause the automatic approval, with a reason, in the audit log. Nothing is approved or reminded while it is paused, and the customer can still approve it. Resuming starts it again with the time that was left, and the reminders still to come. Both sides are told each time.
+- **Freeze and decide:** stepping in moves the errand into dispute, which freezes the money and makes its evidence pack. Staff then decide on the errand's page: release to the agent, refund the customer, or split. A split above the set amount needs a second admin's approval (D4). Staff's decision replaces the automatic one.
+- **Timers:** each timer acts only on the errand exactly as it was when the timer was set. A pause, a resume, the customer's answer or a dispute leaves the old timers doing nothing.
+
 ## Chat warnings (C3)
 
 - **What is flagged:** a message whose text (or a photo's caption) has:

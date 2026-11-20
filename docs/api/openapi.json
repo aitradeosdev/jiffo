@@ -1519,6 +1519,43 @@
         ]
       }
     },
+    "/v1/admin/dropoffs": {
+      "get": {
+        "operationId": "AdminController.dropoffs",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "admin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "country",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 2,
+              "minLength": 2
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default",
+        "x-permission": [
+          "read"
+        ]
+      }
+    },
     "/v1/admin/errands": {
       "get": {
         "operationId": "AdminController.listErrands",
@@ -1668,6 +1705,8 @@
                     "enum": [
                       "admin_cancel",
                       "admin_intervene",
+                      "pause_release",
+                      "resume_release",
                       "redeliver",
                       "resolve_complete",
                       "resolve_cancel"

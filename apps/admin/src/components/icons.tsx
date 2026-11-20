@@ -123,6 +123,14 @@ export const SafetyIcon = () => (
   </Icon>
 );
 
+/** A camera: drop-off photos. */
+export const DropoffsIcon = () => (
+  <Icon>
+    <path d="M4 8h3l2-3h6l2 3h3v11H4z" />
+    <path d="M12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" />
+  </Icon>
+);
+
 export const FlagsIcon = () => (
   <Icon>
     <path d="M5 21V4" />

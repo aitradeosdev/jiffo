@@ -152,6 +152,10 @@ function describe(entry: Entry, names: Map<string, string>, currencyOf: (code: s
       return `Cancelled “${entry.targetLabel ?? 'an errand'}” before an agent took it`;
     case 'errand.admin_intervene':
       return `Stepped into “${entry.targetLabel ?? 'an errand'}”`;
+    case 'errand.pause_release':
+      return `Paused the automatic approval of “${entry.targetLabel ?? 'an errand'}”'s drop-off photo`;
+    case 'errand.resume_release':
+      return `Started the automatic approval of “${entry.targetLabel ?? 'an errand'}”'s drop-off photo again`;
     case 'errand.redeliver':
       return `Arranged a redelivery of “${entry.targetLabel ?? 'an errand'}”`;
     case 'errand.resolve_complete':

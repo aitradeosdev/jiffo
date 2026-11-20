@@ -42,6 +42,7 @@ export const DEFAULT_SECURITY_SETTINGS = {
   attestation: 'record' as 'off' | 'record' | 'enforce',
   trailDays: 90,
   signedLinkMinutes: 5,
+  releaseReminderHours: [2, 12, 20],
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -237,6 +238,21 @@ export const CountrySettingsSchema = z.object({
        * photos themselves are never public.
        */
       signedLinkMinutes: minutes.max(60).default(5),
+      /**
+       * When the customer is reminded of a drop-off photo waiting for them, by push and SMS, in hours after the
+       * agent sent it (X1, X3). Each is a paid SMS. One at or after the automatic approval is never sent.
+       */
+      releaseReminderHours: z
+        .array(
+          z
+            .number()
+            .int()
+            .min(1)
+            .max(24 * 7),
+        )
+        .max(6)
+        .refine((h) => h.every((v, i) => i === 0 || v > h[i - 1]!), 'List the hours from soonest to latest, once each')
+        .default([2, 12, 20]),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
   /**

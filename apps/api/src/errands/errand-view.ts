@@ -16,6 +16,7 @@ export const transitionContext = (errand: ErrandRow, actor: Actor): TransitionCo
   actor,
   buy: errand.buy,
   pendingOffer: errand.pendingOfferKobo !== null,
+  releasePaused: errand.releasePausedAt !== null,
 });
 
 export function eventsFor(errand: ErrandRow, role: ViewerRole): ErrandEvent[] {

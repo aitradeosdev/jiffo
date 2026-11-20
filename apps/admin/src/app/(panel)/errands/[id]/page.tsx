@@ -41,6 +41,9 @@ interface Detail {
     scheduledFor: string | null;
     agentTier: string | null;
     pinAttempts: number;
+    /** While a drop-off photo waits: when it is approved by itself, and since when that is paused (X1, X2). */
+    releaseDueAt: string | null;
+    releasePausedAt: string | null;
     createdAt: string;
   };
   customer: (PersonRef & { status: string }) | null;
@@ -84,6 +87,8 @@ const PHOTO: Record<string, string> = {
 const DONE: Record<string, string> = {
   admin_cancel: 'Errand cancelled. The customer has been told.',
   admin_intervene: 'You stepped in. The errand is in dispute and its money stays held.',
+  pause_release: 'Automatic approval paused. Both sides have been told.',
+  resume_release: 'Automatic approval running again. Both sides have been told.',
   redeliver: 'Redelivery arranged. Both sides have been told.',
   resolve_complete: 'Settled as complete. Both sides have been told.',
   resolve_cancel: 'Settled as cancelled. Both sides have been told.',
@@ -174,6 +179,15 @@ export default async function ErrandPage({
           </div>
           <h1 className="mt-2 max-w-3xl text-2xl leading-snug font-extrabold tracking-tight">{e.description}</h1>
           <p className="num mt-1 text-[13px] text-ink-3 select-all">{e.id}</p>
+          {e.status === 'photo_pending' ? (
+            <p className="mt-2 text-sm font-semibold">
+              {e.releasePausedAt
+                ? `Automatic approval paused since ${time(e.releasePausedAt)}`
+                : e.releaseDueAt
+                  ? `Approved automatically at ${time(e.releaseDueAt)}, unless the customer acts first`
+                  : null}
+            </p>
+          ) : null}
           {d.flags.length ? (
             <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Flags">
               {d.flags.map((f) => (
