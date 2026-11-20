@@ -130,6 +130,13 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 - **The GPS trail is fingerprinted, not copied:** the pack holds how many positions there were, the first and last, and a SHA-256 of them as kept then. The trail itself stays with the errand for as long as G4 allows, so a pack doesn't keep where someone was for longer.
 - **Fixed:** the database refuses any change to a pack, or its deletion (`dispute_evidence`, append-only, as the audit log is). Each pack carries a SHA-256 of its content as canonical JSON (keys in order): download it from the errand's page, and anyone can work the hash out again to show nothing changed since.
 
+## The emergency button and Safety queue (E9)
+
+- **In the apps:** both apps have an Emergency row in an errand's Help sheet and on the Account tab. Pressing it dials the country's emergency number from the phone at once (Settings, Safety: 112 in Nigeria); nothing waits on the network first.
+- **Then the app tells Jiffo:** who pressed, from which app, on which errand (the person's own only), and where the phone is, asking for location permission if it hasn't been asked. It keeps sending where the person is every 30 seconds for ten minutes, while the app runs. Presses within half an hour are one emergency.
+- **The Safety queue:** the panel's Safety page lists open emergencies oldest first, with the person, their errand, a map of where they were last and how many positions came after. Opening one raises an alert. The safety team (and operations, and owners) mark it handled with what they did, in the audit log, once; nobody handles one about their own account.
+- **Limits:** the app can only send where the person is while it runs; the emergency call itself is the phone's.
+
 ## The apps on the phone
 
 - **No screenshots (A9):** the PIN, wallet, top-up, withdrawal, payout account and ID check screens, the hand-off PIN (the customer's and the agent's), and the selfie check block screenshots and screen recording while they are in front (Android also hides them in the app switcher). An identity provider's own page opens in the phone's browser, outside the app, so the app can't block it there.

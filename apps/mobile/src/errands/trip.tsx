@@ -1,4 +1,5 @@
 import { CallButton, canCall } from './call';
+import { EmergencyRow } from '../safety/emergency-row';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
@@ -506,6 +507,7 @@ function HelpSheet({
         <>
           <Text variant="heading">Help with this errand</Text>
           <List>
+            <EmergencyRow errandId={errand.id} />
             <Row icon="chat" title={`Message ${name}`} subtitle="Sort most things out in the chat" onPress={onChat} />
             {can('release_agent') ? (
               <Row

@@ -15,7 +15,9 @@ export type FieldKind =
   | 'bool'
   | 'select'
   | 'multi'
-  | 'optionalText';
+  | 'optionalText'
+  /** A number dialled, such as an emergency number: kept as the digits typed, never as a quantity. */
+  | 'digits';
 
 export interface Field {
   path: string;
@@ -377,6 +379,18 @@ export const SECTIONS: Section[] = [
         label: 'Unusually fast: delivered within',
         kind: 'minutes',
         help: 'Of being accepted, or faster than the route takes at 60 km/h, whichever is longer.',
+      },
+    ],
+  },
+  {
+    title: 'Safety',
+    about: "The apps' emergency button dials this number from the phone and tells the safety team where the person is.",
+    fields: [
+      {
+        path: 'safety.emergencyNumber',
+        label: 'Emergency number',
+        kind: 'digits',
+        help: '2 to 6 digits, as dialled in the country. 112 in Nigeria.',
       },
     ],
   },

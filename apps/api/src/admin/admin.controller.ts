@@ -25,6 +25,7 @@ import { ProvidersAdminService } from './providers-admin.service';
 import { APPLICATION_STATUSES, ApplicationsAdminService } from './applications-admin.service';
 import { ID_CHECK_STATUSES, IdChecksAdminService } from './id-checks-admin.service';
 import { FlagsAdminService } from './flags-admin.service';
+import { SafetyAdminService } from './safety-admin.service';
 import {
   adminErrandPermission,
   AGENT_TIERS,
@@ -174,6 +175,14 @@ const FlagsQuery = z.object({
 const EvidenceId = new ParseUUIDPipe({
   exceptionFactory: () => notFound('evidence_not_found', 'Evidence pack not found'),
 });
+const SafetyQuery = z.object({
+  country: z.string().length(2).toUpperCase(),
+  status: z.enum(['open', 'handled']).default('open'),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+const EmergencyId = new ParseUUIDPipe({
+  exceptionFactory: () => notFound('emergency_not_found', 'Emergency not found'),
+});
 const FlagCountsQuery = FlagsQuery.pick({ country: true, person: true, errand: true });
 const FlagId = new ParseUUIDPipe({ exceptionFactory: () => notFound('flag_not_found', 'Flag not found') });
 const FlagDecisionBody = z.object({ decision: z.enum(['clear', 'confirm', 'reopen']), note: Note });
@@ -214,6 +223,7 @@ export class AdminController {
     private readonly applications: ApplicationsAdminService,
     private readonly idChecks: IdChecksAdminService,
     private readonly flags: FlagsAdminService,
+    private readonly safety: SafetyAdminService,
     private readonly providerSettings: ProvidersAdminService,
     private readonly approvals: ApprovalsService,
     private readonly gated: ApprovalRequests,
@@ -545,6 +555,32 @@ export class AdminController {
     @Body(new ZodBody(IdDecisionBody)) body: z.infer<typeof IdDecisionBody>,
   ) {
     return this.idChecks.decide(admin, id, body);
+  }
+
+  /* ---------- The Safety queue: emergencies pressed in the apps (E9) ---------- */
+
+  @Get('safety')
+  @Needs('read')
+  listEmergencies(@Query(new ZodBody(SafetyQuery)) query: z.infer<typeof SafetyQuery>) {
+    return this.safety.list(query);
+  }
+
+  @Get('safety/counts')
+  @Needs('read')
+  emergencyCounts(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
+    return this.safety.counts(query.country);
+  }
+
+  /** The safety team followed it up: what they did, with the reason in the audit log. */
+  @Post('safety/:id/handle')
+  @HttpCode(200)
+  @Needs('safety')
+  handleEmergency(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', EmergencyId) id: string,
+    @Body(new ZodBody(NoteBody)) body: z.infer<typeof NoteBody>,
+  ) {
+    return this.safety.handle(admin, id, body.note);
   }
 
   /* ---------- Fraud flags: the Risk and verification queues (E5, E6, I3) ---------- */

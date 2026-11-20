@@ -20,6 +20,8 @@ export const ADMIN_PERMISSIONS = [
   'verify',
   /** Deciding the Risk queue: errands flagged for cash, collusion and other signs of fraud. */
   'risk',
+  /** Handling the Safety queue: emergencies pressed in the apps. */
+  'safety',
   /** Wallet adjustments and refunds, payout accounts, the nightly checks and money alerts. */
   'money',
   /** Prices, fees, timers, limits, categories, states and providers. */
@@ -42,7 +44,7 @@ export const ADMIN_ROLE_INFO: Record<
   operations: {
     label: 'Operations',
     about: 'Errands, disputes, the Risk queue, suspensions and agent tiers',
-    permissions: ['read', 'errands', 'disputes', 'risk', 'suspend', 'tiers', 'reveal'],
+    permissions: ['read', 'errands', 'disputes', 'risk', 'safety', 'suspend', 'tiers', 'reveal'],
   },
   disputes: { label: 'Disputes', about: 'Settling disputes', permissions: ['read', 'disputes', 'reveal'] },
   verification: {
@@ -57,8 +59,8 @@ export const ADMIN_ROLE_INFO: Record<
   },
   safety: {
     label: 'Safety',
-    about: 'Suspending accounts that put people at risk',
-    permissions: ['read', 'suspend', 'reveal'],
+    about: 'The Safety queue, and suspending accounts that put people at risk',
+    permissions: ['read', 'safety', 'suspend', 'reveal'],
   },
   support: { label: 'Support', about: 'Can look, but not change anything', permissions: ['read'] },
 };

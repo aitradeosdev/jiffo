@@ -17,6 +17,7 @@ import { JiffoMap } from '../ui/map/map';
 import { StopMark } from '../ui/map/pins';
 import type { MapPin } from '../ui/map/types';
 import { CallButton, canCall } from '../errands/call';
+import { EmergencyRow } from '../safety/emergency-row';
 import { Segments } from '../errands/progress';
 import { stepTime } from '../errands/stage';
 import { Lines, StageChip } from '../errands/trip';
@@ -589,6 +590,7 @@ function HelpSheet({
         <>
           <Text variant="heading">Help with this errand</Text>
           <List>
+            <EmergencyRow errandId={errand.id} />
             <Row icon="chat" title={`Message ${name}`} subtitle="Sort most things out in the chat" onPress={onChat} />
             <Row icon="nav" title="Directions" subtitle="Open your maps app" onPress={onDirections} />
             {can('open_dispute') ? (
