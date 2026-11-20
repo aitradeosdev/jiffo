@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+# Gradle's output for Jiffo's own native modules
+/modules/*/android/build/
+/modules/*/android/.cxx/
