@@ -269,7 +269,11 @@ export class AgentApplicationService implements IdentityOwner {
 
   /** Asks the provider for the identity result, and keeps it once it is back. */
   private async settleIdentity(app: Application) {
-    const result = await this.checks.result({ provider: app.identityProvider!, reference: app.identityReference! });
+    const result = await this.checks.result({
+      provider: app.identityProvider!,
+      reference: app.identityReference!,
+      userId: app.userId,
+    });
     if (result.status === 'pending') {
       // Remembered, so the checklist doesn't ask the provider again before POLL_EVERY_MS.
       await this.db

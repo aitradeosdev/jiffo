@@ -15,6 +15,7 @@ interface AppAttestNative {
   attestAppleKey(keyId: string, clientDataHash: string): Promise<string>;
   appleAssertion(keyId: string, clientDataHash: string): Promise<string>;
   phoneId?(): Promise<string | null>;
+  networkType?(): Promise<string | null>;
 }
 
 const native = requireOptionalNativeModule<AppAttestNative>('AppAttest');
@@ -47,6 +48,18 @@ export const appAttest: AttestNative | null = native
 export async function phoneId(): Promise<string | null> {
   try {
     return (await native?.phoneId?.()) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What the connection is (docs/security-plan.md, E6): wifi, cellular, ethernet, vpn, or none. Null where it
+ * can't be told (the web, Expo Go, a build without it).
+ */
+export async function networkType(): Promise<string | null> {
+  try {
+    return (await native?.networkType?.()) ?? null;
   } catch {
     return null;
   }

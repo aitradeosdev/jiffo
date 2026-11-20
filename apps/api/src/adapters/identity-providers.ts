@@ -108,6 +108,34 @@ interface SmileCallback {
     date_of_birth?: string;
     id_number?: string;
   } | null;
+  /** Smile Secure's matches with other checks, as its current docs describe them. */
+  antifraud?: { smile_secure?: { suspect_users?: SmileSuspect[] } };
+  /** And as its older docs did. */
+  Antifraud?: { smile_secure?: { SuspectUsers?: SmileSuspect[] } };
+}
+
+/** A check Smile Secure found to be of the same person: by our reference for it, and why. */
+interface SmileSuspect {
+  user_id?: unknown;
+  reasons?: unknown;
+}
+
+/**
+ * Smile Secure's matches (docs/security-plan.md, I3): earlier checks of ours with the same face or ID number.
+ * It runs on each check when Smile ID has switched it on for the account. A user id that can't be one of our
+ * references is dropped.
+ */
+function relatedOf(body: SmileCallback): IdentityResult['related'] {
+  const suspects = body.antifraud?.smile_secure?.suspect_users ?? body.Antifraud?.smile_secure?.SuspectUsers;
+  if (!Array.isArray(suspects)) return undefined;
+  const related = suspects.flatMap((s) => {
+    const reasons = Array.isArray(s?.reasons) ? s.reasons : [];
+    const face = reasons.includes('same-face');
+    const idNumber = reasons.includes('same-id-number');
+    const reference = typeof s?.user_id === 'string' && /^[\w-]{1,100}$/.test(s.user_id) ? s.user_id : null;
+    return reference && (face || idNumber) ? [{ reference, face, idNumber }] : [];
+  });
+  return related.length ? related : undefined;
 }
 
 /** Each ID as Smile ID names it, and how it is checked: against the issuer's photo, or the document's. */
@@ -243,6 +271,9 @@ export class SmileIdIdentityAdapter implements IdentityAdapter {
       ],
       idNumber: fields?.id_number,
     };
+    // Like the ID's fields, read from the body: Smile ID's status API doesn't give them.
+    const related = relatedOf(body);
+    if (related) result.related = related;
     // The signature covers only the timestamp, so the API accepts it, for this job, with this body only.
     return { reference, result, replayKey: `${signature}:${jobId}` };
   }

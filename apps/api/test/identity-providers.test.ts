@@ -113,6 +113,43 @@ describe('Smile ID', () => {
       expect(resultOf(await make(running.impl).parseWebhook(callback('clear'), signed()))?.status).toBe('pending');
     });
 
+    it("passes on Smile Secure's matches with other checks, in either shape Smile ID documents (I3)", async () => {
+      const { impl } = withStatus({ status: 'clear', job_id: 'job_01', user_id: 'jid-1' });
+      const current = callback('clear', {
+        antifraud: {
+          smile_secure: {
+            status: 'attention',
+            suspect_users: [
+              { user_id: 'cid-9', reasons: ['same-face'] },
+              { user_id: 'jid-2', reasons: ['same-id-number', 'same-face'] },
+              { user_id: 'jid-3', reasons: ['same-id-number'] },
+              { user_id: '<script>', reasons: ['same-face'] },
+            ],
+          },
+        },
+      });
+      expect(resultOf(await make(impl).parseWebhook(current, signed()))?.related).toEqual([
+        { reference: 'cid-9', face: true, idNumber: false },
+        { reference: 'jid-2', face: true, idNumber: true },
+        { reference: 'jid-3', face: false, idNumber: true },
+      ]);
+      const legacy = callback('clear', {
+        Antifraud: {
+          summary: { fraud_detected: true, fraud_sources: ['smile_secure'] },
+          smile_secure: {
+            ResultCode: '5211',
+            ResultText: 'Suspect Users Found',
+            SuspectUsers: [{ user_id: 'cid-9', reasons: ['same-face'] }],
+          },
+        },
+      });
+      expect(resultOf(await make(impl).parseWebhook(legacy, signed()))?.related).toEqual([
+        { reference: 'cid-9', face: true, idNumber: false },
+      ]);
+      // Nothing found, or Smile Secure not switched on: nothing passed on.
+      expect(resultOf(await make(impl).parseWebhook(callback('clear'), signed()))).not.toHaveProperty('related');
+    });
+
     it('refuses forged, old or misdirected callbacks', async () => {
       const ok = withStatus({ status: 'clear', user_id: 'jid-1' });
       const smile = make(ok.impl);

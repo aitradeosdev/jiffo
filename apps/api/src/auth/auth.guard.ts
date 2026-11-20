@@ -4,6 +4,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { sessions, users, type AppName } from '../db/schema';
 import { forbidden, unauthorized } from '../common/errors';
+import { NETWORK_HEADER, NetworksService } from '../risk/networks.service';
 import { TokensService } from './tokens.service';
 import type { AuthContext, AuthedRequest, TokenClaims } from './auth.types';
 
@@ -63,6 +64,7 @@ export class AuthGuard implements CanActivate {
   constructor(
     private readonly verifier: SessionVerifier,
     private readonly reflector: Reflector,
+    private readonly networks: NetworksService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -76,6 +78,8 @@ export class AuthGuard implements CanActivate {
       context.getClass(),
     ]);
     if (apps && !apps.includes(req.auth.app)) throw forbidden('wrong_app', `Use the ${apps.join(' or ')} app for this`);
+    // The network it came over, for the shared-network flags (E6); written beside the request, never failing it.
+    this.networks.seen(req.auth.userId, req.ip, req.header(NETWORK_HEADER));
     return true;
   }
 }

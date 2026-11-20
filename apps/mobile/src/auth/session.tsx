@@ -9,6 +9,7 @@ import { appCheck } from './app-check';
 import { deviceKey, keepDeviceKeyOnThisPhone } from './install-key';
 import { deviceKeyRemove } from '../../modules/device-key';
 import { phoneId } from '../../modules/app-attest';
+import { networkHeaders } from './network';
 import type { CodeSent, SignedIn, User } from '../api/types';
 
 const TOKENS_KEY = `jiffo.${VARIANT}.tokens`;
@@ -48,7 +49,12 @@ let onSignedOut: () => void = () => undefined;
  * task uses it directly. Sharing it means a token refresh is never done twice at once, which the server
  * would take as a stolen refresh token.
  */
-export const sharedApi = createApiClient({ baseUrl: API_URL, store: tokenStore, onSignedOut: () => onSignedOut() });
+export const sharedApi = createApiClient({
+  baseUrl: API_URL,
+  store: tokenStore,
+  onSignedOut: () => onSignedOut(),
+  headers: networkHeaders,
+});
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>('loading');

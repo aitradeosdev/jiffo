@@ -38,6 +38,8 @@ export interface ApiOptions {
   baseUrl: string;
   store: TokenStore;
   fetchImpl?: typeof fetch;
+  /** Headers every request carries, such as the connection kind (docs/security-plan.md, E6). */
+  headers?: () => Promise<Record<string, string>>;
   /** Called once the session can't be refreshed: the app goes back to sign-in. */
   onSignedOut?: () => void;
   now?: () => number;
@@ -71,6 +73,7 @@ export function createApiClient(options: ApiOptions) {
     headers: Record<string, string> = {},
   ) {
     let res: Response;
+    const always = (await options.headers?.().catch(() => ({}))) ?? {};
     try {
       res = await fetchImpl(`${options.baseUrl}${path}`, {
         method,
@@ -78,6 +81,7 @@ export function createApiClient(options: ApiOptions) {
           accept: 'application/json',
           ...(body === undefined ? {} : { 'content-type': 'application/json' }),
           ...(token ? { authorization: `Bearer ${token}` } : {}),
+          ...always,
           ...headers,
         },
         body: body === undefined ? undefined : JSON.stringify(body),

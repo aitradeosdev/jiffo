@@ -2,14 +2,35 @@ import Darwin
 import DeviceCheck
 import ExpoModulesCore
 import MachO
+import Network
 import UIKit
 
 /// Apple App Attest (docs/security-plan.md, MB3): a key made in the Secure Enclave that Apple attests is our
 /// store app's, on a genuine iPhone. Apple attests it once; after that it signs an assertion over each checked
 /// request. Hashes come in as hex; Apple's answers go back as base64.
 public class AppAttestModule: Module {
+  /// Follows the connection from the start, so its kind is known when a request asks.
+  private let paths: NWPathMonitor = {
+    let monitor = NWPathMonitor()
+    monitor.start(queue: DispatchQueue(label: "jiffo.network"))
+    return monitor
+  }()
+
   public func definition() -> ModuleDefinition {
     Name("AppAttest")
+
+    /// What the connection is (docs/security-plan.md, E6): wifi, cellular, ethernet, or none. A VPN shows as
+    /// other. Sent with requests, so a phone network's or a VPN's address, which thousands share, isn't taken
+    /// for a home's.
+    AsyncFunction("networkType") { () -> String in
+      let path = self.paths.currentPath
+      guard path.status == .satisfied else { return "none" }
+      if path.usesInterfaceType(.other) { return "vpn" }
+      if path.usesInterfaceType(.wifi) { return "wifi" }
+      if path.usesInterfaceType(.cellular) { return "cellular" }
+      if path.usesInterfaceType(.wiredEthernet) { return "ethernet" }
+      return "other"
+    }
 
     /// A new key; its id. Not on the simulator, or on a phone too old for App Attest.
     AsyncFunction("newAppleKey") { (promise: Promise) in

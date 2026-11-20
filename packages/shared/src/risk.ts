@@ -38,10 +38,12 @@ export const RISK_FLAG_KINDS = [
   'same_place',
   'pair_shared_phone',
   'pair_shared_bank',
+  'pair_shared_network',
   'repeat_pairing',
   'fast_high_value',
   'shared_phone',
   'shared_payout_account',
+  'same_face',
 ] as const;
 export type RiskFlagKind = (typeof RISK_FLAG_KINDS)[number];
 
@@ -71,6 +73,11 @@ export const RISK_FLAG_INFO: Record<RiskFlagKind, { queue: RiskQueue; label: str
     label: "Topped up from the agent's account",
     about: "The customer's wallet was topped up from a bank account in the name on the agent's payout account (E6).",
   },
+  pair_shared_network: {
+    queue: 'risk',
+    label: 'Customer and agent share a network',
+    about: "The customer's and the agent's phones used the same Wi-Fi network or internet address (E6).",
+  },
   repeat_pairing: {
     queue: 'risk',
     label: 'Same customer and agent again and again',
@@ -90,6 +97,11 @@ export const RISK_FLAG_INFO: Record<RiskFlagKind, { queue: RiskQueue; label: str
     queue: 'verification',
     label: 'Bank account on two accounts',
     about: 'Two agents saved the same bank account for their withdrawals (I3).',
+  },
+  same_face: {
+    queue: 'verification',
+    label: 'Same face, another account',
+    about: "The identity provider found this person's face on another account's ID check (I3).",
   },
 };
 

@@ -43,9 +43,9 @@ const STATUS: Record<RiskFlagStatus, { label: string; tone: 'warn' | 'neutral' |
 };
 
 const QUEUE_ABOUT: Record<RiskQueue, string> = {
-  risk: "Errands that look like fraud: cash runs, money sent to accounts, a customer and agent who share a phone or bank, the same pair again and again, high-value errands finished too fast. A flag refuses nothing: you decide. Flagged errands are left out of the agent's counts for tiers until cleared.",
+  risk: "Errands that look like fraud: cash runs, money sent to accounts, a customer and agent who share a phone, a network or a bank, the same pair again and again, high-value errands finished too fast. A flag refuses nothing: you decide. Flagged errands are left out of the agent's counts for tiers until cleared.",
   verification:
-    "Accounts that share a phone, where at least one is an agent's, and bank accounts two agents saved. Look at both accounts before deciding: family members do share phones.",
+    "Accounts that share a phone, where at least one is an agent's, bank accounts two agents saved, and a face the identity provider found on another account. Look at both accounts before deciding: family members do share phones.",
 };
 
 const DONE: Record<string, string> = {
@@ -75,6 +75,14 @@ function finding(f: Flag, naira: (kobo: number) => string) {
       return `Seen on ${list(d.by)
         .map((b) => SHARED_BY[b] ?? b)
         .join(', ')}`;
+    case 'pair_shared_network':
+      return list(d.by).includes('wifi')
+        ? 'Both phones used the same Wi-Fi network in the last weeks'
+        : 'Both phones used the same internet address in the last weeks';
+    case 'same_face':
+      return d.sameIdNumber
+        ? 'The identity provider found this face, with the same ID number, on the other account'
+        : "The identity provider found this face on the other account's check, with another ID";
     case 'repeat_pairing':
       return `${f.errandCount} errands together within ${Number(d.days)} days`;
     case 'fast_high_value':

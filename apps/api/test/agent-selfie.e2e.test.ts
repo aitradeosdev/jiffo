@@ -132,7 +132,12 @@ describe('agent selfie checks', () => {
       return (
         saved && {
           ...saved,
-          settings: { ...saved.settings, security: { ...saved.settings.security, randomSelfiePercent: 100 } },
+          // The day's selfie is off, so a selfie an hour old can't be yesterday's when the test runs just
+          // after midnight in Lagos.
+          settings: {
+            ...saved.settings,
+            security: { ...saved.settings.security, randomSelfiePercent: 100, dailySelfie: false },
+          },
         }
       );
     });

@@ -2,11 +2,12 @@
  * Agents' selfie checks (docs/security-plan.md, A4, I2, I8, P8, X4): what the app asks the server and how it
  * waits for the verdict. Plain TypeScript, so it runs in tests without React Native.
  */
+import { providerInfo } from '@jiffo/shared';
 import { ApiError } from '../api/client';
 
 export type SelfieReason = 'daily' | 'random' | 'new_device' | 'payout_change' | 'device_check';
 
-/** What the provider's SDK needs, from the server: for Smile ID, a token for this check alone. */
+/** What the provider's SDK needs, from the server: for some, a token for this check alone. */
 export interface SelfieSession {
   enrolledId: string;
   reference: string;
@@ -16,6 +17,10 @@ export interface SelfieSession {
   /** Shown before the selfie is taken, as the notice the agent agrees to. */
   privacyPolicyUrl?: string;
 }
+
+/** The identity provider by name, for what the agent reads; until the check has started, in general words. */
+export const checkerName = (provider: string | undefined) =>
+  (provider && providerInfo('identity', provider)?.name) || 'Our identity checker';
 
 export interface StartedSelfie {
   id: string;
