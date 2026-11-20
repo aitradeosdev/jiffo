@@ -48,9 +48,15 @@ static TrustKit *pinningKit = nil;
     domains[host] = domain;
   }
   pinningKit = [[TrustKit alloc] initWithConfiguration:@{kTSKPinnedDomains : domains}];
+  NSSet<NSString *> *pinned = [NSSet setWithArray:[hosts.allKeys valueForKey:@"lowercaseString"]];
 
-  // Every new WebSocket checks the pins; one to a host that isn't pinned is checked as usual.
+  // A WebSocket to a pinned host checks the pins. React Native makes any other itself (nil here), with the
+  // subprotocols it was asked for; a pinned one goes without them, which socket.io doesn't use.
   RCTSetCustomSRWebSocketProvider(^SRWebSocket *_Nullable(NSURLRequest *request) {
+    NSString *host = request.URL.host.lowercaseString;
+    if (host == nil || ![pinned containsObject:host]) {
+      return nil;
+    }
     return [[SRWebSocket alloc] initWithURLRequest:request
                                          protocols:nil
                                     securityPolicy:[JiffoPinnedSocketPolicy new]];

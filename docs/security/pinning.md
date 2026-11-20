@@ -15,7 +15,9 @@ The apps can pin the API's certificate authorities: they then talk to the API on
 - **An end date:** the pins carry an end date, at most 13 months after the build. From that day the app checks certificates as usual, without the pins, rather than locking out people who haven't updated.
 - **A remote switch:** a small document the server's key signs (Ed25519), published at an `https://` address on a host the apps don't pin, so it still reaches them when a pin stops matching.
   - **Reading it:** each time the app starts, before its first request, it fetches the switch, waiting at most 3 seconds.
-  - **Taking it:** only a switch signed with the server's key, and newer than the last one taken, so an old one sent again changes nothing. The phone keeps the last one it took.
+  - **Taking it:** only a switch signed with the server's key, and newer than both the last one taken and the build itself, so an old one sent again changes nothing. The phone keeps the last one it took.
+    - **One gap:** an "off" works until its end on a phone that hasn't fetched the later "on", for example one not opened since. Someone who saved the "off" could serve it to that phone until the "off" ends. So keep each "off" as short as the fix needs.
+  - **Clocks:** a switch dated up to a day ahead of the phone's clock is taken, so a phone whose clock is hours slow still gets an emergency "off".
   - **Off:** a switch can turn pinning off for at most 7 days, until an end it names. After that the pins apply again.
 - **Never in the way:** the app checks certificates as usual instead of pinning when:
   - the pins' end date has passed;
@@ -53,10 +55,18 @@ Do each step for staging first (the `preview` builds), and only for production (
    ```
 
    `PINNING_SWITCH_KEY` goes in the build settings. Keep `PINNING_SWITCH_PRIVATE_KEY` as a secret, where only those who may turn pinning off can reach it (a password manager, or the server's secrets). It never goes in the apps or the repository.
-5. **Publish the switch**, on an `https://` address on a host the apps don't pin: a file in a storage bucket or on a CDN, not the API's own host. Start with "on":
+5. **Publish the switch**, on an `https://` address on a host the apps don't pin: a file in a storage bucket or on a CDN, not the API's own host.
+
+   Load the private key into the terminal without it showing or going into the shell's history. This asks for it; paste it and press Enter:
 
    ```bash
-   PINNING_SWITCH_PRIVATE_KEY=<the private key> pnpm --filter @jiffo/api pinning-switch sign --on > pinning.json
+   read -rs PINNING_SWITCH_PRIVATE_KEY && export PINNING_SWITCH_PRIVATE_KEY
+   ```
+
+   Then start with "on". The command writes the document to the file it's given, and nothing else:
+
+   ```bash
+   pnpm --filter @jiffo/api pinning-switch sign --on --out "$PWD/pinning.json"
    ```
 
    Upload `pinning.json`; its address is `PINNING_SWITCH_URL`. Make sure the host doesn't cache it for long (a few minutes at most).
@@ -88,8 +98,10 @@ With staging's API serving a certificate from the first pinned authority:
 3. **The switch, off:** with that build still installed, publish an "off" for 2 hours and restart the app. It reaches the API again.
 
    ```bash
-   PINNING_SWITCH_PRIVATE_KEY=<the private key> pnpm --filter @jiffo/api pinning-switch sign --off --hours 2 > pinning.json
+   pnpm --filter @jiffo/api pinning-switch sign --off --hours 2 --out "$PWD/pinning.json"
    ```
+
+   (With the private key loaded as in step 5 of turning it on.)
 
 4. **The switch, on again:** publish `sign --on` and restart the app: it can't reach the API again.
 5. **No replays:** upload the earlier "off" document again and restart: the app stays pinned.

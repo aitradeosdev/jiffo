@@ -58,9 +58,12 @@ describe('the pinning switch', () => {
     ).not.toBeNull();
   });
 
-  it('refuses one dated in the future, beyond a phone clock being a little off', () => {
-    expect(readSwitch(signed({ pinning: 'on', issuedAt: at(2 * HOUR) }), verify, now)).toBeNull();
-    expect(readSwitch(signed({ pinning: 'on', issuedAt: at(5 * 60_000) }), verify, now)).not.toBeNull();
+  it('takes one from a phone whose clock is hours slow, and refuses one dated more than a day ahead', () => {
+    // A phone set 2 hours behind still takes an emergency "off" signed just now.
+    const off = { pinning: 'off', issuedAt: at(2 * HOUR), until: at(4 * HOUR) } as const;
+    expect(readSwitch(signed(off), verify, now)).toEqual(off);
+    // One dated far ahead (a signing machine's clock gone wrong) would block every later switch: refused.
+    expect(readSwitch(signed({ pinning: 'on', issuedAt: at(25 * HOUR) }), verify, now)).toBeNull();
   });
 
   it('takes only a switch newer than the one kept, so an old one sent again changes nothing', () => {

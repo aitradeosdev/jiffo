@@ -1,7 +1,7 @@
 import { createPublicKey, verify } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { PINNING_OFF_MAX_MS, readSwitch } from '@jiffo/shared';
-import { newSwitchKeys, signSwitch } from '../src/pinning/switch';
+import { newSwitchKeys, signSwitch, switchCommand } from '../src/pinning/switch';
 
 /**
  * The server's side of the remote pinning switch (docs/security-plan.md, MB7): its key pair, and the signed
@@ -46,5 +46,34 @@ describe('pinning switch signing', () => {
       signSwitch(keys.privateKey, { pinning: 'off', hours: PINNING_OFF_MAX_MS / 3_600_000 + 1 }, now),
     ).toThrow(/hours/);
     expect(() => signSwitch('not a key', { pinning: 'on' }, now)).toThrow(/PINNING_SWITCH_PRIVATE_KEY/);
+  });
+
+  describe('the command', () => {
+    const keys = newSwitchKeys();
+    const env = { PINNING_SWITCH_PRIVATE_KEY: keys.privateKey };
+
+    it('writes the switch alone to the file given, ready to upload', () => {
+      const run = switchCommand(['sign', '--off', '--hours', '48', '--out', 'pinning.json'], env, now);
+      expect(run.code).toBe(0);
+      expect(run.file?.path).toBe('pinning.json');
+      // The whole file is the document: nothing printed around it, as a shell redirect of pnpm would add.
+      expect(readSwitch(JSON.parse(run.file!.text), verifierFor(keys.publicKey), now)).toMatchObject({
+        pinning: 'off',
+      });
+    });
+
+    it('takes whole hours only, from 1 to 168', () => {
+      for (const hours of ['0.5', '1e2', '169', '0', 'two']) {
+        const run = switchCommand(['sign', '--off', '--hours', hours, '--out', 'pinning.json'], env, now);
+        expect(run.code, hours).toBe(1);
+        expect(run.file).toBeUndefined();
+      }
+    });
+
+    it('asks for a file, and for on or off, not both', () => {
+      expect(switchCommand(['sign', '--on'], env, now).code).toBe(1);
+      expect(switchCommand(['sign', '--on', '--off', '--out', 'p.json'], env, now).code).toBe(1);
+      expect(switchCommand(['sign', '--on', '--out', 'p.json'], env, now).code).toBe(0);
+    });
   });
 });

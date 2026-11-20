@@ -33,6 +33,8 @@ describe('pinning build settings', () => {
       expires: '2027-09-30',
       switchUrl: 'https://status.jiffo-cdn.example/pinning.json',
       switchKey: hash('k'),
+      // A switch signed before the build can't turn its pins off.
+      issuedAfter: new Date(TODAY).toISOString(),
     });
     expect(pinningFor({ ...ready, PINNING_HOSTS: 'api.jiffo.example, ws.jiffo.example' }, TODAY)?.hosts).toEqual([
       'api.jiffo.example',
@@ -78,6 +80,17 @@ describe('pinning build settings', () => {
     );
     // On a pinned host it couldn't be fetched when the pins fail, which is when it's needed.
     expect(() => pinningFor({ ...ready, PINNING_SWITCH_URL: 'https://api.jiffo.example/pinning.json' }, TODAY)).toThrow(
+      /pinned/,
+    );
+  });
+
+  it("stops a build whose PINNING_HOSTS leaves the API out, or isn't plain host names", () => {
+    expect(() => pinningFor({ ...ready, PINNING_HOSTS: 'ws.jiffo.example' }, TODAY)).toThrow(/API/);
+    expect(() => pinningFor({ ...ready, PINNING_HOSTS: 'https://api.jiffo.example' }, TODAY)).toThrow(/host name/);
+    expect(() => pinningFor({ ...ready, PINNING_HOSTS: 'api.jiffo.example:443' }, TODAY)).toThrow(/host name/);
+    // Host names are compared as the phone compares them, whatever their case.
+    expect(pinningFor({ ...ready, PINNING_HOSTS: 'API.Jiffo.example' }, TODAY)?.hosts).toEqual(['api.jiffo.example']);
+    expect(() => pinningFor({ ...ready, PINNING_HOSTS: 'api.jiffo.example,Status.Jiffo-CDN.example' }, TODAY)).toThrow(
       /pinned/,
     );
   });

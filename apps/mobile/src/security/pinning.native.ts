@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import { initializeSslPinning, isSslPinningAvailable } from 'react-native-ssl-public-key-pinning';
+import { disableSslPinning, initializeSslPinning, isSslPinningAvailable } from 'react-native-ssl-public-key-pinning';
 import { pinWebSockets, socketPinningAvailable } from '../../modules/socket-pinning';
 import { VARIANT } from '../config';
 import { secureStorage } from '../storage';
@@ -41,6 +41,7 @@ export function pinningReady(): Promise<PinningState> {
       available: () => isSslPinningAvailable() && socketPinningAvailable(),
       pinRequests: (hosts) => initializeSslPinning(hosts),
       pinWebSockets,
+      unpinRequests: disableSslPinning,
     },
   }).catch((): PinningState => 'failed');
   return started;

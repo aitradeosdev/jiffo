@@ -57,6 +57,11 @@ export interface PinningSettings {
   switchUrl: string;
   /** The switch's Ed25519 public key, base64 (32 bytes), from `pnpm --filter @jiffo/api pinning-switch keygen`. */
   switchKey: string;
+  /**
+   * When the build was made: a switch signed before it can't turn its pins off, so an old "off" can't be replayed
+   * to a new install, which has kept no later "on".
+   */
+  issuedAfter: string;
 }
 
 /**
@@ -102,7 +107,14 @@ export function pinningFor(env: Record<string, string | undefined>, now = Date.n
 
   const api = new URL(apiUrlFor(env));
   if (api.protocol !== 'https:') fail("the API's address (EXPO_PUBLIC_API_URL) must be https:// to be pinned");
-  const hosts = list(env.PINNING_HOSTS).length ? list(env.PINNING_HOSTS) : [api.hostname];
+  // Host names as the phone compares them: lowercase, no scheme, port or path.
+  const hosts = list(env.PINNING_HOSTS).length ? list(env.PINNING_HOSTS).map((h) => h.toLowerCase()) : [api.hostname];
+  for (const host of hosts) {
+    if (!/^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host)) {
+      fail(`PINNING_HOSTS takes plain host names, such as api.example.com (${host})`);
+    }
+  }
+  if (!hosts.includes(api.hostname)) fail(`PINNING_HOSTS must include the API's host (${api.hostname})`);
 
   const switchUrl = env.PINNING_SWITCH_URL ?? '';
   if (!switchUrl) fail('PINNING_SWITCH_URL must name where the signed switch is published');
@@ -122,7 +134,7 @@ export function pinningFor(env: Record<string, string | undefined>, now = Date.n
   if (!/^[A-Za-z0-9+/]{43}=$/.test(switchKey) || Buffer.from(switchKey, 'base64').length !== 32) {
     fail('PINNING_SWITCH_KEY must be the switch public key `pinning-switch keygen` printed');
   }
-  return { hosts, pins, expires, switchUrl, switchKey };
+  return { hosts, pins, expires, switchUrl, switchKey, issuedAfter: new Date(now).toISOString() };
 }
 
 /**

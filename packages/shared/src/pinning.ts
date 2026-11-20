@@ -24,8 +24,12 @@ export interface SignedPinningSwitch {
 
 /** The longest an "off" may last: long enough to ship an app with new pins, short enough not to linger. */
 export const PINNING_OFF_MAX_MS = 7 * 24 * 3_600_000;
-/** How far ahead of the phone's clock a switch may be dated, for phones whose clock is a little off. */
-export const PINNING_SWITCH_SKEW_MS = 10 * 60_000;
+/**
+ * How far ahead of the phone's clock a switch may be dated: a day, so a phone whose clock is hours slow still takes
+ * an emergency "off" signed just now. Further ahead, it is a signing machine's clock gone wrong, and taking it would
+ * block every later switch.
+ */
+export const PINNING_SWITCH_SKEW_MS = 24 * 3_600_000;
 
 /** Checks an Ed25519 signature over a message with the server's switch key. */
 export type SwitchVerifier = (message: Uint8Array, signature: Uint8Array) => boolean;

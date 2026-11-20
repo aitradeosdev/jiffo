@@ -22,6 +22,8 @@ describe('starting certificate pinning', () => {
     expires: '2027-09-30',
     switchUrl: 'https://status.jiffo-cdn.example/pinning.json',
     switchKey,
+    // Built a month before the tests' "now".
+    issuedAfter: new Date(Date.parse('2026-10-20T12:00:00Z')).toISOString(),
   };
   const signed = (s: PinningSwitch) => {
     const payload = switchPayload(s);
@@ -34,6 +36,7 @@ describe('starting certificate pinning', () => {
       available: vi.fn(() => true),
       pinRequests: vi.fn(async () => {}),
       pinWebSockets: vi.fn(async () => {}),
+      unpinRequests: vi.fn(async () => {}),
     };
     const deps: PinningDeps = {
       config,
@@ -123,10 +126,41 @@ describe('starting certificate pinning', () => {
     expect(await startPinning(setup({ fetchSwitch: vi.fn(async () => signed(off)) }, onLater).deps)).toBe('on');
   });
 
+  it("refuses an off signed before the build, so an old one can't be replayed to a new install", async () => {
+    const off = {
+      pinning: 'off',
+      issuedAt: new Date(now - 2 * HOUR).toISOString(),
+      until: new Date(now + HOUR).toISOString(),
+    } as const;
+    const builtLater = { ...config, issuedAfter: new Date(now - HOUR).toISOString() };
+    expect(await startPinning(setup({ config: builtLater, fetchSwitch: vi.fn(async () => signed(off)) }).deps)).toBe(
+      'on',
+    );
+    const builtEarlier = { ...config, issuedAfter: new Date(now - 3 * HOUR).toISOString() };
+    expect(await startPinning(setup({ config: builtEarlier, fetchSwitch: vi.fn(async () => signed(off)) }).deps)).toBe(
+      'switched_off',
+    );
+  });
+
+  it("takes the request pins off again when the WebSockets can't be pinned, so both are checked alike", async () => {
+    const native = {
+      available: () => true,
+      pinRequests: vi.fn(async () => {}),
+      pinWebSockets: vi.fn(async () => {
+        throw new Error('no WebSocket pinning');
+      }),
+      unpinRequests: vi.fn(async () => {}),
+    };
+    expect(await startPinning(setup({ native }).deps)).toBe('failed');
+    expect(native.unpinRequests).toHaveBeenCalled();
+  });
+
   it("goes on without pins where the app can't pin (Expo Go, the web), or the native side fails", async () => {
     expect(
       await startPinning(
-        setup({ native: { available: () => false, pinRequests: vi.fn(), pinWebSockets: vi.fn() } }).deps,
+        setup({
+          native: { available: () => false, pinRequests: vi.fn(), pinWebSockets: vi.fn(), unpinRequests: vi.fn() },
+        }).deps,
       ),
     ).toBe('unavailable');
     const failing = {
@@ -135,6 +169,7 @@ describe('starting certificate pinning', () => {
         throw new Error('TrustKit');
       }),
       pinWebSockets: vi.fn(),
+      unpinRequests: vi.fn(async () => {}),
     };
     expect(await startPinning(setup({ native: failing }).deps)).toBe('failed');
   });

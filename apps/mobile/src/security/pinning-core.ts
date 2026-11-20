@@ -7,6 +7,8 @@ export interface PinningConfig {
   expires: string;
   switchUrl: string;
   switchKey: string;
+  /** When the build was made: a switch signed before it is ignored. */
+  issuedAfter: string;
 }
 
 /** What each pinned host gets, as the pinning library and the WebSocket pinning take it. */
@@ -30,6 +32,8 @@ export interface PinningDeps {
     available: () => boolean;
     pinRequests: (hosts: PinnedHosts) => Promise<void>;
     pinWebSockets: (hosts: PinnedHosts) => Promise<void>;
+    /** Takes the request pins off, when the WebSockets couldn't get theirs. */
+    unpinRequests: () => Promise<void>;
   };
 }
 
@@ -40,7 +44,8 @@ export interface PinningDeps {
  * - switched_off: a signed switch has it off for now;
  * - on: the hosts are pinned for requests and WebSockets;
  * - unavailable: the app can't pin here (Expo Go, the web);
- * - failed: the native side refused the pins, so certificates are checked as normal rather than locking people out.
+ * - failed: the native side refused the pins, for requests or WebSockets, so both are checked as normal rather than
+ *   locking people out.
  */
 export type PinningState = 'not_built' | 'expired' | 'switched_off' | 'on' | 'unavailable' | 'failed';
 
@@ -70,14 +75,19 @@ export async function startPinning(deps: PinningDeps): Promise<PinningState> {
   // The same end the native side uses: from the start of that day, UTC.
   if (now > Date.parse(`${config.expires}T00:00:00Z`)) return 'expired';
 
-  const kept = parseKept(await deps.storage.get().catch(() => null));
+  // The build counts as a switch it took when it was made: one signed earlier, such as an old "off" replayed to a
+  // new install, changes nothing.
+  const built: PinningSwitch = { pinning: 'on', issuedAt: config.issuedAfter };
+  const kept = nextSwitch(built, parseKept(await deps.storage.get().catch(() => null)));
   const key = fromBase64(config.switchKey);
   const received = await deps
     .fetchSwitch(config.switchUrl)
     .then((doc) => readSwitch(doc, (message, signature) => deps.verify(message, signature, key), now))
     .catch(() => null);
   const current = nextSwitch(kept, received);
-  if (current && current !== kept) await deps.storage.set(JSON.stringify(current)).catch(() => undefined);
+  if (current && current !== kept && current !== built) {
+    await deps.storage.set(JSON.stringify(current)).catch(() => undefined);
+  }
   if (pinningSwitchedOff(current, now)) return 'switched_off';
 
   if (!deps.native.available()) return 'unavailable';
@@ -89,9 +99,15 @@ export async function startPinning(deps: PinningDeps): Promise<PinningState> {
   );
   try {
     await deps.native.pinRequests(hosts);
+  } catch {
+    return 'failed';
+  }
+  try {
     await deps.native.pinWebSockets(hosts);
     return 'on';
   } catch {
+    // Requests and WebSockets are checked alike: both as usual, rather than the sign-in token's socket unpinned.
+    await deps.native.unpinRequests().catch(() => undefined);
     return 'failed';
   }
 }
