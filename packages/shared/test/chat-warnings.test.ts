@@ -108,4 +108,40 @@ describe('chat warnings', () => {
     expect(warningsOf({})).toEqual([]);
     expect(warningsOf(undefined)).toEqual([]);
   });
+
+  it("can't be dodged by a number just before, or by brackets", () => {
+    for (const text of ['buy 2 08031234567', 'Item 12 08031234567', 'time 10:30 08031234567', '(0803) 123-4567']) {
+      expect(chatWarnings(text), text).toContain('phone');
+    }
+    expect(chatWarnings('I need 3 0123456789')).toContain('account_number');
+    expect(chatWarnings('08031234567 or 0123456789')).toEqual(['phone', 'account_number']);
+    expect(chatWarnings('GTB0123456789')).toContain('account_number');
+    expect(chatWarnings('buy 12345678901kg')).toEqual([]);
+    // A whole number is read as one: the end of a +234 number isn't an account number.
+    expect(chatWarnings('2 +234 803 123 4567')).toEqual(['phone']);
+  });
+
+  it("doesn't take a sentence run into the next, or an email address, for a link", () => {
+    for (const text of [
+      'Thanks.Me too',
+      'I am here.Online now',
+      'Got it.Shop is closed',
+      'done.Top',
+      'email me at john@gmail.com',
+    ]) {
+      expect(chatWarnings(text), text).not.toContain('link');
+    }
+    expect(chatWarnings('GOOGLE.COM')).toContain('link');
+  });
+
+  it("doesn't warn about the agent paying the shop", () => {
+    for (const text of [
+      'I will pay cash at the shop',
+      'pay cash to the vendor',
+      'I will transfer to their account (the shop)',
+      'The seller wants me to pay by transfer to his account',
+    ]) {
+      expect(chatWarnings(text), text).not.toContain('pay_outside');
+    }
+  });
 });

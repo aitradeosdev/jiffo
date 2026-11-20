@@ -152,7 +152,7 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 
 - **What is flagged:** a message whose text (or a photo's caption) has:
   - a link (with or without `http` or `www`, short links such as `wa.me` and `bit.ly` too);
-  - a phone number (Nigerian with or without `+234`, or any number written with a `+`);
+  - a phone number (Nigerian with or without `+234`, with spaces, dashes or brackets, or any number written with a `+`), even with another number just before it;
   - a bank account number (ten digits, with or without spaces);
   - wording that asks to be paid outside the app ("pay me directly", "transfer to my account", "send it to my OPay", "outside the app", "don't pay in the app").
 - **Decided by the server:** the server checks each message as it is sent, with the rules in `packages/shared/src/chat-warnings.ts`, and keeps the answer with the message. The apps can't set or clear it.
@@ -160,7 +160,8 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 - **Staff:** the errand's page in the panel marks each warned message ("Warned: account number, pay outside the app"). Dispute evidence packs keep the warnings with the chat.
 - **Limits:**
   - Numbers written in words, or split across messages, aren't caught.
-  - Ordinary amounts are left alone on purpose, so a ten-digit amount reads as an account number.
+  - Prices, times and quantities are left alone, but any ten-digit number (an order reference, say) reads as an account number.
+  - An agent paying the shop in cash or by transfer isn't warned about: only paying "me", "us" or "you", or into "my" or "our" account or wallet, is.
 - **No link previews:** links in chat are plain text. Neither the apps nor the server ever open one, so nothing can be fetched from an internal or private address.
 
 ## The apps on the phone

@@ -26,26 +26,39 @@ export const CHAT_WARNING_LABELS: Record<ChatWarning, string> = {
 
 /** Endings of the web addresses people send, for one written without http or www. */
 const TLDS = 'com|net|org|ng|io|co|me|app|link|xyz|info|biz|online|site|shop|store|ly|gl|to|tv|cc|top|live|page|africa';
-const LINKS: RegExp[] = [
-  /\bhttps?:\/\/\S+/i,
-  /\bwww\.[a-z0-9-]+\.[a-z]{2,}/i,
-  new RegExp(`\\b[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9-]+)*\\.(?:${TLDS})\\b(?![.-]?\\w)`, 'i'),
-  new RegExp(`\\b[a-z0-9][a-z0-9-]*\\.(?:${TLDS})\\/\\S*`, 'i'),
-];
+const LINKS: RegExp[] = [/\bhttps?:\/\/\S+/i, /\bwww\.[a-z0-9-]+\.[a-z]{2,}/i];
+/**
+ * An address written without http or www, such as paystack.shop/pay or wa.me/234...; its ending is captured.
+ * Not the part of an email address after the @.
+ */
+const BARE_ADDRESS = new RegExp(`(?<![@\\w.-])[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9-]+)*\\.(${TLDS})(?![\\w-]|\\.\\w)`, 'gi');
+
+function hasLink(text: string) {
+  if (LINKS.some((p) => p.test(text))) return true;
+  for (const m of text.matchAll(BARE_ADDRESS)) {
+    // "Thanks.Me too" is one sentence run into the next, not an address.
+    if (!/^[A-Z][a-z]+$/.test(m[1]!)) return true;
+  }
+  return false;
+}
 
 /** Wallet apps people are asked to be paid into, in Nigeria. */
 const WALLETS = 'opay|palmpay|moniepoint|kuda|paga';
+/**
+ * Asking the other side to pay, or be paid, outside the app. The payee is "me", "us" or "you", or the account
+ * is "my" or "our": an agent paying the shop in cash or by transfer, as errands need, isn't warned about.
+ */
 const PAY_OUTSIDE: RegExp[] = [
-  // "pay me directly", "I'll pay you cash", "pay outside".
-  /\bpay\s+(?:(?:me|you|him|her|them|us)\s+)?(?:directly|direct|outside|cash|in\s+cash|privately|by\s+transfer|via\s+transfer|off[\s-]?(?:the\s+)?app)\b/i,
+  // "pay me directly", "I'll pay you cash".
+  /\bpay\s+(?:me|us|you)\s+(?:directly|direct|cash|in\s+cash|privately|by\s+transfer|via\s+transfer)\b/i,
   // "transfer to my account", "send the money to my opay".
   new RegExp(
-    `\\b(?:send|transfer|pay|credit|wire)\\b[^.!?\\n]{0,40}?\\b(?:to|into)\\s+(?:my|his|her|their|our)\\s+(?:bank\\s+|personal\\s+)?(?:account|acct|a\\/c|wallet|${WALLETS})\\b`,
+    `\\b(?:send|transfer|pay|credit|wire)\\b[^.!?\\n]{0,40}?\\b(?:to|into)\\s+(?:my|our)\\s+(?:bank\\s+|personal\\s+)?(?:account|acct|a\\/c|wallet|${WALLETS})\\b`,
     'i',
   ),
   // "do bank transfer to me".
-  /\b(?:do|make|send)\s+(?:a\s+)?(?:bank\s+)?transfer\s+(?:to|into)\s+(?:me|my)\b/i,
-  // "outside the app", "outside jiffo", "off the app".
+  /\b(?:do|make|send)\s+(?:a\s+)?(?:bank\s+)?transfer\s+(?:to|into)\s+(?:me|my|us|our)\b/i,
+  // "outside the app", "pay outside jiffo", "off the app".
   /\b(?:outside|off)\s+(?:of\s+)?(?:the\s+)?(?:app|jiffo)\b/i,
   // "don't pay in the app".
   /\b(?:don['’]?t|do\s+not|no\s+need\s+to)\s+pay\s+(?:in|on|through|via|with)\s+(?:the\s+)?(?:app|jiffo)\b/i,
@@ -53,12 +66,18 @@ const PAY_OUTSIDE: RegExp[] = [
   new RegExp(`\\bmy\\s+(?:${WALLETS})\\b`, 'i'),
 ];
 
-/** A run of digits, with single spaces, dots or dashes between them, and a + in front if there is one. */
-const DIGIT_RUN = /(?<![\w+])(\+\s?)?\d(?:[ .-]?\d)+(?!\w)/g;
+/**
+ * Each whole group of digits, unless a unit follows it (1.5kg, 10am). Letters before don't stop one being
+ * read (GTB0123456789).
+ */
+const DIGIT_GROUP = /(?<!\d)\d+(?![A-Za-z\d])/g;
+/** What may come between the groups of one number: a space, dot or dash, and brackets, as in (0803) 123-4567. */
+const JOINER = /^[ ()]{0,2}[.-]?[ ()]{0,2}$/;
+/** The most groups one number is read from. */
+const MAX_GROUPS = 6;
 
-/** What a run of digits looks like: a phone number, an account number, both, or neither (a price, say). */
-function numberKinds(run: string, plus: boolean): ChatWarning[] {
-  const digits = run.replace(/\D/g, '');
+/** What some digits are: a phone number, an account number, both, or neither (a price, say). */
+function numberKinds(digits: string, plus: boolean): ChatWarning[] {
   if (plus) return digits.length >= 8 && digits.length <= 15 ? ['phone'] : [];
   if (digits.length === 13 && digits.startsWith('234')) return ['phone'];
   if (digits.length === 11 && digits.startsWith('0')) return ['phone'];
@@ -67,11 +86,39 @@ function numberKinds(run: string, plus: boolean): ChatWarning[] {
   return [];
 }
 
+/**
+ * The phone and account numbers in the text. From each group of digits, the longest run of joined groups
+ * that reads as a number is taken, then the search goes on after it: so a number just after another one
+ * ("buy 2 08031234567") is still found, and the end of a whole number isn't read as a second one.
+ */
+function numberWarnings(text: string): ChatWarning[] {
+  const groups = [...text.matchAll(DIGIT_GROUP)].map((m) => ({
+    digits: m[0],
+    start: m.index,
+    end: m.index + m[0].length,
+  }));
+  const out: ChatWarning[] = [];
+  let i = 0;
+  while (i < groups.length) {
+    const plus = /\+\s?$/.test(text.slice(Math.max(0, groups[i]!.start - 2), groups[i]!.start));
+    let digits = '';
+    let best: { last: number; kinds: ChatWarning[] } | null = null;
+    for (let j = i; j < groups.length && j < i + MAX_GROUPS; j++) {
+      if (j > i && !JOINER.test(text.slice(groups[j - 1]!.end, groups[j]!.start))) break;
+      digits += groups[j]!.digits;
+      const kinds = numberKinds(digits, plus);
+      if (kinds.length) best = { last: j, kinds };
+    }
+    if (best) out.push(...best.kinds);
+    i = best ? best.last + 1 : i + 1;
+  }
+  return out;
+}
+
 /** The warnings for a message's text, each once, in a fixed order. */
 export function chatWarnings(text: string): ChatWarning[] {
-  const found = new Set<ChatWarning>();
-  if (LINKS.some((p) => p.test(text))) found.add('link');
-  for (const m of text.matchAll(DIGIT_RUN)) for (const kind of numberKinds(m[0], !!m[1])) found.add(kind);
+  const found = new Set<ChatWarning>(numberWarnings(text));
+  if (hasLink(text)) found.add('link');
   if (PAY_OUTSIDE.some((p) => p.test(text))) found.add('pay_outside');
   return CHAT_WARNINGS.filter((w) => found.has(w));
 }
