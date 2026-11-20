@@ -77,9 +77,9 @@ describe('pinning build settings', () => {
       /https/,
     );
     // On a pinned host it couldn't be fetched when the pins fail, which is when it's needed.
-    expect(() =>
-      pinningFor({ ...ready, PINNING_SWITCH_URL: 'https://api.jiffo.example/pinning.json' }, TODAY),
-    ).toThrow(/pinned/);
+    expect(() => pinningFor({ ...ready, PINNING_SWITCH_URL: 'https://api.jiffo.example/pinning.json' }, TODAY)).toThrow(
+      /pinned/,
+    );
   });
 
   it('stops a build that pins an API it reaches without HTTPS', () => {
