@@ -1,0 +1,48 @@
+diff --git a/errors.cjs b/errors.cjs
+index b593f0da263a7ad7904f44e89f1c0992c39c4aad..62acacc9873f1831ddd311daa74cad5aa0a3a5b5 100644
+--- a/errors.cjs
++++ b/errors.cjs
+@@ -32,10 +32,17 @@ class DrizzleError extends Error {
+     this.cause = cause;
+   }
+ }
++// The database's reason for a failed query, without the values sent with it. A data exception (SQLSTATE class
++// 22, such as invalid input syntax) quotes the value it couldn't read, so only its code is given.
++function queryErrorReason(cause) {
++  if (!cause) return "Failed query";
++  const code = typeof cause.code === "string" ? cause.code : "";
++  return code.startsWith("22") ? `invalid value (${code})` : cause.message;
++}
+ class DrizzleQueryError extends Error {
+   constructor(query, params, cause) {
+-    super(`Failed query: ${query}
+-params: ${params}`);
++    super(`${queryErrorReason(cause)}
++query: ${query}`);
+     this.query = query;
+     this.params = params;
+     this.cause = cause;
+diff --git a/errors.js b/errors.js
+index 6db8b6365e30f239bf2738504937ed81733e82dd..a07995a297e278b62fcc1ba7b386196317c8c0b8 100644
+--- a/errors.js
++++ b/errors.js
+@@ -7,10 +7,17 @@ class DrizzleError extends Error {
+     this.cause = cause;
+   }
+ }
++// The database's reason for a failed query, without the values sent with it. A data exception (SQLSTATE class
++// 22, such as invalid input syntax) quotes the value it couldn't read, so only its code is given.
++function queryErrorReason(cause) {
++  if (!cause) return "Failed query";
++  const code = typeof cause.code === "string" ? cause.code : "";
++  return code.startsWith("22") ? `invalid value (${code})` : cause.message;
++}
+ class DrizzleQueryError extends Error {
+   constructor(query, params, cause) {
+-    super(`Failed query: ${query}
+-params: ${params}`);
++    super(`${queryErrorReason(cause)}
++query: ${query}`);
+     this.query = query;
+     this.params = params;
+     this.cause = cause;

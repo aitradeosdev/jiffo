@@ -10,9 +10,12 @@ onlyBuiltDependencies:
 # high or critical advisory in what the apps ship.
 auditConfig:
   ignoreGhsas:
-    # drizzle-orm < 0.45.2: SQL identifiers built from input are escaped wrongly. Jiffo's come only from its
-    # own schema and constants. Upgrade planned.
-    - GHSA-gpj5-g38j-94v9
     # zod < 4.6.6: oversized collections can exhaust memory. Request bodies are capped in size. zod 4 is a
     # major upgrade, planned.
     - GHSA-mrhx-c7xc-m3w5
+
+# Changes to packages, each with its reason in docs/security/dependencies.md.
+patchedDependencies:
+  # A failed query's message names the database's reason and the query, not the values sent with it, which
+  # would otherwise reach the logs (R10, S7).
+  drizzle-orm@0.45.4: patches/drizzle-orm@0.45.4.patch
