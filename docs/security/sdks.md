@@ -30,6 +30,7 @@ uses it.
 | `expo-location`, `expo-task-manager` | An agent's live location while on a job, and the customer's own location when they choose it | Location, with the person's permission |
 | `react-native-maps` | Maps for errands and live tracking | The platform's map service |
 | `expo-image-picker` | Photos in chat, receipts, proof of delivery and selfies | Camera and photos, with permission |
+| `expo-image-manipulator` | Saving each photo as a JPEG no larger than the server keeps, before it is sent (C1). Smile ID's SDK needs it too | The photo being sent |
 | `expo-notifications` | Push notifications | The platform's push service |
 | `expo-web-browser`, `expo-linking` | Opening an identity provider's page and coming back to the app | The browser |
 | `expo-clipboard` | Copying an account number for a top-up | The clipboard, when the person taps copy |
@@ -39,7 +40,7 @@ uses it.
 | `@smileid/usesmileid_mlkit_face`, `@smileid/usesmileid_vision_face` | Finding the face in the selfie camera: Google's ML Kit on Android, Apple's Vision on iOS, on the phone | Nothing beyond the phone |
 | `react-native-quick-crypto`, `react-native-quick-base64`, `react-native-nitro-modules` | Required by Smile ID's SDK, which signs its own requests to Smile ID | Nothing beyond the app |
 | `lottie-react-native` | Required by Smile ID's SDK, for its animations | Nothing beyond the app |
-| `expo-brightness`, `expo-file-system`, `expo-haptics`, `expo-image-manipulator`, `expo-keep-awake`, `expo-screen-orientation` | Required by Smile ID's SDK: screen brightness and orientation while the selfie is taken, the selfie file until it is sent, haptics | The screen and the app's own files |
+| `expo-brightness`, `expo-file-system`, `expo-haptics`, `expo-keep-awake`, `expo-screen-orientation` | Required by Smile ID's SDK: screen brightness and orientation while the selfie is taken, the selfie file until it is sent, haptics | The screen and the app's own files |
 
 Smile ID's optional peers that only add device metadata (`expo-battery`, `expo-cellular`, `expo-network`, `expo-sensors`, `@react-native-async-storage/async-storage`) aren't installed.
 
@@ -66,5 +67,7 @@ Smile ID's optional peers that only add device metadata (`expo-battery`, `expo-c
 | `zod` | Checking every request body |
 | `libphonenumber-js` | Reading and checking phone numbers |
 | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | Photo storage, with links that expire |
+| `sharp` 0.35.5 (libvips, from its prebuilt binaries) | Opening every uploaded photo and writing it again as a plain JPEG, without location or camera details (C1). Runs on the server only | Nothing beyond the server |
+| `heic-decode` 2.1.0 (with `libheif-js`, libheif built to WebAssembly) | Opening HEIC photos, as iPhones save them, which `sharp`'s prebuilt binaries can't, on a worker thread (C1) | Nothing beyond the server |
 | `@aws-sdk/client-sesv2` | Admin team emails through Amazon SES, when that's the email provider chosen in the panel |
 | `@jiffo/shared` | Jiffo's own shared rules and types |

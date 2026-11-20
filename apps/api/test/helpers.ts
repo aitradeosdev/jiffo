@@ -1,6 +1,7 @@
 import { generateKeyPairSync, randomInt, randomUUID, sign, type KeyObject } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import sharp from 'sharp';
 import request from 'supertest';
 import { needsPasskey } from '@jiffo/shared';
 import { AppModule } from '../src/app.module';
@@ -402,7 +403,12 @@ export async function balanceOf(t: TestApp, person: Person) {
   return (await request(t.http).get('/v1/wallet').set(person.headers).expect(200)).body;
 }
 
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+/** A real, tiny JPEG: the server opens every photo it is sent (docs/security-plan.md, C1). */
+let jpeg: Promise<Buffer> | undefined;
+const smallJpeg = () =>
+  (jpeg ??= sharp({ create: { width: 8, height: 8, channels: 3, background: '#888' } })
+    .jpeg()
+    .toBuffer());
 
 /** Uploads a small photo for an errand the way the apps do, and returns its key for an event or message. */
 export async function photo(
@@ -411,16 +417,17 @@ export async function photo(
   errandId: string,
   purpose: 'receipt' | 'item_photo' | 'dropoff_photo' | 'chat_photo',
 ) {
+  const bytes = await smallJpeg();
   const res = await request(t.http)
     .post('/v1/uploads')
     .set(person.headers)
-    .send({ errandId, purpose, contentType: 'image/jpeg', size: JPEG.length })
+    .send({ errandId, purpose, contentType: 'image/jpeg', size: bytes.length })
     .expect(201);
   const url = new URL(res.body.upload.url);
   await request(t.http)
     .put(url.pathname + url.search)
     .set('content-type', 'image/jpeg')
-    .send(JPEG)
+    .send(bytes)
     .expect(200);
   return res.body.key as string;
 }

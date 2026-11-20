@@ -21,7 +21,7 @@ import {
 import { notFound } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
 import { ADMIN_ERRAND_EVENTS, ErrandsService, type AdminErrandEvent } from '../errands/errands.service';
-import { UploadsService } from '../files/uploads.service';
+import { keptKey, UploadsService } from '../files/uploads.service';
 import { chargeableItemsKobo, WalletService, type DisputeSplit } from '../money/wallet.service';
 import { AuditService } from './audit.service';
 import { FlagsAdminService } from './flags-admin.service';
@@ -321,7 +321,7 @@ export class ErrandsAdminService {
     const agentIds = new Set([...convos.map((c) => c.agentId), ...(errand.agentId ? [errand.agentId] : [])]);
     const roleOf = (userId: string | null) =>
       userId === errand.customerId ? 'customer' : userId && agentIds.has(userId) ? 'agent' : null;
-    const signed = async (key: string) => this.uploads.url(key);
+    const signed = await this.uploads.links(errand.countryCode);
 
     // The share-out a normal hand-off would make, as the starting point for settling a dispute.
     const standard = splitFeeEscrow({
@@ -379,13 +379,17 @@ export class ErrandsAdminService {
           createdAt: m.createdAt,
         })),
       ),
+      // Not an upload the server hasn't opened and kept its own copy of yet (C1): nobody has been sent it. One
+      // from before these checks is shown as it always was.
       photos: await Promise.all(
-        files.map(async (f) => ({
-          purpose: f.purpose,
-          from: roleOf(f.ownerId),
-          url: await signed(f.key),
-          createdAt: f.createdAt,
-        })),
+        files
+          .filter((f) => f.checkedAt || keptKey(f.key) === f.key)
+          .map(async (f) => ({
+            purpose: f.purpose,
+            from: roleOf(f.ownerId),
+            url: await signed(f.key),
+            createdAt: f.createdAt,
+          })),
       ),
       money: {
         heldFeeKobo: held.feeKobo,

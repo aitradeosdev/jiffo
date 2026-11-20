@@ -58,7 +58,8 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 11b. Flags for a customer and agent sharing a Wi-Fi network or address (E6), and for a face the identity provider found on another account's check (I3, through the identity port; Smile Secure for Smile ID) | aitradeosdev/jiffo#73 | merged |
 | 11c. The GPS trail: kept while the agent is out on an errand; flags for impossible jumps, trails along a ruler and agents who never moved; fake-location apps as a risk signal on Android; deleted after 90 days unless a dispute or flag is open (G1, G4, the no-movement part of E6) | aitradeosdev/jiffo#74 | merged |
 | 11d. Dispute evidence packs: made as an errand goes into dispute, and by staff on demand; fixed and hashed; with events, offers, PIN entries, chat, photos, calls, flags, money and the trail's fingerprint. The errand page shows the call log and the trail; trail retention is a Security setting (E8, X10's trail days) | aitradeosdev/jiffo#75 | merged |
-| 11e. The emergency button and the Safety queue: dials the country's emergency number, then logs who, which errand and where, following the person's position for ten minutes; handled by the safety team with a reason (E9) | this pull request | open |
+| 11e. The emergency button and the Safety queue: dials the country's emergency number, then logs who, which errand and where, following the person's position for ten minutes; handled by the safety team with a reason (E9) | aitradeosdev/jiffo#76 | merged |
+| 11f. Uploads: JPEG, PNG and HEIC only, told apart by their bytes; each photo re-encoded on the server without location or camera details, broken files and pixel bombs refused; the original deleted; each copy's SHA-256 in the evidence pack; photo links last the Security setting's minutes (5) (C1, X10's link expiry) | this pull request | open |
 
 ## Summary
 
@@ -202,7 +203,7 @@ The owner asked for anything in the plan that contradicts what was built to be c
 
 | ID | Status | Files | What is missing | Decision |
 |---|---|---|---|---|
-| C1 | partly | `files/uploads.service.ts`, `adapters/storage.ts`; tests: `files-ratings` | Type and size limits, signed private links, and memory storage refused in production. **Missing:** a check of the file's real bytes, re-encoding and stripping location data, and a 5-minute link setting (it is 15 minutes, fixed in code). | implement (fix 11) |
+| C1 | done | `files/uploads.service.ts`, `files/photo-check.ts`, `adapters/storage.ts`, the apps' `api/upload.ts`; tests: `upload-checks`, `photo-check`, `files-ratings` | JPEG, PNG and HEIC only, told apart by their bytes; every photo re-encoded as a plain JPEG (location and camera details gone, broken files and pixel bombs refused) and the original deleted; links last Settings, Security's minutes (5). Voice notes aren't built yet: when they are, AAC and Opus only, checked the same way. | done (fix 11f) |
 | C2 | partly | agent app camera screens | The agent app takes these photos with the camera and the server keeps the time; the server can't prove an image came from a camera. | keep, with fix 11's re-encoding and visible server time |
 | C3 | missing | `chat/chat.service.ts` | Warning flags for links, phone numbers, bank account numbers and "pay outside the app". There are no link previews. | implement (fix 11) |
 | C4 | partly | `realtime/realtime.gateway.ts`; tests: `chat-realtime` | Token checked at connection, and rooms only for the two parties. Missing: the Redis adapter, dropping connections on suspension, re-checking, and CORS. | implement (fix 5) |

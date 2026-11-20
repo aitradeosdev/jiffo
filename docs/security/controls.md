@@ -139,6 +139,15 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 - **The Safety queue:** the panel's Safety page lists open emergencies oldest first, with the person, their errand, a map of where they were last and how many positions came after. Opening one raises an alert, which stays off the money pages and is closed only from the Safety queue. The safety team (and operations, and owners) mark it handled with what they did, in the audit log, once; nobody handles one about their own account.
 - **Limits:** the app can only send where the person is while it runs; the emergency call itself is the phone's.
 
+## Uploads (C1)
+
+- **Types:** the apps may send JPEG, PNG and HEIC photos, up to 10 MB each. WebP, GIF, SVG and anything else is refused when the upload is asked for. The apps save every photo as a JPEG no larger than 2,560 pixels on its longest side before sending it, so a picture from the gallery is never refused for its type.
+- **Checked by its bytes:** the name and type the app gives only label the upload. The first time a photo is sent with something (a receipt, an item or drop-off photo, a chat photo), the server reads the file and tells JPEG, PNG and HEIC apart by their first bytes. Anything else, a cut-off or damaged file, or one with more than 100 million pixels (a "pixel bomb"), is refused as `photo_unreadable`, and the person is asked to take it again. The pixels are counted from the header before the photo is opened.
+- **Re-encoded:** the server opens the photo (HEIC on a worker thread, so other requests don't wait), turns it the way the camera held it, makes it no larger than 2,560 pixels on its longest side, and writes it again as a plain JPEG with nothing but its pixels. Location, camera details and anything hidden in the file are gone. At most two photos are opened at once in each API process.
+- **Two places in the store:** the apps upload to `incoming/`. Nobody is ever shown anything there, and the server deletes each original once it has kept its copy under `errands/`, which is all anybody sees. Set the bucket to expire anything under `incoming/` after a day, for uploads never sent with anything.
+- **Fingerprinted:** each upload's row keeps when it was checked and its copy's SHA-256 and size. Dispute evidence packs list them, so a photo shown later can be shown to be the one that was sent (E8). The admin errand page shows only checked photos.
+- **Seen through short links:** the bucket is private. The apps and the panel get a signed link each time they show a photo, which lasts the minutes Settings, Security give (5; at most 60).
+
 ## The apps on the phone
 
 - **No screenshots (A9):** the PIN, wallet, top-up, withdrawal, payout account and ID check screens, the hand-off PIN (the customer's and the agent's), and the selfie check block screenshots and screen recording while they are in front (Android also hides them in the app switcher). An identity provider's own page opens in the phone's browser, outside the app, so the app can't block it there.

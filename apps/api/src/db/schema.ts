@@ -1247,7 +1247,16 @@ export const uploads = pgTable(
       .notNull()
       .references(() => errands.id),
     purpose: text('purpose', { enum: UPLOAD_PURPOSES }).notNull(),
+    /** As uploaded, then image/jpeg once the server has made its own copy. */
     contentType: text('content_type').notNull(),
+    /**
+     * When the server opened the photo and kept its own copy, re-encoded (docs/security-plan.md, C1). Until
+     * then nobody is shown it, and it can't be sent with anything.
+     */
+    checkedAt: timestamp('checked_at', { withTimezone: true }),
+    /** The kept copy's SHA-256 and size, so a dispute's evidence can show the photo is the one sent (E8). */
+    sha256: text('sha256'),
+    size: integer('size'),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('uploads_key_uq').on(t.key), index('uploads_errand_idx').on(t.errandId)],

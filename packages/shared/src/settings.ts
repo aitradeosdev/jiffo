@@ -41,6 +41,7 @@ export const DEFAULT_SECURITY_SETTINGS = {
   randomSelfiePercent: 0,
   attestation: 'record' as 'off' | 'record' | 'enforce',
   trailDays: 90,
+  signedLinkMinutes: 5,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -231,6 +232,11 @@ export const CountrySettingsSchema = z.object({
        * in dispute or a flag on it is still open.
        */
       trailDays: z.number().int().min(30).max(365).default(90),
+      /**
+       * How long a link to see a photo lasts once the app or the panel is given it (C1, X10), in minutes. The
+       * photos themselves are never public.
+       */
+      signedLinkMinutes: minutes.max(60).default(5),
     })
     .default(DEFAULT_SECURITY_SETTINGS),
   /**
