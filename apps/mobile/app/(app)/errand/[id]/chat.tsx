@@ -14,6 +14,7 @@ import {
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Crypto from 'expo-crypto';
+import { CHAT_WARNING_TEXT, warningsOf } from '@jiffo/shared';
 import { goBack } from '@/nav';
 import { VARIANT } from '@/config';
 import { useSession } from '@/auth/session';
@@ -38,7 +39,7 @@ export interface ChatMessage {
   senderRole: 'customer' | 'agent' | 'system';
   kind: 'text' | 'system' | 'photo';
   body: string;
-  /** For timeline notes: what they are about, such as { type: 'call' }. */
+  /** For timeline notes: what they are about, such as { type: 'call' }. For messages: the server's warnings (C3). */
   data?: Record<string, unknown>;
   photoUrl: string | null;
   clientId: string | null;
@@ -321,13 +322,42 @@ function Message({
       {message.body ? <Text style={[styles.bubbleText, { color: mine ? c.onInk : c.ink }]}>{message.body}</Text> : null}
     </View>
   );
-  if (mine) return <View style={[styles.m, { justifyContent: 'flex-end' }]}>{bubble}</View>;
+  if (mine)
+    return (
+      <View style={[styles.col, { alignItems: 'flex-end' }]}>
+        {bubble}
+        <Warning data={message.data} />
+      </View>
+    );
   return (
     <View style={styles.m}>
       {first ? <Avatar name={otherName} size={32} /> : <View style={{ width: 32 }} />}
       <View style={styles.col}>
         {first ? <Text style={[styles.who, { color: c.ink3 }]}>{otherName}</Text> : null}
         {bubble}
+        <Warning data={message.data} />
+      </View>
+    </View>
+  );
+}
+
+/**
+ * What the server warned about in a message (docs/security-plan.md, C3): a link, a phone number, an account
+ * number or a push to pay outside the app. Shown under it, on both sides of the chat.
+ */
+function Warning({ data }: { data?: Record<string, unknown> }) {
+  const c = useColors();
+  const warnings = warningsOf(data);
+  if (!warnings.length) return null;
+  return (
+    <View style={[styles.warn, { backgroundColor: c.urgentSoft }]}>
+      <Icon name="alert" size={16} weight={2} color={c.urgent} />
+      <View style={styles.warnLines}>
+        {warnings.map((w) => (
+          <Text key={w} style={[styles.warnText, { color: c.ink }]}>
+            {CHAT_WARNING_TEXT[w]}
+          </Text>
+        ))}
       </View>
     </View>
   );
@@ -365,6 +395,17 @@ const styles = StyleSheet.create({
   bubble: { maxWidth: '80%', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 20, gap: 6 },
   bubbleText: { fontSize: 15.5, lineHeight: 21 },
   photo: { width: 200, height: 200, borderRadius: 12 },
+  warn: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    maxWidth: '85%',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+  },
+  warnLines: { flexShrink: 1, gap: 4 },
+  warnText: { fontSize: 13, lineHeight: 18 },
   dock: { paddingTop: 8, paddingBottom: 12, paddingHorizontal: 16, borderTopWidth: StyleSheet.hairlineWidth },
   hints: { gap: 8, paddingBottom: 8 },
   hint: { height: 34, paddingHorizontal: 13, borderRadius: 999, justifyContent: 'center' },

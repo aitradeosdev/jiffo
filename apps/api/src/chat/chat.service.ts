@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { TERMINAL_STATES } from '@jiffo/shared';
+import { chatWarnings, TERMINAL_STATES } from '@jiffo/shared';
 import { DB, type Db } from '../db/database.module';
 import { conversations, errands, users } from '../db/schema';
 import { CHAT, type ChatAdapter, type ChatMessage } from '../adapters/chat';
@@ -89,13 +89,15 @@ export class ChatService {
       await this.uploads.assertUploaded([input.photo], { ownerId: auth.userId, errandId, purposes: ['chat_photo'] });
     }
     const text = input.body ?? '';
+    // Kept with the message, for both apps to show beside it (C3). Only the server sets them.
+    const warnings = chatWarnings(text);
     const { message, duplicate } = await this.chat.post({
       conversationId: conversation.id,
       senderId: auth.userId,
       senderRole: role,
       kind: input.photo ? 'photo' : 'text',
       body: text,
-      data: input.photo ? { key: input.photo } : {},
+      data: { ...(input.photo ? { key: input.photo } : {}), ...(warnings.length ? { warnings } : {}) },
       clientId: input.clientId,
     });
     const view = await this.view(await this.uploads.links(errand.countryCode))(message);

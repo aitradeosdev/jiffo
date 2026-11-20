@@ -1,7 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
-import { AGENT_OUT_STATES, allowedEvents, commissionBpsFor, splitFeeEscrow, type ErrandState } from '@jiffo/shared';
+import {
+  AGENT_OUT_STATES,
+  allowedEvents,
+  commissionBpsFor,
+  splitFeeEscrow,
+  warningsOf,
+  type ErrandState,
+} from '@jiffo/shared';
 import { DB, type Db } from '../db/database.module';
 import {
   admins,
@@ -376,6 +383,8 @@ export class ErrandsAdminService {
           kind: m.kind,
           body: m.body,
           photoUrl: m.kind === 'photo' && typeof m.data.key === 'string' ? await signed(m.data.key) : null,
+          /** What the apps warned about beside it (C3). */
+          warnings: warningsOf(m.data),
           createdAt: m.createdAt,
         })),
       ),

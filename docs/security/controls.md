@@ -148,6 +148,21 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 - **Fingerprinted:** each upload's row keeps when it was checked and its copy's SHA-256 and size. Dispute evidence packs list them, so a photo shown later can be shown to be the one that was sent (E8). The admin errand page shows only checked photos.
 - **Seen through short links:** the bucket is private. The apps and the panel get a signed link each time they show a photo, which lasts the minutes Settings, Security give (5; at most 60).
 
+## Chat warnings (C3)
+
+- **What is flagged:** a message whose text (or a photo's caption) has:
+  - a link (with or without `http` or `www`, short links such as `wa.me` and `bit.ly` too);
+  - a phone number (Nigerian with or without `+234`, or any number written with a `+`);
+  - a bank account number (ten digits, with or without spaces);
+  - wording that asks to be paid outside the app ("pay me directly", "transfer to my account", "send it to my OPay", "outside the app", "don't pay in the app").
+- **Decided by the server:** the server checks each message as it is sent, with the rules in `packages/shared/src/chat-warnings.ts`, and keeps the answer with the message. The apps can't set or clear it.
+- **Shown, not blocked:** both apps show a warning under the message, on both sides of the chat. For example, "Only pay through Jiffo. Money paid outside the app isn't protected and can't be refunded." The words are common enough in honest errands that nothing is refused.
+- **Staff:** the errand's page in the panel marks each warned message ("Warned: account number, pay outside the app"). Dispute evidence packs keep the warnings with the chat.
+- **Limits:**
+  - Numbers written in words, or split across messages, aren't caught.
+  - Ordinary amounts are left alone on purpose, so a ten-digit amount reads as an account number.
+- **No link previews:** links in chat are plain text. Neither the apps nor the server ever open one, so nothing can be fetched from an internal or private address.
+
 ## The apps on the phone
 
 - **No screenshots (A9):** the PIN, wallet, top-up, withdrawal, payout account and ID check screens, the hand-off PIN (the customer's and the agent's), and the selfie check block screenshots and screen recording while they are in front (Android also hides them in the app switcher). An identity provider's own page opens in the phone's browser, outside the app, so the app can't block it there.
