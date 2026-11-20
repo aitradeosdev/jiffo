@@ -18,6 +18,7 @@ import { openField } from '../db/fields';
 import {
   agentApplications,
   deposits,
+  errandTrail,
   devices,
   errandStops,
   errands,
@@ -26,6 +27,7 @@ import {
   riskFlags,
   users,
 } from '../db/schema';
+import { impossibleMove, staysPut, straightRun } from './gps';
 import { moderate } from './moderation';
 import { NetworksService } from './networks.service';
 
@@ -143,7 +145,24 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
     }
     if (after.status === 'completed' && before.status !== 'completed') {
       this.later(`speed of ${after.id}`, () => this.checkSpeed(after));
+      this.later(`trail of ${after.id}`, () => this.checkTrail(after));
     }
+  }
+
+  /**
+   * An agent's phone reported a position: checked against the one before for a move no one could make
+   * (G1). Mocked positions are the phone's own word already (MB4), so a move to or from one isn't judged.
+   */
+  positionReported(input: {
+    agentId: string;
+    countryCode: string;
+    before: { lat: number; lng: number; at: Date; mocked: boolean } | null;
+    after: { lat: number; lng: number; at: Date; mocked: boolean };
+    running: Array<{ id: string; customerId: string }>;
+  }) {
+    const { before, after } = input;
+    if (!before || before.mocked || after.mocked) return;
+    this.later(`position of ${input.agentId}`, () => this.checkMove({ ...input, before }));
   }
 
   /** A sign-in, or a phone key saved: the phone may be another account's too (I3). */
@@ -350,6 +369,79 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
       },
       errandIds: [errand.id],
     });
+  }
+
+  private async checkMove(input: {
+    agentId: string;
+    countryCode: string;
+    before: { lat: number; lng: number; at: Date };
+    after: { lat: number; lng: number; at: Date };
+    running: Array<{ id: string; customerId: string }>;
+  }) {
+    const { gpsMaxSpeedKmh, gpsJumpMeters } = await this.risk(input.countryCode);
+    const move = impossibleMove(input.before, input.after, { maxSpeedKmh: gpsMaxSpeedKmh, jumpMeters: gpsJumpMeters });
+    if (!move) return;
+    if (!input.running.length) {
+      // Online, on no errand: one flag for the agent each day it happens.
+      await this.raise({
+        countryCode: input.countryCode,
+        kind: 'gps_jump',
+        dedupeKey: `${input.agentId}:${input.after.at.toISOString().slice(0, 10)}`,
+        userId: input.agentId,
+        details: move,
+      });
+      return;
+    }
+    for (const errand of input.running) {
+      await this.raise({
+        countryCode: input.countryCode,
+        kind: 'gps_jump',
+        dedupeKey: errand.id,
+        userId: errand.customerId,
+        otherUserId: input.agentId,
+        details: move,
+        errandIds: [errand.id],
+      });
+    }
+  }
+
+  /**
+   * A finished errand's trail (G1, E6): an agent who stayed in one spot though the stops are far apart, and
+   * a run along a ruler at an even speed. Mocked positions don't count as where the agent was.
+   */
+  private async checkTrail(errand: ErrandRow) {
+    if (!errand.agentId) return;
+    const [points, stops, { noMovementMeters }] = await Promise.all([
+      this.db
+        .select({ lat: errandTrail.lat, lng: errandTrail.lng, at: errandTrail.at })
+        .from(errandTrail)
+        .where(and(eq(errandTrail.errandId, errand.id), eq(errandTrail.mocked, false)))
+        .orderBy(asc(errandTrail.at), asc(errandTrail.id)),
+      this.db
+        .select({ kind: errandStops.kind, lat: errandStops.lat, lng: errandStops.lng })
+        .from(errandStops)
+        .where(eq(errandStops.errandId, errand.id))
+        .orderBy(asc(errandStops.seq)),
+      this.risk(errand.countryCode),
+    ]);
+    const base = {
+      countryCode: errand.countryCode,
+      dedupeKey: errand.id,
+      userId: errand.customerId,
+      otherUserId: errand.agentId,
+      errandIds: [errand.id],
+    };
+    const pickup = stops.find((s) => s.kind === 'pickup');
+    const dropoff = stops.findLast((s) => s.kind === 'dropoff');
+    const routeMetres = pickup && dropoff ? haversineMeters(pickup, dropoff) : 0;
+    if (noMovementMeters > 0 && routeMetres > 2 * noMovementMeters) {
+      const still = staysPut(points, { metres: noMovementMeters, minPoints: 3, minMinutes: 5 });
+      if (still) {
+        await this.raise({ ...base, kind: 'no_movement', details: { ...still, routeMetres: Math.round(routeMetres) } });
+      }
+    }
+    const straight = straightRun(points);
+    if (straight) await this.raise({ ...base, kind: 'gps_straight', details: straight });
   }
 
   /**

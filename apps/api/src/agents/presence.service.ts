@@ -7,6 +7,8 @@ import { AttestationService, type AttestContext } from '../attestation/attestati
 import { AgentApplicationService } from './application.service';
 import { AgentSelfieService } from './agent-selfie.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { RiskFlagsService } from '../risk/risk-flags.service';
+import { TrailService } from './trail.service';
 import type { AuthContext } from '../auth/auth.types';
 
 /** States in which the agent is out doing the errand, so the customer may see where they are. */
@@ -57,6 +59,8 @@ export class PresenceService {
     private readonly applications: AgentApplicationService,
     private readonly selfie: AgentSelfieService,
     private readonly attestation: AttestationService,
+    private readonly trail: TrailService,
+    private readonly risk: RiskFlagsService,
   ) {}
 
   /**
@@ -73,7 +77,16 @@ export class PresenceService {
         .select({ id: errands.id, customerId: errands.customerId, status: errands.status })
         .from(errands)
         .where(and(eq(errands.agentId, auth.userId), inArray(errands.status, [...TRAVEL_STATES]))),
-      this.db.select({ online: agentPresence.online }).from(agentPresence).where(eq(agentPresence.userId, auth.userId)),
+      this.db
+        .select({
+          online: agentPresence.online,
+          lat: agentPresence.lat,
+          lng: agentPresence.lng,
+          locatedAt: agentPresence.locatedAt,
+          mocked: agentPresence.mocked,
+        })
+        .from(agentPresence)
+        .where(eq(agentPresence.userId, auth.userId)),
     ]);
     let body = { ...input, online: input.online ?? current?.online ?? false };
     // Going online is for approved agents; going offline always works. An agent not approved yet who still
@@ -123,6 +136,26 @@ export class PresenceService {
     // An errand may have ended while this was being written: if the agent is offline and now idle,
     // forget the position again rather than keep it.
     if (!body.online && sharing) await this.forgetIfIdle(auth.userId);
+    if (located) {
+      const position = { lat: body.lat!, lng: body.lng!, mocked: !!body.mocked, at: now };
+      // Kept for each errand they are out on (G1, G4, E6), and checked against the last position (G1).
+      await this.trail.record(
+        auth.userId,
+        running.map((e) => e.id),
+        position,
+      );
+      const before =
+        current?.lat != null && current.lng != null && current.locatedAt
+          ? { lat: current.lat, lng: current.lng, at: current.locatedAt, mocked: current.mocked }
+          : null;
+      this.risk.positionReported({
+        agentId: auth.userId,
+        countryCode: auth.countryCode,
+        before,
+        after: position,
+        running,
+      });
+    }
     // A mocked position (MB4) isn't sent on: it says nothing about where the agent is.
     if (located && !body.mocked) {
       for (const e of sharedWith(running)) {

@@ -64,11 +64,13 @@ class AppAttestModule : Module() {
 
     /** What the app finds on the phone (docs/security-plan.md, MB4). The app's own word: it adds to Play Integrity. */
     AsyncFunction("riskSignals") {
+      val context = appContext.reactContext?.applicationContext
       buildList {
         if (RiskChecks.rooted()) add("rooted")
         if (RiskChecks.emulator()) add("emulator")
         if (RiskChecks.hooked()) add("hooking")
         if (RiskChecks.debugged()) add("debugger")
+        if (context != null && RiskChecks.spoofer(context)) add("location_spoofer")
       }
     }
 
@@ -183,4 +185,16 @@ object RiskChecks {
   }
 
   fun debugged(): Boolean = Debug.isDebuggerConnected() || Debug.waitingForDebugger()
+
+  /** Fake-location apps, by package: only those listed in the manifest's queries can be seen (G1). */
+  private val spoofers = listOf(
+    "fr.dvilleneuve.lockito", "com.lexa.fakegps", "com.incorporateapps.fakegps.fre",
+    "com.theappninjas.fakegpsjoystick", "com.rosteam.gpsemulator", "ru.gavrikov.mocklocations",
+    "org.hola.gpslocation",
+  )
+
+  @Suppress("DEPRECATION")
+  fun spoofer(context: Context): Boolean = spoofers.any { name ->
+    runCatching { context.packageManager.getPackageInfo(name, 0) }.isSuccess
+  }
 }

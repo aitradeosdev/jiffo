@@ -55,7 +55,8 @@ The tables below stay as they were at the audit. What has been fixed since:
 | 10d. App checks in the apps: the native module and the checked requests (MB3) | aitradeosdev/jiffo#70 | merged |
 | 10d. Risk signals: root, emulators, hooking tools and debuggers sent and kept, counted as doubtful and shown to staff; mocked positions refused at the drop-off (MB4) | aitradeosdev/jiffo#71 | merged |
 | 11a. Fraud flags and the Risk queue: cash, "send money" and same-place errands; a customer and agent sharing a phone or bank, pairing again and again, or finishing a high-value errand too fast; accounts sharing a phone (one phone's key on two agent accounts included) or a payout account, to verification; tier counts without flagged errands (E5, most of E6, the shared-account half of I3, F3) | aitradeosdev/jiffo#72 | merged |
-| 11b. Flags for a customer and agent sharing a Wi-Fi network or address (E6), and for a face the identity provider found on another account's check (I3, through the identity port; Smile Secure for Smile ID) | this pull request | open |
+| 11b. Flags for a customer and agent sharing a Wi-Fi network or address (E6), and for a face the identity provider found on another account's check (I3, through the identity port; Smile Secure for Smile ID) | aitradeosdev/jiffo#73 | merged |
+| 11c. The GPS trail: kept while the agent is out on an errand; flags for impossible jumps, trails along a ruler and agents who never moved; fake-location apps as a risk signal on Android; deleted after 90 days unless a dispute or flag is open (G1, G4, the no-movement part of E6) | this pull request | open |
 
 ## Summary
 

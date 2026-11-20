@@ -1109,6 +1109,30 @@ export const userNetworks = pgTable(
 );
 
 /**
+ * Where the agent was while out on an errand (docs/security-plan.md, G1, G4, E6), from their phone's
+ * reports: for the fake-GPS checks and a dispute's evidence. Deleted after 90 days, unless the errand is in
+ * dispute or a flag on it is still open.
+ */
+export const errandTrail = pgTable(
+  'errand_trail',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    errandId: uuid('errand_id')
+      .notNull()
+      .references(() => errands.id),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => users.id),
+    lat: doublePrecision('lat').notNull(),
+    lng: doublePrecision('lng').notNull(),
+    /** The phone said the position was mocked (MB4): kept, but never counted as where the agent was. */
+    mocked: boolean('mocked').notNull().default(false),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('errand_trail_errand_idx').on(t.errandId, t.at), index('errand_trail_at_idx').on(t.at)],
+);
+
+/**
  * Which account each identity check was for, by our reference (docs/security-plan.md, I3): a provider that
  * finds the same face on an earlier check names that check by its reference, which may be long replaced on
  * the account. Kept for a little over a year, as providers look back that far at most.

@@ -253,6 +253,13 @@
       "when": 1795132525439,
       "tag": "0035_network_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1795133836429,
+      "tag": "0036_gps_trail",
+      "breakpoints": true
     }
   ]
 }

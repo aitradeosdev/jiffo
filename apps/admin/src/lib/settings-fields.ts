@@ -343,6 +343,24 @@ export const SECTIONS: Section[] = [
         help: "Over the same days. A shop's, an office's or a campus's Wi-Fi is used by many.",
       },
       {
+        path: 'risk.gpsMaxSpeedKmh',
+        label: "Flag an agent's phone moving faster than",
+        kind: 'count',
+        help: 'In km/h, between two reports. Only moves longer than the distance below count.',
+      },
+      {
+        path: 'risk.gpsJumpMeters',
+        label: 'Count a move as a jump from',
+        kind: 'count',
+        help: "In metres. A phone's GPS wanders a few hundred metres at times; that isn't a jump.",
+      },
+      {
+        path: 'risk.noMovementMeters',
+        label: 'Flag an errand whose agent stayed within',
+        kind: 'count',
+        help: 'In metres, over five minutes or more, when the pickup and drop-off are more than twice this apart. 0 turns it off.',
+      },
+      {
         path: 'risk.fastHighValueKobo',
         label: 'Flag errands finished unusually fast when worth at least',
         kind: 'naira',

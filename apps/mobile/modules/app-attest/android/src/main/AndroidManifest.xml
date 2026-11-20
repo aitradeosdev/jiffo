@@ -1,4 +1,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <!-- Whether a request goes over Wi-Fi or the phone network (docs/security-plan.md, E6): a normal permission. -->
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <!--
+    Fake-location apps the risk signals look for (docs/security-plan.md, G1). Android shows the app only the
+    packages it names here; it never sees the rest of what is installed.
+  -->
+  <queries>
+    <package android:name="fr.dvilleneuve.lockito" />
+    <package android:name="com.lexa.fakegps" />
+    <package android:name="com.incorporateapps.fakegps.fre" />
+    <package android:name="com.theappninjas.fakegpsjoystick" />
+    <package android:name="com.rosteam.gpsemulator" />
+    <package android:name="ru.gavrikov.mocklocations" />
+    <package android:name="org.hola.gpslocation" />
+  </queries>
 </manifest>
