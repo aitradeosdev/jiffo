@@ -211,7 +211,7 @@ The owner asked for anything in the plan that contradicts what was built to be c
 | C4 | partly | `realtime/realtime.gateway.ts`; tests: `chat-realtime` | Token checked at connection, and rooms only for the two parties. Missing: the Redis adapter, dropping connections on suspension, re-checking, and CORS. | implement (fix 5) |
 | C5 | done differently | `calls/calls.service.ts`, `adapters/calls.ts`; tests: `calls.e2e` | Masked calls between the two parties only, while the errand is live; real numbers never appear. | keep (see differences) |
 | C6 | done | the admin panel renders chat as text | A test that markup shows as text. | implement (fix 8) |
-| C7 | after launch | | | after launch |
+| C7 | done | the apps' `safety/never-ask.ts`, the sign-in code, app PIN and hand-off PIN screens; test: the apps' `never-ask` | Both apps say Jiffo will never ask for a sign-in code or PIN where each is entered or shown: the sign-in code, creating the app PIN and entering it for a money action, and the customer's hand-off PIN (given to the agent in person, and nobody else). | done (after launch, built early) |
 
 ## Location (G)
 
@@ -442,7 +442,7 @@ One area per pull request, abuse tests first. Every one that touches login, mone
 
     Covers X1–X3, E5, E6, E8, E9, C1, C3, G1, G4, I3, F3.
 
-**After launch:** A10, C7, D8, F4, MB7, and referrals and promos (F1, F2, X5) when they are built.
+**After launch:** A10, D8, F4, MB7 (C7 is done), and referrals and promos (F1, F2, X5) when they are built.
 
 ## Owner's tasks
 

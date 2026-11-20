@@ -9,6 +9,7 @@ import { space } from '@/theme/tokens';
 import { Button, Field, Text } from '@/ui/kit';
 import { ModalSheet } from '@/ui/modal-sheet';
 import { canSign, forgetPin, moneyRequest, recallPin, setUpPhone, type SecurityStatus } from './device-security';
+import { NEVER_ASK } from '@/safety/never-ask';
 
 /** What to show for a money action's error, with the tries left after a wrong PIN. */
 export function moneyErrorMessage(error: unknown, fallback: (e: unknown) => string): string {
@@ -91,6 +92,9 @@ export function useMoneyAction() {
       <SelfieHost />
       <ModalSheet visible={asking} onClose={() => finish(null)} label="Enter your app PIN">
         <Text variant="title">Enter your app PIN</Text>
+        <Text variant="small" tone="ink3">
+          {NEVER_ASK.appPin}
+        </Text>
         <View style={{ gap: space.md }}>
           <Field
             label="App PIN"

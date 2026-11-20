@@ -21,6 +21,7 @@ import type { MapPin } from '@/ui/map/types';
 import { Segments } from './progress';
 import { customerNeeds, customerStage, heldKobo, stepTime, type StageTone } from './stage';
 import { stepsFor, type ErrandView } from './types';
+import { NEVER_ASK } from '@/safety/never-ask';
 
 const PIN_KIND = { pickup: 'pick', stop: 'stop', dropoff: 'drop' } as const;
 
@@ -446,7 +447,7 @@ export function PinBody({ errand, pin, hidden }: { errand: ErrandView; pin: stri
       </View>
       <Text variant="small" tone="ink3">
         Give it to {name} only when you have everything. Entering it pays {naira(errand.feeKobo)} for the errand
-        {items ? ` and ${naira(items)} for the items` : ''}.
+        {items ? ` and ${naira(items)} for the items` : ''}. {NEVER_ASK.handoffPin}
       </Text>
     </View>
   );

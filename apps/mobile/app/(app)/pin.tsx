@@ -21,6 +21,7 @@ import { space } from '@/theme/tokens';
 import { Button, Field, Screen, Text } from '@/ui/kit';
 import { Chip, Row } from '@/ui/parts';
 import { useNoScreenCapture } from '@/ui/no-screen-capture';
+import { NEVER_ASK } from '@/safety/never-ask';
 
 const digits = (t: string) => t.replace(/\D/g, '').slice(0, 4);
 
@@ -131,8 +132,10 @@ export default function PinScreen() {
         {changing ? 'Change your app PIN' : status.data?.hasPin ? 'Set a new app PIN' : 'Create your app PIN'}
       </Text>
       <Text tone="ink2">
-        You enter it to withdraw or change your bank account. Choose 4 digits that are hard to guess, and never share
-        them.
+        You enter it to withdraw or change your bank account. Choose 4 digits that are hard to guess.
+      </Text>
+      <Text variant="small" tone="ink3">
+        {NEVER_ASK.appPin}
       </Text>
       <View style={{ gap: space.md }}>
         {changing ? (

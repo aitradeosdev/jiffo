@@ -158,6 +158,10 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 - **Freeze and decide:** stepping in moves the errand into dispute, which freezes the money and makes its evidence pack. Staff then decide on the errand's page: release to the agent, refund the customer, or split. A split above the set amount needs a second admin's approval (D4). Staff's decision replaces the automatic one.
 - **Timers:** each timer acts only on the errand exactly as it was when the timer was set. A pause, a resume, the customer's answer or a dispute leaves the old timers doing nothing.
 
+## Jiffo never asks for a code or PIN (C7)
+
+- Wherever a sign-in code or PIN is entered or shown, both apps say Jiffo will never ask for it: on the sign-in code screen, when an agent creates their app PIN or enters it for a money action, and on the customer's hand-off PIN, which goes to the agent in person and nobody else. The sign-in text message says never to share the code too.
+
 ## Chat warnings (C3)
 
 - **What is flagged:** a message whose text (or a photo's caption) has:
