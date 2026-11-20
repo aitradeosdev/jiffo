@@ -180,13 +180,14 @@ describe('ledger guards', () => {
         note: 'Goodwill for a late delivery',
         requestId: randomUUID(),
       };
-      // Asked once; then approved by many at once (or one approver's double click): it runs once.
+      // Asked once; then approved by many at once (or one approver's double click): it runs once. The approver is
+      // on the team first, so the request waits for them whatever other test files have run.
+      const approver = await adminAs(t, 'owner');
       const asked = await request(t.http)
         .post('/v1/admin/money/adjustments')
         .set(finance.headers)
         .send(body)
         .expect(202);
-      const approver = await adminAs(t, 'owner');
       const results = await burst(() =>
         request(t.http).post(`/v1/admin/approvals/${asked.body.approval.id}/approve`).set(approver.headers).send({}),
       );
