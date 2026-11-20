@@ -4133,6 +4133,15 @@
                   },
                   "mocked": {
                     "type": "boolean"
+                  },
+                  "accuracy": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  },
+                  "fixedAt": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
                   }
                 },
                 "additionalProperties": false

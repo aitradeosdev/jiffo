@@ -443,6 +443,9 @@ export const agentPresence = pgTable(
     online: boolean('online').notNull().default(false),
     lat: doublePrecision('lat'),
     lng: doublePrecision('lng'),
+    /** How far off the phone said the last fix might be, in metres, and when it took it (G1). */
+    accuracy: doublePrecision('accuracy'),
+    fixedAt: timestamp('fixed_at', { withTimezone: true }),
     location: geographyPoint('location'),
     locatedAt: timestamp('located_at', { withTimezone: true }),
     /** The phone said the position was mocked (MB4): it can't place the agent at a drop-off. */
@@ -1127,6 +1130,11 @@ export const errandTrail = pgTable(
     lng: doublePrecision('lng').notNull(),
     /** The phone said the position was mocked (MB4): kept, but never counted as where the agent was. */
     mocked: boolean('mocked').notNull().default(false),
+    /** How far off the phone said the fix might be, in metres. */
+    accuracy: doublePrecision('accuracy'),
+    /** When the phone took the fix, by its clock, when it said and it was plausible. */
+    fixedAt: timestamp('fixed_at', { withTimezone: true }),
+    /** When it reached us. */
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('errand_trail_errand_idx').on(t.errandId, t.at), index('errand_trail_at_idx').on(t.at)],

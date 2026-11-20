@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { agentPresence, errandTrail, errands, riskFlagErrands, riskFlags } from '../src/db/schema';
 import { RiskFlagsService } from '../src/risk/risk-flags.service';
 import { TrailService } from '../src/agents/trail.service';
@@ -34,6 +34,9 @@ describe('the GPS trail', () => {
   beforeAll(async () => {
     t = await createTestApp();
     ops = await adminAs(t, 'operations');
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
   afterAll(() => t.close());
 
@@ -122,6 +125,44 @@ describe('the GPS trail', () => {
     expect((await flagsFor({ person: idle.userId })).map((f) => f.kind)).toEqual(['gps_jump']);
   });
 
+  it('judges a move by when the phone took each fix, and by how sure it was of them', async () => {
+    const { agent, errand } = await onErrand();
+    // Sent a moment apart, but taken nine minutes apart: 20 km at 133 km/h.
+    const taken = Date.now() - 540_000;
+    await report(agent, pickup, { fixedAt: taken });
+    await report(agent, { lat: pickup.lat + north(20_000), lng: pickup.lng }, { fixedAt: taken + 540_000 });
+    // A cell tower's fix, off by a kilometre and a half, then a GPS one ten seconds later.
+    await lastReportedAgo(agent, 10);
+    await report(agent, { lat: pickup.lat + north(21_400), lng: pickup.lng }, { accuracy: 1_500 });
+    await lastReportedAgo(agent, 10);
+    await report(agent, { lat: pickup.lat + north(20_000), lng: pickup.lng }, { accuracy: 8 });
+    expect(await flagsFor({ errand: errand.id })).toEqual([]);
+    const [kept] = await trailOf(errand.id);
+    expect(kept).toMatchObject({ fixedAt: new Date(taken), accuracy: null });
+    // A fix the phone says it took an hour ago isn't believed: its clock is wrong, or the fix is stale.
+    await report(agent, { lat: pickup.lat + north(20_000), lng: pickup.lng }, { fixedAt: Date.now() - 3_600_000 });
+    expect((await trailOf(errand.id)).at(-1)).toMatchObject({ fixedAt: null });
+  });
+
+  it("keeps positions only for the errands that follow the agent now, and a failed write doesn't fail the report", async () => {
+    const customer = await signIn(t, 'customer');
+    const agent = await signIn(t, 'agent');
+    await fund(t, customer, 5_000_000);
+    const first = await createErrand(t, customer);
+    const second = await createErrand(t, customer);
+    await act(t, agent, first.id, 'accept');
+    await act(t, agent, second.id, 'accept');
+    await act(t, agent, first.id, 'start');
+    await report(agent, pickup);
+    // Under way on the first, the second's customer doesn't follow them, and nothing is kept for it.
+    expect((await trailOf(first.id)).length).toBe(1);
+    expect(await trailOf(second.id)).toEqual([]);
+
+    const failing = vi.spyOn(t.app.get(TrailService), 'record').mockRejectedValueOnce(new Error('database away'));
+    await report(agent, pickup);
+    expect(failing).toHaveBeenCalled();
+  });
+
   it("leaves a phone's GPS noise and a fast drive alone", async () => {
     const { agent, errand } = await onErrand();
     await report(agent, pickup);
@@ -132,18 +173,54 @@ describe('the GPS trail', () => {
     expect(await flagsFor({ errand: errand.id })).toEqual([]);
   });
 
+  /** The errand as accepted that many minutes ago. */
+  const acceptedAgo = (errandId: string, minutes: number) =>
+    t.db
+      .update(errands)
+      .set({ acceptedAt: sql`now() - make_interval(mins => ${minutes})` })
+      .where(eq(errands.id, errandId));
+  /** A position a minute, from `from` minutes ago to a minute ago. */
+  const everyMinute = (from: number, place: (i: number) => { lat: number; lng: number }) =>
+    Array.from({ length: from }, (_, i) => ({ ...place(i), minutesAgo: from - i }));
+
   it('flags an errand finished with the agent never leaving one spot, far from the pickup', async () => {
     const { customer, agent, errand } = await onErrand();
     // Twenty minutes at the drop-off, never at the pickup 6 km away.
+    await acceptedAgo(errand.id, 21);
     await sent(
       errand.id,
       agent.userId,
-      [20, 15, 10, 5].map((minutesAgo, i) => ({ lat: dropoff.lat + north(i * 10), lng: dropoff.lng, minutesAgo })),
+      everyMinute(20, (i) => ({ lat: dropoff.lat + north((i % 3) * 10), lng: dropoff.lng })),
     );
     await finish(customer, agent, errand.id);
     const flags = await flagsFor({ errand: errand.id });
     expect(flags.map((f) => f.kind)).toEqual(['no_movement']);
     expect(flags[0]!.details).toMatchObject({ points: expect.any(Number), metres: expect.any(Number) });
+  });
+
+  it("can't say an agent never moved when positions stopped coming, or from another agent's", async () => {
+    const { customer, agent, errand } = await onErrand();
+    // Positions at the drop-off at the start and the end only: the agent may have gone without the app.
+    await acceptedAgo(errand.id, 21);
+    await sent(
+      errand.id,
+      agent.userId,
+      [20, 19, 18, 3, 2, 1].map((minutesAgo) => ({ ...dropoff, minutesAgo })),
+    );
+    await finish(customer, agent, errand.id);
+    expect(await flagsFor({ errand: errand.id })).toEqual([]);
+
+    // An agent who waited at the drop-off and gave the errand back: the next agent isn't judged by it.
+    const next = await onErrand();
+    const before = await signIn(t, 'agent');
+    await acceptedAgo(next.errand.id, 21);
+    await sent(
+      next.errand.id,
+      before.userId,
+      everyMinute(20, () => dropoff),
+    );
+    await finish(next.customer, next.agent, next.errand.id);
+    expect(await flagsFor({ errand: next.errand.id })).toEqual([]);
   });
 
   it('flags a perfectly straight, even run, as a route-faking app makes', async () => {

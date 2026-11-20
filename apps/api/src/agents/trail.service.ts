@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { asc, eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { errandTrail } from '../db/schema';
 
@@ -11,12 +11,15 @@ export interface TrailPosition {
   lat: number;
   lng: number;
   mocked: boolean;
+  accuracy: number | null;
+  fixedAt: Date | null;
   at: Date;
 }
 
 /**
  * Where the agent was while out on each errand (docs/security-plan.md, G1, G3, G4, E6): written from the
- * phone's reports only while they are out on one, so being online alone leaves no trail.
+ * phone's reports only for the errands whose customer follows the agent then, so being online alone leaves
+ * no trail, and an errand held while the agent carries out another gets none until it is under way.
  */
 @Injectable()
 export class TrailService {
@@ -26,15 +29,6 @@ export class TrailService {
   async record(agentId: string, errandIds: string[], position: TrailPosition) {
     if (!errandIds.length) return;
     await this.db.insert(errandTrail).values(errandIds.map((errandId) => ({ errandId, agentId, ...position })));
-  }
-
-  /** An errand's trail, oldest first. */
-  of(errandId: string) {
-    return this.db
-      .select({ lat: errandTrail.lat, lng: errandTrail.lng, mocked: errandTrail.mocked, at: errandTrail.at })
-      .from(errandTrail)
-      .where(eq(errandTrail.errandId, errandId))
-      .orderBy(asc(errandTrail.at), asc(errandTrail.id));
   }
 
   /**

@@ -25,6 +25,15 @@ describe('GPS checks', () => {
       expect(impossibleMove(from, { lat: 6.45 + north(500), lng: 3.47, at: at(10) }, limits)).toBeNull();
       // 5 km in 10 minutes: 30 km/h.
       expect(impossibleMove(from, { lat: 6.45 + north(5_000), lng: 3.47, at: at(600) }, limits)).toBeNull();
+      // A coarse fix (a cell tower's, off by a kilometre or more) and then a GPS one: the move is no more
+      // than the two fixes' doubt.
+      expect(
+        impossibleMove(
+          { ...from, accuracy: 1_400 },
+          { lat: 6.45 + north(1_300), lng: 3.47, at: at(10), accuracy: 8 },
+          limits,
+        ),
+      ).toBeNull();
       // The same moment twice.
       expect(impossibleMove(from, { lat: 6.45 + north(5_000), lng: 3.47, at: at(0) }, limits)).toBeNull();
     });
@@ -39,13 +48,20 @@ describe('GPS checks', () => {
       }));
 
     it('finds an agent who never left one spot for minutes', () => {
-      expect(staysPut(still(6), { metres: 150, minPoints: 3, minMinutes: 5 })).toMatchObject({ points: 6 });
+      expect(staysPut(still(6), { metres: 150, minPoints: 3, minMinutes: 5, maxGapMinutes: 3 })).toMatchObject({
+        points: 6,
+      });
+    });
+
+    it("can't tell when positions stopped coming for a while: the agent may have travelled meanwhile", () => {
+      const gap = [0, 60, 120, 600, 660, 720].map((s) => ({ lat: 6.43, lng: 3.41, at: at(s) }));
+      expect(staysPut(gap, { metres: 150, minPoints: 3, minMinutes: 5, maxGapMinutes: 3 })).toBeNull();
     });
 
     it("can't tell from too few points or too short a time, or from a trail that moves", () => {
-      expect(staysPut(still(2), { metres: 150, minPoints: 3, minMinutes: 5 })).toBeNull();
-      expect(staysPut(still(6, 10), { metres: 150, minPoints: 3, minMinutes: 5 })).toBeNull();
-      expect(staysPut(still(6, 60, 400), { metres: 150, minPoints: 3, minMinutes: 5 })).toBeNull();
+      expect(staysPut(still(2), { metres: 150, minPoints: 3, minMinutes: 5, maxGapMinutes: 3 })).toBeNull();
+      expect(staysPut(still(6, 10), { metres: 150, minPoints: 3, minMinutes: 5, maxGapMinutes: 3 })).toBeNull();
+      expect(staysPut(still(6, 60, 400), { metres: 150, minPoints: 3, minMinutes: 5, maxGapMinutes: 3 })).toBeNull();
     });
   });
 

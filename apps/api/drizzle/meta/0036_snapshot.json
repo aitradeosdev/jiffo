@@ -1,5 +1,5 @@
 {
-  "id": "09086c07-9b2e-44bd-9f02-da752c0b958b",
+  "id": "d58bf05f-bd95-4f4f-9758-24eb3a7b7b31",
   "prevId": "c5ae1c21-1d08-4a70-9b4c-35e10e9eb6b7",
   "version": "7",
   "dialect": "postgresql",
@@ -1298,6 +1298,18 @@
         "lng": {
           "name": "lng",
           "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "accuracy": {
+          "name": "accuracy",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fixed_at": {
+          "name": "fixed_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -3853,6 +3865,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "accuracy": {
+          "name": "accuracy",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fixed_at": {
+          "name": "fixed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "at": {
           "name": "at",

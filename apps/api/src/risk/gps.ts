@@ -9,14 +9,18 @@ import { haversineMeters } from '../adapters/maps';
 export interface TrailPoint {
   lat: number;
   lng: number;
+  /** When the phone took the fix, or else when it reached us. */
   at: Date;
+  /** How far off the phone said the fix might be, in metres, when it said. */
+  accuracy?: number | null;
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /**
  * A move no phone could make between two reports: at least `jumpMeters` (so a phone's GPS wandering a few
- * hundred metres doesn't count), faster than `maxSpeedKmh`.
+ * hundred metres doesn't count), faster than `maxSpeedKmh`. How far off each fix might be is taken off the
+ * distance first: a coarse fix from a cell tower can be a kilometre or more from where the phone is.
  */
 export function impossibleMove(
   before: TrailPoint,
@@ -25,7 +29,7 @@ export function impossibleMove(
 ) {
   const seconds = (after.at.getTime() - before.at.getTime()) / 1000;
   if (seconds <= 0) return null;
-  const metres = haversineMeters(before, after);
+  const metres = haversineMeters(before, after) - (before.accuracy ?? 0) - (after.accuracy ?? 0);
   if (metres < limits.jumpMeters) return null;
   const kmh = metres / 1000 / (seconds / 3600);
   return kmh > limits.maxSpeedKmh
@@ -35,13 +39,20 @@ export function impossibleMove(
 
 /**
  * The agent stayed within `metres` of where the trail starts, over at least `minPoints` points and
- * `minMinutes`. Fewer points, or less time, can't tell staying put from a trail that wasn't sent.
+ * `minMinutes`, with no gap longer than `maxGapMinutes`. Fewer points, less time, or a gap can't tell
+ * staying put from positions that weren't sent while the agent travelled.
  */
-export function staysPut(points: TrailPoint[], limits: { metres: number; minPoints: number; minMinutes: number }) {
+export function staysPut(
+  points: TrailPoint[],
+  limits: { metres: number; minPoints: number; minMinutes: number; maxGapMinutes: number },
+) {
   if (points.length < limits.minPoints) return null;
   const first = points[0]!;
   const minutes = (points[points.length - 1]!.at.getTime() - first.at.getTime()) / 60_000;
   if (minutes < limits.minMinutes) return null;
+  for (let i = 1; i < points.length; i += 1) {
+    if (points[i]!.at.getTime() - points[i - 1]!.at.getTime() > limits.maxGapMinutes * 60_000) return null;
+  }
   const farthest = Math.max(...points.map((p) => haversineMeters(first, p)));
   return farthest < limits.metres
     ? { points: points.length, metres: Math.round(farthest), minutes: round1(minutes) }

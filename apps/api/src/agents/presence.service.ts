@@ -34,6 +34,10 @@ export function sharedWith<T extends { status: string }>(running: T[]): T[] {
   return underWay.length ? underWay : shown;
 }
 
+/** A fix the phone says it took longer ago than this, or further ahead than this, isn't believed. */
+const FIX_PAST_MS = 10 * 60_000;
+const FIX_AHEAD_MS = 60_000;
+
 /** A position not refreshed for this long is deleted, whatever the agent's app last said. */
 const KEEP_FOR_MS = 30 * 60_000;
 
@@ -69,7 +73,7 @@ export class PresenceService {
    */
   async report(
     auth: AuthContext,
-    input: { online?: boolean; lat?: number; lng?: number; mocked?: boolean },
+    input: { online?: boolean; lat?: number; lng?: number; mocked?: boolean; accuracy?: number; fixedAt?: number },
     attest?: Pick<AttestContext, 'evidence' | 'request'>,
   ) {
     const [running, [current]] = await Promise.all([
@@ -84,6 +88,8 @@ export class PresenceService {
           lng: agentPresence.lng,
           locatedAt: agentPresence.locatedAt,
           mocked: agentPresence.mocked,
+          accuracy: agentPresence.accuracy,
+          fixedAt: agentPresence.fixedAt,
         })
         .from(agentPresence)
         .where(eq(agentPresence.userId, auth.userId)),
@@ -121,11 +127,27 @@ export class PresenceService {
     const sharing = body.online || running.length > 0;
     const located = sharing && body.lat !== undefined && body.lng !== undefined;
     const now = new Date();
+    // When the phone took the fix, if it is believable: the phone's clock, within a few minutes of ours.
+    const fixedAt =
+      body.fixedAt !== undefined &&
+      body.fixedAt > now.getTime() - FIX_PAST_MS &&
+      body.fixedAt < now.getTime() + FIX_AHEAD_MS
+        ? new Date(body.fixedAt)
+        : null;
+    const accuracy = body.accuracy ?? null;
     const place = located
-      ? { lat: body.lat!, lng: body.lng!, location: point(body.lat!, body.lng!), locatedAt: now, mocked: !!body.mocked }
+      ? {
+          lat: body.lat!,
+          lng: body.lng!,
+          location: point(body.lat!, body.lng!),
+          locatedAt: now,
+          mocked: !!body.mocked,
+          accuracy,
+          fixedAt,
+        }
       : sharing
         ? {}
-        : { lat: null, lng: null, location: null, locatedAt: null };
+        : { lat: null, lng: null, location: null, locatedAt: null, accuracy: null, fixedAt: null };
     await this.db
       .insert(agentPresence)
       .values({ userId: auth.userId, countryCode: auth.countryCode, online: body.online, ...place, updatedAt: now })
@@ -136,29 +158,10 @@ export class PresenceService {
     // An errand may have ended while this was being written: if the agent is offline and now idle,
     // forget the position again rather than keep it.
     if (!body.online && sharing) await this.forgetIfIdle(auth.userId);
-    if (located) {
-      const position = { lat: body.lat!, lng: body.lng!, mocked: !!body.mocked, at: now };
-      // Kept for each errand they are out on (G1, G4, E6), and checked against the last position (G1).
-      await this.trail.record(
-        auth.userId,
-        running.map((e) => e.id),
-        position,
-      );
-      const before =
-        current?.lat != null && current.lng != null && current.locatedAt
-          ? { lat: current.lat, lng: current.lng, at: current.locatedAt, mocked: current.mocked }
-          : null;
-      this.risk.positionReported({
-        agentId: auth.userId,
-        countryCode: auth.countryCode,
-        before,
-        after: position,
-        running,
-      });
-    }
+    const following = sharedWith(running);
     // A mocked position (MB4) isn't sent on: it says nothing about where the agent is.
     if (located && !body.mocked) {
-      for (const e of sharedWith(running)) {
+      for (const e of following) {
         this.realtime.toUser(e.customerId, 'customer', 'agent.location', {
           errandId: e.id,
           lat: body.lat,
@@ -166,6 +169,38 @@ export class PresenceService {
           at: now,
         });
       }
+    }
+    if (located) {
+      const position = { lat: body.lat!, lng: body.lng!, mocked: !!body.mocked, accuracy, fixedAt, at: now };
+      // Kept for the errands whose customer follows the agent now (G1, G4, E6), beside the report: a failed
+      // write is logged rather than failing the agent's report.
+      await this.trail
+        .record(
+          auth.userId,
+          following.map((e) => e.id),
+          position,
+        )
+        .catch((error: Error) => this.logger.warn(`Keeping a trail point failed: ${error.message}`));
+      // Checked against the last position (G1): by when the phone took each fix when both say, else by
+      // when each reached us.
+      const byPhone = !!(current?.fixedAt && fixedAt);
+      const before =
+        current?.lat != null && current.lng != null && current.locatedAt
+          ? {
+              lat: current.lat,
+              lng: current.lng,
+              at: byPhone ? current.fixedAt! : current.locatedAt,
+              accuracy: current.accuracy,
+              mocked: current.mocked,
+            }
+          : null;
+      this.risk.positionReported({
+        agentId: auth.userId,
+        countryCode: auth.countryCode,
+        before,
+        after: { ...position, at: byPhone ? fixedAt! : now },
+        running: following,
+      });
     }
     return { online: body.online, sharingLocation: sharing, ...(selfieNeeded ? { selfieNeeded } : {}) };
   }
@@ -177,7 +212,16 @@ export class PresenceService {
   async sweep() {
     const cleared = await this.db
       .update(agentPresence)
-      .set({ online: false, lat: null, lng: null, location: null, locatedAt: null, updatedAt: new Date() })
+      .set({
+        online: false,
+        lat: null,
+        lng: null,
+        location: null,
+        locatedAt: null,
+        accuracy: null,
+        fixedAt: null,
+        updatedAt: new Date(),
+      })
       .where(and(isNotNull(agentPresence.locatedAt), lt(agentPresence.locatedAt, new Date(Date.now() - KEEP_FOR_MS))))
       .returning({ userId: agentPresence.userId });
     if (cleared.length) this.logger.log(`Cleared ${cleared.length} stale agent positions`);
@@ -194,7 +238,15 @@ export class PresenceService {
     if (busy) return;
     await this.db
       .update(agentPresence)
-      .set({ lat: null, lng: null, location: null, locatedAt: null, updatedAt: new Date() })
+      .set({
+        lat: null,
+        lng: null,
+        location: null,
+        locatedAt: null,
+        accuracy: null,
+        fixedAt: null,
+        updatedAt: new Date(),
+      })
       .where(and(eq(agentPresence.userId, agentId), eq(agentPresence.online, false)));
   }
 

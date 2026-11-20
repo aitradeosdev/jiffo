@@ -111,13 +111,16 @@ A flag asks a person to look; it refuses nothing by itself. Each check runs besi
 
 ## The GPS trail (G1, G3, G4, E6)
 
-- **What is kept:** while an agent is out on an errand, each position their phone reports is kept for that errand (`errand_trail`), mocked ones marked as such. Being online on no errand leaves no trail; only the latest position is kept then, as before (G3).
-- **Impossible jumps (G1):** each reported position is compared with the one before. A move of at least 1 km faster than 150 km/h (Settings, Risk flags) is flagged for the Risk queue: on each errand the agent is out on, or for the agent, once a day, when on none. Smaller moves are a phone's GPS wandering, however fast they look. A move to or from a mocked position isn't judged, as the phone already said it was mocked (MB4).
-- **When an errand is finished:**
-  - **No movement (E6):** the trail stayed within 150 m of where it started, over at least three positions and five minutes, while the pickup and drop-off are more than twice that apart;
+- **What is kept:** each position the agent's phone reports while they are out on an errand is kept for the errands whose customer follows them then (`errand_trail`): an errand held while they carry out another gets none until it is under way (G2). Mocked positions are kept but marked. With each position the app sends when the phone took the fix and how far off it might be. Being online on no errand leaves no trail; only the latest position is kept then, as before (G3). A trail point that can't be written is logged; it never fails the agent's report.
+- **Impossible jumps (G1):** each reported position is compared with the one before. A move of at least 1 km faster than 150 km/h (Settings, Risk flags) is flagged for the Risk queue: on each errand that follows the agent, or for the agent once a day (by the country's day) when on none.
+  - The time is when the phone took each fix, when both reports say and the phone's clock is believable (within ten minutes of ours), so reports held up on the network don't look like jumps.
+  - How far off each fix might be is taken off the distance: a cell tower's fix can be a kilometre or more out.
+  - Smaller moves are a phone's GPS wandering, however fast they look. A move to or from a mocked position isn't judged, as the phone already said it was mocked (MB4).
+- **When an errand is finished,** on the finishing agent's own positions only (an agent who gave the errand back left theirs on it too):
+  - **No movement (E6):** the trail stayed within 150 m of where it started, over at least three positions and five minutes, while the pickup and drop-off are more than twice that apart. Only a trail that covers the errand from accepted to delivered with no gap of more than three minutes is judged: positions that stopped coming say nothing about where the agent went meanwhile.
   - **Along a ruler (G1):** eight positions in a row over at least 300 m, every one within a metre and a half of the straight line, at a speed even to within 3%. A phone's GPS wanders a few metres and a driver's speed changes; an app faking a route doesn't.
 - **Deleted after 90 days (G4):** a daily job deletes older positions, except for an errand in dispute or with a flag still open.
-- **Limits:** the positions are the phone's own word. These checks catch the ways faking usually shows, and with the app checks (MB3) and the mock flag (MB4) make it harder; they don't prove where someone was.
+- **Limits:** the positions, their times and their accuracy are the phone's own word. These checks catch the ways faking usually shows, and with the app checks (MB3) and the mock flag (MB4) make it harder; they don't prove where someone was.
 
 ## The apps on the phone
 

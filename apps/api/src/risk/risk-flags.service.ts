@@ -27,7 +27,7 @@ import {
   riskFlags,
   users,
 } from '../db/schema';
-import { impossibleMove, staysPut, straightRun } from './gps';
+import { impossibleMove, staysPut, straightRun, type TrailPoint } from './gps';
 import { moderate } from './moderation';
 import { NetworksService } from './networks.service';
 
@@ -46,6 +46,11 @@ interface Raise {
   details?: Record<string, unknown>;
   errandIds?: string[];
 }
+
+/** No jump Settings can set is shorter than this (risk.gpsJumpMeters). */
+const MIN_JUMP_METRES = 100;
+/** The app reports every ten seconds: a trail with a longer gap than this wasn't being sent. */
+const TRAIL_GAP_MINUTES = 3;
 
 /** Older payout accounts fingerprinted at a time. */
 const BACKFILL_BATCH = 200;
@@ -156,12 +161,14 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
   positionReported(input: {
     agentId: string;
     countryCode: string;
-    before: { lat: number; lng: number; at: Date; mocked: boolean } | null;
-    after: { lat: number; lng: number; at: Date; mocked: boolean };
+    before: (TrailPoint & { mocked: boolean }) | null;
+    after: TrailPoint & { mocked: boolean };
     running: Array<{ id: string; customerId: string }>;
   }) {
     const { before, after } = input;
     if (!before || before.mocked || after.mocked) return;
+    // Most reports move a few metres: shorter than any jump Settings can set, so nothing more is read.
+    if (haversineMeters(before, after) < MIN_JUMP_METRES) return;
     this.later(`position of ${input.agentId}`, () => this.checkMove({ ...input, before }));
   }
 
@@ -374,19 +381,21 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
   private async checkMove(input: {
     agentId: string;
     countryCode: string;
-    before: { lat: number; lng: number; at: Date };
-    after: { lat: number; lng: number; at: Date };
+    before: TrailPoint;
+    after: TrailPoint;
     running: Array<{ id: string; customerId: string }>;
   }) {
     const { gpsMaxSpeedKmh, gpsJumpMeters } = await this.risk(input.countryCode);
     const move = impossibleMove(input.before, input.after, { maxSpeedKmh: gpsMaxSpeedKmh, jumpMeters: gpsJumpMeters });
     if (!move) return;
     if (!input.running.length) {
-      // Online, on no errand: one flag for the agent each day it happens.
+      // Online, on no errand: one flag for the agent each day it happens, by the country's day.
+      const { timezone } = await this.countries.basics(input.countryCode);
+      const day = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, dateStyle: 'short' }).format(new Date());
       await this.raise({
         countryCode: input.countryCode,
         kind: 'gps_jump',
-        dedupeKey: `${input.agentId}:${input.after.at.toISOString().slice(0, 10)}`,
+        dedupeKey: `${input.agentId}:${day}`,
         userId: input.agentId,
         details: move,
       });
@@ -410,12 +419,19 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
    * a run along a ruler at an even speed. Mocked positions don't count as where the agent was.
    */
   private async checkTrail(errand: ErrandRow) {
-    if (!errand.agentId) return;
-    const [points, stops, { noMovementMeters }] = await Promise.all([
+    if (!errand.agentId || !errand.acceptedAt) return;
+    const [rows, stops, { noMovementMeters }] = await Promise.all([
+      // This agent's own positions: an agent who gave the errand back left theirs on it too.
       this.db
-        .select({ lat: errandTrail.lat, lng: errandTrail.lng, at: errandTrail.at })
+        .select({ lat: errandTrail.lat, lng: errandTrail.lng, at: errandTrail.at, fixedAt: errandTrail.fixedAt })
         .from(errandTrail)
-        .where(and(eq(errandTrail.errandId, errand.id), eq(errandTrail.mocked, false)))
+        .where(
+          and(
+            eq(errandTrail.errandId, errand.id),
+            eq(errandTrail.agentId, errand.agentId),
+            eq(errandTrail.mocked, false),
+          ),
+        )
         .orderBy(asc(errandTrail.at), asc(errandTrail.id)),
       this.db
         .select({ kind: errandStops.kind, lat: errandStops.lat, lng: errandStops.lng })
@@ -431,11 +447,27 @@ export class RiskFlagsService implements OnApplicationBootstrap, BeforeApplicati
       otherUserId: errand.agentId,
       errandIds: [errand.id],
     };
+    // By when the phone took each fix, where it said.
+    const points = rows.map((r) => ({ lat: r.lat, lng: r.lng, at: r.fixedAt ?? r.at }));
     const pickup = stops.find((s) => s.kind === 'pickup');
     const dropoff = stops.findLast((s) => s.kind === 'dropoff');
     const routeMetres = pickup && dropoff ? haversineMeters(pickup, dropoff) : 0;
-    if (noMovementMeters > 0 && routeMetres > 2 * noMovementMeters) {
-      const still = staysPut(points, { metres: noMovementMeters, minPoints: 3, minMinutes: 5 });
+    // Staying put is judged only on a trail that covers the errand, from accepted to delivered, with no gap:
+    // positions that stopped coming say nothing about where the agent went meanwhile.
+    const gap = TRAIL_GAP_MINUTES * 60_000;
+    const end = errand.deliveredAt ?? errand.completedAt ?? new Date();
+    const during = points.filter((p) => p.at >= errand.acceptedAt! && p.at <= end);
+    const covers =
+      during.length > 0 &&
+      during[0]!.at.getTime() - errand.acceptedAt.getTime() <= gap &&
+      end.getTime() - during[during.length - 1]!.at.getTime() <= gap;
+    if (noMovementMeters > 0 && routeMetres > 2 * noMovementMeters && covers) {
+      const still = staysPut(during, {
+        metres: noMovementMeters,
+        minPoints: 3,
+        minMinutes: 5,
+        maxGapMinutes: TRAIL_GAP_MINUTES,
+      });
       if (still) {
         await this.raise({ ...base, kind: 'no_movement', details: { ...still, routeMetres: Math.round(routeMetres) } });
       }

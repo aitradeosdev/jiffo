@@ -65,7 +65,10 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   const switched = useRef(false);
 
   const send = useCallback(
-    async (next: { online: boolean; lat?: number; lng?: number; mocked?: boolean }, goingOnline = false) => {
+    async (
+      next: { online: boolean; lat?: number; lng?: number; mocked?: boolean; accuracy?: number; fixedAt?: number },
+      goingOnline = false,
+    ) => {
       markSent();
       // Going online carries the app check (MB3), made fresh each time; staying online needs none.
       const checked = goingOnline ? await appCheck('PUT', '/v1/agent/presence', next) : {};
