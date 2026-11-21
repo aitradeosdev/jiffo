@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CountrySettingsSchema, NIGERIA_DEFAULT_SETTINGS } from '../src/settings';
 import {
+  averageReliability,
   matchRefusal,
   offerCounts,
   pausesOffers,
@@ -122,8 +123,8 @@ describe('the Matching settings', () => {
       freeDeclineKm: 3,
       freeDeclineMinutes: 2,
       acceptanceOffers: 50,
+      acceptanceMinOffers: 10,
       pauseBelowBps: null,
-      pauseMinOffers: 10,
       pauseMinutes: 30,
       offers: true,
       offerSeconds: 20,
@@ -218,7 +219,7 @@ describe('the search steps', () => {
 
 /** The acceptance rate (docs/matching.md, M9): the share of an agent's recent counted offers they took. */
 describe('the acceptance rate', () => {
-  const rules = { freeDeclineKm: 3, freeDeclineMinutes: 2, pauseBelowBps: 6_000, pauseMinOffers: 10 };
+  const rules = { freeDeclineKm: 3, freeDeclineMinutes: 2, pauseBelowBps: 6_000, acceptanceMinOffers: 10 };
   const at = new Date('2026-11-21T10:00:00.000Z');
   const ago = (minutes: number) => new Date(at.getTime() - minutes * 60_000);
 
@@ -233,10 +234,30 @@ describe('the acceptance rate', () => {
   });
 
   it('pauses offers below the level admin set, once there are enough counted offers, and never when off', () => {
-    expect(pausesOffers(0.5, 10, rules)).toBe(true);
-    expect(pausesOffers(0.6, 10, rules)).toBe(false);
-    expect(pausesOffers(0.1, 9, rules)).toBe(false);
-    expect(pausesOffers(null, 20, rules)).toBe(false);
-    expect(pausesOffers(0, 50, { ...rules, pauseBelowBps: null })).toBe(false);
+    expect(pausesOffers({ taken: 5, answered: 10 }, rules)).toBe(true);
+    expect(pausesOffers({ taken: 6, answered: 10 }, rules)).toBe(false);
+    expect(pausesOffers({ taken: 1, answered: 9 }, rules)).toBe(false);
+    expect(pausesOffers({ taken: 0, answered: 50 }, { ...rules, pauseBelowBps: null })).toBe(false);
+    // Exactly at the level isn't below it, whatever rounding would make of 57%.
+    expect(pausesOffers({ taken: 57, answered: 100 }, { ...rules, pauseBelowBps: 5_700 })).toBe(false);
+    expect(pausesOffers({ taken: 56, answered: 100 }, { ...rules, pauseBelowBps: 5_700 })).toBe(true);
+  });
+
+  it("compares agents with too little history to the state's reliability, acceptance included", () => {
+    expect(averageReliability({ completion: 0.9, acceptance: 0.7 })).toBeCloseTo(0.8);
+    expect(averageReliability({ completion: 0.9, acceptance: null })).toBe(0.9);
+    expect(averageReliability({ completion: null, acceptance: null })).toBe(1);
+  });
+
+  it('needs the rate to be over at least as many offers as it takes to count', () => {
+    const parse = (matching: Record<string, unknown>) =>
+      CountrySettingsSchema.safeParse({
+        ...NIGERIA_DEFAULT_SETTINGS,
+        matching: { ...NIGERIA_DEFAULT_SETTINGS.matching, ...matching },
+      });
+    expect(parse({ acceptanceOffers: 50, acceptanceMinOffers: 50 }).success).toBe(true);
+    const never = parse({ acceptanceOffers: 50, acceptanceMinOffers: 60 });
+    expect(never.success).toBe(false);
+    expect(JSON.stringify(never.error)).toContain('more offers than the rate is over');
   });
 });

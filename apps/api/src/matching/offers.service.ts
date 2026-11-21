@@ -9,7 +9,7 @@ import {
   searchStep,
   type CountrySettings,
 } from '@jiffo/shared';
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { haversineMeters } from '../adapters/maps';
 import { AgentsService } from '../agents/agents.service';
 import { PresenceService } from '../agents/presence.service';
@@ -424,11 +424,32 @@ export class OffersService {
   private async pauseIfLow(agentId: string, countryCode: string) {
     const rules = (await this.countries.currentSettings(countryCode)).settings.matching;
     if (rules.pauseBelowBps === null) return;
-    const standing = await this.ranking.standing(agentId, countryCode);
-    if (standing.offersPausedUntil) return;
-    if (!pausesOffers(standing.acceptanceRate, standing.countedOffers, rules)) return;
-    const until = new Date(Date.now() + rules.pauseMinutes * 60_000);
-    await this.db.update(agentPresence).set({ offersPausedUntil: until }).where(eq(agentPresence.userId, agentId));
+    const [presence] = await this.db
+      .select({ until: agentPresence.offersPausedUntil })
+      .from(agentPresence)
+      .where(eq(agentPresence.userId, agentId));
+    const now = new Date();
+    if (presence?.until && presence.until > now) return;
+    // After a pause, only offers since count toward the next, so one miss can't pause them again at once.
+    const { rows } = await this.db.execute<{ taken: number; answered: number }>(sql`
+      select count(*) filter (where o.status = 'accepted')::int as taken, count(*)::int as answered
+      from (select status from errand_offers where agent_id = ${agentId} and counts
+        and status in ('accepted', 'declined', 'expired') and offered_at > ${presence?.until ?? new Date(0)}
+        order by offered_at desc limit ${rules.acceptanceOffers}) o`);
+    if (!pausesOffers(rows[0] ?? { taken: 0, answered: 0 }, rules)) return;
+    const until = new Date(now.getTime() + rules.pauseMinutes * 60_000);
+    // Paused once: two offers ending together don't tell them twice.
+    const [paused] = await this.db
+      .update(agentPresence)
+      .set({ offersPausedUntil: until })
+      .where(
+        and(
+          eq(agentPresence.userId, agentId),
+          or(isNull(agentPresence.offersPausedUntil), lte(agentPresence.offersPausedUntil, now)),
+        ),
+      )
+      .returning({ userId: agentPresence.userId });
+    if (!paused) return;
     this.realtime.toUser(agentId, 'agent', 'offers.paused', { until });
     await this.push.notifyUser(agentId, 'agent', {
       title: 'Offers paused',

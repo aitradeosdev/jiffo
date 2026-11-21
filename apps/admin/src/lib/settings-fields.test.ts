@@ -22,7 +22,7 @@ describe('settings fields', () => {
     expect(shown(FIELD_BY_PATH.get('matching.freeDeclineKm'), 3)).toBe('3 km');
     expect(shown(FIELD_BY_PATH.get('matching.pauseBelowBps'), null)).toBe('none');
     expect(shown(FIELD_BY_PATH.get('matching.pauseBelowBps'), 6_000)).toBe('60%');
-    for (const path of ['freeDeclineMinutes', 'acceptanceOffers', 'pauseMinOffers', 'pauseMinutes']) {
+    for (const path of ['freeDeclineMinutes', 'acceptanceOffers', 'acceptanceMinOffers', 'pauseMinutes']) {
       expect(FIELD_BY_PATH.has(`matching.${path}`)).toBe(true);
     }
   });

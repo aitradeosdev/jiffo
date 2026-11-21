@@ -132,9 +132,21 @@ describe('the acceptance rate', () => {
     expect(await openOffer(distant.id)).toMatchObject({ agentId: far.userId, counts: false });
   });
 
-  it('works out the rate from counted offers only, beside completion and cancellations', async () => {
+  it('works out the rate from counted offers only, once there are enough, beside completion and cancellations', async () => {
+    await matching({ acceptanceMinOffers: 4 });
+    try {
+      await rateFromCountedOffers();
+    } finally {
+      await matching({ acceptanceMinOffers: DEFAULT_MATCHING_SETTINGS.acceptanceMinOffers });
+    }
+  });
+
+  async function rateFromCountedOffers() {
     const agent = await agentAt(east(1));
-    for (let i = 0; i < 2; i++) await decline(agent, (await urgent()).id);
+    await decline(agent, (await urgent()).id);
+    // One no is too little to go by: not shown, nor counted in their ranking, until there are 4.
+    expect(await standing(agent)).toMatchObject({ acceptanceRate: null, countedOffers: 1 });
+    await decline(agent, (await urgent()).id);
     await runOut((await urgent()).id);
     // A far one, declined: not counted.
     await decline(agent, (await urgent(east(-3.5))).id);
@@ -152,10 +164,10 @@ describe('the acceptance rate', () => {
       cancellations7d: 0,
       offersPausedUntil: null,
     });
-  });
+  }
 
   it('pauses offers below the level admin set, says so, and leaves the board open', async () => {
-    await matching({ pauseBelowBps: 6_000, pauseMinOffers: 2, pauseMinutes: 30 });
+    await matching({ pauseBelowBps: 6_000, acceptanceMinOffers: 2, pauseMinutes: 30 });
     try {
       const picky = await agentAt(east(0.5));
       // The first no leaves them at 0% from one offer: too few to pause on.
@@ -174,8 +186,32 @@ describe('the acceptance rate', () => {
         .get(`/v1/errands/board?lat=${east(0.5).lat}&lng=${east(0.5).lng}&radiusKm=50`)
         .set(picky.headers)
         .expect(200);
+
+      // Once the pause is over, only offers since count toward the next: one more no isn't enough.
+      await t.db
+        .update(agentPresence)
+        // Just ended: after every offer so far.
+        .set({ offersPausedUntil: new Date(Date.now() - 1) })
+        .where(eq(agentPresence.userId, picky.userId));
+      await alone();
+      await t.db
+        .update(agentPresence)
+        .set({ online: true, onlineSince: new Date(Date.now() - 10 * 60_000) })
+        .where(eq(agentPresence.userId, picky.userId));
+      await request(t.http).put('/v1/agent/presence').set(picky.headers).send(east(0.5)).expect(200);
+      const before = pushesTo(picky).length;
+      await decline(picky, (await urgent()).id);
+      expect((await standing(picky)).offersPausedUntil).toBeNull();
+      await decline(picky, (await urgent()).id);
+      expect((await standing(picky)).offersPausedUntil).not.toBeNull();
+      // Told once for it.
+      expect(
+        pushesTo(picky)
+          .slice(before)
+          .filter((p) => /paused/i.test(p.title)),
+      ).toHaveLength(1);
     } finally {
-      await matching({ pauseBelowBps: null });
+      await matching({ pauseBelowBps: null, acceptanceMinOffers: DEFAULT_MATCHING_SETTINGS.acceptanceMinOffers });
     }
   });
 });

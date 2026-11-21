@@ -1,9 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   AGENT_OUT_STATES,
+  averageReliability,
   byRank,
   rankScore,
   type AgentTier,
+  type CountrySettings,
   type RankInputs,
   type RankParts,
   type StateAverages,
@@ -57,7 +59,7 @@ export class RankingService {
     const [history, average] = await Promise.all([
       this.history(
         found.map((c) => c.agentId),
-        rules.acceptanceOffers,
+        rules,
       ),
       this.stateAverages(errand!.countryCode, errand!.stateCode),
     ]);
@@ -78,7 +80,7 @@ export class RankingService {
   async standing(agentId: string, countryCode: string) {
     const rules = (await this.countries.currentSettings(countryCode)).settings.matching;
     const [mine, [presence]] = await Promise.all([
-      this.history([agentId], rules.acceptanceOffers),
+      this.history([agentId], rules),
       this.db
         .select({ until: agentPresence.offersPausedUntil })
         .from(agentPresence)
@@ -97,8 +99,15 @@ export class RankingService {
     };
   }
 
-  /** Each agent's own history, in one query: `acceptanceOffers`, how many counted offers the rate is over (M9). */
-  private async history(agentIds: string[], acceptanceOffers: number): Promise<Map<string, History>> {
+  /**
+   * Each agent's own history, in one query. Their acceptance rate (M9) is over their last counted offers, and only
+   * once they've had enough of them to go by.
+   */
+  private async history(
+    agentIds: string[],
+    rules: Pick<CountrySettings['matching'], 'acceptanceOffers' | 'acceptanceMinOffers'>,
+  ): Promise<Map<string, History>> {
+    const acceptanceOffers = rules.acceptanceOffers;
     const ids = sql.join(
       agentIds.map((id) => sql`(${id}::uuid)`),
       sql`, `,
@@ -165,7 +174,7 @@ export class RankingService {
             // Of the errands they accepted lately, the share they didn't leave.
             completionRate: r.accepted ? 1 - r.withdrawn / r.accepted : null,
             // Of their last counted offers, the share they took (M9).
-            acceptanceRate: r.answered ? r.taken / r.answered : null,
+            acceptanceRate: r.answered && r.answered >= rules.acceptanceMinOffers ? r.taken / r.answered : null,
             countedOffers: r.answered,
             onlineSince: time(r.onlineSince) === null ? null : new Date(r.onlineSince!),
             cancellations7d: r.leftThisWeek,
@@ -187,8 +196,20 @@ export class RankingService {
     const key = `rank:averages:${countryCode}:${stateCode}`;
     const kept = await this.redis.client.get(key).catch(() => null);
     if (kept) return JSON.parse(kept) as StateAverages;
-    const { rows } = await this.db.execute<{ accepted: number; withdrawn: number; rating: number | null }>(sql`
+    const { rows } = await this.db.execute<{
+      accepted: number;
+      withdrawn: number;
+      rating: number | null;
+      taken: number;
+      answered: number;
+    }>(sql`
       select
+        (select count(*) filter (where o.status = 'accepted')::int from errand_offers o join errands e on e.id = o.errand_id
+          where o.counts and o.status in ('accepted', 'declined', 'expired') and e.country_code = ${countryCode}
+            and e.state_code = ${stateCode} and o.offered_at > now() - interval '90 days') as taken,
+        (select count(*)::int from errand_offers o join errands e on e.id = o.errand_id
+          where o.counts and o.status in ('accepted', 'declined', 'expired') and e.country_code = ${countryCode}
+            and e.state_code = ${stateCode} and o.offered_at > now() - interval '90 days') as answered,
         (select count(*)::int from errand_events ev join errands e on e.id = ev.errand_id
           where ev.event = 'accept' and e.country_code = ${countryCode} and e.state_code = ${stateCode}
             and ev.created_at > now() - interval '90 days') as accepted,
@@ -200,7 +221,11 @@ export class RankingService {
             and r.created_at > now() - interval '90 days') as rating`);
     const row = rows[0]!;
     const average: StateAverages = {
-      reliability: row.accepted ? Math.max(0, 1 - row.withdrawn / row.accepted) : NO_HISTORY.reliability,
+      // Completion and acceptance together, as an agent's own reliability is (M9).
+      reliability: averageReliability({
+        completion: row.accepted ? Math.max(0, 1 - row.withdrawn / row.accepted) : null,
+        acceptance: row.answered ? row.taken / row.answered : null,
+      }),
       ratingStars: row.rating ?? NO_HISTORY.ratingStars,
     };
     await this.redis.client.set(key, JSON.stringify(average), 'EX', AVERAGES_SECONDS).catch(() => undefined);

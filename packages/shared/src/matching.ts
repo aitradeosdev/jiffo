@@ -176,7 +176,7 @@ export function searchRadiusKm(offersMade: number, farthestMeters: number | null
 
 type AcceptanceRules = Pick<
   CountrySettings['matching'],
-  'freeDeclineKm' | 'freeDeclineMinutes' | 'pauseBelowBps' | 'pauseMinOffers'
+  'freeDeclineKm' | 'freeDeclineMinutes' | 'pauseBelowBps' | 'acceptanceMinOffers'
 >;
 
 /**
@@ -193,12 +193,23 @@ export function offerCounts(
   return offer.offeredAt.getTime() - offer.onlineSince.getTime() >= rules.freeDeclineMinutes * 60_000;
 }
 
-/** Whether a low acceptance rate pauses the agent's offers now (M9): only where admin set a level, after enough offers. */
+/**
+ * Whether a low acceptance rate pauses the agent's offers now (M9): only where admin set a level, after enough
+ * counted offers, and only below it, compared in whole numbers so a rate exactly at the level never is.
+ */
 export function pausesOffers(
-  rate: number | null,
-  counted: number,
-  rules: Pick<AcceptanceRules, 'pauseBelowBps' | 'pauseMinOffers'>,
+  offers: { taken: number; answered: number },
+  rules: Pick<AcceptanceRules, 'pauseBelowBps' | 'acceptanceMinOffers'>,
 ): boolean {
-  if (rules.pauseBelowBps === null || rate === null || counted < rules.pauseMinOffers) return false;
-  return rate * 10_000 < rules.pauseBelowBps;
+  if (rules.pauseBelowBps === null || offers.answered < rules.acceptanceMinOffers) return false;
+  return offers.taken * 10_000 < rules.pauseBelowBps * offers.answered;
+}
+
+/**
+ * A state's reliability, for agents with too little history of their own (M4): its completion and acceptance
+ * rates together, as an agent's own are, so neither newcomers nor the established gain from the difference.
+ */
+export function averageReliability(rates: { completion: number | null; acceptance: number | null }): number {
+  const known = [rates.completion, rates.acceptance].filter((r): r is number => r !== null);
+  return known.length ? known.reduce((a, b) => a + b, 0) / known.length : 1;
 }

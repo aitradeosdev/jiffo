@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import Constants from 'expo-constants';
@@ -7,6 +7,7 @@ import { errorMessage } from '@/api/client';
 import { formatE164 } from '@/auth/phone';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { useResource } from '@/api/useResource';
+import { useRealtimeEvent } from '@/realtime/realtime';
 import { VARIANT } from '@/config';
 import { useCustomerIdentity } from '@/identity/customer';
 import { useColors } from '@/theme/theme';
@@ -32,6 +33,16 @@ export default function Account() {
   const stats = useResource<Stats>('/v1/me/stats');
   // An agent's acceptance rate, completion rate and errands left this week, beside their rating (M9).
   const standing = useResource<Standing>(VARIANT === 'agent' ? '/v1/agent/standing' : null);
+  useRealtimeEvent('offers.paused', standing.reloadSoon);
+  // The pause's note goes once it has ended, the screen left open or not.
+  const pausedUntil = standing.data?.offersPausedUntil ?? null;
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    const left = pausedUntil ? Date.parse(pausedUntil) - Date.now() : 0;
+    if (left <= 0) return;
+    const ended = setTimeout(() => rerender((n) => n + 1), Math.min(left + 1_000, 2 ** 31 - 1));
+    return () => clearTimeout(ended);
+  }, [pausedUntil]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<'out' | 'forget' | 'others' | null>(null);
   const [othersDone, setOthersDone] = useState(false);

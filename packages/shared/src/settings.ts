@@ -71,8 +71,8 @@ export const DEFAULT_MATCHING_SETTINGS = {
   freeDeclineKm: 3,
   freeDeclineMinutes: 2,
   acceptanceOffers: 50,
+  acceptanceMinOffers: 10,
   pauseBelowBps: null,
-  pauseMinOffers: 10,
   pauseMinutes: 30,
 };
 
@@ -459,17 +459,22 @@ const CountrySettingsObject = z.object({
       freeDeclineMinutes: z.number().int().min(0).max(60).default(2),
       /** The rate is over an agent's last this many counted offers. */
       acceptanceOffers: z.number().int().min(10).max(500).default(50),
+      /** Counted offers an agent has before their rate counts, in their ranking and for a pause; until then, none. */
+      acceptanceMinOffers: z.number().int().min(1).max(500).default(10),
       /**
-       * Below this rate, in basis points, an agent's offers pause for `pauseMinutes`, once they have had
-       * `pauseMinOffers` counted offers. Null: never (a low rate then only lowers their ranking).
+       * Below this rate, in basis points, an agent's offers pause for `pauseMinutes`. Null: never (a low rate then
+       * only lowers their ranking). After a pause, only offers since count toward the next.
        */
       pauseBelowBps: z.number().int().min(1).max(9_999).nullable().default(null),
-      pauseMinOffers: z.number().int().min(1).max(500).default(10),
       pauseMinutes: z.number().int().min(5).max(1_440).default(30),
     })
     .refine((m) => (m.searchStepsKm.at(-1) ?? 0) <= m.boardRadiusKm, {
       message: "The last search step can't reach past how far the board reaches",
       path: ['searchStepsKm'],
+    })
+    .refine((m) => m.acceptanceMinOffers <= m.acceptanceOffers, {
+      message: "The acceptance rate can't need more offers than the rate is over",
+      path: ['acceptanceMinOffers'],
     })
     .default(() => structuredClone(DEFAULT_MATCHING_SETTINGS)),
   /** The emergency button (docs/security-plan.md, E9). */

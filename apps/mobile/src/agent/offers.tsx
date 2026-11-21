@@ -218,11 +218,11 @@ function OfferScreen({ showing, onClose }: { showing: Showing; onClose: () => vo
           <Text variant="note" tone="ink3">
             The full addresses show once you accept.
           </Text>
-          {offer.counts ? null : (
+          {offer.counts === false ? (
             <View style={[styles.free, { borderColor: c.urgent }]}>
               <Text variant="small">Declining this one is free: it doesn't count toward your acceptance rate.</Text>
             </View>
-          )}
+          ) : null}
         </View>
 
         {ended ? (

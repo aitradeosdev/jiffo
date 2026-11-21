@@ -518,9 +518,10 @@ export const SECTIONS: Section[] = [
         help: 'Leave empty for never: a low rate then only lowers their ranking. They can still take errands from the board.',
       },
       {
-        path: 'matching.pauseMinOffers',
-        label: 'Only once they have had this many counted offers',
+        path: 'matching.acceptanceMinOffers',
+        label: 'Counted offers an agent has before their rate counts',
         kind: 'count',
+        help: 'In their ranking and for a pause. After a pause, only offers since count toward the next.',
       },
       {
         path: 'matching.pauseMinutes',
