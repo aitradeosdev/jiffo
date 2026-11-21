@@ -20,7 +20,6 @@ import {
   agentReachKm,
   heldRefusal,
   matchRefusal,
-  type MatchErrand,
 } from '@jiffo/shared';
 import type { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
@@ -159,24 +158,6 @@ export class ErrandsService implements OnModuleInit {
     private readonly eligibility: EligibilityService,
     private readonly matchBlocks: MatchBlocksService,
   ) {}
-
-  /** An errand as matching checks it for this agent (docs/matching.md, M1). */
-  private matchErrand(
-    errand: ErrandRow,
-    pickupMeters: number,
-    agentId: string,
-    facts: { apart: Set<string>; gaveUp: Set<string> },
-  ): MatchErrand {
-    return {
-      customerId: errand.customerId,
-      urgent: errand.urgent,
-      categoryKey: errand.categoryKey,
-      buy: errand.buy,
-      pickupMeters,
-      keptApart: agentId !== errand.customerId && facts.apart.has(errand.customerId),
-      gaveUp: facts.gaveUp.has(errand.id),
-    };
-  }
 
   onModuleInit() {
     this.timers.setHandler((job) => this.applyTimer(job));
@@ -335,7 +316,8 @@ export class ErrandsService implements OnModuleInit {
       found.map((r) => ({ id: r.errand.id, customerId: r.errand.customerId })),
     );
     const rows = found.filter(
-      (r) => !matchRefusal(me, this.matchErrand(r.errand, Number(r.distanceMeters), auth.userId, facts), rules),
+      (r) =>
+        !matchRefusal(me, this.eligibility.matchErrand(r.errand, Number(r.distanceMeters), auth.userId, facts), rules),
     );
     const views = await this.views(
       rows.map((r) => r.errand),
@@ -1115,7 +1097,7 @@ export class ErrandsService implements OnModuleInit {
         const facts = await this.eligibility.facts(auth.userId, [errand], tx);
         const refused = matchRefusal(
           me,
-          this.matchErrand(errand, Number(pickup[0]?.meters ?? Infinity), auth.userId, facts),
+          this.eligibility.matchErrand(errand, Number(pickup[0]?.meters ?? Infinity), auth.userId, facts),
           live.matching,
         );
         if (refused) throw this.eligibility.refusal(refused);

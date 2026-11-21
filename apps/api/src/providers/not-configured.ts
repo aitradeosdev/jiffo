@@ -32,6 +32,7 @@ export class NotConfiguredMaps implements MapsAdapter {
   autocomplete = refuse('maps');
   place = refuse('maps');
   route = refuse('maps');
+  travelTimes = refuse('maps');
 }
 
 export class NotConfiguredStorage implements StorageAdapter {

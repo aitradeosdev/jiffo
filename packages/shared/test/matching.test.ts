@@ -102,6 +102,8 @@ describe('the Matching settings', () => {
       boardRadiusKm: 10,
       maxBoardErrands: 3,
       fakeGpsHoldHours: 24,
+      shortlistSize: 10,
+      fallbackSpeedKmh: 20,
     });
   });
 

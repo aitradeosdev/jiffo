@@ -6,6 +6,7 @@ import {
   PAIR_FLAG_KINDS,
   type CountrySettings,
   type MatchAgent,
+  type MatchErrand,
   type MatchRefusal,
 } from '@jiffo/shared';
 import { and, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
@@ -49,6 +50,24 @@ export class EligibilityService {
 
   refusal(code: MatchRefusal): ApiError {
     return REFUSALS[code]();
+  }
+
+  /** An errand as matching checks it for this agent, with what facts() found. */
+  matchErrand(
+    errand: { id: string; customerId: string; urgent: boolean; categoryKey: string; buy: boolean },
+    pickupMeters: number,
+    agentId: string,
+    facts: { apart: Set<string>; gaveUp: Set<string> },
+  ): MatchErrand {
+    return {
+      customerId: errand.customerId,
+      urgent: errand.urgent,
+      categoryKey: errand.categoryKey,
+      buy: errand.buy,
+      pickupMeters,
+      keptApart: agentId !== errand.customerId && facts.apart.has(errand.customerId),
+      gaveUp: facts.gaveUp.has(errand.id),
+    };
   }
 
   /** The agent now, or the reason they may not get any errand. */

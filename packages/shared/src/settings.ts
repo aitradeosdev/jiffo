@@ -54,6 +54,8 @@ export const DEFAULT_MATCHING_SETTINGS = {
   boardRadiusKm: 10,
   maxBoardErrands: 3,
   fakeGpsHoldHours: 24,
+  shortlistSize: 10,
+  fallbackSpeedKmh: 20,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -377,6 +379,16 @@ const CountrySettingsObject = z.object({
         .min(0)
         .max(24 * 7)
         .default(24),
+      /**
+       * How many of the agents nearest a pickup in a straight line have their road travel time asked of the
+       * maps provider (docs/matching.md, M3). Each is a paid lookup.
+       */
+      shortlistSize: z.number().int().min(1).max(25).default(10),
+      /**
+       * When the maps provider can't give travel times: roads are taken as 30% longer than a straight line,
+       * at this speed, and it is logged.
+       */
+      fallbackSpeedKmh: z.number().int().min(5).max(80).default(20),
     })
     .default(() => structuredClone(DEFAULT_MATCHING_SETTINGS)),
   /** The emergency button (docs/security-plan.md, E9). */

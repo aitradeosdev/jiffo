@@ -23,6 +23,7 @@ import { AttestationModule } from './attestation/attestation.module';
 import { RatingsModule } from './ratings/ratings.module';
 import { PushModule } from './push/push.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { MatchingModule } from './matching/matching.module';
 import { RiskModule } from './risk/risk.module';
 import { SafetyModule } from './safety/safety.module';
 import { TimersModule } from './timers/timers.module';
@@ -40,6 +41,7 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     IdentityModule,
     AttestationModule,
+    MatchingModule,
     AgentsModule,
     PushModule,
     RealtimeModule,

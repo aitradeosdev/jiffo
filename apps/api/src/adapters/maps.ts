@@ -43,7 +43,17 @@ export interface MapsAdapter {
   place(placeId: string, sessionToken?: string): Promise<Place | null>;
   /** Driving distance through the points in order. */
   route(points: LatLng[]): Promise<RouteEstimate>;
+  /**
+   * How long each origin takes to reach one destination by road, with live traffic where the provider has it
+   * (docs/matching.md, M3): agents to a pickup. null for an origin it found no route from. Fails when the
+   * provider does, so the caller can estimate instead.
+   */
+  travelTimes(origins: LatLng[], destination: LatLng): Promise<Array<RouteEstimate | null>>;
 }
+
+/** Splits a list into parts of at most `size`. */
+const inParts = <T>(items: T[], size: number) =>
+  Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size));
 
 export const MAPS = Symbol('MAPS');
 
@@ -200,11 +210,47 @@ export class GoogleMapsAdapter implements MapsAdapter {
       return estimateRoute(points);
     }
   }
+
+  async travelTimes(origins: LatLng[], destination: LatLng) {
+    const waypoint = (p: LatLng) => ({ waypoint: { location: { latLng: { latitude: p.lat, longitude: p.lng } } } });
+    const parts = await Promise.all(
+      inParts(origins, GOOGLE_MATRIX_ORIGINS).map(async (part) => {
+        const elements = await this.call<
+          Array<{ originIndex?: number; condition?: string; distanceMeters?: number; duration?: string }>
+        >('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
+          method: 'POST',
+          fieldMask: 'originIndex,destinationIndex,condition,distanceMeters,duration',
+          body: {
+            origins: part.map(waypoint),
+            destinations: [waypoint(destination)],
+            travelMode: 'DRIVE',
+            routingPreference: 'TRAFFIC_AWARE',
+          },
+        });
+        if (!Array.isArray(elements)) throw new Error('Google sent no route matrix');
+        const times: Array<RouteEstimate | null> = part.map(() => null);
+        for (const e of elements) {
+          // An element without an index is the first origin's: Google leaves zeros out.
+          const i = e.originIndex ?? 0;
+          if (e.condition !== 'ROUTE_EXISTS' && e.condition !== undefined) continue;
+          if (e.distanceMeters === undefined || e.duration === undefined || i >= part.length) continue;
+          times[i] = { distanceMeters: e.distanceMeters, durationSeconds: Number.parseInt(e.duration, 10) };
+        }
+        return times;
+      }),
+    );
+    return parts.flat();
+  }
 }
+
+/** Origins per Route Matrix request: well inside Google's limit on elements. */
+const GOOGLE_MATRIX_ORIGINS = 100;
 
 const MAPBOX = 'https://api.mapbox.com';
 /** The most points Mapbox routes in one request. */
 const MAPBOX_MAX_POINTS = 25;
+/** The most points a Mapbox matrix with live traffic takes: the pickup and 9 agents. */
+const MAPBOX_TRAFFIC_MATRIX_POINTS = 10;
 /**
  * The kinds of suggestion with a position to pick: not a category ("Supermarket"), which has none, nor a whole
  * state, country or postcode, which is no errand stop.
@@ -357,6 +403,34 @@ export class MapboxMapsAdapter implements MapsAdapter {
       return estimateRoute(points);
     }
   }
+
+  async travelTimes(origins: LatLng[], destination: LatLng) {
+    const coord = (p: LatLng) => `${Number(p.lng.toFixed(6))},${Number(p.lat.toFixed(6))}`;
+    const parts = await Promise.all(
+      inParts(origins, MAPBOX_TRAFFIC_MATRIX_POINTS - 1).map(async (part) => {
+        const path = [...part, destination].map(coord).join(';');
+        const body = await this.call<{
+          code?: string;
+          durations?: Array<Array<number | null>>;
+          distances?: Array<Array<number | null>>;
+        }>(
+          this.url(`/directions-matrix/v1/mapbox/driving-traffic/${path}`, {
+            sources: part.map((_, i) => i).join(';'),
+            destinations: String(part.length),
+            annotations: 'duration,distance',
+          }),
+        );
+        if (body?.code !== 'Ok' || !body.durations) throw new Error('Mapbox sent no matrix');
+        return part.map((_, i): RouteEstimate | null => {
+          const duration = body.durations?.[i]?.[0];
+          const distance = body.distances?.[i]?.[0];
+          if (duration === null || duration === undefined || distance === null || distance === undefined) return null;
+          return { distanceMeters: Math.round(distance), durationSeconds: Math.round(duration) };
+        });
+      }),
+    );
+    return parts.flat();
+  }
 }
 
 /** Development and tests: a handful of real Lagos places, matched by name. */
@@ -437,5 +511,9 @@ export class FakeMapsAdapter implements MapsAdapter {
 
   async route(points: LatLng[]) {
     return estimateRoute(points);
+  }
+
+  async travelTimes(origins: LatLng[], destination: LatLng) {
+    return origins.map((o) => estimateRoute([o, destination]));
   }
 }

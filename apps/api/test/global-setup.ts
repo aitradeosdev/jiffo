@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import IORedis from 'ioredis';
 import { Client, Pool } from 'pg';
 import { DEFAULT_MATCHING_SETTINGS } from '@jiffo/shared';
 import { addDevLagos } from '../src/countries/service-areas';
@@ -46,6 +47,8 @@ export default async function setup() {
     PUSH_PROVIDER: 'memory',
     EMAIL_PROVIDER: 'memory',
     TIMER_PROVIDER: 'memory',
+    // Matching's Redis keys for this run only, removed after it.
+    REDIS_PREFIX: `test:${name}:`,
     TRUST_PROXY_HOPS: '1',
     ADMIN_PANEL_SECRET: 'test-panel-secret-0123456789abcdef0123',
     SECURITY_CONTACT: 'mailto:security@jiffo.test',
@@ -55,6 +58,15 @@ export default async function setup() {
   });
 
   return async () => {
+    const redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 1 });
+    try {
+      const stream = redis.scanStream({ match: `test:${name}:*`, count: 500 });
+      for await (const keys of stream) if ((keys as string[]).length) await redis.del(...(keys as string[]));
+    } catch {
+      // A run's keys are only clutter if Redis is gone.
+    } finally {
+      redis.disconnect();
+    }
     const cleanup = new Client({ connectionString: base.toString() });
     await cleanup.connect();
     await cleanup.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
