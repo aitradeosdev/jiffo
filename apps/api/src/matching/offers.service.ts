@@ -518,6 +518,7 @@ export class OffersService {
         .returning({ id: errands.id });
       if (!marked) return;
       this.searchChanged(errand);
+      this.realtime.boardChanged(errand.id, 'added');
     }
     const [passed, told, holding] = await Promise.all([
       this.passed(errand),
@@ -727,6 +728,7 @@ export class OffersService {
       .where(and(eq(errands.id, errand.id), eq(errands.broadcastFeeKobo, was)))
       .returning({ id: errands.id });
     if (!cleared) return;
+    this.realtime.boardChanged(errand.id, 'removed');
     await this.tellGone(errand.id, was, null, 'offered');
   }
 

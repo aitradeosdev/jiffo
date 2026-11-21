@@ -529,6 +529,12 @@ export const SECTIONS: Section[] = [
         kind: 'minutes',
       },
       {
+        path: 'matching.boardTravelTimes',
+        label: "The board's order asks the maps provider for travel times",
+        kind: 'bool',
+        help: '"Best for you" orders the board by how quickly the agent reaches each pickup. On: the maps provider\'s times for the nearest ten, each a paid lookup, shared by agents nearby for ten minutes. Off: estimated from the distance at the fallback speed.',
+      },
+      {
         path: 'matching.offersPerStep',
         label: 'Agents offered it at each step before searching further',
         kind: 'count',

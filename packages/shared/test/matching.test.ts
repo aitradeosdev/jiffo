@@ -126,6 +126,7 @@ describe('the Matching settings', () => {
       acceptanceMinOffers: 10,
       pauseBelowBps: null,
       pauseMinutes: 30,
+      boardTravelTimes: false,
       offers: true,
       offerSeconds: 20,
       missedOffersOffline: 3,

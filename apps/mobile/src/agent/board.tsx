@@ -1,13 +1,14 @@
 import { agentTierLabel } from '@jiffo/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useIsFocused } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSession } from '../auth/session';
 import { ApiError, errorMessage } from '../api/client';
 import { useCountryConfig } from '../api/useCountryConfig';
 import { useResource } from '../api/useResource';
-import { useRealtimeEvent } from '../realtime/realtime';
+import { useBoardWatch, useRealtimeEvent } from '../realtime/realtime';
+import { sortBoard, type BoardSort } from './board-order';
 import { pausedNote, type Standing } from './standing';
 import { useCurrentLocation } from '../location';
 import { isActive, AGENT_STATUS, type ErrandView } from '../errands/types';
@@ -35,11 +36,16 @@ interface Earnings {
   todayKobo: number;
   tier: 'bronze' | 'silver' | 'gold' | 'platinum';
 }
-type Sort = 'near' | 'fee' | 'buy';
 
 /** How far the board reaches until the country's settings arrive, or from an older API. */
 const DEFAULT_RADIUS_KM = 10;
-const REFRESH_MS = 20_000;
+/** Live updates keep the board current (M11); this catches up on any missed while the connection dropped. */
+const REFRESH_MS = 60_000;
+/**
+ * Board changes reload it at most this often, within the board's limit (30 a minute), so a busy area never has
+ * it refused; a burst in between makes one reload.
+ */
+const RELOAD_EVERY_MS = 4_000;
 export const km = (m: number) => (m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`);
 
 /**
@@ -62,7 +68,7 @@ export function AgentBoard() {
   const [error, setError] = useState<string | null>(null);
   const { config } = useCountryConfig();
   const radiusKm = config?.settings.matching?.boardRadiusKm ?? DEFAULT_RADIUS_KM;
-  const [sort, setSort] = useState<Sort>('near');
+  const [sort, setSort] = useState<BoardSort>('best');
   const [sheetHeight, setSheetHeight] = useState(0);
   const [areaHeight, setAreaHeight] = useState(0);
   useRealtimeEvent('errand.updated', mine.reloadSoon);
@@ -86,6 +92,8 @@ export function AgentBoard() {
       setBoard(await api.get<Board>(`/v1/errands/board?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}`));
       setError(null);
     } catch (e) {
+      // Asked too often: the board shown stays, and the next reload catches up.
+      if (e instanceof ApiError && e.status === 429) return;
       // Refused (an urgent errand to finish, say): the errands shown before can't be taken now.
       if (e instanceof ApiError) setBoard(null);
       setError(errorMessage(e));
@@ -100,10 +108,31 @@ export function AgentBoard() {
   // An urgent errand open to everyone near them now, or one they were told of taken or gone (M8): on or off
   // the board at once.
   useRealtimeEvent('errand.broadcast', () => void load());
-  useRealtimeEvent<{ errandId: string }>('errand.gone', ({ errandId }) =>
-    setBoard((now) => (now ? { ...now, errands: now.errands.filter((e) => e.id !== errandId) } : now)),
+  const drop = useCallback(
+    (errandId: string) =>
+      setBoard((now) => (now ? { ...now, errands: now.errands.filter((e) => e.id !== errandId) } : now)),
+    [],
   );
-  // New errands from the board don't arrive as live events yet, so it checks every 20 seconds while in front.
+  useRealtimeEvent<{ errandId: string }>('errand.gone', ({ errandId }) => drop(errandId));
+  // Live (M11): errands coming on and going off the board around the agent. One taken goes at once; new or
+  // changed ones reload the board, once for a burst of them.
+  useBoardWatch(presence.online ? presence.coords : null);
+  const focused = useIsFocused();
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastReload = useRef(0);
+  useEffect(() => () => clearTimeout(reloadTimer.current ?? undefined), []);
+  useRealtimeEvent<{ errandId: string; change: 'added' | 'removed' | 'changed' }>('board.changed', (c) => {
+    if (c.change === 'removed') return drop(c.errandId);
+    // Behind another screen, it loads again when it comes back to the front.
+    if (!focused || reloadTimer.current) return;
+    const wait = Math.max(0, lastReload.current + RELOAD_EVERY_MS - Date.now());
+    reloadTimer.current = setTimeout(() => {
+      reloadTimer.current = null;
+      lastReload.current = Date.now();
+      void load();
+    }, wait);
+  });
+  // A slow check besides, for changes missed while the connection was down.
   useFocusEffect(
     useCallback(() => {
       void load();
@@ -112,12 +141,7 @@ export function AgentBoard() {
     }, [load]),
   );
 
-  const jobs = useMemo(() => {
-    const list = [...(board?.errands ?? [])];
-    if (sort === 'fee') list.sort((a, b) => b.feeKobo - a.feeKobo);
-    if (sort === 'buy') return list.filter((j) => j.buy);
-    return list;
-  }, [board, sort]);
+  const jobs = useMemo(() => sortBoard(board?.errands ?? [], sort), [board, sort]);
   const active = mine.data?.filter(isActive) ?? [];
   const online = presence.online;
 
@@ -213,8 +237,10 @@ export function AgentBoard() {
           <>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
               <Chip label="Preferences" icon="tune" onPress={() => router.push('/preferences')} />
+              <Chip label="Best for you" selected={sort === 'best'} onPress={() => setSort('best')} />
               <Chip label="Nearest" selected={sort === 'near'} onPress={() => setSort('near')} />
               <Chip label="Highest fee" selected={sort === 'fee'} onPress={() => setSort('fee')} />
+              <Chip label="Newest" selected={sort === 'newest'} onPress={() => setSort('newest')} />
               <Chip label="Buying items" selected={sort === 'buy'} onPress={() => setSort('buy')} />
             </ScrollView>
             {error ? <Text tone="danger">{error}</Text> : null}

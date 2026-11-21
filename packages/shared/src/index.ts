@@ -10,3 +10,4 @@ export * from './pinning';
 export * from './prices';
 export * from './matching';
 export * from './assignment';
+export * from './board';

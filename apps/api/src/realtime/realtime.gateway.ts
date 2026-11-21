@@ -7,11 +7,15 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { eq, inArray } from 'drizzle-orm';
+import { boardCell, boardCellsAround, DEFAULT_MATCHING_SETTINGS, DEFAULT_SECURITY_SETTINGS } from '@jiffo/shared';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { Namespace, Socket } from 'socket.io';
 import { z } from 'zod';
 import { DB, type Db } from '../db/database.module';
-import { errands, type AppName } from '../db/schema';
+import { agentPresence, errandStops, errands, type AppName } from '../db/schema';
+import { haversineMeters } from '../adapters/maps';
+import { CountriesService } from '../countries/countries.service';
+import { AgentApplicationService } from '../agents/application.service';
 import { SessionVerifier } from '../auth/auth.guard';
 import { RateLimiter } from '../common/rate-limit';
 import type { AuthContext } from '../auth/auth.types';
@@ -22,6 +26,10 @@ const sessionRoom = (sessionId: string) => `session:${sessionId}`;
 const errandRoom = (errandId: string) => `errand:${errandId}`;
 const ERRAND_PREFIX = 'errand:';
 const SubscribeBody = z.object({ errandId: z.string().uuid() });
+/** The board around a place (docs/matching.md, M11): agents watching it hear of errands coming on and going off. */
+const boardRoom = (countryCode: string, cell: string) => `board:${countryCode}:${cell}`;
+const BOARD_PREFIX = 'board:';
+const WatchBody = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) });
 /** How often each server checks its own sockets' sessions and errand rooms. */
 const SWEEP_MS = 30_000;
 /** How many errands one re-check reads at a time. */
@@ -44,6 +52,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnModuleInit, OnMod
     private readonly verifier: SessionVerifier,
     @Inject(DB) private readonly db: Db,
     private readonly limiter: RateLimiter,
+    private readonly countries: CountriesService,
+    private readonly applications: AgentApplicationService,
   ) {}
 
   onModuleInit() {
@@ -66,6 +76,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnModuleInit, OnMod
     this.sweeping = true;
     try {
       await this.recheck();
+      await this.recheckBoard();
     } catch (error) {
       this.logger.error(`Re-checking live connections failed: ${(error as Error).message}`);
     } finally {
@@ -107,6 +118,24 @@ export class RealtimeGateway implements OnGatewayConnection, OnModuleInit, OnMod
     }
   }
 
+  /** An agent who went offline stops watching the board until they watch it again (M11). */
+  private async recheckBoard() {
+    const watching = [...this.server.sockets.values()].filter(
+      (s) => s.connected && s.data.auth && [...s.rooms].some((r) => r.startsWith(BOARD_PREFIX)),
+    );
+    if (!watching.length) return;
+    const watcherIds = [...new Set(watching.map((s) => (s.data.auth as AuthContext).userId))];
+    const online = await this.db
+      .select({ userId: agentPresence.userId })
+      .from(agentPresence)
+      .where(and(inArray(agentPresence.userId, watcherIds), eq(agentPresence.online, true)));
+    const still = new Set(online.map((o) => o.userId));
+    for (const socket of watching) {
+      if (still.has((socket.data.auth as AuthContext).userId)) continue;
+      for (const room of [...socket.rooms]) if (room.startsWith(BOARD_PREFIX)) await socket.leave(room);
+    }
+  }
+
   async handleConnection(client: Socket) {
     try {
       const token = (client.handshake.auth as { token?: unknown } | undefined)?.token;
@@ -143,6 +172,81 @@ export class RealtimeGateway implements OnGatewayConnection, OnModuleInit, OnMod
 
     await client.join(errandRoom(parsed.data.errandId));
     return { ok: true };
+  }
+
+  /**
+   * An agent's app watches the board around where they are (docs/matching.md, M11): only around where their phone
+   * last said they are, as the board itself answers, and only their own country's. Watching a new place stops
+   * watching the last.
+   */
+  @SubscribeMessage('board.watch')
+  async watchBoard(@ConnectedSocket() client: Socket, @MessageBody() body: unknown): Promise<Ack> {
+    const auth = client.data.auth as AuthContext | undefined;
+    const parsed = WatchBody.safeParse(body);
+    if (!auth || auth.app !== 'agent' || !parsed.success) {
+      return { ok: false, error: { code: 'invalid_request', message: 'Send lat and lng from the agent app' } };
+    }
+    if (!(await this.limiter.hit('presence', `u:${auth.userId}`)).ok) {
+      return { ok: false, error: { code: 'rate_limited', message: 'Too many requests. Try again in a minute.' } };
+    }
+    const [[presence], current, approved] = await Promise.all([
+      this.db
+        .select({
+          lat: agentPresence.lat,
+          lng: agentPresence.lng,
+          online: agentPresence.online,
+          locatedAt: agentPresence.locatedAt,
+        })
+        .from(agentPresence)
+        .where(eq(agentPresence.userId, auth.userId)),
+      this.countries.currentSettingsIfAny(auth.countryCode),
+      this.applications.approved(auth.userId),
+    ]);
+    // As the board itself: an approved agent, online, where their phone said they are a moment ago.
+    if (!approved) {
+      return {
+        ok: false,
+        error: {
+          code: 'application_pending',
+          message: 'Finish your application, and once it is approved you can take errands',
+        },
+      };
+    }
+    const nearKm = (current?.settings.security ?? DEFAULT_SECURITY_SETTINGS).boardNearKm;
+    const matching = current?.settings.matching ?? DEFAULT_MATCHING_SETTINGS;
+    const reachKm = matching.boardRadiusKm;
+    const fresh =
+      !!presence?.locatedAt && Date.now() - presence.locatedAt.getTime() <= matching.locationFreshMinutes * 60_000;
+    if (!presence?.online || !fresh) {
+      return { ok: false, error: { code: 'go_online', message: 'Go online to see and take errands' } };
+    }
+    if (presence.lat == null || presence.lng == null) {
+      return { ok: false, error: { code: 'not_here', message: 'The board shows errands near where you are' } };
+    }
+    if (haversineMeters({ lat: presence.lat, lng: presence.lng }, parsed.data) > nearKm * 1000) {
+      return { ok: false, error: { code: 'not_here', message: 'The board shows errands near where you are' } };
+    }
+    for (const room of [...client.rooms]) if (room.startsWith(BOARD_PREFIX)) await client.leave(room);
+    await client.join(boardCellsAround(parsed.data, reachKm).map((cell) => boardRoom(auth.countryCode, cell)));
+    return { ok: true };
+  }
+
+  /**
+   * An errand came on the board, went off it (taken, cancelled, expired), or changed (a raised fee): agents
+   * watching around its pickup are told, with its id alone. Not waited for by the change; a failure is logged.
+   */
+  boardChanged(errandId: string, change: 'added' | 'removed' | 'changed') {
+    void (async () => {
+      if (!this.server) return;
+      const [pickup] = await this.db
+        .select({ countryCode: errands.countryCode, lat: errandStops.lat, lng: errandStops.lng })
+        .from(errands)
+        .innerJoin(errandStops, and(eq(errandStops.errandId, errands.id), eq(errandStops.seq, 0)))
+        .where(eq(errands.id, errandId));
+      if (pickup) {
+        this.server.to(boardRoom(pickup.countryCode, boardCell(pickup))).emit('board.changed', { errandId, change });
+      }
+    })().catch((error: Error) => this.logger.warn(`Telling the board of ${errandId} failed: ${error.message}`));
   }
 
   @SubscribeMessage('errand.unsubscribe')
