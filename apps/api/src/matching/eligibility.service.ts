@@ -108,13 +108,13 @@ export class EligibilityService {
         throw conflict('location_review', "Jiffo is checking your phone's location. You can take errands again soon.");
       }
     }
-    const [held, prefs] = await Promise.all([
-      db
-        .select({ urgent: errands.urgent, status: errands.status, scheduledFor: errands.scheduledFor })
-        .from(errands)
-        .where(and(eq(errands.agentId, agentId), inArray(errands.status, [...AGENT_OUT_STATES]))),
-      this.agents.profile(agentId),
-    ]);
+    // One after the other, on the caller's connection: accepting asks inside its transaction, and a
+    // transaction's connection runs one query at a time.
+    const held = await db
+      .select({ urgent: errands.urgent, status: errands.status, scheduledFor: errands.scheduledFor })
+      .from(errands)
+      .where(and(eq(errands.agentId, agentId), inArray(errands.status, [...AGENT_OUT_STATES])));
+    const prefs = await this.agents.profile(agentId, db);
     const now = Date.now();
     return {
       userId: agentId,
@@ -164,45 +164,44 @@ export class EligibilityService {
   async facts(agentId: string, rows: Array<{ id: string; customerId: string }>, db: Db | Tx = this.db) {
     if (!rows.length) return { apart: new Set<string>(), gaveUp: new Set<string>() };
     const customers = [...new Set(rows.map((r) => r.customerId))];
-    const [flags, blocks, left] = await Promise.all([
-      db
-        .select({ userId: riskFlags.userId, otherUserId: riskFlags.otherUserId })
-        .from(riskFlags)
-        .where(
-          and(
-            or(
-              and(inArray(riskFlags.kind, [...PAIR_FLAG_KINDS]), ne(riskFlags.status, 'cleared')),
-              and(inArray(riskFlags.kind, [...CONFIRMED_PAIR_FLAG_KINDS]), eq(riskFlags.status, 'confirmed')),
-            ),
-            or(
-              and(eq(riskFlags.userId, agentId), inArray(riskFlags.otherUserId, customers)),
-              and(eq(riskFlags.otherUserId, agentId), inArray(riskFlags.userId, customers)),
-            ),
-          ),
-        ),
-      db
-        .select({ userId: matchBlocks.userId, otherUserId: matchBlocks.otherUserId })
-        .from(matchBlocks)
-        .where(
+    // One after the other, on the caller's connection (see agent()).
+    const flags = await db
+      .select({ userId: riskFlags.userId, otherUserId: riskFlags.otherUserId })
+      .from(riskFlags)
+      .where(
+        and(
           or(
-            and(eq(matchBlocks.userId, agentId), inArray(matchBlocks.otherUserId, customers)),
-            and(eq(matchBlocks.otherUserId, agentId), inArray(matchBlocks.userId, customers)),
+            and(inArray(riskFlags.kind, [...PAIR_FLAG_KINDS]), ne(riskFlags.status, 'cleared')),
+            and(inArray(riskFlags.kind, [...CONFIRMED_PAIR_FLAG_KINDS]), eq(riskFlags.status, 'confirmed')),
+          ),
+          or(
+            and(eq(riskFlags.userId, agentId), inArray(riskFlags.otherUserId, customers)),
+            and(eq(riskFlags.otherUserId, agentId), inArray(riskFlags.userId, customers)),
           ),
         ),
-      db
-        .select({ errandId: errandEvents.errandId })
-        .from(errandEvents)
-        .where(
-          and(
-            inArray(
-              errandEvents.errandId,
-              rows.map((r) => r.id),
-            ),
-            inArray(errandEvents.event, ['withdraw', 'release_agent']),
-            sql`${errandEvents.data}->>'agentId' = ${agentId}`,
-          ),
+      );
+    const blocks = await db
+      .select({ userId: matchBlocks.userId, otherUserId: matchBlocks.otherUserId })
+      .from(matchBlocks)
+      .where(
+        or(
+          and(eq(matchBlocks.userId, agentId), inArray(matchBlocks.otherUserId, customers)),
+          and(eq(matchBlocks.otherUserId, agentId), inArray(matchBlocks.userId, customers)),
         ),
-    ]);
+      );
+    const left = await db
+      .select({ errandId: errandEvents.errandId })
+      .from(errandEvents)
+      .where(
+        and(
+          inArray(
+            errandEvents.errandId,
+            rows.map((r) => r.id),
+          ),
+          inArray(errandEvents.event, ['withdraw', 'release_agent']),
+          sql`${errandEvents.data}->>'agentId' = ${agentId}`,
+        ),
+      );
     const otherOf = (r: { userId: string; otherUserId: string | null }) =>
       r.userId === agentId ? r.otherUserId! : r.userId;
     return {
