@@ -104,6 +104,9 @@ describe('the Matching settings', () => {
       fakeGpsHoldHours: 24,
       shortlistSize: 10,
       fallbackSpeedKmh: 20,
+      weights: { travel: 60, reliability: 20, rating: 10, waiting: 10 },
+      tierBoosts: { bronze: 0, silver: 0, gold: 0, platinum: 0 },
+      newAgentErrands: 10,
     });
   });
 

@@ -576,6 +576,8 @@ export const agentPresence = pgTable(
     locatedAt: timestamp('located_at', { withTimezone: true }),
     /** The phone said the position was mocked (MB4): it can't place the agent at a drop-off. */
     mocked: boolean('mocked').notNull().default(false),
+    /** When they last went online; null while offline. How long they've waited counts from it (matching, M4). */
+    onlineSince: timestamp('online_since', { withTimezone: true }),
     updatedAt: updatedAt(),
   },
   (t) => [index('agent_presence_location_gix').using('gist', t.location)],
@@ -682,7 +684,11 @@ export const errandEvents = pgTable(
     data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
   },
-  (t) => [index('errand_events_errand_idx').on(t.errandId, t.id)],
+  (t) => [
+    index('errand_events_errand_idx').on(t.errandId, t.id),
+    // Each agent's accepts and withdrawals, for ranking (docs/matching.md, M4).
+    index('errand_events_actor_idx').on(t.actorId, t.event, t.id),
+  ],
 );
 
 /* ---------- Chat ---------- */

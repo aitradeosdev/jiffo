@@ -25,7 +25,7 @@ const PICKUP = { lat: LAGOS_STOPS[0]!.lat, lng: LAGOS_STOPS[0]!.lng };
 describe('who may get an errand', () => {
   let t: TestApp;
   let owner: Awaited<ReturnType<typeof adminAs>>;
-  let original: { settings: { matching: Record<string, number> } };
+  let original: { settings: { matching: Record<string, unknown> } };
   let customer: Person;
 
   beforeAll(async () => {
@@ -42,7 +42,7 @@ describe('who may get an errand', () => {
     await t.close();
   });
 
-  async function matching(changes: Record<string, number>) {
+  async function matching(changes: Record<string, unknown>) {
     const now = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
     const settings = structuredClone(now.settings);
     Object.assign(settings.matching, changes);

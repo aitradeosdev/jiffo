@@ -4,6 +4,8 @@ import { ID_TYPE_KEYS, CUSTOMER_ID_TYPES } from './identity';
 const kobo = z.number().int().nonnegative();
 const bps = z.number().int().min(0).max(10_000);
 const minutes = z.number().int().positive();
+const percent = z.number().int().min(0).max(100);
+const boost = z.number().int().min(0).max(20);
 
 export const AGENT_TIERS = ['bronze', 'silver', 'gold', 'platinum'] as const;
 export type AgentTier = (typeof AGENT_TIERS)[number];
@@ -56,6 +58,9 @@ export const DEFAULT_MATCHING_SETTINGS = {
   fakeGpsHoldHours: 24,
   shortlistSize: 10,
   fallbackSpeedKmh: 20,
+  weights: { travel: 60, reliability: 20, rating: 10, waiting: 10 },
+  tierBoosts: { bronze: 0, silver: 0, gold: 0, platinum: 0 },
+  newAgentErrands: 10,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -389,6 +394,21 @@ const CountrySettingsObject = z.object({
        * at this speed, and it is logged.
        */
       fallbackSpeedKmh: z.number().int().min(5).max(80).default(20),
+      /** How much each part counts in an agent's score (M4), in percent: they must add up to 100. */
+      weights: z
+        .object({ travel: percent, reliability: percent, rating: percent, waiting: percent })
+        .refine((w) => w.travel + w.reliability + w.rating + w.waiting === 100, {
+          message: 'The ranking weights must add up to 100%',
+          // Beside the first of them, so the panel shows it there.
+          path: ['travel'],
+        })
+        .default(() => ({ ...DEFAULT_MATCHING_SETTINGS.weights })),
+      /** Points added to the score for each tier, on top of it: 0 to 20 (0.2). */
+      tierBoosts: z
+        .object({ bronze: boost, silver: boost, gold: boost, platinum: boost })
+        .default(() => ({ ...DEFAULT_MATCHING_SETTINGS.tierBoosts })),
+      /** Errands an agent completes before their own reliability and rating count; until then, the state's. */
+      newAgentErrands: z.number().int().min(0).max(1_000).default(10),
     })
     .default(() => structuredClone(DEFAULT_MATCHING_SETTINGS)),
   /** The emergency button (docs/security-plan.md, E9). */

@@ -52,6 +52,26 @@ describe('agent presence and live location', () => {
     await put(near, { online: true, lat: 6.4 }, 400);
   });
 
+  it('remembers when the agent went online while they stay so, for how long they have waited', async () => {
+    const agent = await signIn(t, 'agent');
+    await put(agent, { online: true, lat: 6.448, lng: 3.47 });
+    const went = (await presenceOf(agent))!.onlineSince!;
+    expect(went).toBeInstanceOf(Date);
+    await new Promise((r) => setTimeout(r, 20));
+    await put(agent, { online: true, lat: 6.4481, lng: 3.4701 });
+    await put(agent, { lat: 6.4482, lng: 3.4702 });
+    expect((await presenceOf(agent))!.onlineSince).toEqual(went);
+    await put(agent, { online: false });
+    expect((await presenceOf(agent))!.onlineSince).toBeNull();
+    await put(agent, { online: true, lat: 6.448, lng: 3.47 });
+    expect((await presenceOf(agent))!.onlineSince!.getTime()).toBeGreaterThan(went.getTime());
+    // Online with none, as a background report racing a tap on Go offline could leave it: the next report
+    // while online sets it.
+    await t.db.update(agentPresence).set({ onlineSince: null }).where(eq(agentPresence.userId, agent.userId));
+    await put(agent, { lat: 6.4483, lng: 3.4703 });
+    expect((await presenceOf(agent))!.onlineSince).toBeInstanceOf(Date);
+  });
+
   it('keeps the agent online or offline as they were when only a position is sent from the background', async () => {
     const agent = await signIn(t, 'agent');
     await put(agent, { online: true, lat: 6.448, lng: 3.47 });
