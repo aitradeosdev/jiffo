@@ -8,6 +8,8 @@ import {
   nextState,
   serviceFee,
   withPrices,
+  countryPrices,
+  type Prices,
   suggestedFee,
   TERMINAL_STATES,
   type AgentTier,
@@ -425,13 +427,16 @@ export class ErrandsService implements OnModuleInit {
     if (outside.length) {
       throw unprocessable('outside_service_area', "Jiffo doesn't work there yet", { stops: outside });
     }
-    const here = withPrices(settings, await this.prices.pricesAt(settings, served[0]!));
+    const prices = await this.prices.pricesAt(settings, served[0]!);
+    const here = withPrices(settings, prices);
     const suggestedFeeKobo = suggestedFee(here.pricing, route.distanceMeters);
     return {
       ...route,
       suggestedFeeKobo,
       minFeeKobo: here.pricing.minFeeKobo,
       serviceFeeKobo: serviceFee(suggestedFeeKobo, here.fees),
+      // The prices there, so the app can work out the service fee for whatever fee the customer offers.
+      prices,
     };
   }
 
@@ -570,6 +575,7 @@ export class ErrandsService implements OnModuleInit {
       settlement: null as Settlement | null,
       agentLocation: null as { lat: number; lng: number; at: Date } | null,
       nearbyAgents: null as { count: number; radiusKm: number } | null,
+      prices: null as Prices | null,
     };
     if (!viewerId) return { ...view!, ...empty };
     // An agent deciding whether to accept sees what they would earn at their tier.
@@ -661,6 +667,9 @@ export class ErrandsService implements OnModuleInit {
       settlement: settled,
       agentLocation,
       nearbyAgents: nearby === null ? null : { count: nearby, radiusKm: NEARBY_RADIUS_KM },
+      // Its own prices (its area's, kept when it was sent; the country's for one from before), for the apps'
+      // lowest fee and service fee when the fee is raised or a new price offered.
+      prices: errand.prices ?? countryPrices(await this.countries.errandSettings(errand)),
     };
   }
 

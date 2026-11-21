@@ -175,6 +175,75 @@ describe('area prices', () => {
     expect(state.body.error.message).toMatch(/Sabon Gari/);
   });
 
+  it("can't be broken by a change to the country's settings they fall back to", async () => {
+    // Sabon Gari sets only a service fee minimum (50,000, from the test above); the cap comes from the country.
+    const now = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
+    const settings = structuredClone(now.settings);
+    settings.fees.serviceFeeCapKobo = 40_000;
+    const saved = await approved(t, 'owner', (h) =>
+      request(t.http)
+        .post('/v1/admin/settings?country=NG')
+        .set(h)
+        .send({ basedOn: now.version, settings, note: 'A lower cap' }),
+    );
+    expect(saved.status).toBe(400);
+    expect(JSON.stringify(saved.body.error.issues)).toMatch(/Sabon Gari/);
+  });
+
+  it("are checked one change at a time, so two approved together can't break a place between them", async () => {
+    const area = await saved('area', ids.area);
+    const state = await saved('state', ids.state);
+    const [a, b] = await Promise.all([
+      approved(t, 'owner', (h) =>
+        request(t.http)
+          .post('/v1/admin/prices')
+          .set(h)
+          .send({
+            scope: 'area',
+            id: ids.area,
+            basedOn: area.version,
+            prices: { serviceFeeMinKobo: 60_000 },
+            note: 'A higher service fee minimum',
+          }),
+      ),
+      approved(t, 'owner', (h) =>
+        request(t.http)
+          .post('/v1/admin/prices')
+          .set(h)
+          .send({
+            scope: 'state',
+            id: ids.state,
+            basedOn: state.version,
+            prices: { ...state.data, serviceFeeCapKobo: 55_000 },
+            note: 'A lower service fee cap',
+          }),
+      ),
+    ]);
+    // Either can go first; whichever comes second sees the first, and is refused.
+    expect([a.status, b.status].sort(), JSON.stringify([a.body, b.body])).toEqual([200, 400]);
+    expect([a, b].find((r) => r.status === 400)!.body.error.code).toBe('invalid_prices');
+    const listed = (await admin('get', '/service-areas?country=NG').expect(200)).body;
+    const kano = listed.states.find((s: { code: string }) => s.code === 'KN');
+    const min = kano.cities[0].areas[0].prices.data.serviceFeeMinKobo ?? 10_000;
+    const cap = kano.prices.data.serviceFeeCapKobo ?? 100_000;
+    expect(min).toBeLessThanOrEqual(cap);
+  });
+
+  it('are told to the apps: with a quote, and with each errand, which keeps its own', async () => {
+    const q = (await quote().expect(200)).body;
+    expect(q.prices).toEqual(
+      expect.objectContaining({ minFeeKobo: expect.any(Number), serviceFeeBps: expect.any(Number) }),
+    );
+    const sent = (
+      await request(t.http)
+        .post('/v1/errands')
+        .set(customer.headers)
+        .send(errandBody({ stops: STOPS, feeKobo: 200_000 }))
+        .expect(201)
+    ).body;
+    expect(sent.prices).toEqual(q.prices);
+  });
+
   it('refuse a change made from prices that changed since they were read', async () => {
     const stale = await approved(t, 'owner', (h) =>
       request(t.http)

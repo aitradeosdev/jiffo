@@ -6,12 +6,15 @@ import {
   ID_TYPES,
   settingChanges,
   type CountrySettings,
+  pricesProblem,
+  resolvePrices,
 } from '@jiffo/shared';
 import { APP_CONFIG, type AppConfig, testSignInCodesAllowed } from '../config/app-config';
 import { IdentityChecksService } from '../identity/identity-checks.service';
 import { ProvidersService } from '../providers/providers.service';
 import { sql } from 'drizzle-orm';
-import { DB, type Db } from '../db/database.module';
+import { DB, type Db, type Tx } from '../db/database.module';
+import { PricesService } from '../countries/prices.service';
 import { admins, categories, settingsVersions, states } from '../db/schema';
 import { badRequest, conflict, notFound } from '../common/errors';
 import { AgentApplicationService, type Reopened } from '../agents/application.service';
@@ -35,6 +38,7 @@ export class SettingsAdminService {
     private readonly identity: IdentityChecksService,
     private readonly providers: ProvidersService,
     private readonly applications: AgentApplicationService,
+    private readonly prices: PricesService,
   ) {}
 
   private country(code: string) {
@@ -87,6 +91,26 @@ export class SettingsAdminService {
    * can't overwrite each other.
    */
   /** The settings checked: their shape, and that customers can still add money and both sides can verify. */
+  /**
+   * The prices of every state, city and area that sets its own still work with these settings: one that sets only
+   * a service fee minimum must not be left above a lower cap here (Settings, Places).
+   */
+  private async checkPlacePrices(code: string, settings: CountrySettings, db: Db | Tx = this.db) {
+    for (const place of await this.prices.chains(code, db)) {
+      const problem = pricesProblem(resolvePrices(settings, place.chain));
+      if (problem) {
+        throw badRequest('invalid_settings', 'Some settings are not valid', {
+          issues: [
+            {
+              path: 'fees.serviceFeeCapKobo',
+              message: `${place.name}'s own prices would then not work: ${problem.toLowerCase()}. Change them in Places first.`,
+            },
+          ],
+        });
+      }
+    }
+  }
+
   private async validated(code: string, input: { settings: unknown }) {
     // Customers verify with a number and a selfie: an ID document for them is refused, not quietly dropped.
     const asked = (input.settings as { identity?: { customerIdTypes?: unknown } } | null)?.identity?.customerIdTypes;
@@ -147,6 +171,8 @@ export class SettingsAdminService {
       }
     }
     await this.country(code);
+    // Checked when asked for too, so a change that would break a place's prices is refused before it waits.
+    await this.checkPlacePrices(code, parsed.data);
     return parsed.data;
   }
 
@@ -178,6 +204,9 @@ export class SettingsAdminService {
     const saved = await this.db.transaction(async (tx) => {
       // One save at a time per country: a second save made at the same moment then sees the first's version.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'settings:' + code}))`);
+      // And none while a place's prices, which fall back to these, are being saved (Settings, Places).
+      await this.prices.lock(tx, code);
+      await this.checkPlacePrices(code, parsed, tx);
       const [latest] = await tx
         .select()
         .from(settingsVersions)

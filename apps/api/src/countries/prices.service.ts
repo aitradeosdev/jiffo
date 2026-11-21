@@ -35,6 +35,44 @@ export class PricesService {
     return found;
   }
 
+  /**
+   * One change to a country's prices at a time, whether a place's prices or the country's settings they fall back
+   * to: each is checked against the others' saved values, so two at once must not both pass on stale ones.
+   */
+  async lock(tx: Tx, countryCode: string) {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'prices:' + countryCode}))`);
+  }
+
+  /**
+   * Every state, city and area of a country that sets prices of its own, or sits below one that does, each with
+   * the prices of its levels from the state down, to check against the country's settings.
+   */
+  async chains(countryCode: string, db: Db | Tx = this.db) {
+    const { rows } = await db.execute<{
+      name: string;
+      state_id: string;
+      city_id: string | null;
+      area_id: string | null;
+    }>(sql`
+      select s.name, s.id as state_id, null::uuid as city_id, null::uuid as area_id from states s
+        where s.country_code = ${countryCode}
+      union all
+      select c.name, c.state_id, c.id, null from cities c join states s on s.id = c.state_id
+        where s.country_code = ${countryCode}
+      union all
+      select a.name, c.state_id, c.id, a.id from areas a join cities c on c.id = a.city_id
+        join states s on s.id = c.state_id where s.country_code = ${countryCode}`);
+    const places = rows.map((r) => [
+      { scope: 'state' as const, id: r.state_id },
+      ...(r.city_id ? [{ scope: 'city' as const, id: r.city_id }] : []),
+      ...(r.area_id ? [{ scope: 'area' as const, id: r.area_id }] : []),
+    ]);
+    const saved = await this.latest([...new Map(places.flat().map((p) => [`${p.scope}:${p.id}`, p])).values()], db);
+    return rows
+      .map((r, i) => ({ name: r.name, chain: places[i]!.map((p) => saved.get(`${p.scope}:${p.id}`)!.data) }))
+      .filter((p) => p.chain.some((data) => Object.keys(data).length > 0));
+  }
+
   /** The prices where a point is served: its area's, city's and state's, then the country's. */
   async pricesAt(
     settings: CountrySettings,

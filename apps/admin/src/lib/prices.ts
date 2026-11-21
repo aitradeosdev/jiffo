@@ -31,8 +31,11 @@ export function pricesFromForm(form: FormData): { prices?: PriceOverride; error?
     if (!raw) continue;
     const { label, percent } = PRICE_LABELS[field];
     const value = Number(raw);
-    if (!Number.isFinite(value) || value < 0 || (percent && value > 100)) {
-      return { error: `${label}: enter ${percent ? 'a percentage from 0 to 100' : 'an amount in naira'}` };
+    // The API's limits: a percentage up to 100, an amount up to ₦100,000,000.
+    if (!Number.isFinite(value) || value < 0 || value > (percent ? 100 : 100_000_000)) {
+      return {
+        error: `${label}: enter ${percent ? 'a percentage from 0 to 100' : 'an amount in naira, up to ₦100,000,000'}`,
+      };
     }
     prices[field] = Math.round(value * 100);
   }

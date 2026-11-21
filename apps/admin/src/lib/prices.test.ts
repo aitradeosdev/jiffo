@@ -28,6 +28,9 @@ describe('prices form', () => {
     const pct = new FormData();
     pct.set('serviceFeeBps', '120');
     expect(pricesFromForm(pct).error).toMatch(/service fee/i);
+    const huge = new FormData();
+    huge.set('baseFeeKobo', '200,000,000');
+    expect(pricesFromForm(huge).error).toMatch(/base fee/i);
     const text = new FormData();
     text.set('ratePerKmKobo', 'abc');
     expect(pricesFromForm(text).error).toMatch(/per km/i);

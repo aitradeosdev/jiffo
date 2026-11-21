@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { asc, eq, sql } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { formatNaira, PRICE_FIELDS, pricesProblem, resolvePrices, type PriceOverride } from '@jiffo/shared';
 import { badRequest, conflict, notFound } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
@@ -136,7 +136,9 @@ export class PricesAdminService {
         version: current.version,
       });
     }
-    const country = await this.countries.currentSettings(place.countryCode);
+    // Read on the same connection: a save holds its transaction while it checks.
+    const country = await this.countries.currentSettingsIfAny(place.countryCode, db);
+    if (!country) throw notFound('settings_missing', `No settings saved for ${place.countryCode}`);
     const dataOf = (l: Level) => (l === self ? input.prices : saved.get(`${l.scope}:${l.id}`)!.data);
     for (const levels of [[], ...below]) {
       const chain = [...place.chain, ...levels];
@@ -165,8 +167,11 @@ export class PricesAdminService {
 
   /** Saves the next version of a place's prices, once approved. */
   async save(admin: AdminContext, input: PriceChange) {
+    // The place's country, then its lock: one price change in a country at a time, whether a place's or the
+    // country's settings they fall back to, as each is checked against the others' saved prices.
+    const { countryCode } = await this.place(input.scope, input.id, this.db);
     return this.db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`prices:${input.scope}:${input.id}`}))`);
+      await this.prices.lock(tx, countryCode);
       const { place, current } = await this.check(input, tx);
       const version = current.version + 1;
       await tx.insert(priceOverrides).values({
