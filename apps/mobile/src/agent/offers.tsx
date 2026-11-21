@@ -218,6 +218,11 @@ function OfferScreen({ showing, onClose }: { showing: Showing; onClose: () => vo
           <Text variant="note" tone="ink3">
             The full addresses show once you accept.
           </Text>
+          {offer.counts ? null : (
+            <View style={[styles.free, { borderColor: c.urgent }]}>
+              <Text variant="small">Declining this one is free: it doesn't count toward your acceptance rate.</Text>
+            </View>
+          )}
         </View>
 
         {ended ? (
@@ -262,6 +267,7 @@ const styles = StyleSheet.create({
   barFill: { height: 6, borderRadius: 3 },
   body: { flex: 1, gap: 16 },
   badges: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  free: { borderWidth: 2, borderRadius: 12, padding: 12 },
   fee: {
     fontFamily: fonts.extrabold,
     fontSize: 44,

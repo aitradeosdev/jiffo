@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { CountrySettingsSchema, NIGERIA_DEFAULT_SETTINGS } from '../src/settings';
 import {
   matchRefusal,
+  offerCounts,
+  pausesOffers,
   searchRadiusKm,
   searchStep,
   type HeldErrand,
@@ -117,6 +119,12 @@ describe('the Matching settings', () => {
       searchStepsKm: [3, 6, 10],
       offersPerStep: 5,
       batchSeconds: 3,
+      freeDeclineKm: 3,
+      freeDeclineMinutes: 2,
+      acceptanceOffers: 50,
+      pauseBelowBps: null,
+      pauseMinOffers: 10,
+      pauseMinutes: 30,
       offers: true,
       offerSeconds: 20,
       missedOffersOffline: 3,
@@ -205,5 +213,30 @@ describe('the search steps', () => {
 
   it('drops the old single widening, which the steps replace', () => {
     expect(CountrySettingsSchema.parse(NIGERIA_DEFAULT_SETTINGS).timers).not.toHaveProperty('urgentWidenMinutes');
+  });
+});
+
+/** The acceptance rate (docs/matching.md, M9): the share of an agent's recent counted offers they took. */
+describe('the acceptance rate', () => {
+  const rules = { freeDeclineKm: 3, freeDeclineMinutes: 2, pauseBelowBps: 6_000, pauseMinOffers: 10 };
+  const at = new Date('2026-11-21T10:00:00.000Z');
+  const ago = (minutes: number) => new Date(at.getTime() - minutes * 60_000);
+
+  it('counts offers near enough, once the agent has been online a little while', () => {
+    expect(offerCounts({ straightMeters: 2_500, offeredAt: at, onlineSince: ago(30) }, rules)).toBe(true);
+    expect(offerCounts({ straightMeters: 3_000, offeredAt: at, onlineSince: ago(2) }, rules)).toBe(true);
+    // Further than 3 km to the pickup: declining it is free.
+    expect(offerCounts({ straightMeters: 3_001, offeredAt: at, onlineSince: ago(30) }, rules)).toBe(false);
+    // Within 2 minutes of going online.
+    expect(offerCounts({ straightMeters: 500, offeredAt: at, onlineSince: ago(1) }, rules)).toBe(false);
+    expect(offerCounts({ straightMeters: 500, offeredAt: at, onlineSince: null }, rules)).toBe(false);
+  });
+
+  it('pauses offers below the level admin set, once there are enough counted offers, and never when off', () => {
+    expect(pausesOffers(0.5, 10, rules)).toBe(true);
+    expect(pausesOffers(0.6, 10, rules)).toBe(false);
+    expect(pausesOffers(0.1, 9, rules)).toBe(false);
+    expect(pausesOffers(null, 20, rules)).toBe(false);
+    expect(pausesOffers(0, 50, { ...rules, pauseBelowBps: null })).toBe(false);
   });
 });

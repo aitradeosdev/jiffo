@@ -8,6 +8,7 @@ import { ApiError, errorMessage } from '../api/client';
 import { useCountryConfig } from '../api/useCountryConfig';
 import { useResource } from '../api/useResource';
 import { useRealtimeEvent } from '../realtime/realtime';
+import { pausedNote, type Standing } from './standing';
 import { useCurrentLocation } from '../location';
 import { isActive, AGENT_STATUS, type ErrandView } from '../errands/types';
 import { naira } from '../money';
@@ -52,6 +53,10 @@ export function AgentBoard() {
   const presence = usePresence();
   const here = useCurrentLocation();
   const earnings = useResource<Earnings>('/v1/wallet');
+  // Offers paused for a low acceptance rate (M9): said here, as the board still works meanwhile.
+  const standing = useResource<Standing>('/v1/agent/standing');
+  useRealtimeEvent('offers.paused', standing.reloadSoon);
+  const paused = pausedNote(standing.data?.offersPausedUntil ?? null, Date.now());
   const mine = useResource<ErrandView[]>('/v1/errands?limit=10');
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -190,6 +195,11 @@ export function AgentBoard() {
           <OfflineHead tier={earnings.data?.tier} />
         )}
 
+        {paused ? (
+          <View style={[styles.notice, { backgroundColor: c.urgentSoft }]}>
+            <Text variant="small">{paused}</Text>
+          </View>
+        ) : null}
         {presence.error ? (
           <View style={[styles.notice, { backgroundColor: c.urgentSoft }]}>
             <Text variant="small">{presence.error}</Text>

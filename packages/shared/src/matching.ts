@@ -173,3 +173,32 @@ export function searchRadiusKm(offersMade: number, farthestMeters: number | null
   const reached = farthestMeters === null ? 0 : (rules.searchStepsKm.find((km) => km * 1000 >= farthestMeters) ?? last);
   return Math.max(step, reached);
 }
+
+type AcceptanceRules = Pick<
+  CountrySettings['matching'],
+  'freeDeclineKm' | 'freeDeclineMinutes' | 'pauseBelowBps' | 'pauseMinOffers'
+>;
+
+/**
+ * Whether an offer counts toward the agent's acceptance rate (docs/matching.md, M9): not one whose pickup is far,
+ * nor one in the first minutes after going online, so declining those is free. Offers to everyone at once never
+ * count, and are kept apart.
+ */
+export function offerCounts(
+  offer: { straightMeters: number; offeredAt: Date; onlineSince: Date | null },
+  rules: Pick<AcceptanceRules, 'freeDeclineKm' | 'freeDeclineMinutes'>,
+): boolean {
+  if (offer.straightMeters > rules.freeDeclineKm * 1000) return false;
+  if (!offer.onlineSince) return false;
+  return offer.offeredAt.getTime() - offer.onlineSince.getTime() >= rules.freeDeclineMinutes * 60_000;
+}
+
+/** Whether a low acceptance rate pauses the agent's offers now (M9): only where admin set a level, after enough offers. */
+export function pausesOffers(
+  rate: number | null,
+  counted: number,
+  rules: Pick<AcceptanceRules, 'pauseBelowBps' | 'pauseMinOffers'>,
+): boolean {
+  if (rules.pauseBelowBps === null || rate === null || counted < rules.pauseMinOffers) return false;
+  return rate * 10_000 < rules.pauseBelowBps;
+}

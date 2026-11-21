@@ -68,6 +68,12 @@ export const DEFAULT_MATCHING_SETTINGS = {
   searchStepsKm: [3, 6, 10],
   offersPerStep: 5,
   batchSeconds: 3,
+  freeDeclineKm: 3,
+  freeDeclineMinutes: 2,
+  acceptanceOffers: 50,
+  pauseBelowBps: null,
+  pauseMinOffers: 10,
+  pauseMinutes: 30,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -445,6 +451,21 @@ const CountrySettingsObject = z.object({
        * together (M5): as many as can get an agent, with the highest total score.
        */
       batchSeconds: z.number().int().min(1).max(30).default(3),
+      /**
+       * The acceptance rate (M9): offers whose pickup is further than this, in km, don't count, so declining them
+       * is free; nor do offers this many minutes after going online, nor any to everyone at once.
+       */
+      freeDeclineKm: z.number().min(0.5).max(50).default(3),
+      freeDeclineMinutes: z.number().int().min(0).max(60).default(2),
+      /** The rate is over an agent's last this many counted offers. */
+      acceptanceOffers: z.number().int().min(10).max(500).default(50),
+      /**
+       * Below this rate, in basis points, an agent's offers pause for `pauseMinutes`, once they have had
+       * `pauseMinOffers` counted offers. Null: never (a low rate then only lowers their ranking).
+       */
+      pauseBelowBps: z.number().int().min(1).max(9_999).nullable().default(null),
+      pauseMinOffers: z.number().int().min(1).max(500).default(10),
+      pauseMinutes: z.number().int().min(5).max(1_440).default(30),
     })
     .refine((m) => (m.searchStepsKm.at(-1) ?? 0) <= m.boardRadiusKm, {
       message: "The last search step can't reach past how far the board reaches",

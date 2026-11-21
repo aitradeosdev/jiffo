@@ -14,6 +14,7 @@ import { fonts } from '@/theme/tokens';
 import { Text } from '@/ui/kit';
 import { Avatar, Icon } from '@/ui/parts';
 import { TabPage } from '@/ui/tab-page';
+import { pausedNote, standingFigures, type Standing } from '@/agent/standing';
 import { useEmergency } from '@/safety/use-emergency';
 
 interface Stats {
@@ -29,6 +30,8 @@ export default function Account() {
   const { api, user, signOut } = useSession();
   const { config } = useCountryConfig();
   const stats = useResource<Stats>('/v1/me/stats');
+  // An agent's acceptance rate, completion rate and errands left this week, beside their rating (M9).
+  const standing = useResource<Standing>(VARIANT === 'agent' ? '/v1/agent/standing' : null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<'out' | 'forget' | 'others' | null>(null);
   const [othersDone, setOthersDone] = useState(false);
@@ -78,7 +81,14 @@ export default function Account() {
 
   const s = stats.data;
   return (
-    <TabPage gap={18} refreshing={stats.refreshing} onRefresh={stats.refresh}>
+    <TabPage
+      gap={18}
+      refreshing={stats.refreshing}
+      onRefresh={() => {
+        void standing.refresh();
+        return stats.refresh();
+      }}
+    >
       <View style={styles.acchead}>
         <Avatar name={user?.firstName} size={62} />
         <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
@@ -99,6 +109,20 @@ export default function Account() {
         <Stat value={s ? String(s.errandsCompleted) : '…'} label={agent ? 'Completed' : 'Errands'} />
         <Stat value={s ? String(s.disputes) : '…'} label="Disputes" />
       </View>
+      {agent && standing.data ? (
+        <>
+          <View style={styles.stats}>
+            {standingFigures(standing.data).map((f) => (
+              <Stat key={f.label} value={f.value} label={f.label} />
+            ))}
+          </View>
+          {pausedNote(standing.data.offersPausedUntil, Date.now()) ? (
+            <Text variant="small" tone="urgent">
+              {pausedNote(standing.data.offersPausedUntil, Date.now())}
+            </Text>
+          ) : null}
+        </>
+      ) : null}
 
       {agent ? null : (
         <View style={styles.menu}>

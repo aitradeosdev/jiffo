@@ -3,6 +3,8 @@ import {
   bestAssignment,
   DEFAULT_MATCHING_SETTINGS,
   formatNaira,
+  offerCounts,
+  pausesOffers,
   searchRadiusKm,
   searchStep,
   type CountrySettings,
@@ -177,18 +179,15 @@ export class OffersService {
     if (errand.broadcastFeeKobo === errand.feeKobo) return this.toEveryone(errand, rules);
     // Left out before the shortlist is drawn up, so they never take the places of agents who could be asked:
     // who said no to it at this fee, and who holds another offer (one at a time, kept by the database too).
-    const [passed, holding, made] = await Promise.all([
+    const [passed, busy, made] = await Promise.all([
       this.passed(errand),
-      this.db
-        .select({ agentId: errandOffers.agentId })
-        .from(errandOffers)
-        .where(and(eq(errandOffers.countryCode, errand.countryCode), eq(errandOffers.status, 'open'))),
+      this.notToOffer(errand.countryCode),
       this.offersMade(errand),
     ]);
     // Every step has had its offers: to everyone at once.
     const step = searchStep(made.n, rules);
     if (!step) return this.toEveryone(errand, rules);
-    const skip = new Set([...passed, ...holding].map((p) => p.agentId));
+    const skip = new Set([...passed.map((p) => p.agentId), ...busy]);
     // Ranked once, as far as the last step reaches, and offered from this step's radius out: further out at once
     // where no one nearer can be asked.
     const ranked = await this.ranking.ranked(errandId, skip, rules.searchStepsKm.at(-1));
@@ -235,6 +234,7 @@ export class OffersService {
           travelSeconds: r.travel.durationSeconds,
           travelEstimated: r.travel.estimated,
           straightMeters: r.straightMeters,
+          counts: offerCounts({ straightMeters: r.straightMeters, offeredAt: now, onlineSince: r.onlineSince }, rules),
           offeredAt: now,
           expiresAt: new Date(now.getTime() + rules.offerSeconds * 1000),
         })
@@ -368,11 +368,7 @@ export class OffersService {
       for (const e of waiting) await this.dispatch(e.id);
       return;
     }
-    const holding = await this.db
-      .select({ agentId: errandOffers.agentId })
-      .from(errandOffers)
-      .where(and(eq(errandOffers.countryCode, trigger.countryCode), eq(errandOffers.status, 'open')));
-    const skip = new Set(holding.map((h) => h.agentId));
+    const skip = await this.notToOffer(trigger.countryCode);
     const options = await Promise.all(
       waiting.map(async (e) => {
         const ranked = await this.ranking.ranked(e.id, skip, rules.searchStepsKm.at(-1)).catch((error: Error) => {
@@ -400,6 +396,45 @@ export class OffersService {
       if (outcome === 'taken') left.push(e.id);
     }
     for (const id of left) await this.dispatch(id);
+  }
+
+  /**
+   * Agents in the country not to offer an errand to now: those holding another offer (one at a time, kept by the
+   * database too), and those whose offers are paused for a low acceptance rate (M9).
+   */
+  private async notToOffer(countryCode: string): Promise<Set<string>> {
+    const [holding, paused] = await Promise.all([
+      this.db
+        .select({ agentId: errandOffers.agentId })
+        .from(errandOffers)
+        .where(and(eq(errandOffers.countryCode, countryCode), eq(errandOffers.status, 'open'))),
+      this.db
+        .select({ agentId: agentPresence.userId })
+        .from(agentPresence)
+        .where(and(eq(agentPresence.countryCode, countryCode), gt(agentPresence.offersPausedUntil, new Date()))),
+    ]);
+    return new Set([...holding, ...paused].map((a) => a.agentId));
+  }
+
+  /**
+   * After an agent declined or let a counted offer run out (M9): if their acceptance rate is now below the level
+   * admin set, their offers pause for a while, and they're told. The board, and errands open to everyone, still
+   * work.
+   */
+  private async pauseIfLow(agentId: string, countryCode: string) {
+    const rules = (await this.countries.currentSettings(countryCode)).settings.matching;
+    if (rules.pauseBelowBps === null) return;
+    const standing = await this.ranking.standing(agentId, countryCode);
+    if (standing.offersPausedUntil) return;
+    if (!pausesOffers(standing.acceptanceRate, standing.countedOffers, rules)) return;
+    const until = new Date(Date.now() + rules.pauseMinutes * 60_000);
+    await this.db.update(agentPresence).set({ offersPausedUntil: until }).where(eq(agentPresence.userId, agentId));
+    this.realtime.toUser(agentId, 'agent', 'offers.paused', { until });
+    await this.push.notifyUser(agentId, 'agent', {
+      title: 'Offers paused',
+      body: `You've declined or missed many offers lately, so Jiffo won't offer you urgent errands for ${rules.pauseMinutes} minutes. The board still works.`,
+      data: { type: 'offers.paused', until: until.toISOString() },
+    });
   }
 
   /** Agents who said no to the errand at its fee, or let the offer run out. */
@@ -587,8 +622,17 @@ export class OffersService {
       .update(errandOffers)
       .set({ status: 'declined', answeredAt: new Date() })
       .where(and(eq(errandOffers.id, offerId), eq(errandOffers.agentId, agentId), eq(errandOffers.status, 'open')))
-      .returning({ errandId: errandOffers.errandId });
+      .returning({
+        errandId: errandOffers.errandId,
+        counts: errandOffers.counts,
+        countryCode: errandOffers.countryCode,
+      });
     if (!offer) throw notFound('offer_not_found', 'This offer has ended');
+    if (offer.counts) {
+      await this.pauseIfLow(agentId, offer.countryCode).catch((error: Error) =>
+        this.logger.warn(`Checking acceptance for ${agentId} failed: ${error.message}`),
+      );
+    }
     await this.dispatch(offer.errandId);
     return { status: 'declined' as const };
   }
@@ -612,6 +656,11 @@ export class OffersService {
     await this.offlineIfMissing(offer.agentId, offer.countryCode).catch((error: Error) =>
       this.logger.warn(`Checking missed offers failed: ${error.message}`),
     );
+    if (offer.counts) {
+      await this.pauseIfLow(offer.agentId, offer.countryCode).catch((error: Error) =>
+        this.logger.warn(`Checking acceptance for ${offer.agentId} failed: ${error.message}`),
+      );
+    }
     if (offerAgain) await this.dispatch(offer.errandId);
   }
 
@@ -741,6 +790,8 @@ export class OffersService {
     return {
       id: offer.offer.id,
       expiresAt: offer.offer.expiresAt,
+      // Whether declining it lowers their acceptance rate (M9): the offer screen marks the ones that don't.
+      counts: offer.offer.counts,
       secondsLeft: Math.max(0, Math.ceil((offer.offer.expiresAt.getTime() - Date.now()) / 1000)),
       windowSeconds: Math.round((offer.offer.expiresAt.getTime() - offer.offer.offeredAt.getTime()) / 1000),
       agentEarnsKobo: earns,

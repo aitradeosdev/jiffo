@@ -11,7 +11,7 @@ import {
 import { eq, sql } from 'drizzle-orm';
 import { CountriesService } from '../countries/countries.service';
 import { DB, type Db } from '../db/database.module';
-import { errands } from '../db/schema';
+import { agentPresence, errands } from '../db/schema';
 import { CandidatesService, type Candidate } from './candidates.service';
 import { MatchingRedis } from './matching-redis';
 
@@ -19,6 +19,8 @@ import { MatchingRedis } from './matching-redis';
 export interface Ranked extends Candidate {
   score: number;
   parts: RankParts;
+  /** When they went online: an offer in their first minutes doesn't count toward their acceptance rate (M9). */
+  onlineSince: Date | null;
 }
 
 /** Errands of their own that count: their last 100 accepted, and their last 100 ratings (M4). */
@@ -28,7 +30,7 @@ const AVERAGES_SECONDS = 10 * 60;
 /** A state with no history yet: every agent reliable, rated four and a half stars. */
 const NO_HISTORY: StateAverages = { reliability: 1, ratingStars: 4.5 };
 
-type History = Omit<RankInputs, 'travelSeconds'>;
+type History = Omit<RankInputs, 'travelSeconds'> & { countedOffers: number; onlineSince: Date | null };
 
 /**
  * Who is offered an errand first (docs/matching.md, M4): the candidates (CandidatesService), each scored by
@@ -53,24 +55,50 @@ export class RankingService {
       .where(eq(errands.id, errandId));
     const rules = (await this.countries.currentSettings(errand!.countryCode)).settings.matching;
     const [history, average] = await Promise.all([
-      this.history(found.map((c) => c.agentId)),
+      this.history(
+        found.map((c) => c.agentId),
+        rules.acceptanceOffers,
+      ),
       this.stateAverages(errand!.countryCode, errand!.stateCode),
     ]);
     return found
       .map((c) => {
-        const parts = rankScore(
-          { travelSeconds: c.travel.durationSeconds, ...history.get(c.agentId)! },
-          rules,
-          average,
-        );
-        return { ...c, score: parts.total, parts, travelSeconds: c.travel.durationSeconds };
+        const { countedOffers: _, onlineSince, ...mine } = history.get(c.agentId)!;
+        const parts = rankScore({ travelSeconds: c.travel.durationSeconds, ...mine }, rules, average);
+        return { ...c, score: parts.total, parts, onlineSince, travelSeconds: c.travel.durationSeconds };
       })
       .sort(byRank)
       .map(({ travelSeconds: _, ...r }) => r);
   }
 
-  /** Each agent's own history, in one query. */
-  private async history(agentIds: string[]): Promise<Map<string, History>> {
+  /**
+   * How the agent stands (M9), as the agent app shows it beside their rating: their acceptance rate over their last
+   * counted offers, completion rate, errands left this week, rating, errands done, and any pause on their offers.
+   */
+  async standing(agentId: string, countryCode: string) {
+    const rules = (await this.countries.currentSettings(countryCode)).settings.matching;
+    const [mine, [presence]] = await Promise.all([
+      this.history([agentId], rules.acceptanceOffers),
+      this.db
+        .select({ until: agentPresence.offersPausedUntil })
+        .from(agentPresence)
+        .where(eq(agentPresence.userId, agentId)),
+    ]);
+    const h = mine.get(agentId)!;
+    const until = presence?.until && presence.until.getTime() > Date.now() ? presence.until : null;
+    return {
+      acceptanceRate: h.acceptanceRate,
+      countedOffers: h.countedOffers,
+      completionRate: h.completionRate,
+      cancellations7d: h.cancellations7d,
+      ratingStars: h.ratingStars,
+      completedErrands: h.completedErrands,
+      offersPausedUntil: until,
+    };
+  }
+
+  /** Each agent's own history, in one query: `acceptanceOffers`, how many counted offers the rate is over (M9). */
+  private async history(agentIds: string[], acceptanceOffers: number): Promise<Map<string, History>> {
     const ids = sql.join(
       agentIds.map((id) => sql`(${id}::uuid)`),
       sql`, `,
@@ -90,6 +118,8 @@ export class RankingService {
       onlineSince: Date | string | null;
       busy: boolean;
       tier: AgentTier | null;
+      taken: number;
+      answered: number;
     }>(sql`
       select a.id as "agentId",
         (select count(*)::int from errands e where e.agent_id = a.id and e.status = 'completed') as completed,
@@ -102,7 +132,8 @@ export class RankingService {
         p.online_since as "onlineSince",
         exists (select 1 from errands e where e.agent_id = a.id and e.status in (${out})
           and not (e.status = 'accepted' and e.scheduled_for > now())) as busy,
-        ap.tier
+        ap.tier,
+        offered.taken, offered.answered
       from (values ${ids}) as a(id)
       left join agent_presence p on p.user_id = a.id
       left join agent_profiles ap on ap.user_id = a.id
@@ -112,7 +143,12 @@ export class RankingService {
             where w.errand_id = acc.errand_id and w.event = 'withdraw' and w.actor_id = a.id))::int as withdrawn
         from (select ev.errand_id from errand_events ev where ev.event = 'accept' and ev.actor_id = a.id
           order by ev.id desc limit ${RECENT}) acc
-      ) recent on true`);
+      ) recent on true
+      left join lateral (
+        select count(*) filter (where o.status = 'accepted')::int as taken, count(*)::int as answered
+        from (select status from errand_offers where agent_id = a.id and counts
+          and status in ('accepted', 'declined', 'expired') order by offered_at desc limit ${acceptanceOffers}) o
+      ) offered on true`);
     const now = Date.now();
     const time = (d: Date | string | null) => {
       const ms = d ? new Date(d).getTime() : NaN;
@@ -128,8 +164,10 @@ export class RankingService {
           {
             // Of the errands they accepted lately, the share they didn't leave.
             completionRate: r.accepted ? 1 - r.withdrawn / r.accepted : null,
-            // Counted once offers are (M9).
-            acceptanceRate: null,
+            // Of their last counted offers, the share they took (M9).
+            acceptanceRate: r.answered ? r.taken / r.answered : null,
+            countedOffers: r.answered,
+            onlineSince: time(r.onlineSince) === null ? null : new Date(r.onlineSince!),
             cancellations7d: r.leftThisWeek,
             ratingStars: r.rating,
             completedErrands: r.completed,

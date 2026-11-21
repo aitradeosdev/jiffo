@@ -17,6 +17,7 @@ const offer: Offer = {
   secondsLeft: 20,
   windowSeconds: 20,
   agentEarnsKobo: 212_500,
+  counts: true,
   errand: {
     id: 'errand-1',
     categoryKey: 'parcel',

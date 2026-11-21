@@ -9,6 +9,8 @@ export interface Offer {
   /** The whole time the agent had to answer, for the countdown bar. */
   windowSeconds: number;
   agentEarnsKobo: number;
+  /** Whether declining it lowers their acceptance rate (M9): not for one far away or soon after going online. */
+  counts: boolean;
   errand: {
     id: string;
     categoryKey: string;
