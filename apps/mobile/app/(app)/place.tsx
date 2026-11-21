@@ -70,6 +70,12 @@ export default function PlaceSearch() {
     setChoosing(true);
     try {
       const place = await api.get<PlacePick>(`/v1/places/${encodeURIComponent(s.placeId)}?session=${session}`);
+      // Outside the areas where Jiffo works: said here, rather than when the errand is sent.
+      if (!place.stateCode) {
+        setError(`Jiffo doesn't work at ${place.name} yet. Pick a place where Jiffo works.`);
+        setChoosing(false);
+        return;
+      }
       update({ [field]: place });
       goBack();
     } catch (e) {
