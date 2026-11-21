@@ -20,6 +20,7 @@ import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { earningHolds, errandEvents, errandRatings, errandStops, errands, journalEntries, users } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
+import { ServiceAreasService } from '../countries/service-areas';
 import type { AuthContext } from '../auth/auth.types';
 import { decrypt, encrypt, errandPinKey, numericCode, pinDigest, safeEqual } from '../common/crypto';
 import { ApiError, badRequest, conflict, forbidden, locked, notFound, tooMany, unprocessable } from '../common/errors';
@@ -133,6 +134,7 @@ export class ErrandsService implements OnModuleInit {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(ERRAND_TIMERS) private readonly timers: ErrandTimers,
     private readonly countries: CountriesService,
+    private readonly serviceAreas: ServiceAreasService,
     private readonly notifier: ErrandNotifier,
     private readonly wallet: WalletService,
     private readonly agents: AgentsService,
@@ -427,12 +429,18 @@ export class ErrandsService implements OnModuleInit {
     // Every customer is verified, so agents know who they run errands for.
     await this.customerIdentity.assertVerified(auth.userId);
     const country = customer.countryCode;
-    const [{ version, settings }, state, category] = await Promise.all([
+    const [{ version, settings }, served, category] = await Promise.all([
       this.countries.currentSettings(country),
-      this.countries.enabledState(country, input.stateCode),
+      // Where Jiffo works: every stop inside a switched-on area. The pickup's area gives the errand its state,
+      // whatever the app said.
+      this.serviceAreas.servedAt(country, input.stops),
       this.countries.activeCategory(country, input.categoryKey),
     ]);
-    if (!state) throw unprocessable('state_not_available', 'Jiffo is not available in this state yet');
+    const outside = served.flatMap((at, i) => (at ? [] : [i]));
+    if (outside.length) {
+      throw unprocessable('outside_service_area', "Jiffo doesn't work there yet", { stops: outside });
+    }
+    const pickupArea = served[0]!;
     if (!category) throw unprocessable('category_not_available', 'This category is not available');
     if (input.feeKobo < settings.pricing.minFeeKobo) {
       throw unprocessable('fee_too_low', 'The fee is below the minimum', { minFeeKobo: settings.pricing.minFeeKobo });
@@ -457,7 +465,8 @@ export class ErrandsService implements OnModuleInit {
         .insert(errands)
         .values({
           countryCode: country,
-          stateCode: state.code,
+          stateCode: pickupArea.stateCode,
+          areaId: pickupArea.areaId,
           customerId: customer.id,
           categoryKey: category.key,
           buy: input.buy ?? category.buyDefault,

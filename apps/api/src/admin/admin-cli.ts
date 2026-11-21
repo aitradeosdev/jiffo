@@ -5,6 +5,8 @@ import { Pool } from 'pg';
 import { normalisePhone } from '../auth/phone';
 import { keyFor } from '../common/keys';
 import { loadConfig } from '../config/app-config';
+import { addDevLagos } from '../countries/service-areas';
+import type { Db } from '../db/database.module';
 import { useFieldKey } from '../db/fields';
 import * as schema from '../db/schema';
 import { ADMIN_ROLES, admins } from '../db/schema';
@@ -30,6 +32,11 @@ const USAGE = `Jiffo admin accounts, from the server.
       invite link. For when the only owner has lost their phone or password.
 
   Each is recorded in the audit log as from the command line, with the reason.
+
+  dev-areas
+      Development only: draws one city and one area covering roughly all of Lagos State, switched on,
+      so errands can be tried before real areas are drawn in the panel. Does nothing where Lagos already
+      has a city, and is refused in production.
 
   derived-keys
       Prints the ID_FINGERPRINT_KEY, ADMIN_TOTP_KEY and FIELD_KEY a server without them derives from
@@ -59,6 +66,22 @@ async function main() {
         `ADMIN_TOTP_KEY=${keyFor(from, 'adminTotp').toString('hex')}\n` +
         `FIELD_KEY=${keyFor(from, 'fields').toString('hex')}\n`,
     );
+    return;
+  }
+  if (command === 'dev-areas') {
+    const config = loadConfig();
+    if (config.NODE_ENV === 'production') throw new Error('dev-areas is for development, never production');
+    const pool = new Pool({ connectionString: config.DATABASE_URL, max: 1 });
+    try {
+      const added = await addDevLagos(drizzle(pool, { schema }) as unknown as Db);
+      process.stdout.write(
+        added
+          ? 'Drew Lagos, with one area covering it, switched on.\n'
+          : 'Lagos already has a city: nothing changed.\n',
+      );
+    } finally {
+      await pool.end();
+    }
     return;
   }
   const email = values.email ? normaliseEmail(values.email) : '';

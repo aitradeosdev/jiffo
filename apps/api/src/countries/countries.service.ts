@@ -95,14 +95,6 @@ export class CountriesService {
       .orderBy(asc(states.name));
   }
 
-  async enabledState(countryCode: string, code: string) {
-    const [state] = await this.db
-      .select()
-      .from(states)
-      .where(and(eq(states.countryCode, countryCode), eq(states.code, code), eq(states.enabled, true)));
-    return state;
-  }
-
   activeCategories(countryCode: string) {
     return this.db
       .select({
