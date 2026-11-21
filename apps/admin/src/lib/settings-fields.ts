@@ -19,7 +19,9 @@ export type FieldKind =
   /** A number dialled, such as an emergency number: kept as the digits typed, never as a quantity. */
   | 'digits'
   /** Whole hours, several, typed with commas between them: 2, 12, 20. */
-  | 'hoursList';
+  | 'hoursList'
+  /** Distances in km, several, typed with commas between them: 3, 6, 10 (one decimal place at most). */
+  | 'kmList';
 
 export interface Field {
   path: string;
@@ -79,7 +81,6 @@ export const SECTIONS: Section[] = [
     title: 'Timers',
     about: 'How long each step waits before the app moves it on.',
     fields: [
-      { path: 'timers.urgentWidenMinutes', label: 'Urgent: widen the search after', kind: 'minutes' },
       { path: 'timers.raisePricePromptMinutes', label: 'Suggest raising the fee after', kind: 'minutes' },
       { path: 'timers.urgentExpiryMinutes', label: 'Urgent errand expires after', kind: 'minutes' },
       { path: 'timers.boardRaisePromptMinutes', label: 'Board: suggest raising the fee after', kind: 'minutes' },
@@ -480,6 +481,18 @@ export const SECTIONS: Section[] = [
         help: 'While it waits. 5 to 300 seconds.',
       },
       {
+        path: 'matching.searchStepsKm',
+        label: 'Urgent errands: search out to',
+        kind: 'kmList',
+        help: "Offered one agent at a time within the first distance, then the next, then to every agent within the last at once, the first to accept getting it. Further each time, with commas between them; the last no further than the board's reach. A raised fee starts again.",
+      },
+      {
+        path: 'matching.offersPerStep',
+        label: 'Agents offered it at each step before searching further',
+        kind: 'count',
+        help: 'With no one left to ask nearer, the search moves out at once.',
+      },
+      {
         path: 'matching.fakeGpsHoldHours',
         label: 'A fake-GPS flag keeps the agent from errands for',
         kind: 'hours',
@@ -617,6 +630,8 @@ export function shown(field: Field | undefined, value: unknown): string {
       return (value as string[]).map((v) => field.options?.find((o) => o.value === v)?.label ?? v).join(', ');
     case 'hoursList':
       return (value as number[]).map((h) => `${h} h`).join(', ') || 'none';
+    case 'kmList':
+      return (value as number[]).map((km) => `${km} km`).join(', ') || 'none';
     default:
       return String(value);
   }

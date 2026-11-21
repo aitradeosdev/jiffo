@@ -60,8 +60,12 @@ export function AgentOffersProvider({ children }: { children: ReactNode }) {
     void dismissOfferPush(offerId);
     setShowing((now) => (now?.offer.id === offerId ? { ...now, gone: true } : now));
   });
-  usePushData((data) => {
+  usePushData((data, how) => {
     if (isOfferPush(data)) void load();
+    // An urgent errand open to everyone near them (M8): tapping its push opens it, to accept.
+    if (how === 'tapped' && data.type === 'errand.broadcast' && typeof data.errandId === 'string') {
+      router.push(`/errand/${data.errandId}`);
+    }
   });
 
   const shownId = showing?.offer.id;

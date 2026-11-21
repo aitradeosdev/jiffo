@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { CountrySettingsSchema, NIGERIA_DEFAULT_SETTINGS } from '../src/settings';
-import { matchRefusal, type HeldErrand, type MatchAgent, type MatchErrand } from '../src/matching';
+import {
+  matchRefusal,
+  searchRadiusKm,
+  searchStep,
+  type HeldErrand,
+  type MatchAgent,
+  type MatchErrand,
+} from '../src/matching';
 
 const rules = NIGERIA_DEFAULT_SETTINGS.matching;
 
@@ -107,6 +114,8 @@ describe('the Matching settings', () => {
       weights: { travel: 60, reliability: 20, rating: 10, waiting: 10 },
       tierBoosts: { bronze: 0, silver: 0, gold: 0, platinum: 0 },
       newAgentErrands: 10,
+      searchStepsKm: [3, 6, 10],
+      offersPerStep: 5,
       offers: true,
       offerSeconds: 20,
       missedOffersOffline: 3,
@@ -136,5 +145,50 @@ describe('the Matching settings', () => {
       security: { ...NIGERIA_DEFAULT_SETTINGS.security, maxActiveErrandsPerAgent: 0 },
     };
     expect(CountrySettingsSchema.parse(older).security).not.toHaveProperty('maxActiveErrandsPerAgent');
+  });
+});
+
+/** An urgent errand's search (docs/matching.md, M8): 3 km, 6 km, then 10 km, 5 offers each, then everyone. */
+describe('the search steps', () => {
+  const rules = { searchStepsKm: [3, 6, 10], offersPerStep: 5 };
+
+  it('moves out a step after each step has had its offers, then to everyone at once', () => {
+    expect(searchStep(0, rules)).toEqual({ index: 0, km: 3 });
+    expect(searchStep(4, rules)).toEqual({ index: 0, km: 3 });
+    expect(searchStep(5, rules)).toEqual({ index: 1, km: 6 });
+    expect(searchStep(14, rules)).toEqual({ index: 2, km: 10 });
+    expect(searchStep(15, rules)).toBeNull();
+    expect(searchStep(40, rules)).toBeNull();
+  });
+
+  it("says how far it reaches: its latest offer's step, or further where it widened early for want of agents", () => {
+    expect(searchRadiusKm(0, null, rules)).toBe(3);
+    expect(searchRadiusKm(1, 2_500, rules)).toBe(3);
+    // The fifth offer was the first step's last.
+    expect(searchRadiusKm(5, 2_500, rules)).toBe(3);
+    // One offer made, to an agent 4 km away: there was no one within 3 km.
+    expect(searchRadiusKm(1, 4_000, rules)).toBe(6);
+    expect(searchRadiusKm(6, 1_000, rules)).toBe(6);
+    expect(searchRadiusKm(15, 9_000, rules)).toBe(10);
+  });
+
+  it("must widen step by step, within the board's reach", () => {
+    const parse = (matching: Record<string, unknown>) =>
+      CountrySettingsSchema.safeParse({
+        ...NIGERIA_DEFAULT_SETTINGS,
+        matching: { ...NIGERIA_DEFAULT_SETTINGS.matching, ...matching },
+      });
+    expect(parse({ searchStepsKm: [2, 5] }).success).toBe(true);
+    const narrowing = parse({ searchStepsKm: [6, 3, 10] });
+    expect(narrowing.success).toBe(false);
+    expect(JSON.stringify(narrowing.error)).toContain('Each search step must reach further than the one before');
+    const past = parse({ searchStepsKm: [3, 6, 12] });
+    expect(past.success).toBe(false);
+    expect(JSON.stringify(past.error)).toContain("can't reach past how far the board reaches");
+    expect(parse({ searchStepsKm: [] }).success).toBe(false);
+  });
+
+  it('drops the old single widening, which the steps replace', () => {
+    expect(CountrySettingsSchema.parse(NIGERIA_DEFAULT_SETTINGS).timers).not.toHaveProperty('urgentWidenMinutes');
   });
 });

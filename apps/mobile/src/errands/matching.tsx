@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,7 +13,7 @@ import { StopMark } from '@/ui/map/pins';
 import type { MapPin } from '@/ui/map/types';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import type { ErrandView } from './types';
-import { waitingCopy } from './waiting';
+import { raisePromptDue, waitingCopy } from './waiting';
 import { upcoming } from './when';
 
 const PIN_KIND = { pickup: 'pick', stop: 'stop', dropoff: 'drop' } as const;
@@ -56,7 +56,22 @@ export function Matching({
     offers: config?.settings.matching.offers,
     scheduled,
     pickupLabel: pickup?.label ?? null,
+    search: errand.search,
   });
+  // After a while with no agent, ask whether to raise the fee (M8): looked at again every half minute.
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(tick);
+  }, []);
+  const askToRaise =
+    !!onRaise &&
+    raisePromptDue(
+      { createdAt: errand.createdAt, urgent: errand.urgent, feeRaised: errand.version > 0 },
+      scheduled,
+      config?.settings.timers,
+      now,
+    );
 
   return (
     <View style={[styles.fill, { backgroundColor: c.bg }]}>
@@ -79,6 +94,20 @@ export function Matching({
                 ? `No agents online within ${errand.nearbyAgents.radiusKm} km yet. It stays open for the next one.`
                 : `${errand.nearbyAgents.count} ${errand.nearbyAgents.count === 1 ? 'agent' : 'agents'} online within ${errand.nearbyAgents.radiusKm} km`}
             </Text>
+          </View>
+        ) : null}
+        {askToRaise ? (
+          <View style={[styles.prompt, { backgroundColor: c.urgentSoft }]} accessibilityLiveRegion="polite">
+            <Text variant="label">No agent yet</Text>
+            <Text variant="sub" tone="ink2">
+              Raising your fee makes your errand worth more to agents nearby. Or keep waiting: it stays open.
+            </Text>
+            <Button
+              small
+              label={`Raise it by ${naira(RAISE_STEP_KOBO)}`}
+              loading={raising}
+              onPress={() => onRaise?.(errand.feeKobo + RAISE_STEP_KOBO)}
+            />
           </View>
         ) : null}
         <List>
@@ -136,4 +165,5 @@ function MarkWell({ kind }: { kind: 'pick' | 'stop' | 'drop' }) {
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   nearby: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  prompt: { borderRadius: 16, padding: 14, gap: 8, alignItems: 'flex-start' },
 });

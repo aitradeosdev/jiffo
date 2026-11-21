@@ -13,7 +13,9 @@ export type TimerEvent =
   /** An offer's time is up (docs/matching.md, M6). */
   | 'offer_expire'
   /** Look again for someone to offer an urgent errand to. */
-  | 'offer_dispatch';
+  | 'offer_dispatch'
+  /** Still waiting: ask the customer whether to raise the fee (docs/matching.md, M8). */
+  | 'raise_prompt';
 
 /**
  * A system event due later. It only applies if the errand is still exactly as it was when the timer

@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { useColors } from '../theme/theme';
@@ -7,6 +7,7 @@ import { IconCircle } from '../ui/parts';
 import { AgentDone } from '../agent/done';
 import { AgentRequest } from '../agent/request';
 import { AgentTrip } from '../agent/trip';
+import { useRealtimeEvent } from '../realtime/realtime';
 import { useErrand } from './use-errand';
 
 /**
@@ -20,6 +21,11 @@ export function AgentErrand({ id }: { id: string }) {
   // released them, or they left, it went back to matching for other agents.
   const wasMine = useRef(false);
   if (errand?.role === 'agent') wasMine.current = true;
+  // Told while it was open to everyone (M8) that someone else took it, or it went.
+  const [gone, setGone] = useState<{ taken: boolean } | null>(null);
+  useRealtimeEvent<{ errandId: string; taken: boolean }>('errand.gone', (g) => {
+    if (g.errandId === id) setGone({ taken: g.taken });
+  });
 
   if (!errand) {
     return (
@@ -29,6 +35,20 @@ export function AgentErrand({ id }: { id: string }) {
     );
   }
   const movedOn = wasMine.current && errand.role === 'prospect';
+  if (gone && errand.role === 'prospect') {
+    return (
+      <View style={[styles.center, { backgroundColor: c.surface, gap: 12, padding: 24 }]}>
+        <IconCircle icon="x" size={64} />
+        <Text variant="title" style={{ textAlign: 'center' }} accessibilityLiveRegion="polite">
+          {gone.taken ? 'This errand was taken' : 'This errand has gone'}
+        </Text>
+        <Text variant="sub" tone="ink3" style={{ textAlign: 'center' }}>
+          {gone.taken ? 'Another agent accepted it first.' : 'The customer no longer needs it.'}
+        </Text>
+        <Button label="Back to the board" onPress={() => router.replace('/home')} />
+      </View>
+    );
+  }
   if (errand.role === 'prospect' && !movedOn) {
     return (
       <AgentRequest errand={errand} onAccept={() => act('accept')} accepting={busy === 'accept'} error={actionError} />

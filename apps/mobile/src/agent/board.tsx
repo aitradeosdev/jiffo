@@ -90,7 +90,13 @@ export function AgentBoard() {
   useEffect(() => {
     if (located) void load();
   }, [located, load]);
-  // New errands don't arrive as live events yet, so the board checks every 20 seconds while in front.
+  // An urgent errand open to everyone near them now, or one they were told of taken or gone (M8): on or off
+  // the board at once.
+  useRealtimeEvent('errand.broadcast', () => void load());
+  useRealtimeEvent<{ errandId: string }>('errand.gone', ({ errandId }) =>
+    setBoard((now) => (now ? { ...now, errands: now.errands.filter((e) => e.id !== errandId) } : now)),
+  );
+  // New errands from the board don't arrive as live events yet, so it checks every 20 seconds while in front.
   useFocusEffect(
     useCallback(() => {
       void load();

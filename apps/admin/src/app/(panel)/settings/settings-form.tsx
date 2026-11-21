@@ -12,7 +12,7 @@ type Settings = Record<string, unknown>;
 /** What the input shows for a stored value, in the field's own unit. */
 function toText(field: Field, value: unknown): string {
   if (value === null || value === undefined) return '';
-  if (field.kind === 'hoursList') return (value as number[]).join(', ');
+  if (field.kind === 'hoursList' || field.kind === 'kmList') return (value as number[]).join(', ');
   if (field.kind === 'naira' || field.kind === 'optionalNaira') return String(Number(value) / 100);
   if (field.kind === 'percent' || field.kind === 'optionalPercent') return String(Number(value) / 100);
   return String(value);
@@ -30,12 +30,13 @@ function fromText(field: Field, text: string): unknown {
   if (field.kind === 'optionalText') return t;
   // Digits stay text: an emergency number like 112 is dialled, not counted. A wrong one is the API's to refuse.
   if (field.kind === 'digits') return text.trim();
-  if (field.kind === 'hoursList') {
+  if (field.kind === 'hoursList' || field.kind === 'kmList') {
     const parts = text
       .split(',')
       .map((p) => p.trim())
       .filter(Boolean);
-    return parts.every((p) => /^\d+$/.test(p)) ? parts.map(Number) : NaN;
+    const shape = field.kind === 'kmList' ? /^\d+(\.\d)?$/ : /^\d+$/;
+    return parts.every((p) => shape.test(p)) ? parts.map(Number) : NaN;
   }
   if (!/^\d+(\.\d{1,2})?$/.test(t)) return NaN;
   const n = Number(t);
@@ -56,7 +57,9 @@ const unreadable = (field: Field) =>
     ? 'Enter a number, with at most two decimal places'
     : field.kind === 'hoursList'
       ? 'Enter whole hours with commas between them, such as 2, 12, 20'
-      : 'Enter a whole number';
+      : field.kind === 'kmList'
+        ? 'Enter distances in km with commas between them, such as 3, 6, 10'
+        : 'Enter a whole number';
 
 const UNIT: Partial<Record<Field['kind'], string>> = {
   naira: '₦',
@@ -66,6 +69,7 @@ const UNIT: Partial<Record<Field['kind'], string>> = {
   minutes: 'min',
   hours: 'h',
   hoursList: 'h',
+  kmList: 'km',
   seconds: 's',
 };
 
@@ -215,7 +219,7 @@ export function SettingsForm({
                         <input
                           id={id}
                           inputMode={
-                            f.kind === 'optionalText' || f.kind === 'hoursList'
+                            f.kind === 'optionalText' || f.kind === 'hoursList' || f.kind === 'kmList'
                               ? 'text'
                               : f.kind === 'digits'
                                 ? 'numeric'

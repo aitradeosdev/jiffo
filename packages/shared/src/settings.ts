@@ -65,6 +65,8 @@ export const DEFAULT_MATCHING_SETTINGS = {
   offerSeconds: 20,
   missedOffersOffline: 3,
   dispatchRetrySeconds: 15,
+  searchStepsKm: [3, 6, 10],
+  offersPerStep: 5,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -120,7 +122,6 @@ const CountrySettingsObject = z.object({
       path: ['serviceFeeMinKobo'],
     }),
   timers: z.object({
-    urgentWidenMinutes: minutes,
     raisePricePromptMinutes: minutes,
     urgentExpiryMinutes: minutes,
     boardRaisePromptMinutes: minutes,
@@ -424,6 +425,24 @@ const CountrySettingsObject = z.object({
       missedOffersOffline: z.number().int().min(0).max(20).default(3),
       /** With no one to offer an urgent errand to, how soon to look again. */
       dispatchRetrySeconds: z.number().int().min(5).max(300).default(15),
+      /**
+       * An urgent errand's search (M8): offered one agent at a time within each radius in turn, in km, then to
+       * every agent within the last at once, the first to accept getting it. A raised fee starts it again.
+       */
+      searchStepsKm: z
+        .array(z.number().min(0.5).max(50))
+        .min(1, 'Give at least one search step')
+        .max(6)
+        .refine((steps) => steps.every((km, i) => i === 0 || km > steps[i - 1]!), {
+          message: 'Each search step must reach further than the one before',
+        })
+        .default(() => [...DEFAULT_MATCHING_SETTINGS.searchStepsKm]),
+      /** Agents offered it one at a time at each step before the search moves out to the next. */
+      offersPerStep: z.number().int().min(1).max(50).default(5),
+    })
+    .refine((m) => (m.searchStepsKm.at(-1) ?? 0) <= m.boardRadiusKm, {
+      message: "The last search step can't reach past how far the board reaches",
+      path: ['searchStepsKm'],
     })
     .default(() => structuredClone(DEFAULT_MATCHING_SETTINGS)),
   /** The emergency button (docs/security-plan.md, E9). */
@@ -468,7 +487,6 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
     instantWithdrawalFeeKobo: 10_000,
   },
   timers: {
-    urgentWidenMinutes: 5,
     raisePricePromptMinutes: 15,
     urgentExpiryMinutes: 30,
     boardRaisePromptMinutes: 30,

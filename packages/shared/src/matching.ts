@@ -150,3 +150,26 @@ export function byRank(a: { score: number; travelSeconds: number }, b: { score: 
   const diff = b.score - a.score;
   return Math.abs(diff) > 1e-9 ? diff : a.travelSeconds - b.travelSeconds;
 }
+
+type SearchRules = Pick<CountrySettings['matching'], 'searchStepsKm' | 'offersPerStep'>;
+
+/**
+ * Which step an urgent errand's search is at (docs/matching.md, M8), from how many agents were offered it at this
+ * fee: the step's index and radius, or null once every step has had its offers and it goes to everyone at once.
+ */
+export function searchStep(offersMade: number, rules: SearchRules): { index: number; km: number } | null {
+  const index = Math.floor(offersMade / rules.offersPerStep);
+  return index < rules.searchStepsKm.length ? { index, km: rules.searchStepsKm[index]! } : null;
+}
+
+/**
+ * How far the search reaches now, for the customer: the radius of the step its latest offer was made at, or of a
+ * step further out where it widened early, with no one to ask nearer (`farthestMeters`: the furthest agent
+ * offered it at this fee).
+ */
+export function searchRadiusKm(offersMade: number, farthestMeters: number | null, rules: SearchRules): number {
+  const last = rules.searchStepsKm.at(-1)!;
+  const step = searchStep(Math.max(0, offersMade - 1), rules)?.km ?? last;
+  const reached = farthestMeters === null ? 0 : (rules.searchStepsKm.find((km) => km * 1000 >= farthestMeters) ?? last);
+  return Math.max(step, reached);
+}

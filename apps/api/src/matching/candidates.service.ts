@@ -44,31 +44,69 @@ export class CandidatesService {
   /**
    * `skip`: agents left out before the shortlist is drawn up (offers, M6: those who said no to the errand at
    * this fee, and those holding another offer), so they never take the places of agents who could be asked.
+   * `radiusKm`: how far from the pickup to look (a search step, M8); the board's reach when left out.
    */
-  async forErrand(errandId: string, skip: ReadonlySet<string> = new Set()): Promise<Candidate[]> {
+  async forErrand(errandId: string, skip: ReadonlySet<string> = new Set(), radiusKm?: number): Promise<Candidate[]> {
+    const found = await this.waiting(errandId);
+    if (!found) return [];
+    const { errand, pickup, rules } = found;
+    const shortlist = await this.checkedNear(
+      errand,
+      pickup,
+      rules,
+      skip,
+      radiusKm ?? rules.boardRadiusKm,
+      rules.shortlistSize,
+    );
+    const travel = await this.travelTimes.toPickup(shortlist, pickup, rules);
+    return shortlist
+      .map((c) => ({ agentId: c.agentId, straightMeters: c.straightMeters, travel: travel.get(c.agentId)! }))
+      .sort((a, b) => a.travel.durationSeconds - b.travel.durationSeconds || a.straightMeters - b.straightMeters);
+  }
+
+  /**
+   * Every agent within `radiusKm` of the pickup who may take the errand now, nearest first, up to `max`: those an
+   * urgent errand open to everyone is told of (M8). No travel times: no one is ranked.
+   */
+  async everyoneWithin(errandId: string, skip: ReadonlySet<string>, radiusKm: number, max = 200) {
+    const found = await this.waiting(errandId);
+    if (!found) return [];
+    const { errand, pickup, rules } = found;
+    const checked = await this.checkedNear(errand, pickup, rules, skip, radiusKm, max);
+    return checked.map((c) => ({ agentId: c.agentId, straightMeters: c.straightMeters }));
+  }
+
+  /** The errand if it still waits, with its pickup and its country's Matching rules. */
+  private async waiting(errandId: string) {
     const [row] = await this.db
       .select({ errand: errands, lat: errandStops.lat, lng: errandStops.lng })
       .from(errands)
       .innerJoin(errandStops, and(eq(errandStops.errandId, errands.id), eq(errandStops.seq, 0)))
       .where(eq(errands.id, errandId));
-    if (!row || row.errand.status !== 'requested') return [];
-    const { errand } = row;
-    const pickup = { lat: row.lat, lng: row.lng };
-    const rules = (await this.countries.currentSettings(errand.countryCode)).settings.matching;
+    if (!row || row.errand.status !== 'requested') return null;
+    const rules = (await this.countries.currentSettings(row.errand.countryCode)).settings.matching;
+    return { errand: row.errand, pickup: { lat: row.lat, lng: row.lng }, rules };
+  }
 
-    // More than the shortlist: some of the nearest are left out, and some won't pass the check.
-    const near = (await this.nearest(errand.countryCode, pickup, rules, rules.shortlistSize * 3 + skip.size)).filter(
+  /** The nearest agents within the radius who pass the check, a few at a time, until there are `want`. */
+  private async checkedNear(
+    errand: ErrandRow,
+    pickup: LatLng,
+    rules: CountrySettings['matching'],
+    skip: ReadonlySet<string>,
+    radiusKm: number,
+    want: number,
+  ) {
+    // More than wanted: some of the nearest are left out, and some won't pass the check.
+    const near = (await this.nearest(errand.countryCode, pickup, rules, want * 3 + skip.size, radiusKm)).filter(
       (n) => !skip.has(n.agentId),
     );
-    const shortlist: Array<Omit<Candidate, 'travel'> & LatLng> = [];
-    for (let i = 0; i < near.length && shortlist.length < rules.shortlistSize; i += CHECK_AT_ONCE) {
+    const out: Array<Omit<Candidate, 'travel'> & LatLng> = [];
+    for (let i = 0; i < near.length && out.length < want; i += CHECK_AT_ONCE) {
       const checked = await Promise.all(near.slice(i, i + CHECK_AT_ONCE).map((n) => this.check(n, errand, rules)));
-      for (const c of checked) if (c && shortlist.length < rules.shortlistSize) shortlist.push(c);
+      for (const c of checked) if (c && out.length < want) out.push(c);
     }
-    const travel = await this.travelTimes.toPickup(shortlist, pickup, rules);
-    return shortlist
-      .map((c) => ({ agentId: c.agentId, straightMeters: c.straightMeters, travel: travel.get(c.agentId)! }))
-      .sort((a, b) => a.travel.durationSeconds - b.travel.durationSeconds || a.straightMeters - b.straightMeters);
+    return out;
   }
 
   /**
@@ -80,15 +118,16 @@ export class CandidatesService {
     pickup: LatLng,
     rules: CountrySettings['matching'],
     count: number,
+    radiusKm: number,
   ): Promise<NearAgent[]> {
     try {
       if (!(await this.locations.loaded(countryCode))) {
         await this.locations.load(countryCode, await this.livePositions(countryCode, rules.locationFreshMinutes));
       }
-      return await this.locations.near(countryCode, pickup, rules.boardRadiusKm, count, rules.locationFreshMinutes);
+      return await this.locations.near(countryCode, pickup, radiusKm, count, rules.locationFreshMinutes);
     } catch (error) {
       this.logger.warn(`Live positions unavailable, reading the database: ${(error as Error).message}`);
-      return this.nearestInDatabase(countryCode, pickup, rules, count);
+      return this.nearestInDatabase(countryCode, pickup, rules, count, radiusKm);
     }
   }
 
@@ -107,6 +146,7 @@ export class CandidatesService {
     pickup: LatLng,
     rules: CountrySettings['matching'],
     count: number,
+    radiusKm: number,
   ): Promise<NearAgent[]> {
     {
       const here = sql`ST_SetSRID(ST_MakePoint(${pickup.lng}, ${pickup.lat}), 4326)::geography`;
@@ -120,7 +160,7 @@ export class CandidatesService {
         from agent_presence
         where country_code = ${countryCode} and online and not mocked
           and located_at > now() - make_interval(mins => ${rules.locationFreshMinutes})
-          and ST_DWithin(location, ${here}, ${rules.boardRadiusKm * 1000})
+          and ST_DWithin(location, ${here}, ${radiusKm * 1000})
         order by meters limit ${count}`);
       return rows.map((r) => ({ agentId: r.agentId, lat: r.lat, lng: r.lng, meters: Math.round(Number(r.meters)) }));
     }

@@ -15,5 +15,12 @@ describe('settings fields', () => {
     expect(shown(FIELD_BY_PATH.get('fees.launchCommissionBps'), null)).toBe('none');
     expect(shown(FIELD_BY_PATH.get('timers.autoReleaseHours'), 24)).toBe('24 h');
     expect(shown(FIELD_BY_PATH.get('identity.agentIdTypes'), ['nin', 'bvn'])).toBe('NIN, BVN');
+    expect(shown(FIELD_BY_PATH.get('matching.searchStepsKm'), [3, 6, 10])).toBe('3 km, 6 km, 10 km');
+  });
+
+  it('has the search steps in place of the old single widening (docs/matching.md, M8)', () => {
+    expect(FIELD_BY_PATH.get('matching.searchStepsKm')?.kind).toBe('kmList');
+    expect(FIELD_BY_PATH.get('matching.offersPerStep')?.kind).toBe('count');
+    expect(FIELD_BY_PATH.has('timers.urgentWidenMinutes')).toBe(false);
   });
 });
