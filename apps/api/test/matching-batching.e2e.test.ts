@@ -1,9 +1,11 @@
 import { and, eq } from 'drizzle-orm';
 import request from 'supertest';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_MATCHING_SETTINGS } from '@jiffo/shared';
 import { agentPresence, errandOffers, errands } from '../src/db/schema';
 import { AgentLocations } from '../src/matching/agent-locations';
+import { MatchingRedis } from '../src/matching/matching-redis';
+import { RankingService } from '../src/matching/ranking.service';
 import { adminAs, approved, createErrand, createTestApp, fund, signIn, type Person, type TestApp } from './helpers';
 
 /** Ikota, away from the other tests' agents. */
@@ -48,6 +50,12 @@ describe('batching first offers', () => {
   });
   // Each test starts with every agent so far offline, and no urgent errand waiting.
   afterEach(async () => {
+    vi.restoreAllMocks();
+    // No batch left waiting either.
+    for (const p of t.timers.pending.filter((p) => p.job.event === 'offer_batch')) {
+      t.timers.pending.splice(t.timers.pending.indexOf(p), 1);
+    }
+    await t.app.get(MatchingRedis).client.del('offers:batch:NG:LA');
     await t.db.update(errandOffers).set({ status: 'withdrawn' }).where(eq(errandOffers.status, 'open'));
     await t.db
       .update(errands)
@@ -143,5 +151,72 @@ describe('batching first offers', () => {
     await urgentAt(east(0));
     expect(batches()).toHaveLength(1);
     await runBatch();
+  });
+
+  it('leaves out errands waiting since before the batch, which are offered one at a time', async () => {
+    // Sent ten minutes ago, with no one to offer it to then: it looks again on its own.
+    const old = await urgentAt(east(0));
+    await runBatch();
+    await t.db
+      .update(errands)
+      .set({ createdAt: new Date(Date.now() - 10 * 60_000) })
+      .where(eq(errands.id, old.id));
+    const x = await agentAt(east(0));
+    const fresh = await urgentAt(east(0.5));
+    await runBatch();
+    expect((await openOffer(fresh.id))?.agentId).toBe(x.userId);
+    expect(await openOffer(old.id)).toBeUndefined();
+  });
+
+  it('keeps an errand sent while a batch runs for the next batch, never running two at once', async () => {
+    const x = await agentAt(east(0));
+    const y = await agentAt(east(0.5));
+    const ranking = t.app.get(RankingService);
+    const real = ranking.ranked.bind(ranking);
+    let during: { id: string } | undefined;
+    let batchesMeanwhile = -1;
+    vi.spyOn(ranking, 'ranked').mockImplementationOnce(async (...args) => {
+      during = await urgentAt(east(0.3));
+      batchesMeanwhile = batches().length;
+      return real(...args);
+    });
+    const first = await urgentAt(east(0));
+    await runBatch();
+    expect(batchesMeanwhile).toBe(0);
+    expect((await openOffer(first.id))?.agentId).toBe(x.userId);
+    expect(await openOffer(during!.id)).toBeUndefined();
+    // The next batch, for the errand sent meanwhile.
+    expect(batches()).toHaveLength(1);
+    await runBatch();
+    expect((await openOffer(during!.id))?.agentId).toBe(y.userId);
+  });
+
+  it("doesn't hold up later errands when a batch's timer can't be set", async () => {
+    const x = await agentAt(east(0));
+    const schedule = t.timers.schedule.bind(t.timers);
+    let failed = false;
+    vi.spyOn(t.timers, 'schedule').mockImplementation(async (job, delayMs) => {
+      if (job.event === 'offer_batch' && !failed) {
+        failed = true;
+        throw new Error('The timer store is down');
+      }
+      return schedule(job, delayMs);
+    });
+    // Offered on its own instead.
+    const alone = await urgentAt(east(0));
+    expect((await openOffer(alone.id))?.agentId).toBe(x.userId);
+    // The next errand starts a batch as usual.
+    await urgentAt(east(0.5));
+    expect(batches()).toHaveLength(1);
+    await runBatch();
+  });
+
+  it("leaves an errand waiting for its batch to the batch, not the minute's sweep", async () => {
+    const x = await agentAt(east(0));
+    const errand = await urgentAt(east(0));
+    await t.jobs.run('offers.sweep');
+    expect(await openOffer(errand.id)).toBeUndefined();
+    await runBatch();
+    expect((await openOffer(errand.id))?.agentId).toBe(x.userId);
   });
 });

@@ -53,4 +53,24 @@ describe('the best assignment', () => {
     ];
     expect(bestAssignment(weights)).toEqual([1, 0]);
   });
+
+  it('treats a score that is not a number as a pair that may not be, rather than never finishing', () => {
+    expect(bestAssignment([[Number.NaN, 0.5]])).toEqual([1]);
+    expect(bestAssignment([[Number.POSITIVE_INFINITY], [0.3]])).toEqual([null, 0]);
+  });
+
+  it('assigns a large batch quickly', () => {
+    // 50 errands, each with 25 agents of its own nearby, plus a few shared.
+    let seed = 7;
+    const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const cols = 50 * 25;
+    const weights = Array.from({ length: 50 }, (_, i) =>
+      Array.from({ length: cols }, (_, j) => (Math.floor(j / 25) === i || j < 10 ? random() : null)),
+    );
+    const started = Date.now();
+    const picked = bestAssignment(weights);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(picked.every((j) => j !== null)).toBe(true);
+    expect(new Set(picked).size).toBe(50);
+  });
 });

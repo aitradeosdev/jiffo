@@ -50,6 +50,8 @@ const batchKey = (errand: Pick<ErrandRow, 'countryCode' | 'stateCode'>) =>
   `offers:batch:${errand.countryCode}:${errand.stateCode}`;
 /** Errands in one state's batch at most; any more wait for the next. */
 const BATCH_MAX = 50;
+/** How long a running batch holds its state's mark at most, should it never finish. */
+const BATCH_RUNNING_SECONDS = 60;
 
 /**
  * Ranked agents in the order offering asks them: those within the first of these search steps by score, then
@@ -263,18 +265,32 @@ export class OffersService {
     try {
       const rules = (await this.countries.currentSettings(errand.countryCode)).settings.matching;
       if (!rules.offers) return await this.dispatch(errand.id);
-      // One batch waiting per state: an errand sent while one waits joins it.
-      const first = await this.redis.client
-        .set(batchKey(errand), '1', 'EX', rules.batchSeconds + RETRY_SLACK_SECONDS, 'NX')
-        .catch(() => 'OK');
-      if (first !== 'OK') return;
+      await this.batchSoon(errand, rules);
+    } catch (error) {
+      this.logger.warn(`Batching errand ${errand.id} failed, offering it alone: ${(error as Error).message}`);
+      await this.dispatch(errand.id);
+    }
+  }
+
+  /**
+   * Starts the errand's state's batch, unless one is waiting or running already, which the errand joins (one that
+   * is running leaves it to the next). If its timer can't be set, the mark comes off again, so the errands sent
+   * after aren't left waiting on a batch that never comes.
+   */
+  private async batchSoon(errand: ErrandRow, rules: CountrySettings['matching']) {
+    const key = batchKey(errand);
+    const first = await this.redis.client
+      .set(key, '1', 'EX', rules.batchSeconds + RETRY_SLACK_SECONDS, 'NX')
+      .catch(() => 'OK');
+    if (first !== 'OK') return;
+    try {
       await this.timers.schedule(
         { errandId: errand.id, event: 'offer_batch', status: 'requested', version: errand.version },
         rules.batchSeconds * 1000,
       );
     } catch (error) {
-      this.logger.warn(`Batching errand ${errand.id} failed, offering it alone: ${(error as Error).message}`);
-      await this.dispatch(errand.id);
+      await this.redis.client.del(key).catch(() => undefined);
+      throw error;
     }
   }
 
@@ -288,8 +304,37 @@ export class OffersService {
   async runBatch(errandId: string) {
     const [trigger] = await this.db.select().from(errands).where(eq(errands.id, errandId));
     if (!trigger) return;
-    await this.redis.client.del(batchKey(trigger)).catch(() => undefined);
-    const waiting = await this.db
+    const key = batchKey(trigger);
+    // Held while it runs, so an errand sent meanwhile waits for the next batch rather than starting one beside it.
+    await this.redis.client.set(key, '1', 'EX', BATCH_RUNNING_SECONDS).catch(() => undefined);
+    const done = new Set<string>();
+    try {
+      const rules = (await this.countries.currentSettings(trigger.countryCode)).settings.matching;
+      const waiting = await this.waitingForBatch(trigger, rules);
+      for (const e of waiting) done.add(e.id);
+      if (!waiting.length) return;
+      await this.matchBatch(trigger, waiting, rules).catch(async (error: Error) => {
+        this.logger.warn(`The batch for ${trigger.countryCode}-${trigger.stateCode} failed: ${error.message}`);
+        for (const e of waiting) await this.dispatch(e.id);
+      });
+    } finally {
+      await this.redis.client.del(key).catch(() => undefined);
+      // Errands sent while it ran get the next batch.
+      await this.nextBatch(trigger, done).catch((error: Error) =>
+        this.logger.warn(
+          `Starting the next batch for ${trigger.countryCode}-${trigger.stateCode} failed: ${error.message}`,
+        ),
+      );
+    }
+  }
+
+  /**
+   * The state's urgent errands waiting for a first offer, sent within the batch's window: never offered, not open to
+   * everyone, and not looking again on their own (an errand no batch could match is offered one at a time from then).
+   */
+  private async waitingForBatch(trigger: ErrandRow, rules: CountrySettings['matching']) {
+    const since = new Date(Date.now() - (rules.batchSeconds + RETRY_SLACK_SECONDS) * 1000);
+    const rows = await this.db
       .select()
       .from(errands)
       .where(
@@ -299,54 +344,62 @@ export class OffersService {
           eq(errands.status, 'requested'),
           eq(errands.urgent, true),
           isNull(errands.broadcastFeeKobo),
+          gt(errands.createdAt, since),
           sql`not exists (select 1 from ${errandOffers} o where o.errand_id = ${errands.id})`,
         ),
       )
       .orderBy(asc(errands.createdAt))
       .limit(BATCH_MAX);
-    if (!waiting.length) return;
-    try {
-      const rules = (await this.countries.currentSettings(trigger.countryCode)).settings.matching;
-      if (!rules.offers) {
-        for (const e of waiting) await this.dispatch(e.id);
-        return;
-      }
-      const holding = await this.db
-        .select({ agentId: errandOffers.agentId })
-        .from(errandOffers)
-        .where(and(eq(errandOffers.countryCode, trigger.countryCode), eq(errandOffers.status, 'open')));
-      const skip = new Set(holding.map((h) => h.agentId));
-      const options = await Promise.all(
-        waiting.map(async (e) => {
-          const ranked = await this.ranking.ranked(e.id, skip, rules.searchStepsKm.at(-1)).catch((error: Error) => {
-            this.logger.warn(`Ranking errand ${e.id} for its batch failed: ${error.message}`);
-            return [] as Ranked[];
-          });
-          return nearestRing(ranked, rules.searchStepsKm);
-        }),
-      );
-      const agents = [...new Set(options.flat().map((r) => r.agentId))];
-      const column = new Map(agents.map((a, j) => [a, j]));
-      const weights = options.map((rankedFor) => {
-        const row: (number | null)[] = agents.map(() => null);
-        for (const r of rankedFor) row[column.get(r.agentId)!] = r.score;
-        return row;
-      });
-      const picked = bestAssignment(weights);
-      // Every assignment is offered before anything else, so offering one errand alone can't take an agent the
-      // batch gave another.
-      const left: string[] = [];
-      for (const [i, e] of waiting.entries()) {
-        const j = picked[i];
-        const r = j === null || j === undefined ? undefined : options[i]!.find((o) => o.agentId === agents[j]);
-        const outcome = r ? await this.offerTo(e, r, options[i]!.indexOf(r) + 1, rules) : 'taken';
-        if (outcome === 'taken') left.push(e.id);
-      }
-      for (const id of left) await this.dispatch(id);
-    } catch (error) {
-      this.logger.warn(`The batch for ${trigger.countryCode}-${trigger.stateCode} failed: ${(error as Error).message}`);
+    const looking = await Promise.all(rows.map((e) => this.redis.client.exists(retryKey(e.id)).catch(() => 0)));
+    return rows.filter((_, i) => !looking[i]);
+  }
+
+  /** After a batch: if errands arrived while it ran, the next batch starts for them. */
+  private async nextBatch(trigger: ErrandRow, done: ReadonlySet<string>) {
+    const rules = (await this.countries.currentSettings(trigger.countryCode)).settings.matching;
+    if (!rules.offers) return;
+    const next = (await this.waitingForBatch(trigger, rules)).find((e) => !done.has(e.id));
+    if (next) await this.batchSoon(next, rules);
+  }
+
+  /** Assigns the batch's errands their agents together, and offers the rest one at a time. */
+  private async matchBatch(trigger: ErrandRow, waiting: ErrandRow[], rules: CountrySettings['matching']) {
+    if (!rules.offers) {
       for (const e of waiting) await this.dispatch(e.id);
+      return;
     }
+    const holding = await this.db
+      .select({ agentId: errandOffers.agentId })
+      .from(errandOffers)
+      .where(and(eq(errandOffers.countryCode, trigger.countryCode), eq(errandOffers.status, 'open')));
+    const skip = new Set(holding.map((h) => h.agentId));
+    const options = await Promise.all(
+      waiting.map(async (e) => {
+        const ranked = await this.ranking.ranked(e.id, skip, rules.searchStepsKm.at(-1)).catch((error: Error) => {
+          this.logger.warn(`Ranking errand ${e.id} for its batch failed: ${error.message}`);
+          return [] as Ranked[];
+        });
+        return nearestRing(ranked, rules.searchStepsKm);
+      }),
+    );
+    const agents = [...new Set(options.flat().map((r) => r.agentId))];
+    const column = new Map(agents.map((a, j) => [a, j]));
+    const weights = options.map((rankedFor) => {
+      const row: (number | null)[] = agents.map(() => null);
+      for (const r of rankedFor) row[column.get(r.agentId)!] = r.score;
+      return row;
+    });
+    const picked = bestAssignment(weights);
+    // Every assignment is offered before anything else, so offering one errand alone can't take an agent the
+    // batch gave another.
+    const left: string[] = [];
+    for (const [i, e] of waiting.entries()) {
+      const j = picked[i];
+      const r = j === null || j === undefined ? undefined : options[i]!.find((o) => o.agentId === agents[j]);
+      const outcome = r ? await this.offerTo(e, r, options[i]!.indexOf(r) + 1, rules) : 'taken';
+      if (outcome === 'taken') left.push(e.id);
+    }
+    for (const id of left) await this.dispatch(id);
   }
 
   /** Agents who said no to the errand at its fee, or let the offer run out. */
@@ -488,7 +541,7 @@ export class OffersService {
       .returning();
     for (const o of lost) await this.ended(o, { offerAgain: true });
     const waiting = await this.db
-      .select({ id: errands.id })
+      .select({ id: errands.id, countryCode: errands.countryCode, stateCode: errands.stateCode })
       .from(errands)
       .where(
         and(
@@ -498,7 +551,8 @@ export class OffersService {
         ),
       );
     for (const w of waiting) {
-      const looking = await this.redis.client.exists(retryKey(w.id)).catch(() => 0);
+      // Looking again on its own already, or waiting for its state's batch (M5), which offers it.
+      const looking = await this.redis.client.exists(retryKey(w.id), batchKey(w)).catch(() => 0);
       if (!looking) await this.dispatch(w.id);
     }
     return lost.length;
