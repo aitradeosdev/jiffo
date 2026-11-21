@@ -39,6 +39,14 @@ const geographyPoint = customType<{ data: string; driverData: string }>({
   dataType: () => 'geography(Point, 4326)',
 });
 
+/**
+ * A drawn boundary: one or more polygons (longitude, latitude). Written with ST_GeomFromGeoJSON, read back with
+ * ST_AsGeoJSON.
+ */
+const boundaryShape = customType<{ data: string; driverData: string }>({
+  dataType: () => 'geometry(MultiPolygon, 4326)',
+});
+
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const updatedAt = () => timestamp('updated_at', { withTimezone: true }).notNull().defaultNow();
 const kobo = (name: string) => bigint(name, { mode: 'number' });
@@ -69,6 +77,49 @@ export const states = pgTable(
       .default('open'),
   },
   (t) => [uniqueIndex('states_country_code_uq').on(t.countryCode, t.code)],
+);
+
+/**
+ * A city in a state, drawn by admin on a map. Errands are taken only in its areas, and only while the city, its
+ * state and its country are switched on.
+ */
+export const cities = pgTable(
+  'cities',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    stateId: uuid('state_id')
+      .notNull()
+      .references(() => states.id),
+    name: text('name').notNull(),
+    enabled: boolean('enabled').notNull().default(false),
+    boundary: boundaryShape('boundary').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('cities_state_name_uq').on(t.stateId, sql`lower(${t.name})`),
+    index('cities_boundary_gix').using('gist', t.boundary),
+  ],
+);
+
+/** An area in a city, drawn by admin: where errands are taken while it is switched on. Areas in a city never overlap. */
+export const areas = pgTable(
+  'areas',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    cityId: uuid('city_id')
+      .notNull()
+      .references(() => cities.id),
+    name: text('name').notNull(),
+    enabled: boolean('enabled').notNull().default(false),
+    boundary: boundaryShape('boundary').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('areas_city_name_uq').on(t.cityId, sql`lower(${t.name})`),
+    index('areas_boundary_gix').using('gist', t.boundary),
+  ],
 );
 
 /** Every saved change to a country's settings is a new version; the highest version is current. */
@@ -481,6 +532,8 @@ export const errands = pgTable(
       .notNull()
       .references(() => countries.code),
     stateCode: text('state_code').notNull(),
+    /** The area the pickup is in, worked out by the server when the errand was sent. Null for older errands. */
+    areaId: uuid('area_id').references(() => areas.id),
     customerId: uuid('customer_id')
       .notNull()
       .references(() => users.id),

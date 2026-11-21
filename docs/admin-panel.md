@@ -11,7 +11,22 @@
 - **ID checks:** customers' ID checks by state. Those the provider couldn't settle wait in review, longest first; operations verifies or declines each from the customer's page (never with an ID another customer holds), or reopens a declined one so they can check again. The decline's reason is shown to the customer. The providers page says which IDs each identity provider checks.
 - **Money:** what Jiffo holds, earns and pays providers (net revenue), top-ups by way of paying in, customers' own account numbers and what issuing them cost, withdrawals and the nightly check against the payment provider.
 - **Settings:** prices, fees, commission, timers, limits and identity rules as versioned settings, plus categories and states. Identity has a switch each for customers' and agents' ID checks (docs/security/controls.md, Identity checks). Sign-in codes can be switched to Test per country (Settings, Security): no texts are sent and the app shows each code, and every page warns while one is on.
+- **Places:** where Jiffo works, by country, state, city and area (below).
 - **Team and audit log:** who can use the panel, and every change anyone made in it.
+
+## Places: where Jiffo works
+
+Jiffo works in areas, drawn in cities, in states, in a country.
+
+- **Drawing:** admin draws each city in a state, and each area in a city, on a map. The rules for a shape:
+  - an area stays inside its city;
+  - areas in a city never overlap, and neither do cities, though they can share an edge (100 m and one hectare of slack for a hand-drawn line);
+  - a shape can't cross itself.
+- **Switching on:** each one is switched on separately, and starts off.
+- **Where errands are taken:** only when every stop is inside an area that is on, in a city, state and country that are on.
+  - **Switched off:** an area, city or state stops new errands there. Errands already sent go on as before.
+  - **The errand's area and state:** the server works out the pickup's area, and its state, from the map. Whatever the app says is never used: before areas, the app named the state, and nothing checked it against the stops.
+- **Who can change them:** anyone who may change settings. Every change is in the audit log: a new boundary by its size, not its points.
 
 ## Roles
 

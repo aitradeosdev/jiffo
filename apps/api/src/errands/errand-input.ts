@@ -14,7 +14,8 @@ const Stop = z.object({
 export const CreateErrandBody = z
   .object({
     categoryKey: z.string().min(1).max(40),
-    stateCode: z.string().min(1).max(10),
+    /** Sent by older apps, and ignored: the server works out the state from where the pickup is. */
+    stateCode: z.string().min(1).max(10).optional(),
     description: z.string().trim().min(3).max(1000),
     /** Leave out to use the category's default. */
     buy: z.boolean().optional(),

@@ -63,7 +63,12 @@ describe('errands', () => {
         minFeeKobo: 100_000,
       });
       expect((await send({ categoryKey: 'rockets' }).expect(422)).body.error.code).toBe('category_not_available');
-      expect((await send({ stateCode: 'XX' }).expect(422)).body.error.code).toBe('state_not_available');
+      // Abuja: no area is drawn there in the tests. The state the app names is never taken for where it is.
+      const abuja = { ...LAGOS_STOPS[0], lat: 9.0765, lng: 7.3986 };
+      expect((await send({ stops: [abuja, LAGOS_STOPS[1]] }).expect(422)).body.error).toMatchObject({
+        code: 'outside_service_area',
+        stops: [0],
+      });
       expect((await send({ stops: [...LAGOS_STOPS].reverse() }).expect(400)).body.error.code).toBe('invalid_request');
       expect((await send({ stops: [LAGOS_STOPS[0]] }).expect(400)).body.error.code).toBe('invalid_request');
       const soon = new Date(Date.now() + 60_000).toISOString();

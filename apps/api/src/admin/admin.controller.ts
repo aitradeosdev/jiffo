@@ -22,6 +22,8 @@ import { StaffAlertsAdminService } from './staff-alerts-admin.service';
 import { PEOPLE_ROLES, PeopleAdminService } from './people-admin.service';
 import { MAX_ADJUSTMENT_KOBO, MoneyAdminService } from './money-admin.service';
 import { SettingsAdminService } from './settings-admin.service';
+import { ServiceAreasAdminService } from './service-areas-admin.service';
+import { BoundaryInput } from '../countries/service-areas';
 import { ProvidersAdminService } from './providers-admin.service';
 import { APPLICATION_STATUSES, ApplicationsAdminService } from './applications-admin.service';
 import { ID_CHECK_STATUSES, IdChecksAdminService } from './id-checks-admin.service';
@@ -89,6 +91,15 @@ const AdjustBody = z.object({
 });
 const CategoryId = new ParseUUIDPipe({ exceptionFactory: () => notFound('category_not_found', 'Category not found') });
 const StateId = new ParseUUIDPipe({ exceptionFactory: () => notFound('state_not_found', 'State not found') });
+const CityId = new ParseUUIDPipe({ exceptionFactory: () => notFound('city_not_found', 'City not found') });
+const AreaId = new ParseUUIDPipe({ exceptionFactory: () => notFound('area_not_found', 'Area not found') });
+const PlaceName = z.string().trim().min(2).max(60);
+const NewCityBody = z.object({ stateId: z.string().uuid(), name: PlaceName, boundary: BoundaryInput });
+const NewAreaBody = z.object({ cityId: z.string().uuid(), name: PlaceName, boundary: BoundaryInput });
+const PlaceChangeBody = z
+  .object({ name: PlaceName, boundary: BoundaryInput, enabled: z.boolean() })
+  .partial()
+  .refine((b) => Object.keys(b).length > 0, 'Nothing to update');
 const SaveSettingsBody = z.object({
   basedOn: z.number().int().positive(),
   settings: z.record(z.string(), z.unknown()),
@@ -222,6 +233,7 @@ export class AdminController {
     private readonly people: PeopleAdminService,
     private readonly money: MoneyAdminService,
     private readonly settingsAdmin: SettingsAdminService,
+    private readonly serviceAreas: ServiceAreasAdminService,
     private readonly applications: ApplicationsAdminService,
     private readonly idChecks: IdChecksAdminService,
     private readonly flags: FlagsAdminService,
@@ -412,6 +424,45 @@ export class AdminController {
     @Body(new ZodBody(UpdateStateBody)) body: z.infer<typeof UpdateStateBody>,
   ) {
     return this.settingsAdmin.updateState(admin, id, body);
+  }
+
+  /** Where Jiffo works: each state's cities and their areas, as drawn (docs/admin-panel.md, Places). */
+  @Get('service-areas')
+  @Needs('read')
+  serviceAreaList(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
+    return this.serviceAreas.list(query.country);
+  }
+
+  @Post('cities')
+  @Needs('settings')
+  createCity(@CurrentAdmin() admin: AdminContext, @Body(new ZodBody(NewCityBody)) body: z.infer<typeof NewCityBody>) {
+    return this.serviceAreas.createCity(admin, body);
+  }
+
+  @Patch('cities/:id')
+  @Needs('settings')
+  updateCity(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', CityId) id: string,
+    @Body(new ZodBody(PlaceChangeBody)) body: z.infer<typeof PlaceChangeBody>,
+  ) {
+    return this.serviceAreas.updateCity(admin, id, body);
+  }
+
+  @Post('areas')
+  @Needs('settings')
+  createArea(@CurrentAdmin() admin: AdminContext, @Body(new ZodBody(NewAreaBody)) body: z.infer<typeof NewAreaBody>) {
+    return this.serviceAreas.createArea(admin, body);
+  }
+
+  @Patch('areas/:id')
+  @Needs('settings')
+  updateArea(
+    @CurrentAdmin() admin: AdminContext,
+    @Param('id', AreaId) id: string,
+    @Body(new ZodBody(PlaceChangeBody)) body: z.infer<typeof PlaceChangeBody>,
+  ) {
+    return this.serviceAreas.updateArea(admin, id, body);
   }
 
   @Get('money/summary')

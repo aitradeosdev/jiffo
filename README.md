@@ -138,7 +138,13 @@ pnpm build
 cd apps/api && set -a && . ./.env && set +a && pnpm start
 ```
 
-The API listens on port 3000. `RUN_MIGRATIONS=true` applies the database migrations at start-up, including the Nigeria seed: 37 states, 8 categories and the first settings version. With the console providers, sign-in codes and push notifications are printed to the log instead of being sent. To see the codes in the app instead, switch the country's sign-in codes to Test (admin panel, Settings, Security): the code screen then shows each one.
+The API listens on port 3000. `RUN_MIGRATIONS=true` applies the database migrations at start-up, including the Nigeria seed: 37 states, 8 categories and the first settings version. Errands are taken only inside areas drawn in the admin panel (Places). To try the apps before drawing any, add one area covering all of Lagos, for development only:
+
+```bash
+cd apps/api && pnpm build && set -a && . ./.env && set +a && pnpm admin dev-areas
+```
+
+With the console providers, sign-in codes and push notifications are printed to the log instead of being sent. To see the codes in the app instead, switch the country's sign-in codes to Test (admin panel, Settings, Security): the code screen then shows each one.
 
 Tests run against real Postgres and Redis. Each run creates a throwaway database and drops it at the end:
 

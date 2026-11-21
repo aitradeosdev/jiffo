@@ -1,6 +1,10 @@
 import { randomBytes } from 'node:crypto';
-import { Client } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { Client, Pool } from 'pg';
+import { addDevLagos } from '../src/countries/service-areas';
+import type { Db } from '../src/db/database.module';
 import { runMigrations } from '../src/db/migrate';
+import * as schema from '../src/db/schema';
 
 /**
  * Creates a throwaway database for this run, migrates it and points the tests at it.
@@ -17,6 +21,10 @@ export default async function setup() {
   const url = new URL(base.toString());
   url.pathname = `/${name}`;
   await runMigrations(url.toString());
+  // Errands are taken only inside drawn areas: the tests' Lagos places are in one covering the whole state.
+  const pool = new Pool({ connectionString: url.toString() });
+  await addDevLagos(drizzle(pool, { schema }) as unknown as Db);
+  await pool.end();
 
   Object.assign(process.env, {
     NODE_ENV: 'test',
