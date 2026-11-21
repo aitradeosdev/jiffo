@@ -728,8 +728,12 @@ export const errandOffers = pgTable(
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },
   (t) => [
-    uniqueIndex('errand_offers_open_errand_uq').on(t.errandId).where(sql`status = 'open'`),
-    uniqueIndex('errand_offers_open_agent_uq').on(t.agentId).where(sql`status = 'open'`),
+    uniqueIndex('errand_offers_open_errand_uq')
+      .on(t.errandId)
+      .where(sql`status = 'open'`),
+    uniqueIndex('errand_offers_open_agent_uq')
+      .on(t.agentId)
+      .where(sql`status = 'open'`),
     index('errand_offers_errand_idx').on(t.errandId, t.offeredAt),
     index('errand_offers_agent_idx').on(t.agentId, t.offeredAt),
   ],
