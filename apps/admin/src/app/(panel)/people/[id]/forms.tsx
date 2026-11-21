@@ -143,7 +143,8 @@ const DECISION_COPY: Record<Decision, { about: string; reason: string; example: 
     confirm: 'Yes, decline',
   },
   reopen: {
-    about: 'Their application goes back to them to change and send again, for example to retake the selfie.',
+    about:
+      'Their application goes back to them to change and send again, for example to retake the selfie or check their ID.',
     reason: 'Why reopen',
     example: 'For example: they called to say the selfie was taken in the dark',
     confirm: 'Yes, reopen',
@@ -152,9 +153,20 @@ const DECISION_COPY: Record<Decision, { about: string; reason: string; example: 
 
 /**
  * What support can do with an application: approve or decline one in review; approve one declined by
- * mistake, or reopen it for the agent. Each asks for a reason. One with a failed check can't be approved.
+ * mistake, or reopen it for the agent. One in review without an ID check can be reopened too, so the agent
+ * can take it. Each asks for a reason. One with a failed check can't be approved.
  */
-export function DecisionForm({ id, status, failed }: { id: string; status: string; failed: string[] }) {
+export function DecisionForm({
+  id,
+  status,
+  failed,
+  noIdCheck,
+}: {
+  id: string;
+  status: string;
+  failed: string[];
+  noIdCheck: boolean;
+}) {
   const [state, action] = useActionState<PersonState, FormData>(decideApplication, {});
   const [decision, setDecision] = useState<Decision | null>(null);
   if (!decision) {
@@ -173,11 +185,12 @@ export function DecisionForm({ id, status, failed }: { id: string; status: strin
             <button type="button" className={buttonClass('danger', true)} onClick={() => setDecision('reject')}>
               Decline
             </button>
-          ) : (
+          ) : null}
+          {status !== 'review' || noIdCheck ? (
             <button type="button" className={buttonClass('secondary', true)} onClick={() => setDecision('reopen')}>
               Reopen for them
             </button>
-          )}
+          ) : null}
         </div>
         {failed.length ? (
           <p className="text-[13px] text-ink-3">

@@ -115,7 +115,7 @@ export class PresenceService {
             evidence: attest?.evidence ?? {},
             request: attest?.request ?? { method: 'PUT', path: '/v1/agent/presence', body: undefined },
           });
-          if (attested === 'doubtful' && !(await this.selfie.fresh(auth.userId))) selfieNeeded = 'device_check';
+          if (attested === 'doubtful') selfieNeeded = await this.selfie.neededOnDoubtfulPhone(auth);
         } catch (error) {
           if (running.length === 0) throw error;
           body = { ...body, online: false };

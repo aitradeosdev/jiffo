@@ -156,7 +156,7 @@ function Stat({ value, label }: { value: string; label: string }) {
 function CustomerIdRow() {
   const { identity } = useCustomerIdentity();
   // Left out where the country doesn't ask for the check, unless the customer already passed one.
-  if (identity && !identity.required && identity.status !== 'verified') return null;
+  if (identity && identity.required === false && identity.status !== 'verified') return null;
   const label = !identity
     ? 'Your ID'
     : identity.status === 'verified'

@@ -184,7 +184,7 @@ export default function TopUp() {
     );
   }
   // Where the country asks customers to check their ID, it comes first.
-  if (identity && identity.required && identity.status !== 'verified' && !deposit) {
+  if (identity && identity.required !== false && identity.status !== 'verified' && !deposit) {
     const checking = identity.status === 'checking' || identity.status === 'review';
     return (
       <Screen

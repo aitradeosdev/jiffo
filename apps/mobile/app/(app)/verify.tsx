@@ -55,7 +55,7 @@ export default function Verify() {
   }
 
   // Where the country doesn't ask customers to check their ID, there is nothing to do here.
-  if (!identity.required && identity.status !== 'verified' && !checking) {
+  if (identity.required === false && identity.status !== 'verified' && !checking) {
     return (
       <ObScreen onBack={leave} footer={<Button label="Continue" onPress={home} />}>
         <Question title="No ID check needed" sub="You can add money and request errands straight away." />

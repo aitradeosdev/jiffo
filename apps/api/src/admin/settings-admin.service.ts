@@ -13,7 +13,7 @@ import { sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { admins, categories, settingsVersions, states } from '../db/schema';
 import { badRequest, conflict, notFound } from '../common/errors';
-import { AgentApplicationService } from '../agents/application.service';
+import { AgentApplicationService, type Reopened } from '../agents/application.service';
 import { AuditService } from './audit.service';
 import { requireCountry } from './countries';
 import type { AdminContext } from './admin.types';
@@ -159,7 +159,7 @@ export class SettingsAdminService {
 
   async saveSettings(admin: AdminContext, code: string, input: { basedOn: number; settings: unknown; note: string }) {
     const parsed = await this.validated(code, input);
-    let reopened: string[] = [];
+    let reopened: Reopened[] = [];
     const saved = await this.db.transaction(async (tx) => {
       // One save at a time per country: a second save made at the same moment then sees the first's version.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'settings:' + code}))`);

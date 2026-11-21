@@ -21,6 +21,8 @@ import { RiskFlagsService } from '../risk/risk-flags.service';
 
 type Application = typeof agentApplications.$inferSelect;
 type Check = { key: string; outcome: string; note?: string };
+/** An agent sent back to their application for the ID check, and whether they were approved before. */
+export type Reopened = { userId: string; wasApproved: boolean };
 
 /** What the checklist says about each check, in the agent's words. */
 export const CHECK_LABELS: Record<string, string> = {
@@ -546,19 +548,41 @@ export class AgentApplicationService implements IdentityOwner {
                 : 'The bank account is in another name than the one in the app',
           },
     ];
-    const [after] = await this.db
-      .update(agentApplications)
-      .set({ addressOutcome: address.outcome!, checks, status: 'review', updatedAt: new Date() })
-      .where(and(eq(agentApplications.userId, app.userId), eq(agentApplications.status, 'checking')))
-      .returning();
-    if (!after)
+    // The application is held first, then the switch read again: one switched on since the agent sent it (the
+    // checklist they saw had no ID step) sends it back for the check, rather than to staff who can't approve it.
+    // A settings save reopening applications waits for this one, and then sees it in review.
+    const decided = await this.db.transaction(async (tx) => {
+      const [held] = await tx
+        .select({ status: agentApplications.status })
+        .from(agentApplications)
+        .where(eq(agentApplications.userId, app.userId))
+        .for('update');
+      if (held?.status !== 'checking') return null;
+      const saved = await this.countries.currentSettingsIfAny(app.countryCode, tx);
+      const idCheckOn = saved?.settings.identity.agentCheck ?? true;
+      const [row] = await tx
+        .update(agentApplications)
+        .set(
+          idCheckOn
+            ? { addressOutcome: address.outcome!, status: 'draft', submittedAt: null, updatedAt: new Date() }
+            : { addressOutcome: address.outcome!, checks, status: 'review', updatedAt: new Date() },
+        )
+        .where(eq(agentApplications.userId, app.userId))
+        .returning();
+      return row!;
+    });
+    if (!decided)
       return (await this.db.select().from(agentApplications).where(eq(agentApplications.userId, app.userId)))[0]!;
+    if (decided.status === 'draft') {
+      await this.tellToCheckId([{ userId: app.userId, wasApproved: false }]);
+      return decided;
+    }
     await this.push.notifyUser(app.userId, 'agent', {
       title: 'We are checking your application',
       body: 'Our team will text you, usually within 24 hours.',
-      data: { type: 'agent.application', status: after.status },
+      data: { type: 'agent.application', status: decided.status },
     });
-    return after;
+    return decided;
   }
 
   /**
@@ -566,8 +590,21 @@ export class AgentApplicationService implements IdentityOwner {
    * decision, without one go back to their application, with only that step left, and offline. An errand
    * they already have can still be finished. Run in the settings save's transaction; returns who, to tell them.
    */
-  async reopenForIdCheck(tx: Tx, countryCode: string) {
-    const reopened = await tx
+  async reopenForIdCheck(tx: Tx, countryCode: string): Promise<Reopened[]> {
+    const which = and(
+      eq(agentApplications.countryCode, countryCode),
+      inArray(agentApplications.status, ['approved', 'review', 'checking']),
+      isNull(agentApplications.identityOutcome),
+    );
+    // Held first, to know which were approved: the update can only say what each became.
+    const before = await tx
+      .select({ userId: agentApplications.userId, status: agentApplications.status })
+      .from(agentApplications)
+      .where(which)
+      .for('update');
+    if (!before.length) return [];
+    const userIds = before.map((r) => r.userId);
+    await tx
       .update(agentApplications)
       .set({
         status: 'draft',
@@ -577,30 +614,20 @@ export class AgentApplicationService implements IdentityOwner {
         decisionNote: null,
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(agentApplications.countryCode, countryCode),
-          inArray(agentApplications.status, ['approved', 'review', 'checking']),
-          isNull(agentApplications.identityOutcome),
-        ),
-      )
-      .returning({ userId: agentApplications.userId });
-    const userIds = reopened.map((r) => r.userId);
-    if (userIds.length) {
-      await tx
-        .update(agentPresence)
-        .set({ online: false, updatedAt: new Date() })
-        .where(inArray(agentPresence.userId, userIds));
-    }
-    return userIds;
+      .where(inArray(agentApplications.userId, userIds));
+    await tx
+      .update(agentPresence)
+      .set({ online: false, updatedAt: new Date() })
+      .where(inArray(agentPresence.userId, userIds));
+    return before.map((r) => ({ userId: r.userId, wasApproved: r.status === 'approved' }));
   }
 
-  /** Tells agents their application needs their ID check now, once the settings change is saved. */
-  async tellToCheckId(userIds: string[]) {
-    for (const userId of userIds) {
+  /** Tells agents their application needs their ID check now, once the change is saved. */
+  async tellToCheckId(agents: Reopened[]) {
+    for (const { userId, wasApproved } of agents) {
       await this.push
         .notifyUser(userId, 'agent', {
-          title: 'Check your ID to keep taking errands',
+          title: wasApproved ? 'Check your ID to keep taking errands' : 'Check your ID to finish your application',
           body: 'It takes a couple of minutes, in your application.',
           data: { type: 'agent.application', status: 'draft' },
         })
@@ -625,12 +652,14 @@ export class AgentApplicationService implements IdentityOwner {
       .where(eq(agentApplications.userId, input.userId))
       .for('update');
     if (!app) throw notFound('application_not_found', 'This person has no agent application');
-    const from = { approve: ['review', 'rejected'], reject: ['review'], reopen: ['rejected'] }[input.decision];
+    // One in review without an ID check can be reopened too, so the agent can take it.
+    const reopenable = app.identityOutcome === null ? ['rejected', 'review'] : ['rejected'];
+    const from = { approve: ['review', 'rejected'], reject: ['review'], reopen: reopenable }[input.decision];
     if (!from.includes(app.status)) {
       throw conflict(
         input.decision === 'reopen' ? 'not_declined' : 'not_in_review',
         input.decision === 'reopen'
-          ? 'Only a declined application can be reopened'
+          ? 'Only a declined application, or one without an ID check, can be reopened'
           : 'Only an application in review can be decided',
         { status: app.status },
       );
@@ -685,7 +714,9 @@ export class AgentApplicationService implements IdentityOwner {
       });
     }
     let idFingerprint = app.idFingerprint;
-    if (!idFingerprint && app.pendingIdFingerprint) {
+    // An ID check started and never finished proved nothing: approving without one claims no ID.
+    const unproven = app.identityOutcome === null;
+    if (!idFingerprint && app.pendingIdFingerprint && !unproven) {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'id:' + app.pendingIdFingerprint}))`);
       const [holder] = await tx
         .select({ userId: agentApplications.userId, status: agentApplications.status })
@@ -718,7 +749,7 @@ export class AgentApplicationService implements IdentityOwner {
     }
     const [row] = await tx
       .update(agentApplications)
-      .set({ status: 'approved', idFingerprint, ...decided })
+      .set({ status: 'approved', idFingerprint, ...(unproven ? { pendingIdFingerprint: null } : {}), ...decided })
       .where(eq(agentApplications.userId, input.userId))
       .returning();
     // A payout account waiting because its name only nearly matched was looked at with the application, so

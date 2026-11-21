@@ -160,10 +160,19 @@ export class AgentSelfieService implements SelfieOwner {
     return this.reasonToGoOnline(auth, true);
   }
 
-  /** A phone the app check doubts (MB3): a money action on it needs a selfie passed in the last few minutes. */
+  /**
+   * A phone the app check doubts (MB3): going online or a money action on it needs a selfie passed in the last
+   * few minutes, where the country's agents take selfie checks.
+   */
+  async neededOnDoubtfulPhone(auth: AuthContext): Promise<SelfieReason | null> {
+    if (!(await this.selfiesOn(auth.countryCode))) return null;
+    return (await this.fresh(auth.userId)) ? null : 'device_check';
+  }
+
+  /** A money action on a phone the app check doubts (MB3). */
   async assertFreshForDevice(auth: AuthContext) {
-    if (!(await this.selfiesOn(auth.countryCode))) return;
-    if (!(await this.fresh(auth.userId))) throw this.needed('device_check');
+    const reason = await this.neededOnDoubtfulPhone(auth);
+    if (reason) throw this.needed(reason);
   }
 
   /**

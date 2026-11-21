@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
 /** Whether the customer's country asks them to check their ID; when it can't be told, the check screen decides. */
 async function customerCheckAsked(api: ReturnType<typeof useSession>['api']) {
   try {
-    return (await api.get<{ required: boolean }>('/v1/me/identity')).required;
+    return (await api.get<{ required?: boolean }>('/v1/me/identity')).required !== false;
   } catch {
     return true;
   }
