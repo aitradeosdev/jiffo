@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { boundaryFrom, boundsOf, parseBoundary, polygonsOf, type PolygonRings } from './shapes';
+import {
+  boundaryField,
+  boundaryFrom,
+  boundsOf,
+  editableOnMap,
+  parseBoundary,
+  polygonsOf,
+  type PolygonRings,
+} from './shapes';
 
 const square = (w: number, s: number, e: number, n: number): PolygonRings => [
   [
@@ -78,5 +86,31 @@ describe('shapes', () => {
       north: 7.1,
     });
     expect(boundsOf([])).toBeNull();
+  });
+
+  it('find where to look around very detailed shapes, without running out of stack', () => {
+    const ring: [number, number][] = Array.from({ length: 200_000 }, (_, i) => [3 + i / 1e6, 6 + i / 1e6]);
+    ring.push(ring[0]!);
+    expect(boundsOf([{ type: 'Polygon', coordinates: [ring] }])).toEqual({
+      west: 3,
+      south: 6,
+      east: 3 + 199_999 / 1e6,
+      north: 6 + 199_999 / 1e6,
+    });
+  });
+
+  it('say a shape with holes cannot be reshaped on the map, which would drop them', () => {
+    expect(editableOnMap({ type: 'Polygon', coordinates: square(3, 6, 4, 7) })).toBe(true);
+    const holed = { type: 'Polygon' as const, coordinates: [...square(3, 6, 4, 7), ...square(3.4, 6.4, 3.6, 6.6)] };
+    expect(editableOnMap(holed)).toBe(false);
+    expect(editableOnMap({ type: 'MultiPolygon', coordinates: [square(3, 6, 4, 7), holed.coordinates] })).toBe(false);
+  });
+
+  it('send a shape only when it is new or changed, so a rename alone keeps the shape as it is', () => {
+    const shape = { type: 'Polygon' as const, coordinates: square(3, 6, 4, 7) };
+    expect(boundaryField({ reshaping: false, changed: false, drawn: shape })).toBe(JSON.stringify(shape));
+    expect(boundaryField({ reshaping: true, changed: false, drawn: shape })).toBe('');
+    expect(boundaryField({ reshaping: true, changed: true, drawn: shape })).toBe(JSON.stringify(shape));
+    expect(boundaryField({ reshaping: false, changed: true, drawn: null })).toBe('');
   });
 });

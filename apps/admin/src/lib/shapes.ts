@@ -31,13 +31,51 @@ export function boundaryFrom(polygons: number[][][][]): Boundary | null {
 /** A boundary's polygons, one by one. */
 export const polygonsOf = (b: Boundary): PolygonRings[] => (b.type === 'Polygon' ? [b.coordinates] : b.coordinates);
 
-/** The box around some boundaries, for the map to show them all; null when there are none. */
+/**
+ * The box around some boundaries, for the map to show them all; null when there are none. Walked point by point:
+ * a pasted boundary can have hundreds of thousands, too many to spread into Math.min.
+ */
 export function boundsOf(boundaries: Boundary[]) {
-  const points = boundaries.flatMap((b) => polygonsOf(b).flat(2));
-  if (!points.length) return null;
-  const lngs = points.map((p) => p[0]);
-  const lats = points.map((p) => p[1]);
-  return { west: Math.min(...lngs), south: Math.min(...lats), east: Math.max(...lngs), north: Math.max(...lats) };
+  let box: { west: number; south: number; east: number; north: number } | null = null;
+  for (const b of boundaries) {
+    for (const polygon of polygonsOf(b)) {
+      for (const ring of polygon) {
+        for (const [lng, lat] of ring) {
+          if (!box) box = { west: lng, south: lat, east: lng, north: lat };
+          else {
+            if (lng < box.west) box.west = lng;
+            if (lng > box.east) box.east = lng;
+            if (lat < box.south) box.south = lat;
+            if (lat > box.north) box.north = lat;
+          }
+        }
+      }
+    }
+  }
+  return box;
+}
+
+/**
+ * Whether the map's drawing tool can reshape it: it takes no holes, and would drop a polygon that has one. Such a
+ * shape is changed by pasting a new one.
+ */
+export const editableOnMap = (b: Boundary) => polygonsOf(b).every((polygon) => polygon.length === 1);
+
+/**
+ * The boundary the form sends: the new shape, or nothing when reshaping left it as it was, so a rename alone keeps
+ * the shape and isn't recorded as a reshape.
+ */
+export function boundaryField({
+  reshaping,
+  changed,
+  drawn,
+}: {
+  reshaping: boolean;
+  changed: boolean;
+  drawn: Boundary | null;
+}) {
+  if (!drawn || (reshaping && !changed)) return '';
+  return JSON.stringify(drawn);
 }
 
 type Geometry = { type?: unknown; coordinates?: unknown };

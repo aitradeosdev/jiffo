@@ -4,7 +4,7 @@ import { importLibrary, setOptions } from '@googlemaps/js-api-loader';
 import { useEffect, useRef, useState } from 'react';
 import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode, type GeoJSONStoreFeatures } from 'terra-draw';
 import { TerraDrawGoogleMapsAdapter } from 'terra-draw-google-maps-adapter';
-import { boundaryFrom, boundsOf, polygonsOf, type Boundary } from '@/lib/shapes';
+import { boundaryFrom, boundsOf, editableOnMap, polygonsOf, type Boundary } from '@/lib/shapes';
 
 /** A city or area drawn on the map. */
 export interface MapShape {
@@ -65,10 +65,14 @@ export function PlacesMap({
   const [problem, setProblem] = useState<string | null>(null);
   const report = useRef(onShape);
   report.current = onShape;
+  // Set while the drawing tool is cleared or loaded with a shape: those changes aren't the admin's.
+  const quiet = useRef(false);
 
   // The map, and Terra Draw on it, once.
   useEffect(() => {
     let stopped = false;
+    let listener: google.maps.MapsEventListener | null = null;
+    let terra: TerraDraw | null = null;
     // Google calls this when it refuses the key.
     (window as unknown as { gm_authFailure?: () => void }).gm_authFailure = () =>
       setProblem("Google refused the map's key. Check GOOGLE_MAPS_BROWSER_KEY and its restrictions.");
@@ -85,9 +89,11 @@ export function PlacesMap({
         });
         map.current = m;
         // Terra Draw needs the map's projection first.
-        const listener = m.addListener('projection_changed', () => {
-          listener.remove();
-          const terra = new TerraDraw({
+        listener = m.addListener('projection_changed', () => {
+          listener?.remove();
+          // Left the page while the map was getting ready.
+          if (stopped) return;
+          terra = new TerraDraw({
             adapter: new TerraDrawGoogleMapsAdapter({ lib: maps, map: m, coordinatePrecision: 6 }),
             modes: [
               new TerraDrawPolygonMode({
@@ -105,20 +111,28 @@ export function PlacesMap({
               }),
             ],
           });
-          terra.start();
+          const t = terra;
+          t.start();
+          // The finished polygons only: one still being drawn isn't a shape yet.
           const send = () => {
-            const polygons = terra
+            if (quiet.current) return;
+            const polygons = t
               .getSnapshot()
-              .filter((f) => f.geometry.type === 'Polygon')
+              .filter((f) => f.geometry.type === 'Polygon' && !f.properties.currentlyDrawing)
               .map((f) => f.geometry.coordinates as number[][][]);
             report.current(boundaryFrom(polygons));
           };
-          terra.on('finish', send);
-          terra.on('change', (_ids, type) => {
+          t.on('finish', () => {
+            send();
+            // Done drawing: its corners can now be dragged, and another click doesn't start a second shape.
+            t.setMode('select');
+          });
+          t.on('change', (_ids, type) => {
             if (type !== 'styling') send();
           });
-          terra.on('ready', () => {
-            draw.current = terra;
+          t.on('ready', () => {
+            if (stopped) return;
+            draw.current = t;
             setReady(true);
           });
         });
@@ -126,7 +140,8 @@ export function PlacesMap({
       .catch(() => setProblem("Google's map couldn't be loaded. Check the connection, then reload the page."));
     return () => {
       stopped = true;
-      draw.current?.stop();
+      listener?.remove();
+      terra?.stop();
       draw.current = null;
     };
   }, [apiKey]);
@@ -171,8 +186,11 @@ export function PlacesMap({
   useEffect(() => {
     const terra = draw.current;
     if (!terra || !ready) return;
+    quiet.current = true;
     terra.clear();
-    if (!edit) {
+    quiet.current = false;
+    // A shape with holes isn't loaded: the tool would drop it (Places offers pasting instead).
+    if (!edit || (edit.boundary && !editableOnMap(edit.boundary))) {
       terra.setMode('static');
       return;
     }
@@ -189,7 +207,9 @@ export function PlacesMap({
           properties: { mode: 'polygon' },
         }) as GeoJSONStoreFeatures,
     );
+    quiet.current = true;
     terra.addFeatures(features);
+    quiet.current = false;
     terra.setMode('select');
     const box = boundsOf([edit.boundary]);
     if (box) map.current?.fitBounds(box, 48);

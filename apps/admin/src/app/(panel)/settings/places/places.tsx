@@ -4,7 +4,7 @@ import { useActionState, useEffect, useMemo, useState } from 'react';
 import { ReasonInput } from '@/components/reason';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, Card, Notice, buttonClass, inputClass } from '@/components/ui';
-import { parseBoundary, type Boundary } from '@/lib/shapes';
+import { boundaryField, editableOnMap, parseBoundary, type Boundary } from '@/lib/shapes';
 import { createArea, createCity, updatePlace } from '../actions';
 import { PlacesMap, type MapShape } from './map';
 
@@ -42,6 +42,8 @@ export function Places({ states, canEdit, mapsKey }: { states: PlaceState[]; can
   const state = states.find((s) => s.id === stateId);
   const [task, setTask] = useState<Task | null>(null);
   const [drawn, setDrawn] = useState<Boundary | null>(null);
+  // Whether the shape was changed since this task began: a rename alone keeps the shape.
+  const [changed, setChanged] = useState(false);
   // A new task starts the panel and the drawing afresh; a pasted shape starts only the drawing again, keeping the
   // name already typed.
   const [round, setRound] = useState(0);
@@ -50,29 +52,36 @@ export function Places({ states, canEdit, mapsKey }: { states: PlaceState[]; can
   const start = (next: Task | null) => {
     setTask(next);
     setDrawn(next?.kind === 'reshape' ? next.boundary : null);
+    setChanged(false);
     setRound((r) => r + 1);
     setDrawing((d) => d + 1);
   };
   const pasted = (boundary: Boundary) => {
     setDrawn(boundary);
+    setChanged(true);
     setDrawing((d) => d + 1);
   };
 
   const target = task?.kind === 'reshape' ? task.id : task?.kind === 'new-area' ? task.cityId : null;
+  // The one being reshaped is drawn by the drawing tool instead, unless it has holes, which the tool can't take.
+  const inTool = task?.kind === 'reshape' && editableOnMap(task.boundary) ? task.id : null;
   const shapes = useMemo<MapShape[]>(
     () =>
       (state?.cities ?? []).flatMap((c) => [
-        {
-          id: c.id,
-          kind: 'city' as const,
-          name: c.name,
-          enabled: c.enabled,
-          boundary: c.boundary,
-          selected: c.id === target,
-        },
+        ...(c.id === inTool
+          ? []
+          : [
+              {
+                id: c.id,
+                kind: 'city' as const,
+                name: c.name,
+                enabled: c.enabled,
+                boundary: c.boundary,
+                selected: c.id === target,
+              },
+            ]),
         ...c.areas
-          // The one being reshaped is drawn by Terra Draw instead.
-          .filter((a) => !(task?.kind === 'reshape' && a.id === task.id))
+          .filter((a) => a.id !== inTool)
           .map((a) => ({
             id: a.id,
             kind: 'area' as const,
@@ -82,7 +91,7 @@ export function Places({ states, canEdit, mapsKey }: { states: PlaceState[]; can
             selected: a.id === target,
           })),
       ]),
-    [state, target, task],
+    [state, target, inTool],
   );
 
   return (
@@ -122,6 +131,7 @@ export function Places({ states, canEdit, mapsKey }: { states: PlaceState[]; can
             task={task}
             stateId={stateId}
             drawn={drawn}
+            changed={changed}
             hasMap={!!mapsKey}
             onPasted={pasted}
             onDone={() => start(null)}
@@ -202,8 +212,11 @@ export function Places({ states, canEdit, mapsKey }: { states: PlaceState[]; can
           <PlacesMap
             apiKey={mapsKey}
             shapes={shapes}
-            edit={task ? { key: String(drawing), boundary: drawn } : null}
-            onShape={setDrawn}
+            edit={task && (task.kind !== 'reshape' || inTool) ? { key: String(drawing), boundary: drawn } : null}
+            onShape={(b) => {
+              setDrawn(b);
+              setChanged(true);
+            }}
             fitKey={stateId}
           />
         ) : (
@@ -274,6 +287,7 @@ function DrawPanel({
   task,
   stateId,
   drawn,
+  changed,
   hasMap,
   onPasted,
   onDone,
@@ -281,11 +295,13 @@ function DrawPanel({
   task: Task;
   stateId: string;
   drawn: Boundary | null;
+  changed: boolean;
   hasMap: boolean;
   onPasted: (b: Boundary) => void;
   onDone: () => void;
 }) {
   const save = task.kind === 'new-city' ? createCity : task.kind === 'new-area' ? createArea : updatePlace;
+  const holed = task.kind === 'reshape' && !editableOnMap(task.boundary) && !changed;
   const [result, action] = useActionState(save, {});
   const [pasted, setPasted] = useState('');
   const [pasteError, setPasteError] = useState<string | null>(null);
@@ -318,7 +334,11 @@ function DrawPanel({
             <input type="hidden" name="id" value={task.id} />
           </>
         ) : null}
-        <input type="hidden" name="boundary" value={drawn ? JSON.stringify(drawn) : ''} />
+        <input
+          type="hidden"
+          name="boundary"
+          value={boundaryField({ reshaping: task.kind === 'reshape', changed, drawn })}
+        />
         <div>
           <label className="block text-sm font-semibold" htmlFor="place-name">
             Name
@@ -356,14 +376,24 @@ function DrawPanel({
           </button>
           {pasteError ? <p className="mt-2 text-danger">{pasteError}</p> : null}
         </details>
+        {holed ? (
+          <p className="text-sm text-ink-2">
+            This shape has holes, which the map can&apos;t reshape: paste a new shape to change it, or save to change
+            only the name.
+          </p>
+        ) : null}
         {drawn ? (
-          <p className="text-sm text-ink-2">Shape ready to save.</p>
+          <p className="text-sm text-ink-2">
+            {changed || task.kind !== 'reshape' ? 'Shape ready to save.' : 'Shape as saved.'}
+          </p>
         ) : (
-          <p className="text-sm text-ink-3">No shape yet.</p>
+          <p className="text-sm text-ink-3">
+            {task.kind === 'reshape' ? 'No shape: draw one again, or cancel to keep the one saved.' : 'No shape yet.'}
+          </p>
         )}
         <Notice>{result.error}</Notice>
         <div className="flex gap-2">
-          {task.kind === 'reshape' || drawn ? (
+          {drawn ? (
             <SubmitButton small pendingLabel="Saving…">
               Save
             </SubmitButton>

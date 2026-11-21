@@ -105,7 +105,7 @@ export async function updateState(_: Result, form: FormData): Promise<Result> {
   );
 }
 
-/** The boundary drawn or pasted, as the form sends it: GeoJSON text, or nothing when it didn't change. */
+/** The boundary drawn or pasted, as the form sends it: GeoJSON text, or nothing when it didn't change (boundaryField). */
 const boundaryOf = (form: FormData) => {
   const text = String(form.get('boundary') ?? '').trim();
   return text ? (JSON.parse(text) as unknown) : undefined;
@@ -151,18 +151,17 @@ export async function updatePlace(_: Result, form: FormData): Promise<Result> {
   const name = form.get('name');
   // A switch's form says it carries the switch: an unticked box sends nothing at all.
   const enabled = form.get('toggle') !== null ? form.get('enabled') === 'on' : null;
-  const boundary = boundaryOf(form);
-  return run(
-    () =>
-      api(`/admin/${kind}/${encodeURIComponent(String(form.get('id') ?? ''))}`, {
-        reason: reasonOf(form),
-        method: 'PATCH',
-        body: {
-          ...(name !== null ? { name: String(name) } : {}),
-          ...(enabled !== null ? { enabled } : {}),
-          ...(boundary !== undefined ? { boundary } : {}),
-        },
-      }),
-    '/settings/places',
-  );
+  return run(() => {
+    // Read inside, so a boundary that isn't JSON is a message on the form, as everywhere else.
+    const boundary = boundaryOf(form);
+    return api(`/admin/${kind}/${encodeURIComponent(String(form.get('id') ?? ''))}`, {
+      reason: reasonOf(form),
+      method: 'PATCH',
+      body: {
+        ...(name !== null ? { name: String(name) } : {}),
+        ...(enabled !== null ? { enabled } : {}),
+        ...(boundary !== undefined ? { boundary } : {}),
+      },
+    });
+  }, '/settings/places');
 }
