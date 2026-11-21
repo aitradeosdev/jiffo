@@ -104,3 +104,64 @@ export async function updateState(_: Result, form: FormData): Promise<Result> {
     '/settings/states',
   );
 }
+
+/** The boundary drawn or pasted, as the form sends it: GeoJSON text, or nothing when it didn't change (boundaryField). */
+const boundaryOf = (form: FormData) => {
+  const text = String(form.get('boundary') ?? '').trim();
+  return text ? (JSON.parse(text) as unknown) : undefined;
+};
+
+/** Adds a city to a state, with the shape drawn (Places). It starts off. */
+export async function createCity(_: Result, form: FormData): Promise<Result> {
+  return run(
+    () =>
+      api('/admin/cities', {
+        reason: reasonOf(form),
+        method: 'POST',
+        body: {
+          stateId: String(form.get('stateId') ?? ''),
+          name: String(form.get('name') ?? ''),
+          boundary: boundaryOf(form),
+        },
+      }),
+    '/settings/places',
+  );
+}
+
+/** Adds an area to a city, with the shape drawn (Places). It starts off. */
+export async function createArea(_: Result, form: FormData): Promise<Result> {
+  return run(
+    () =>
+      api('/admin/areas', {
+        reason: reasonOf(form),
+        method: 'POST',
+        body: {
+          cityId: String(form.get('cityId') ?? ''),
+          name: String(form.get('name') ?? ''),
+          boundary: boundaryOf(form),
+        },
+      }),
+    '/settings/places',
+  );
+}
+
+/** Renames, reshapes, or switches a city or area on or off: only what the form sends changes. */
+export async function updatePlace(_: Result, form: FormData): Promise<Result> {
+  const kind = form.get('kind') === 'city' ? 'cities' : 'areas';
+  const name = form.get('name');
+  // A switch's form says it carries the switch: an unticked box sends nothing at all.
+  const enabled = form.get('toggle') !== null ? form.get('enabled') === 'on' : null;
+  return run(() => {
+    // Read inside, so a boundary that isn't JSON is a message on the form, as everywhere else.
+    const boundary = boundaryOf(form);
+    return api(`/admin/${kind}/${encodeURIComponent(String(form.get('id') ?? ''))}`, {
+      reason: reasonOf(form),
+      method: 'PATCH',
+      body: {
+        ...(name !== null ? { name: String(name) } : {}),
+        ...(enabled !== null ? { enabled } : {}),
+        ...(boundary !== undefined ? { boundary } : {}),
+      },
+    });
+  }, '/settings/places');
+}
