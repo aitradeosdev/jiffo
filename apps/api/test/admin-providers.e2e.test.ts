@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { MapboxMapsAdapter } from '../src/adapters/maps';
 import { TermiiMessagingAdapter } from '../src/adapters/messaging';
 import { FlutterwavePaymentsAdapter, PaystackPaymentsAdapter } from '../src/adapters/payments';
 import { adminAudit, deposits, payoutAccounts, payouts, providerSettings } from '../src/db/schema';
@@ -110,6 +111,58 @@ describe('admin: providers', () => {
     const other = randomPhone();
     await request(t.http).post('/v1/auth/otp/request').send({ phone: other }).expect(200);
     expect(t.messaging.lastCodeFor(other)).toMatch(/^\d{6}$/);
+  });
+
+  it("switches maps to Mapbox, and the apps' address search then goes through it", async () => {
+    const maps = (await api('get', '').expect(200)).body.categories.find(
+      (c: { category: string }) => c.category === 'maps',
+    );
+    expect(maps.providers.map((p: { key: string }) => p.key)).toEqual(expect.arrayContaining(['google', 'mapbox']));
+    await api('put', '/maps/mapbox')
+      .send({ secrets: { accessToken: 'pk.mapbox-token-0123456789wxyz' } })
+      .expect(200);
+    const [row] = await t.db.select().from(providerSettings).where(eq(providerSettings.provider, 'mapbox'));
+    expect(row!.secrets).not.toContain('pk.mapbox-token');
+    vi.spyOn(MapboxMapsAdapter.prototype, 'check').mockResolvedValue('Connected. Place search works.');
+    expect((await api('post', '/maps/mapbox/test')).body).toEqual({
+      ok: true,
+      message: 'Connected. Place search works.',
+    });
+    await switchProvider(t, 'maps', 'mapbox');
+    try {
+      const search = vi
+        .spyOn(MapboxMapsAdapter.prototype, 'autocomplete')
+        .mockResolvedValue([{ placeId: 'dXJuOm1ieHBvaTox', title: 'Shoprite', subtitle: 'Lekki, Lagos' }]);
+      vi.spyOn(MapboxMapsAdapter.prototype, 'place').mockResolvedValue({
+        placeId: 'dXJuOm1ieHBvaTox',
+        name: 'Shoprite',
+        address: 'Lekki-Epe Expressway, Lekki, Lagos',
+        lat: 6.4442,
+        lng: 3.4761,
+        region: 'Lagos',
+      });
+      const customer = await signIn(t, 'customer');
+      const found = await request(t.http)
+        .get('/v1/places/autocomplete?q=shoprite&session=s-1')
+        .set(customer.headers)
+        .expect(200);
+      expect(found.body).toEqual([{ placeId: 'dXJuOm1ieHBvaTox', title: 'Shoprite', subtitle: 'Lekki, Lagos' }]);
+      expect(search).toHaveBeenCalledWith(expect.objectContaining({ query: 'shoprite', sessionToken: 's-1' }));
+      const picked = await request(t.http)
+        .get('/v1/places/dXJuOm1ieHBvaTox?session=s-1')
+        .set(customer.headers)
+        .expect(200);
+      expect(picked.body).toMatchObject({ name: 'Shoprite', lat: 6.4442, lng: 3.4761, stateCode: 'LA' });
+      // Mapbox ids are base64: whatever characters one has, it reaches Mapbox as it was suggested.
+      const odd = 'dXJu+Om1i/eHBvaT0x==';
+      await request(t.http)
+        .get(`/v1/places/${encodeURIComponent(odd)}?session=s-1`)
+        .set(customer.headers)
+        .expect(200);
+      expect(MapboxMapsAdapter.prototype.place).toHaveBeenLastCalledWith(odd, 's-1');
+    } finally {
+      await switchProvider(t, 'maps', null);
+    }
   });
 
   it("doesn't count a test of settings saved over while it ran, and takes keys again after a key change", async () => {

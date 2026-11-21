@@ -237,7 +237,7 @@ Webhook addresses are shown in the panel, built from `PUBLIC_API_URL`, which mus
 | Identity checks | Smile ID                       |
 | Calls           | Africa's Talking, Twilio       |
 | Push            | Firebase Cloud Messaging       |
-| Maps            | Google Maps Platform           |
+| Maps            | Google Maps Platform, Mapbox   |
 | Files           | S3, or any S3-compatible store |
 | Email           | Resend, Postmark, Amazon SES   |
 
@@ -250,7 +250,7 @@ While no provider is switched on for a service, the environment's choice below i
 | Chat          | Built-in (Postgres and the realtime socket)  | `CHAT_PROVIDER`      |
 | Errand timers | BullMQ on Redis                              | `TIMER_PROVIDER`     |
 | Payments      | Paystack, or fake for development            | `PAYMENTS_PROVIDER`  |
-| Maps          | Google (Places and Routes), or fake          | `MAPS_PROVIDER`      |
+| Maps          | Google (Places and Routes), Mapbox, or fake  | `MAPS_PROVIDER`      |
 | Files         | S3 (private bucket, signed links), or memory | `STORAGE_PROVIDER`   |
 
 Calls between a customer and their agent use the same pattern (`CALLS_PROVIDER`: `fake` or `none`). Jiffo's provider rings the caller's own phone and connects them to the other person, so neither sees the other's number, and the chat notes that they called. Calls aren't recorded. They work while an agent is on the errand, until it ends; in a dispute, support talks to each side. In the panel the provider is Africa's Talking or Twilio; the fake never runs in production.
@@ -260,6 +260,8 @@ Identity checks, for customers and agents alike, use the same pattern (`IDENTITY
 With Smile ID the app opens Smile ID's own page, a single-use Smile Link for the chosen ID, which asks for the ID and takes the selfie, so the selfie never passes through Jiffo. Smile ID sends the result to `POST /v1/webhooks/identity/:provider`, signed with the API key saved in the panel; that signature doesn't cover the result, so the verdict is also confirmed with Smile ID's status API. The result settles the check at once, which keeps only the outcome of each check, the legal name, the date of birth and a keyed fingerprint of the ID (to catch a second account on it), never the payload, the number or the selfie. Smile ID doesn't check addresses, so the team confirms agents' addresses at review. In production the fake is never used, so nobody is verified without a real check, and with `none` nobody can be.
 
 With the fake payment provider, set `FAKE_PAYMENTS_AUTOPAY_SECONDS` to have top-ups land by themselves, so the apps can be tried end to end without moving money. The fake maps provider knows a handful of Lagos places (search for Shoprite, Medplus, Circle Mall, Admiralty Way, Adeola Odeku or Ikeja).
+
+The maps provider (Google Maps or Mapbox) does the address search, the place's position and state, and the driving distance that prices an errand. If its route service fails, the price uses a straight-line estimate instead. It doesn't change the map drawn in the apps: Google's on Android, Apple's on iPhone. Mapbox uses its Search Box API and Directions API with one access token. Its terms treat Search Box results as for temporary use, and Jiffo keeps each errand's addresses and positions. So, as with Google's terms, check with Mapbox that this use is covered before going live.
 
 ### Money
 
