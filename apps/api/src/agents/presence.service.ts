@@ -72,16 +72,18 @@ export class PresenceService {
 
   /**
    * Matching's live positions (docs/matching.md, M2): an online agent where their phone really is, and no one
-   * offline or whose position is mocked. A failed write is logged; the database stays the record that
+   * offline or whose position is mocked. Not waited for, so Redis never holds up an agent's report; on one
+   * connection, so the writes keep their order. A failed write is logged; the database stays the record that
    * matching checks before anyone gets an errand.
    */
-  private async keepLive(agentId: string, countryCode: string, online: boolean, mocked: boolean, at?: LatLng) {
-    try {
-      if (!online || mocked) await this.locations.remove(agentId, countryCode);
-      else if (at) await this.locations.put(agentId, countryCode, at);
-    } catch (error) {
-      this.logger.warn(`Keeping a live position failed: ${(error as Error).message}`);
-    }
+  private keepLive(agentId: string, countryCode: string, online: boolean, mocked: boolean, at?: LatLng) {
+    const write =
+      !online || mocked
+        ? this.locations.remove(agentId, countryCode)
+        : at
+          ? this.locations.put(agentId, countryCode, at)
+          : Promise.resolve();
+    write.catch((error: Error) => this.logger.warn(`Keeping a live position failed: ${error.message}`));
   }
 
   /**
@@ -172,7 +174,7 @@ export class PresenceService {
         target: agentPresence.userId,
         set: { countryCode: auth.countryCode, online: body.online, ...place, updatedAt: now },
       });
-    await this.keepLive(
+    this.keepLive(
       auth.userId,
       auth.countryCode,
       body.online,
@@ -248,7 +250,7 @@ export class PresenceService {
       })
       .where(and(isNotNull(agentPresence.locatedAt), lt(agentPresence.locatedAt, new Date(Date.now() - KEEP_FOR_MS))))
       .returning({ userId: agentPresence.userId, countryCode: agentPresence.countryCode });
-    for (const c of cleared) await this.keepLive(c.userId, c.countryCode, false, false);
+    for (const c of cleared) this.keepLive(c.userId, c.countryCode, false, false);
     if (cleared.length) this.logger.log(`Cleared ${cleared.length} stale agent positions`);
     return cleared.length;
   }

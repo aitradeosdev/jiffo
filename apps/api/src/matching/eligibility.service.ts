@@ -13,7 +13,7 @@ import { and, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { AgentsService } from '../agents/agents.service';
 import { conflict, forbidden, unprocessable, type ApiError } from '../common/errors';
 import { DB, type Db, type Tx } from '../db/database.module';
-import { agentPresence, errandEvents, errands, matchBlocks, riskFlags } from '../db/schema';
+import { agentPresence, errandEvents, errands, matchBlocks, riskFlags, users } from '../db/schema';
 
 const MINUTE_MS = 60_000;
 
@@ -52,6 +52,18 @@ export class EligibilityService {
     return REFUSALS[code]();
   }
 
+  /**
+   * How far the agent's position is from the errand's pickup, in metres, as PostGIS measures it on the earth's
+   * shape: the one measure for accepting and for who could be offered it, so no one is shortlisted only to be
+   * refused at the edge of their reach.
+   */
+  async pickupMeters(errandId: string, at: { lat: number; lng: number }, db: Db | Tx = this.db) {
+    const { rows } = await db.execute<{ meters: number | string }>(sql`
+      select ST_Distance(location, ST_SetSRID(ST_MakePoint(${at.lng}, ${at.lat}), 4326)::geography) as meters
+      from errand_stops where errand_id = ${errandId} and seq = 0`);
+    return Number(rows[0]?.meters ?? Infinity);
+  }
+
   /** An errand as matching checks it for this agent, with what facts() found. */
   matchErrand(
     errand: { id: string; customerId: string; urgent: boolean; categoryKey: string; buy: boolean },
@@ -72,6 +84,14 @@ export class EligibilityService {
 
   /** The agent now, or the reason they may not get any errand. */
   async agent(agentId: string, rules: CountrySettings['matching'], db: Db | Tx = this.db): Promise<AgentNow> {
+    // As accepting checks it: an active account, with a name for the customer to see.
+    const [account] = await db
+      .select({ status: users.status, firstName: users.firstName })
+      .from(users)
+      .where(eq(users.id, agentId));
+    if (account?.status !== 'active')
+      throw forbidden('account_suspended', 'This account is suspended. Contact support.');
+    if (!account.firstName) throw conflict('profile_incomplete', 'Add your name before taking errands');
     const [here] = await db
       .select({
         online: agentPresence.online,

@@ -3,6 +3,8 @@ import type { LatLng } from '../adapters/maps';
 import { MatchingRedis } from './matching-redis';
 
 const MINUTE_MS = 60_000;
+/** Stale positions removed per search, so one search never stalls on a backlog. */
+const PRUNE_AT_ONCE = 1_000;
 
 /** An agent near a point, from their live position. */
 export interface NearAgent extends LatLng {
@@ -22,7 +24,33 @@ export class AgentLocations {
   constructor(private readonly redis: MatchingRedis) {}
 
   private keys(countryCode: string) {
-    return { geo: `agents:geo:${countryCode}`, seen: `agents:seen:${countryCode}` };
+    return {
+      geo: `agents:geo:${countryCode}`,
+      seen: `agents:seen:${countryCode}`,
+      loaded: `agents:loaded:${countryCode}`,
+    };
+  }
+
+  /**
+   * Whether the country's positions are here: set once they were loaded from the database, and gone with
+   * everything else if Redis restarts empty or is flushed.
+   */
+  async loaded(countryCode: string) {
+    return (await this.redis.client.exists(this.keys(countryCode).loaded)) === 1;
+  }
+
+  /** Puts back positions the database has, each as last seen, then marks the country loaded. */
+  async load(countryCode: string, positions: Array<{ agentId: string; lat: number; lng: number; seenAt: Date }>) {
+    const { geo, seen, loaded } = this.keys(countryCode);
+    const write = this.redis.client.multi();
+    // Neither overwrites what a report brought while loading: a position only if there was none, a time only
+    // if later.
+    for (const p of positions) {
+      write.geoadd(geo, 'NX', p.lng, p.lat, p.agentId);
+      write.zadd(seen, 'GT', p.seenAt.getTime(), p.agentId);
+    }
+    write.set(loaded, String(Date.now()));
+    await write.exec();
   }
 
   /** The agent is online here now. */
@@ -43,6 +71,16 @@ export class AgentLocations {
    */
   async near(countryCode: string, at: LatLng, radiusKm: number, count: number, freshMinutes: number) {
     const { geo, seen } = this.keys(countryCode);
+    const since = Date.now() - freshMinutes * MINUTE_MS;
+    // Positions not seen lately go first, so they can't take the nearest places from agents seen now: an
+    // agent the app stopped reporting for, or one taken offline outside the app (suspended, say).
+    const stale = await this.redis.client.zrangebyscore(seen, '-inf', `(${since}`, 'LIMIT', 0, PRUNE_AT_ONCE);
+    if (stale.length)
+      await this.redis.client
+        .multi()
+        .zrem(geo, ...stale)
+        .zrem(seen, ...stale)
+        .exec();
     const raw = (await this.redis.client.geosearch(
       geo,
       'FROMLONLAT',
@@ -59,7 +97,6 @@ export class AgentLocations {
     )) as Array<[string, string, [string, string]]>;
     if (!raw.length) return [];
     const scores = await this.redis.client.zmscore(seen, ...raw.map((r) => r[0]));
-    const since = Date.now() - freshMinutes * MINUTE_MS;
     return raw.flatMap(([agentId, km, [lng, lat]], i): NearAgent[] =>
       Number(scores[i] ?? 0) >= since
         ? [{ agentId, meters: Math.round(Number(km) * 1000), lat: Number(lat), lng: Number(lng) }]

@@ -48,6 +48,19 @@ describe('travel times to a pickup', () => {
       ]);
     });
 
+    it('takes a route Google sends without a distance or time as none, as it leaves zeros out', async () => {
+      const { impl } = fakeFetch(() =>
+        Response.json([
+          { condition: 'ROUTE_EXISTS' },
+          { originIndex: 1, destinationIndex: 0, condition: 'ROUTE_EXISTS', duration: '30s' },
+        ]),
+      );
+      expect(await new GoogleMapsAdapter('key-1', impl).travelTimes(agents(2), PICKUP)).toEqual([
+        { distanceMeters: 0, durationSeconds: 0 },
+        { distanceMeters: 0, durationSeconds: 30 },
+      ]);
+    });
+
     it('asks in parts of at most 100 agents at a time', async () => {
       const { impl, calls } = fakeFetch((call) => {
         const origins = JSON.parse(String(call.init.body)).origins as unknown[];
@@ -61,9 +74,11 @@ describe('travel times to a pickup', () => {
       expect(times.every((t) => t?.durationSeconds === 60)).toBe(true);
     });
 
-    it('fails when Google does, so the caller can estimate instead', async () => {
-      const refused = fakeFetch(() => new Response('{"error":{"message":"quota"}}', { status: 429 }));
-      await expect(new GoogleMapsAdapter('key-1', refused.impl).travelTimes(agents(2), PICKUP)).rejects.toThrow();
+    it('fails when Google does, saying why, so the caller can estimate instead', async () => {
+      const refused = fakeFetch(() => new Response('{"error":{"message":"Quota exceeded"}}', { status: 429 }));
+      await expect(new GoogleMapsAdapter('key-1', refused.impl).travelTimes(agents(2), PICKUP)).rejects.toThrow(
+        'Google answered 429: Quota exceeded',
+      );
       const garbled = fakeFetch(() => new Response('<html>', { status: 200 }));
       await expect(new GoogleMapsAdapter('key-1', garbled.impl).travelTimes(agents(2), PICKUP)).rejects.toThrow();
     });
@@ -110,10 +125,11 @@ describe('travel times to a pickup', () => {
       expect(times.every((t) => t?.durationSeconds === 60)).toBe(true);
     });
 
-    it('fails when Mapbox does, without the token in what it says', async () => {
+    it('fails when Mapbox does, saying why without the token', async () => {
       const refused = fakeFetch(() => new Response('{"message":"Too Many Requests"}', { status: 429 }));
       const error = await new MapboxMapsAdapter(TOKEN, refused.impl).travelTimes(agents(2), PICKUP).catch((e) => e);
       expect(error).toBeInstanceOf(Error);
+      expect(error.message).toBe('Mapbox answered 429: Too Many Requests');
       expect(String(error.message)).not.toContain(TOKEN);
       const noRoute = fakeFetch(() => Response.json({ code: 'NoRoute' }));
       await expect(new MapboxMapsAdapter(TOKEN, noRoute.impl).travelTimes(agents(2), PICKUP)).rejects.toThrow();

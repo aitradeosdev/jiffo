@@ -211,30 +211,57 @@ export class GoogleMapsAdapter implements MapsAdapter {
     }
   }
 
+  /** A Route Matrix request, whose failures say why for the log: Google's status and words, never the key. */
+  private async matrix(body: unknown) {
+    let res: Response;
+    try {
+      res = await this.fetchImpl('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-goog-api-key': this.apiKey,
+          'x-goog-fieldmask': 'originIndex,destinationIndex,condition,distanceMeters,duration',
+        },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      throw new Error('Google could not be reached');
+    }
+    const json = (await res.json().catch(() => null)) as unknown;
+    if (!res.ok) {
+      const message = (json as { error?: { message?: string } } | null)?.error?.message;
+      throw new Error(`Google answered ${res.status}: ${message ?? 'no details'}`);
+    }
+    if (!Array.isArray(json)) throw new Error('Google sent no route matrix');
+    return json as Array<{
+      originIndex?: number;
+      condition?: string;
+      status?: { code?: number };
+      distanceMeters?: number;
+      duration?: string;
+    }>;
+  }
+
   async travelTimes(origins: LatLng[], destination: LatLng) {
     const waypoint = (p: LatLng) => ({ waypoint: { location: { latLng: { latitude: p.lat, longitude: p.lng } } } });
     const parts = await Promise.all(
       inParts(origins, GOOGLE_MATRIX_ORIGINS).map(async (part) => {
-        const elements = await this.call<
-          Array<{ originIndex?: number; condition?: string; distanceMeters?: number; duration?: string }>
-        >('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
-          method: 'POST',
-          fieldMask: 'originIndex,destinationIndex,condition,distanceMeters,duration',
-          body: {
-            origins: part.map(waypoint),
-            destinations: [waypoint(destination)],
-            travelMode: 'DRIVE',
-            routingPreference: 'TRAFFIC_AWARE',
-          },
+        const elements = await this.matrix({
+          origins: part.map(waypoint),
+          destinations: [waypoint(destination)],
+          travelMode: 'DRIVE',
+          routingPreference: 'TRAFFIC_AWARE',
         });
-        if (!Array.isArray(elements)) throw new Error('Google sent no route matrix');
         const times: Array<RouteEstimate | null> = part.map(() => null);
         for (const e of elements) {
-          // An element without an index is the first origin's: Google leaves zeros out.
+          // Google leaves zeros out: no index is the first origin's, no distance or time is none at all.
           const i = e.originIndex ?? 0;
-          if (e.condition !== 'ROUTE_EXISTS' && e.condition !== undefined) continue;
-          if (e.distanceMeters === undefined || e.duration === undefined || i >= part.length) continue;
-          times[i] = { distanceMeters: e.distanceMeters, durationSeconds: Number.parseInt(e.duration, 10) };
+          if (i >= part.length || e.status?.code) continue;
+          if (e.condition !== 'ROUTE_EXISTS' && (e.condition !== undefined || e.duration === undefined)) continue;
+          times[i] = {
+            distanceMeters: e.distanceMeters ?? 0,
+            durationSeconds: Number.parseInt(e.duration ?? '0', 10),
+          };
         }
         return times;
       }),
@@ -404,23 +431,42 @@ export class MapboxMapsAdapter implements MapsAdapter {
     }
   }
 
+  /**
+   * A Matrix request, whose failures say why for the log: Mapbox's status and words. Never the address it was
+   * sent to, which holds the token.
+   */
+  private async matrix(url: string) {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url);
+    } catch {
+      throw new Error('Mapbox could not be reached');
+    }
+    const json = (await res.json().catch(() => null)) as {
+      code?: string;
+      message?: string;
+      durations?: Array<Array<number | null>>;
+      distances?: Array<Array<number | null>>;
+    } | null;
+    if (!res.ok) throw new Error(`Mapbox answered ${res.status}: ${json?.message ?? json?.code ?? 'no details'}`);
+    if (json?.code !== 'Ok' || !json.durations) {
+      throw new Error(`Mapbox sent no matrix${json?.code ? ` (${json.code})` : ''}`);
+    }
+    return json;
+  }
+
   async travelTimes(origins: LatLng[], destination: LatLng) {
     const coord = (p: LatLng) => `${Number(p.lng.toFixed(6))},${Number(p.lat.toFixed(6))}`;
     const parts = await Promise.all(
       inParts(origins, MAPBOX_TRAFFIC_MATRIX_POINTS - 1).map(async (part) => {
         const path = [...part, destination].map(coord).join(';');
-        const body = await this.call<{
-          code?: string;
-          durations?: Array<Array<number | null>>;
-          distances?: Array<Array<number | null>>;
-        }>(
+        const body = await this.matrix(
           this.url(`/directions-matrix/v1/mapbox/driving-traffic/${path}`, {
             sources: part.map((_, i) => i).join(';'),
             destinations: String(part.length),
             annotations: 'duration,distance',
           }),
         );
-        if (body?.code !== 'Ok' || !body.durations) throw new Error('Mapbox sent no matrix');
         return part.map((_, i): RouteEstimate | null => {
           const duration = body.durations?.[i]?.[0];
           const distance = body.distances?.[i]?.[0];

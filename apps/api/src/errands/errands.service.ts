@@ -1091,13 +1091,11 @@ export class ErrandsService implements OnModuleInit {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'agent-accept:' + auth.userId}))`);
         // The same check as the board's, as matching rules stand now (docs/matching.md, M1).
         const me = await this.eligibility.agent(auth.userId, live.matching, tx);
-        const { rows: pickup } = await tx.execute<{ meters: number | string }>(sql`
-          select ST_Distance(location, ST_SetSRID(ST_MakePoint(${me.lng}, ${me.lat}), 4326)::geography) as meters
-          from errand_stops where errand_id = ${errand.id} and seq = 0`);
+        const pickupMeters = await this.eligibility.pickupMeters(errand.id, me, tx);
         const facts = await this.eligibility.facts(auth.userId, [errand], tx);
         const refused = matchRefusal(
           me,
-          this.eligibility.matchErrand(errand, Number(pickup[0]?.meters ?? Infinity), auth.userId, facts),
+          this.eligibility.matchErrand(errand, pickupMeters, auth.userId, facts),
           live.matching,
         );
         if (refused) throw this.eligibility.refusal(refused);

@@ -5,6 +5,7 @@ import { DEFAULT_MATCHING_SETTINGS } from '@jiffo/shared';
 import { haversineMeters, MAPS, type MapsAdapter } from '../src/adapters/maps';
 import { agentPresence } from '../src/db/schema';
 import { AgentLocations } from '../src/matching/agent-locations';
+import { MatchingRedis } from '../src/matching/matching-redis';
 import { CandidatesService } from '../src/matching/candidates.service';
 import { adminAs, approved, createErrand, createTestApp, fund, signIn, type Person, type TestApp } from './helpers';
 
@@ -168,6 +169,22 @@ describe('candidates for an errand', () => {
     expect(of(unrouted).estimated).toBe(true);
   });
 
+  it('leaves out an agent without a name, as accepting would', async () => {
+    const named = await agentAt(east(EPE, 5));
+    const unnamed = await signIn(t, 'agent', { firstName: null });
+    await report(unnamed, { online: true, ...east(EPE, 5) });
+    const errand = await errandAt(EPE);
+    expect(ids(await candidates.forErrand(errand.id), [named, unnamed])).toEqual([named.userId]);
+  });
+
+  it('loads the live positions from the database again when Redis has lost them, as after a restart', async () => {
+    const forgotten = await agentAt(east(EPE, 5.5));
+    // Redis restarted empty: the agent is still online in the database.
+    await t.app.get(MatchingRedis).client.del('agents:geo:NG', 'agents:seen:NG', 'agents:loaded:NG');
+    const errand = await errandAt(EPE);
+    expect(ids(await candidates.forErrand(errand.id), [forgotten])).toEqual([forgotten.userId]);
+  });
+
   it('reads the database when Redis has no answer, and still checks every agent', async () => {
     const able = await agentAt(east(EPE, 3.5));
     const choosy = await agentAt(east(EPE, 3.5));
@@ -200,6 +217,21 @@ describe('candidates for an errand', () => {
       expect(await nearIds(IKORODU)).toContain(agent.userId);
       await report(agent, { online: false });
       expect(await nearIds(IKORODU)).not.toContain(agent.userId);
+    });
+
+    it('never let stale positions crowd out fresh ones nearer the pickup', async () => {
+      // A crowd last seen ten minutes ago, all nearer the pickup than one agent seen now.
+      const redis = t.app.get(MatchingRedis).client;
+      const old = Date.now() - 10 * 60_000;
+      const at = east(IKORODU, 3);
+      for (let i = 0; i < 60; i++) {
+        await redis.geoadd('agents:geo:NG', at.lng + i / 1_000_000, at.lat, `stale-${i}`);
+        await redis.zadd('agents:seen:NG', old, `stale-${i}`);
+      }
+      const fresh = await agentAt(east(IKORODU, 3.5));
+      const found = await locations().near('NG', at, 2, 5, DEFAULT_MATCHING_SETTINGS.locationFreshMinutes);
+      expect(found.map((n) => n.agentId)).toContain(fresh.userId);
+      expect(found.some((n) => n.agentId.startsWith('stale-'))).toBe(false);
     });
 
     it('are never kept for an agent the presence sweep forgets', async () => {

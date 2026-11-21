@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { matchRefusal, type CountrySettings } from '@jiffo/shared';
 import { and, eq, sql } from 'drizzle-orm';
-import { haversineMeters, type LatLng } from '../adapters/maps';
+import type { LatLng } from '../adapters/maps';
 import { ApiError } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
 import { DB, type Db } from '../db/database.module';
@@ -56,9 +56,7 @@ export class CandidatesService {
     const near = await this.nearest(errand.countryCode, pickup, rules, rules.shortlistSize * 3);
     const shortlist: Array<Omit<Candidate, 'travel'> & LatLng> = [];
     for (let i = 0; i < near.length && shortlist.length < rules.shortlistSize; i += CHECK_AT_ONCE) {
-      const checked = await Promise.all(
-        near.slice(i, i + CHECK_AT_ONCE).map((n) => this.check(n, errand, pickup, rules)),
-      );
+      const checked = await Promise.all(near.slice(i, i + CHECK_AT_ONCE).map((n) => this.check(n, errand, rules)));
       for (const c of checked) if (c && shortlist.length < rules.shortlistSize) shortlist.push(c);
     }
     const travel = await this.travelTimes.toPickup(shortlist, pickup, rules);
@@ -67,7 +65,10 @@ export class CandidatesService {
       .sort((a, b) => a.travel.durationSeconds - b.travel.durationSeconds || a.straightMeters - b.straightMeters);
   }
 
-  /** The nearest live positions, from Redis; from the database when Redis can't say (logged). */
+  /**
+   * The nearest live positions, from Redis, loaded from the database first if Redis lost them (restarted or
+   * flushed); the database's when Redis can't say (logged).
+   */
   private async nearest(
     countryCode: string,
     pickup: LatLng,
@@ -75,9 +76,33 @@ export class CandidatesService {
     count: number,
   ): Promise<NearAgent[]> {
     try {
+      if (!(await this.locations.loaded(countryCode))) {
+        await this.locations.load(countryCode, await this.livePositions(countryCode, rules.locationFreshMinutes));
+      }
       return await this.locations.near(countryCode, pickup, rules.boardRadiusKm, count, rules.locationFreshMinutes);
     } catch (error) {
       this.logger.warn(`Live positions unavailable, reading the database: ${(error as Error).message}`);
+      return this.nearestInDatabase(countryCode, pickup, rules, count);
+    }
+  }
+
+  /** Every online agent's real position the database has from the last few minutes, to load into Redis. */
+  private async livePositions(countryCode: string, freshMinutes: number) {
+    const { rows } = await this.db.execute<{ agentId: string; lat: number; lng: number; at: Date | string }>(sql`
+      select user_id as "agentId", lat, lng, located_at as at
+      from agent_presence
+      where country_code = ${countryCode} and online and not mocked and lat is not null and lng is not null
+        and located_at > now() - make_interval(mins => ${freshMinutes})`);
+    return rows.map((r) => ({ agentId: r.agentId, lat: r.lat, lng: r.lng, seenAt: new Date(r.at) }));
+  }
+
+  private async nearestInDatabase(
+    countryCode: string,
+    pickup: LatLng,
+    rules: CountrySettings['matching'],
+    count: number,
+  ): Promise<NearAgent[]> {
+    {
       const here = sql`ST_SetSRID(ST_MakePoint(${pickup.lng}, ${pickup.lat}), 4326)::geography`;
       const { rows } = await this.db.execute<{
         agentId: string;
@@ -96,7 +121,7 @@ export class CandidatesService {
   }
 
   /** The agent, if they may get this errand now, by the same check as the board and accepting. */
-  private async check(near: NearAgent, errand: ErrandRow, pickup: LatLng, rules: CountrySettings['matching']) {
+  private async check(near: NearAgent, errand: ErrandRow, rules: CountrySettings['matching']) {
     let me;
     try {
       me = await this.eligibility.agent(near.agentId, rules);
@@ -104,8 +129,8 @@ export class CandidatesService {
       if (error instanceof ApiError) return null;
       throw error;
     }
-    // Measured from the database's position, the one accepting will check.
-    const pickupMeters = haversineMeters(me, pickup);
+    // Measured as accepting measures it, from the database's position.
+    const pickupMeters = await this.eligibility.pickupMeters(errand.id, me);
     const facts = await this.eligibility.facts(near.agentId, [errand]);
     if (matchRefusal(me, this.eligibility.matchErrand(errand, pickupMeters, near.agentId, facts), rules)) return null;
     return { agentId: near.agentId, straightMeters: Math.round(pickupMeters), lat: me.lat, lng: me.lng };
