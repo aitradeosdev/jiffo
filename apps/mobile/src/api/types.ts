@@ -24,6 +24,8 @@ export interface CodeSent {
   phone: string;
   expiresInSeconds: number;
   resendInSeconds: number;
+  /** Only where sign-in codes are in Test (Settings, Security): no text was sent, and the app shows this. */
+  testCode?: string;
 }
 
 export interface SignedIn {

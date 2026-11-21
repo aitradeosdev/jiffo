@@ -100,6 +100,8 @@ export interface Country {
   name: string;
   currency: string;
   timezone: string;
+  /** How sign-in codes reach people there now: test shows them in the app, so anyone can sign in. */
+  signInCodes: 'live' | 'test';
 }
 
 export type Permission = AdminPermission;

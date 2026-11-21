@@ -45,7 +45,7 @@ All the commands below run in a terminal in the repository's `apps/mobile` folde
 
 ## The API the app talks to
 
-Start the backend as the README says. With the console providers, sign-in codes are printed in the API's log.
+Start the backend as the README says. With the console providers, sign-in codes are printed in the API's log. With sign-in codes in Test (admin panel, Settings, Security), the app shows each code on its code screen instead, which is easier with a phone.
 
 - **Development builds:** the phone and your computer must be on the same Wi-Fi. Find your computer's address on that network (on a Mac: System Settings, Wi-Fi, Details; on Windows: `ipconfig`), such as `192.168.1.20`. It goes in the bundler's start command: step 4 for an Android phone, step 6 for an iPhone.
 - **Preview builds:** a release build talks to the API only over HTTPS. Until there is a staging server, open a temporary HTTPS address to the API on your computer, and leave it running while you test:

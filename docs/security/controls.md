@@ -49,7 +49,12 @@ How Jiffo protects people, money and data, area by area. What is required is in 
 - **Codes:** each number and each phone may ask for 3 codes in 15 minutes and 10 in a day (Settings, Limits). A phone already signed in to the number isn't held to the number's limits, so a stranger asking for codes to it can't lock the owner out.
 - **Network addresses:** limited too (`OTP_PER_IP_PER_HOUR`, `OTP_PER_IP_PER_DAY`), but higher, since mobile networks put many customers behind one address.
 - **Bursts:** each request is counted one at a time, so a burst can't slip past. One that arrives while another for the same number, phone or address is being counted is told to try again at once, not queued.
-- **SMS spend:** every 10 minutes, finance gets an alert if a country has sent more codes in the last day than the set level (Settings, Security), since each is a paid SMS. It fires once per day.
+- **SMS spend:** every 10 minutes, finance gets an alert if a country has sent more codes in the last day than the set level (Settings, Security), since each is a paid SMS. It fires once per day. Codes shown in the app (Test, below) aren't counted.
+- **Live or Test, per country (Settings, Security, Sign-in codes):** Live, the default, texts each code.
+  - **Test, for trying the apps without an SMS provider:** no text is sent. The code goes back to the app, which shows it at the bottom of the code screen with a button to use it. Every other rule holds: the limits, the wait before another code, the tries, a single use.
+  - **What it costs:** anyone can sign in to any number in that country, so use it only while nobody real uses the apps there. Switching needs a second admin's approval, like every settings change, and every page of the admin panel warns while a country is in Test.
+  - **Production:** a production server refuses to save Test, and texts every code even where Test was saved before. The one exception is a server set up with `ALLOW_TEST_SIGN_IN_CODES=true`, for one nobody real uses, such as a shared test server run in production mode.
+  - **Kept apart:** each code shown in the app is marked so in the database (`otp_challenges.shown_in_app`), so sign-ins made with one can be found later.
 - **A new phone:** signing in on one signs the others out of that app, and they get a push saying so.
 - **Copied refresh tokens:**
   - A refresh token used twice ends every session of the account, in both apps.

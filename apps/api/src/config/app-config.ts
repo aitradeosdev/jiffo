@@ -170,6 +170,15 @@ const EnvSchema = z
       .enum(['true', 'false'])
       .default('false')
       .transform((v) => v === 'true'),
+    /**
+     * Lets a production server use Test sign-in codes (Settings, Security): no text is sent and the app shows
+     * the code, so anyone can sign in to any number in a country with it on. Only for a server nobody real
+     * uses, such as a shared test server run in production mode. Outside production they're always allowed.
+     */
+    ALLOW_TEST_SIGN_IN_CODES: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
   })
   .superRefine((env, ctx) => {
     const need = (ok: boolean, path: string, message: string) => {
@@ -243,6 +252,10 @@ const EnvSchema = z
 
 export type AppConfig = z.infer<typeof EnvSchema>;
 export const APP_CONFIG = Symbol('APP_CONFIG');
+
+/** Whether Test sign-in codes may be used: always outside production, there only where the server allows. */
+export const testSignInCodesAllowed = (config: Pick<AppConfig, 'NODE_ENV' | 'ALLOW_TEST_SIGN_IN_CODES'>) =>
+  config.NODE_ENV !== 'production' || config.ALLOW_TEST_SIGN_IN_CODES;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = EnvSchema.safeParse(env);

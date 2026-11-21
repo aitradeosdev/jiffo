@@ -19,7 +19,8 @@ import {
   TeamIcon,
 } from '@/components/icons';
 import { Wordmark } from '@/components/wordmark';
-import { api, getCountry, getMe, type Permission } from '@/lib/api';
+import { Notice } from '@/components/ui';
+import { api, getCountry, getMe, type Country, type Permission } from '@/lib/api';
 import { chooseCountry, signOut } from './actions';
 import { CountrySelect, Nav, type NavItem } from './nav';
 
@@ -39,6 +40,24 @@ const SECTIONS: Array<NavItem & { needs: Permission }> = [
   { href: '/team', label: 'Team', icon: <TeamIcon />, needs: 'team' },
   { href: '/audit', label: 'Audit log', icon: <AuditIcon />, needs: 'team' },
 ];
+
+/**
+ * On every page while a country's sign-in codes are in Test (Settings, Security): no texts are sent and the app
+ * shows each code, so anyone can sign in to any number there.
+ */
+function TestCodesWarning({ countries }: { countries: Country[] }) {
+  const testing = countries.filter((c) => c.signInCodes === 'test');
+  if (!testing.length) return null;
+  const names = testing.map((c) => c.name).join(', ');
+  return (
+    <div className="mb-6">
+      <Notice tone="warn">
+        Sign-in codes are in Test in {names}: no texts are sent and the app shows each code, so anyone can sign in to
+        any number there. Switch them to Live in Settings, Security, before real people use the apps.
+      </Notice>
+    </div>
+  );
+}
 
 /** Every signed-in page: the sections on the left (on top on small screens), the page on the right. */
 export default async function PanelLayout({ children }: { children: ReactNode }) {
@@ -107,7 +126,10 @@ export default async function PanelLayout({ children }: { children: ReactNode })
         </div>
       </aside>
       <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
-        <div className="mx-auto max-w-6xl">{children}</div>
+        <div className="mx-auto max-w-6xl">
+          <TestCodesWarning countries={me.countries} />
+          {children}
+        </div>
       </main>
     </div>
   );

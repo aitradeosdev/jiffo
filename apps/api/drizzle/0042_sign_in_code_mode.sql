@@ -1,0 +1,1 @@
+ALTER TABLE "otp_challenges" ADD COLUMN "shown_in_app" boolean DEFAULT false NOT NULL;

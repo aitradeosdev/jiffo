@@ -406,6 +406,8 @@ export const otpChallenges = pgTable(
     requestedIp: text('requested_ip'),
     /** The app's own key for the phone that asked, when it sent one: codes are limited per device too. */
     deviceKey: text('device_key'),
+    /** Given to the app to show instead of texted, under Test sign-in codes (Settings, Security). */
+    shownInApp: boolean('shown_in_app').notNull().default(false),
     attempts: smallint('attempts').notNull().default(0),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     consumedAt: timestamp('consumed_at', { withTimezone: true }),

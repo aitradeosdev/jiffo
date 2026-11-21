@@ -347,6 +347,16 @@ export const SECTIONS: Section[] = [
         help: 'Legal names, dates of birth, addresses and emergency contacts are hidden until revealed with a reason. Counted per country. 0 means nobody can.',
       },
       {
+        path: 'security.signInCodes',
+        label: 'Sign-in codes',
+        kind: 'select',
+        options: [
+          { value: 'live', label: 'Live: sent by text' },
+          { value: 'test', label: 'Test: shown in the app' },
+        ],
+        help: 'Test sends no text: the app shows the code on its code screen, for trying the apps without an SMS provider. Anyone can then sign in to any number in this country, so use it only while nobody real uses the apps here. A production server refuses it unless set up to allow it, and every page of the panel warns while it is on.',
+      },
+      {
         path: 'security.smsCodesDailyAlert',
         label: 'Alert when sign-in codes sent in a day pass',
         kind: 'count',

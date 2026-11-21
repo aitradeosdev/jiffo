@@ -22,6 +22,11 @@ interface SessionValue {
   user: User | null;
   api: ApiClient;
   requestCode(phone: string): Promise<CodeSent>;
+  /**
+   * The last code asked for this number, where sign-in codes are in Test and none was texted: the code screen
+   * shows it. Kept in memory only, never saved.
+   */
+  testCodeFor(phone: string): string | null;
   verifyCode(phone: string, code: string): Promise<User>;
   updateProfile(changes: Partial<Pick<User, 'firstName' | 'lastName' | 'email'>>): Promise<User>;
   /** `forgetPhone`: for a phone being handed on; signing in on it again then pauses withdrawals (A6). */
@@ -114,11 +119,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
   }, [loadUser]);
 
+  const [testCode, setTestCode] = useState<{ phone: string; code: string } | null>(null);
   const requestCode = useCallback(
     // The phone's own key goes too, so codes are limited per phone as well as per number.
-    async (phone: string) =>
-      api.public<CodeSent>('POST', '/v1/auth/otp/request', { phone, deviceKey: await deviceKey() }),
+    async (phone: string) => {
+      const sent = await api.public<CodeSent>('POST', '/v1/auth/otp/request', { phone, deviceKey: await deviceKey() });
+      setTestCode(sent.testCode ? { phone: sent.phone, code: sent.testCode } : null);
+      return sent;
+    },
     [api],
+  );
+  const testCodeFor = useCallback(
+    (phone: string) => (testCode && testCode.phone === phone ? testCode.code : null),
+    [testCode],
   );
 
   const verifyCode = useCallback(
@@ -139,6 +152,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const checked = await appCheck('POST', '/v1/auth/otp/verify', body);
       const res = await api.publicWithHeaders<SignedIn>('POST', '/v1/auth/otp/verify', body, checked);
       await tokenStore.set(toTokens(res, Date.now()));
+      setTestCode(null);
       // The agent app registers this phone's key now: the server takes one only just after signing in (A3).
       if (VARIANT === 'agent') void setUpPhone(api).catch(() => undefined);
       setUser(res.user);
@@ -198,8 +212,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ status, user, api, requestCode, verifyCode, updateProfile, signOut }),
-    [status, user, api, requestCode, verifyCode, updateProfile, signOut],
+    () => ({ status, user, api, requestCode, testCodeFor, verifyCode, updateProfile, signOut }),
+    [status, user, api, requestCode, testCodeFor, verifyCode, updateProfile, signOut],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

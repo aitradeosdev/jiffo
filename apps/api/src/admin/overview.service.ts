@@ -1,6 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { asc, desc, eq, sql, type SQL } from 'drizzle-orm';
 import { AGENT_OUT_STATES, STAFF_ALERT_KINDS } from '@jiffo/shared';
+import { APP_CONFIG, type AppConfig, testSignInCodesAllowed } from '../config/app-config';
+import { CountriesService } from '../countries/countries.service';
 import { DB, type Db } from '../db/database.module';
 import { countries, reconciliationRuns } from '../db/schema';
 import { notFound } from '../common/errors';
@@ -14,13 +16,18 @@ const num = (v: unknown) => Number(v ?? 0);
 export class OverviewService {
   constructor(
     @Inject(DB) private readonly db: Db,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly alerts: AlertsService,
     private readonly payouts: PayoutsService,
+    private readonly settings: CountriesService,
   ) {}
 
-  /** The countries Jiffo runs in, for the panel's country switch. */
-  countries() {
-    return this.db
+  /**
+   * The countries Jiffo runs in, for the panel's country switch, with how each sends sign-in codes now: the
+   * panel warns on every page while one shows them in the app (Test), as anyone can then sign in there.
+   */
+  async countries() {
+    const rows = await this.db
       .select({
         code: countries.code,
         name: countries.name,
@@ -30,6 +37,14 @@ export class OverviewService {
       .from(countries)
       .where(eq(countries.enabled, true))
       .orderBy(asc(countries.name));
+    const allowed = testSignInCodesAllowed(this.config);
+    return Promise.all(
+      rows.map(async (row) => {
+        const saved = await this.settings.currentSettingsIfAny(row.code);
+        const test = allowed && saved?.settings.security.signInCodes === 'test';
+        return { ...row, signInCodes: test ? ('test' as const) : ('live' as const) };
+      }),
+    );
   }
 
   async overview(countryCode: string) {

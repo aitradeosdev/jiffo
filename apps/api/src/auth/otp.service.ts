@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, count, desc, eq, gt, sql, isNull } from 'drizzle-orm';
-import { APP_CONFIG, AppConfig } from '../config/app-config';
+import { APP_CONFIG, AppConfig, testSignInCodesAllowed } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
 import { devices, otpChallenges, users } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
@@ -31,8 +31,14 @@ export class OtpService {
     return hmacSha256(this.config.OTP_SECRET, `${phone}:${code}`);
   }
 
+  /**
+   * Makes and sends a code. In a country with Test sign-in codes (Settings, Security), no text is sent and the
+   * code is returned for the app to show, with every limit the same; production ignores Test unless the server
+   * allows it, so a setting saved before that can't open every account there.
+   */
   async request(phone: string, country: string, ip: string | null, deviceKey: string | null = null) {
-    const { limits } = (await this.countries.currentSettings(country)).settings;
+    const { limits, security } = (await this.countries.currentSettings(country)).settings;
+    const shownInApp = security.signInCodes === 'test' && testSignInCodesAllowed(this.config);
     const code = numericCode(6);
     const now = Date.now();
     const since = (ms: number) => new Date(now - ms);
@@ -126,12 +132,15 @@ export class OtpService {
           codeHash: this.hash(phone, code),
           requestedIp: ip,
           deviceKey,
+          shownInApp,
           expiresAt: new Date(now + limits.otpTtlSeconds * 1000),
         })
         .returning({ id: otpChallenges.id });
       return row!.id;
     });
 
+    const sent = { expiresInSeconds: limits.otpTtlSeconds, resendInSeconds: limits.otpResendSeconds };
+    if (shownInApp) return { ...sent, testCode: code };
     try {
       await this.messaging.sendOtp(phone, code, limits.otpTtlSeconds);
     } catch (error) {
@@ -139,7 +148,7 @@ export class OtpService {
       await this.db.delete(otpChallenges).where(eq(otpChallenges.id, challengeId));
       throw error;
     }
-    return { expiresInSeconds: limits.otpTtlSeconds, resendInSeconds: limits.otpResendSeconds };
+    return sent;
   }
 
   /**
@@ -151,7 +160,8 @@ export class OtpService {
     const sent = await this.db
       .select({ country: otpChallenges.countryCode, n: count() })
       .from(otpChallenges)
-      .where(gt(otpChallenges.createdAt, new Date(Date.now() - DAY_MS)))
+      // Codes shown in the app (Test sign-in codes) were never texted.
+      .where(and(gt(otpChallenges.createdAt, new Date(Date.now() - DAY_MS)), eq(otpChallenges.shownInApp, false)))
       .groupBy(otpChallenges.countryCode);
     let raised = 0;
     for (const { country, n } of sent) {
