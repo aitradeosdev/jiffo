@@ -89,15 +89,23 @@ export const PAIR_FLAG_KINDS = [
   'pair_shared_phone',
   'pair_shared_bank',
   'pair_shared_network',
-  'repeat_pairing',
-  'no_movement',
-  'fast_high_value',
   'shared_phone',
   'shared_payout_account',
   'same_face',
 ] as const satisfies readonly RiskFlagKind[];
 
-/** Flags that an agent's GPS was faked (G1): an open one keeps them from errands for a while (M1). */
+/**
+ * Flags that link a customer and an agent but keep them apart only once staff confirm them: working together
+ * often is also what a regular customer and their local agent do, and one errand that looked unusual says
+ * less than a phone, bank account or face they share.
+ */
+export const CONFIRMED_PAIR_FLAG_KINDS = [
+  'repeat_pairing',
+  'no_movement',
+  'fast_high_value',
+] as const satisfies readonly RiskFlagKind[];
+
+/** Flags that an agent's GPS was faked (G1): until staff clear one, it keeps them from errands for a while (M1). */
 export const FAKE_GPS_FLAG_KINDS = ['gps_jump', 'gps_straight'] as const satisfies readonly RiskFlagKind[];
 
 export const RISK_FLAG_INFO: Record<RiskFlagKind, { queue: RiskQueue; label: string; about: string }> = {

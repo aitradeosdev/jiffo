@@ -3,7 +3,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CountriesService } from '../src/countries/countries.service';
-import { adminAudit, deposits, devices, otpChallenges, payoutAccounts } from '../src/db/schema';
+import { adminAudit, deposits, devices, otpChallenges, payoutAccounts, riskFlags } from '../src/db/schema';
 import { RiskFlagsService } from '../src/risk/risk-flags.service';
 import {
   act,
@@ -132,8 +132,11 @@ describe('fraud flags and the Risk queue', () => {
     expect(shared).toMatchObject({ kind: 'shared_phone', details: { by: ['phone'] } });
     expect(shared!.people.map((p) => p.id).sort()).toEqual([customer.userId, agent.userId].sort());
 
+    // Until staff clear it, matching keeps the two apart (docs/matching.md, M1).
     await fund(t, customer);
     const errand = await createErrand(t, customer);
+    expect((await act(t, agent, errand.id, 'accept', {}, 409)).error.code).toBe('unavailable');
+    await t.db.update(riskFlags).set({ status: 'cleared' }).where(eq(riskFlags.id, shared!.id));
     await act(t, agent, errand.id, 'accept');
     expect(kinds(await flagsFor({ errand: errand.id }))).toEqual(['pair_shared_phone']);
   });

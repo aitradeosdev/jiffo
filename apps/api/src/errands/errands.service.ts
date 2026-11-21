@@ -278,9 +278,11 @@ export class ErrandsService implements OnModuleInit {
     if (haversineMeters(me, q) > security.boardNearKm * 1000) {
       throw unprocessable('not_here', 'The board shows errands near where you are');
     }
-    // Errands the agent holds that leave room for none from the board: the board says why.
-    const full = heldRefusal(me.held, false, rules);
-    if (full) throw this.eligibility.refusal(full);
+    // What the errands the agent holds leave room for: errands from the board, urgent ones, both, or neither,
+    // when the board says why.
+    const boardFull = heldRefusal(me.held, false, rules);
+    const urgentFull = heldRefusal(me.held, true, rules);
+    if (boardFull && urgentFull) throw this.eligibility.refusal(boardFull);
     const tier = await this.agents.tier(auth.userId);
     const here = sql`ST_SetSRID(ST_MakePoint(${me.lng}, ${me.lat}), 4326)::geography`;
     const distance = sql<number>`ST_Distance(${errandStops.location}, ${here})`;
@@ -298,13 +300,18 @@ export class ErrandsService implements OnModuleInit {
       me.categoryKeys ? inArray(errands.categoryKey, me.categoryKeys) : undefined,
       me.takesPurchases ? undefined : eq(errands.buy, false),
     );
+    // Left out in the query, so the limit counts only errands the agent may take.
+    const allowed = and(
+      boardFull ? eq(errands.urgent, true) : urgentFull ? eq(errands.urgent, false) : undefined,
+      this.eligibility.boardExclusions(auth.userId),
+    );
     const pickupOf = and(eq(errandStops.errandId, errands.id), eq(errandStops.seq, 0));
     const [found, counts] = await Promise.all([
       this.db
         .select({ errand: errands, distanceMeters: distance })
         .from(errands)
         .innerJoin(errandStops, pickupOf)
-        .where(wanted)
+        .where(and(wanted, allowed))
         .orderBy(distance, desc(errands.createdAt))
         .limit(q.limit),
       // How many nearby errands the agent's preferences leave out, so the board can say so.

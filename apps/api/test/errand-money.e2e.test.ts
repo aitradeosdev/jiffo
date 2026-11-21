@@ -194,6 +194,27 @@ describe('the errand money path', () => {
       }
     });
 
+    it('reads how recent a position must be at the drop-off from the settings', async () => {
+      const { agent, errand } = await underway();
+      await atDropoff(t, agent, errand.id);
+      // Six minutes old: past the five Security starts with, inside ten.
+      const aged = () =>
+        t.db.execute(
+          `update agent_presence set located_at = now() - interval '6 minutes' where user_id = '${agent.userId}'` as never,
+        );
+      await aged();
+      expect((await event(agent, errand.id, 'mark_delivered')).body.error.code).toBe('location_needed');
+      const before = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body
+        .settings.security;
+      try {
+        await security({ positionFreshMinutes: 10 });
+        await aged();
+        expect((await event(agent, errand.id, 'mark_delivered')).status).toBe(200);
+      } finally {
+        await security({ positionFreshMinutes: before.positionFreshMinutes });
+      }
+    });
+
     it('holds no more item money than a new agent may carry', async () => {
       const { agent, errand } = await underway({ categoryKey: 'groceries' });
       const res = await event(agent, errand.id, 'send_item_amount', {

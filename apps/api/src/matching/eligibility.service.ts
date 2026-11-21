@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   AGENT_OUT_STATES,
+  CONFIRMED_PAIR_FLAG_KINDS,
   FAKE_GPS_FLAG_KINDS,
   PAIR_FLAG_KINDS,
   type CountrySettings,
@@ -77,7 +78,8 @@ export class EligibilityService {
         .where(
           and(
             inArray(riskFlags.kind, [...FAKE_GPS_FLAG_KINDS]),
-            eq(riskFlags.status, 'open'),
+            // Open or confirmed: only a flag staff cleared lets the agent work before the hold is over.
+            ne(riskFlags.status, 'cleared'),
             gt(riskFlags.createdAt, new Date(Date.now() - rules.fakeGpsHoldHours * 60 * MINUTE_MS)),
             or(and(eq(riskFlags.userId, agentId), isNull(riskFlags.otherUserId)), eq(riskFlags.otherUserId, agentId)),
           ),
@@ -110,8 +112,29 @@ export class EligibilityService {
   }
 
   /**
-   * For these errands and this agent: the customers flagged with the agent (not cleared), and the errands the
-   * agent left or was replaced on.
+   * The board's query leaves out, before its limit, errands this agent may not take for who they are with or
+   * what they did: a customer flagged with them, and an errand they left or were replaced on.
+   */
+  boardExclusions(agentId: string) {
+    const list = (kinds: readonly string[]) =>
+      sql.join(
+        kinds.map((k) => sql`${k}`),
+        sql`, `,
+      );
+    return and(
+      sql`not exists (select 1 from risk_flags f
+        where ((f.kind in (${list(PAIR_FLAG_KINDS)}) and f.status <> 'cleared')
+          or (f.kind in (${list(CONFIRMED_PAIR_FLAG_KINDS)}) and f.status = 'confirmed'))
+        and ((f.user_id = ${agentId} and f.other_user_id = ${errands.customerId})
+          or (f.other_user_id = ${agentId} and f.user_id = ${errands.customerId})))`,
+      sql`not exists (select 1 from errand_events ev where ev.errand_id = ${errands.id}
+        and ev.event in ('withdraw', 'release_agent') and ev.data->>'agentId' = ${agentId})`,
+    );
+  }
+
+  /**
+   * For these errands and this agent: the customers flagged with the agent (not cleared, or for a repeat
+   * pairing, confirmed), and the errands the agent left or was replaced on.
    */
   async facts(agentId: string, rows: Array<{ id: string; customerId: string }>, db: Db | Tx = this.db) {
     if (!rows.length) return { pairs: new Set<string>(), gaveUp: new Set<string>() };
@@ -122,8 +145,10 @@ export class EligibilityService {
         .from(riskFlags)
         .where(
           and(
-            inArray(riskFlags.kind, [...PAIR_FLAG_KINDS]),
-            ne(riskFlags.status, 'cleared'),
+            or(
+              and(inArray(riskFlags.kind, [...PAIR_FLAG_KINDS]), ne(riskFlags.status, 'cleared')),
+              and(inArray(riskFlags.kind, [...CONFIRMED_PAIR_FLAG_KINDS]), eq(riskFlags.status, 'confirmed')),
+            ),
             or(
               and(eq(riskFlags.userId, agentId), inArray(riskFlags.otherUserId, customers)),
               and(eq(riskFlags.otherUserId, agentId), inArray(riskFlags.userId, customers)),

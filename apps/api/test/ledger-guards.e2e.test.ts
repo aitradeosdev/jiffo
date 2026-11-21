@@ -15,6 +15,7 @@ import {
   createTestApp,
   deliverWebhook,
   fund,
+  onlineAtPickup,
   photo,
   signIn,
   type Person,
@@ -106,6 +107,8 @@ describe('ledger guards', () => {
       const buyer = await customer();
       const errand = await createErrand(t, buyer);
       const agents = await Promise.all(Array.from({ length: 10 }, agent));
+      // Each may take it: online at the pickup.
+      for (const a of agents) await onlineAtPickup(t, a, errand.id);
       const results = await burst(() => event(agents[Math.floor(Math.random() * agents.length)]!, errand.id, 'accept'));
       // Once taken, the errand is gone for other agents (404).
       expect(succeeded(results, [409, 404])).toBe(1);

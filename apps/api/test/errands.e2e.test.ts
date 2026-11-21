@@ -5,6 +5,7 @@ import { countries, errands, users } from '../src/db/schema';
 import {
   boardRequest,
   act,
+  onlineAtPickup,
   createErrand,
   createTestApp,
   photo,
@@ -233,8 +234,11 @@ describe('errands', () => {
 
     it('lets only one of two agents win the same errand', async () => {
       const errand = await createErrand(t, customer);
+      // Both may take it: online at the pickup, holding nothing.
+      const racers = [await signIn(t, 'agent'), await signIn(t, 'agent')];
+      for (const a of racers) await onlineAtPickup(t, a, errand.id);
       const results = await Promise.all(
-        [agent, otherAgent].map((a) =>
+        racers.map((a) =>
           request(t.http).post(`/v1/errands/${errand.id}/events`).set(a.headers).send({ event: 'accept' }),
         ),
       );

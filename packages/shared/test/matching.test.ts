@@ -100,6 +100,17 @@ describe('the Matching settings', () => {
     expect(CountrySettingsSchema.parse(older).matching).toEqual(rules);
   });
 
+  it('keep a cap on errands held at once that admin had saved, as the cap on errands from the board', () => {
+    const { matching: _, ...older } = NIGERIA_DEFAULT_SETTINGS;
+    const withCap = (cap: number) => ({ ...older, security: { ...older.security, maxActiveErrandsPerAgent: cap } });
+    expect(CountrySettingsSchema.parse(withCap(1)).matching.maxBoardErrands).toBe(1);
+    expect(CountrySettingsSchema.parse(withCap(20)).matching.maxBoardErrands).toBe(10);
+    // 0 meant no limit: such a country starts at the new cap.
+    expect(CountrySettingsSchema.parse(withCap(0)).matching.maxBoardErrands).toBe(3);
+    // Saved with the Matching group, its own cap stands.
+    expect(CountrySettingsSchema.parse({ ...withCap(1), matching: rules }).matching.maxBoardErrands).toBe(3);
+  });
+
   it('replace the old cap on errands held at once, which meant no limit by default', () => {
     const older = {
       ...NIGERIA_DEFAULT_SETTINGS,

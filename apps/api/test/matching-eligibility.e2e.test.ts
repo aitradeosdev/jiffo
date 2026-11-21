@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { DEFAULT_MATCHING_SETTINGS } from '@jiffo/shared';
 import { agentPresence, riskFlags } from '../src/db/schema';
 import {
   act,
@@ -33,6 +34,8 @@ describe('who may get an errand', () => {
     original = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
     customer = await signIn(t, 'customer');
     await fund(t, customer, 50_000_000);
+    // Matching's starting values, which the other tests' settings relax.
+    await matching(DEFAULT_MATCHING_SETTINGS);
   });
   afterAll(async () => {
     await matching(original.settings.matching);
@@ -66,7 +69,11 @@ describe('who may get an errand', () => {
     const res = await board(agent, at).expect(200);
     return (res.body.errands as Array<{ id: string }>).some((e) => e.id === id);
   };
-  const flag = async (kind: 'pair_shared_phone' | 'gps_jump', userId: string, otherUserId: string | null) => {
+  const flag = async (
+    kind: 'pair_shared_phone' | 'repeat_pairing' | 'gps_jump',
+    userId: string,
+    otherUserId: string | null,
+  ) => {
     const [row] = await t.db
       .insert(riskFlags)
       .values({ countryCode: 'NG', queue: 'risk', kind, dedupeKey: `test:${Math.random()}`, userId, otherUserId })
@@ -147,6 +154,20 @@ describe('who may get an errand', () => {
     expect((await accept(agent, errand.id)).status).toBe(200);
   });
 
+  it('keeps matching a customer and the agent who often works for them, unless staff confirm it is collusion', async () => {
+    // Working together often is what a regular customer and their local agent do: a person looks first.
+    const agent = await signIn(t, 'agent');
+    await online(agent);
+    const flagId = await flag('repeat_pairing', customer.userId, agent.userId);
+    const first = await createErrand(t, customer);
+    expect(await onBoard(agent, first.id)).toBe(true);
+    await act(t, agent, first.id, 'accept');
+    await t.db.update(riskFlags).set({ status: 'confirmed' }).where(eq(riskFlags.id, flagId));
+    const next = await createErrand(t, customer);
+    expect(await onBoard(agent, next.id)).toBe(false);
+    expect((await accept(agent, next.id)).body.error.code).toBe('unavailable');
+  });
+
   it('never gives an errand back to an agent who left it, or whom the customer replaced', async () => {
     const [left, replaced, next] = await Promise.all([0, 1, 2].map(() => signIn(t, 'agent')));
     for (const a of [left!, replaced!, next!]) await online(a);
@@ -172,11 +193,25 @@ describe('who may get an errand', () => {
     expect((await board(agent)).body.error.code).toBe('location_review');
     expect((await accept(agent, errand.id)).body.error.code).toBe('location_review');
 
-    // After the hold, the agent works again while staff look.
+    // Confirmed by staff, it holds the agent all the same; staff decide on anything more.
+    await t.db.update(riskFlags).set({ status: 'confirmed' }).where(eq(riskFlags.id, flagId));
+    expect((await accept(agent, errand.id)).body.error.code).toBe('location_review');
+
+    // After the hold, the agent works again.
     await t.db
       .update(riskFlags)
       .set({ createdAt: new Date(Date.now() - 25 * 3_600_000) })
       .where(eq(riskFlags.id, flagId));
+    expect((await accept(agent, errand.id)).status).toBe(200);
+  });
+
+  it('lets an agent work again as soon as staff clear a fake-GPS flag', async () => {
+    const agent = await signIn(t, 'agent');
+    await online(agent);
+    const errand = await createErrand(t, customer);
+    const flagId = await flag('gps_jump', agent.userId, null);
+    expect((await accept(agent, errand.id)).body.error.code).toBe('location_review');
+    await t.db.update(riskFlags).set({ status: 'cleared' }).where(eq(riskFlags.id, flagId));
     expect((await accept(agent, errand.id)).status).toBe(200);
   });
 
@@ -234,8 +269,48 @@ describe('who may get an errand', () => {
         expect((await accept(agent, waiting[2]!.id)).status).toBe(200);
         expect((await accept(agent, waiting[3]!.id)).body.error.code).toBe('too_many_errands');
       } finally {
-        await matching({ maxBoardErrands: original.settings.matching.maxBoardErrands! });
+        await matching({ maxBoardErrands: DEFAULT_MATCHING_SETTINGS.maxBoardErrands });
       }
+    });
+  });
+
+  describe('the board', () => {
+    const top = async (agent: Person, limit: number) => {
+      const res = await request(t.http)
+        .get(`/v1/errands/board?lat=${PICKUP.lat}&lng=${PICKUP.lng}&radiusKm=50&limit=${limit}`)
+        .set(agent.headers)
+        .expect(200);
+      return (res.body.errands as Array<{ id: string }>).map((e) => e.id);
+    };
+
+    it('fills its list with errands the agent may take, past nearer ones they may not', async () => {
+      const agent = await signIn(t, 'agent');
+      await online(agent);
+      await act(t, agent, (await createErrand(t, customer)).id, 'accept');
+      const flagged = await signIn(t, 'customer');
+      await fund(t, flagged, 5_000_000);
+      await flag('pair_shared_phone', flagged.userId, agent.userId);
+      const mine = await createErrand(t, customer);
+      // Newer, so first at the same distance: urgent ones, and ones from a customer flagged with the agent.
+      await createErrand(t, customer, { urgent: true });
+      await createErrand(t, flagged);
+      await createErrand(t, customer, { urgent: true });
+      expect(await top(agent, 1)).toEqual([mine.id]);
+    });
+
+    it('shows urgent errands to an agent whose only errands are scheduled ones taken ahead, at the cap', async () => {
+      const agent = await signIn(t, 'agent');
+      await online(agent);
+      for (let i = 0; i < 3; i++) await act(t, agent, (await createErrand(t, customer, scheduled())).id, 'accept');
+      await createErrand(t, customer);
+      const urgent = await createErrand(t, customer, { urgent: true });
+      expect(await top(agent, 50)).toEqual(expect.arrayContaining([urgent.id]));
+      const shown = await request(t.http)
+        .get(`/v1/errands/board?lat=${PICKUP.lat}&lng=${PICKUP.lng}&radiusKm=50`)
+        .set(agent.headers)
+        .expect(200);
+      expect((shown.body.errands as Array<{ urgent: boolean }>).every((e) => e.urgent)).toBe(true);
+      expect((await accept(agent, urgent.id)).status).toBe(200);
     });
   });
 
@@ -254,8 +329,8 @@ describe('who may get an errand', () => {
       expect((await accept(agent, errand.id)).status).toBe(200);
     } finally {
       await matching({
-        boardRadiusKm: original.settings.matching.boardRadiusKm!,
-        locationFreshMinutes: original.settings.matching.locationFreshMinutes!,
+        boardRadiusKm: DEFAULT_MATCHING_SETTINGS.boardRadiusKm,
+        locationFreshMinutes: DEFAULT_MATCHING_SETTINGS.locationFreshMinutes,
       });
     }
   });

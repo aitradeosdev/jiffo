@@ -122,7 +122,8 @@ describe('access rules', () => {
 
     it('are listed on the board only around where the agent is', async () => {
       const agent = await signIn(t, 'agent');
-      expect((await board(agent, PICKUP)).body.error.code).toBe('location_needed');
+      // An agent who hasn't gone online sees no board at all.
+      expect((await board(agent, PICKUP)).body.error.code).toBe('go_online');
       await here(agent, PICKUP);
       expect((await board(agent, PICKUP)).status).toBe(200);
       // Asking about the other side of the country from Lekki.

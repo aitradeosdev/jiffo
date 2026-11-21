@@ -23,7 +23,7 @@ export interface MatchErrand {
   buy: boolean;
   /** From the agent's position to the pickup, in a straight line. */
   pickupMeters: number;
-  /** A flag links its customer and this agent (PAIR_FLAG_KINDS), not cleared. */
+  /** A flag links its customer and this agent: one of PAIR_FLAG_KINDS not cleared, or a repeat pairing confirmed. */
   pairFlagged: boolean;
   /** This agent left it, or its customer replaced them on it. */
   gaveUp: boolean;

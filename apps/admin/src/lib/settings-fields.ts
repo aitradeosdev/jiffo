@@ -393,14 +393,14 @@ export const SECTIONS: Section[] = [
         path: 'matching.fakeGpsHoldHours',
         label: 'A fake-GPS flag keeps the agent from errands for',
         kind: 'hours',
-        help: 'While the flag is open, unless staff clear it sooner. 0: the flag alone keeps no one off.',
+        help: 'From when it was raised, unless staff clear it sooner. 0: the flag alone keeps no one off.',
       },
     ],
   },
   {
     title: 'Risk flags',
     about:
-      'When errands go to the Risk queue for a person to look at. Staff decide, and flagged errands leave the counts used for agent tiers until cleared. Until a flag linking a customer and an agent is cleared, they are not matched.',
+      'When errands go to the Risk queue for a person to look at. Staff decide, and flagged errands leave the counts used for agent tiers until cleared. A customer and an agent who share a phone, bank account, network or face are not matched until staff clear the flag. Working together often, or one errand that looked unusual, keeps them apart only once confirmed.',
     fields: [
       {
         path: 'risk.samePlaceMeters',

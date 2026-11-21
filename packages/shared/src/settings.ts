@@ -89,7 +89,7 @@ export function customerIdTypesOf(value: unknown) {
   return value.every(numbers) ? value : [...CUSTOMER_ID_TYPES];
 }
 
-export const CountrySettingsSchema = z.object({
+const CountrySettingsObject = z.object({
   pricing: z.object({
     baseFeeKobo: kobo,
     ratePerKmKobo: kobo,
@@ -368,8 +368,8 @@ export const CountrySettingsSchema = z.object({
        */
       maxBoardErrands: z.number().int().min(1).max(10).default(3),
       /**
-       * How long an open fake-GPS flag on an agent keeps them from errands, unless staff clear it sooner, so a
-       * phone's glitch costs a day at most. 0: a flag doesn't hold them.
+       * How long a fake-GPS flag on an agent keeps them from errands, unless staff clear it sooner, so a phone's
+       * glitch costs a day at most. 0: a flag doesn't hold them.
        */
       fakeGpsHoldHours: z
         .number()
@@ -390,6 +390,19 @@ export const CountrySettingsSchema = z.object({
     })
     .default(() => structuredClone(DEFAULT_SAFETY_SETTINGS)),
 });
+
+/**
+ * A version saved before the Matching group kept its cap on errands held at once in Security, where 0 meant no
+ * limit: a cap admin had set becomes the cap on errands from the board, so no country loses the limit it chose.
+ */
+function carryOldCap(raw: unknown) {
+  if (!raw || typeof raw !== 'object' || 'matching' in raw) return raw;
+  const cap = (raw as { security?: { maxActiveErrandsPerAgent?: unknown } }).security?.maxActiveErrandsPerAgent;
+  if (typeof cap !== 'number' || !Number.isInteger(cap) || cap <= 0) return raw;
+  return { ...raw, matching: { ...DEFAULT_MATCHING_SETTINGS, maxBoardErrands: Math.min(cap, 10) } };
+}
+
+export const CountrySettingsSchema = z.preprocess(carryOldCap, CountrySettingsObject);
 
 export type CountrySettings = z.infer<typeof CountrySettingsSchema>;
 
