@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { and, eq, isNull, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { ID_TYPE_KEYS, ID_TYPES, yearsOld, type IdType } from '@jiffo/shared';
 import { nameIndex } from '../db/fields';
 import { liveAccounts } from '../money/payout-accounts';
@@ -21,6 +21,8 @@ import { RiskFlagsService } from '../risk/risk-flags.service';
 
 type Application = typeof agentApplications.$inferSelect;
 type Check = { key: string; outcome: string; note?: string };
+/** An agent sent back to their application for the ID check, and whether they were approved before. */
+export type Reopened = { userId: string; wasApproved: boolean };
 
 /** What the checklist says about each check, in the agent's words. */
 export const CHECK_LABELS: Record<string, string> = {
@@ -132,9 +134,11 @@ export class AgentApplicationService implements IdentityOwner {
       this.countries.currentSettings(app.countryCode),
     ]);
     const u = user[0]!;
+    // Where the country has the agent ID check off, the step isn't asked for (Settings, Identity).
+    const identityRequired = settings.identity.agentCheck;
     const steps = {
       basics: !!(u.firstName && u.lastName && app.stateCode && app.area),
-      identity: app.identityOutcome !== null,
+      identity: !identityRequired || app.identityOutcome !== null,
       address: !!(app.address && app.emergencyName && app.emergencyPhone),
       bank: payout.length > 0,
       prefs: profile.length > 0,
@@ -144,6 +148,8 @@ export class AgentApplicationService implements IdentityOwner {
     return {
       status: app.status,
       steps,
+      /** Whether the application asks for the ID check: the app leaves the step out when not. */
+      identityRequired,
       /** "hosted": a web page asks for the ID and takes the selfie, so the app opens it instead. */
       identityFlow: options.flow,
       /** The IDs the agent can verify with now, and whether their BVN is checked as well. */
@@ -200,6 +206,8 @@ export class AgentApplicationService implements IdentityOwner {
     }
     const person = await this.person(userId);
     const { settings } = await this.countries.currentSettings(app.countryCode);
+    // Each check is paid for: none starts where the country doesn't ask agents for one.
+    if (!settings.identity.agentCheck) throw conflict('identity_check_off', "You don't need to check your ID here");
     // Earlier versions of the app send only a NIN.
     const idType = input.idType ?? (input.nin ? 'nin' : undefined);
     const started = await this.checks.start(
@@ -448,6 +456,10 @@ export class AgentApplicationService implements IdentityOwner {
     const payout = live.pending ?? live.approved;
     const [user] = await this.db.select().from(users).where(eq(users.id, app.userId));
     const fullName = `${user!.firstName ?? ''} ${user!.lastName ?? ''}`;
+    // Sent where the country had the agent ID check off: there's no ID record to check the age and names
+    // against, so a person decides every such application, and the bank account is matched to the name the
+    // agent gave.
+    if (app.identityOutcome === null) return this.decideWithoutId(app, address, payout, fullName);
     const legal = app.legalName ?? '';
     const own = app.checks.filter((c) => IDENTITY_CHECKS.includes(c.key));
     // The checks the identity check asked for must be there and passed, any other that came back too, and
@@ -514,6 +526,115 @@ export class AgentApplicationService implements IdentityOwner {
     return after;
   }
 
+  /** The checks for an application sent without an ID check, which then waits for support. */
+  private async decideWithoutId(
+    app: Application,
+    address: { outcome?: 'passed' | 'failed' | 'review'; note?: string },
+    payout: { accountName: string } | null | undefined,
+    fullName: string,
+  ): Promise<Application> {
+    const bank = payout ? nameMatch(payout.accountName, fullName) : 'none';
+    const checks: Check[] = [
+      { key: 'age', outcome: 'review', note: 'No ID check: confirm the agent is 18 or older' },
+      { key: 'address', outcome: address.outcome!, ...(address.note ? { note: address.note } : {}) },
+      bank === 'match'
+        ? { key: 'bank', outcome: 'passed' }
+        : {
+            key: 'bank',
+            outcome: 'review',
+            note:
+              bank === 'near'
+                ? "The bank account's name is close to the name in the app, but not the same."
+                : 'The bank account is in another name than the one in the app',
+          },
+    ];
+    // The application is held first, then the switch read again: one switched on since the agent sent it (the
+    // checklist they saw had no ID step) sends it back for the check, rather than to staff who can't approve it.
+    // A settings save reopening applications waits for this one, and then sees it in review.
+    const decided = await this.db.transaction(async (tx) => {
+      const [held] = await tx
+        .select({ status: agentApplications.status })
+        .from(agentApplications)
+        .where(eq(agentApplications.userId, app.userId))
+        .for('update');
+      if (held?.status !== 'checking') return null;
+      const saved = await this.countries.currentSettingsIfAny(app.countryCode, tx);
+      const idCheckOn = saved?.settings.identity.agentCheck ?? true;
+      const [row] = await tx
+        .update(agentApplications)
+        .set(
+          idCheckOn
+            ? { addressOutcome: address.outcome!, status: 'draft', submittedAt: null, updatedAt: new Date() }
+            : { addressOutcome: address.outcome!, checks, status: 'review', updatedAt: new Date() },
+        )
+        .where(eq(agentApplications.userId, app.userId))
+        .returning();
+      return row!;
+    });
+    if (!decided)
+      return (await this.db.select().from(agentApplications).where(eq(agentApplications.userId, app.userId)))[0]!;
+    if (decided.status === 'draft') {
+      await this.tellToCheckId([{ userId: app.userId, wasApproved: false }]);
+      return decided;
+    }
+    await this.push.notifyUser(app.userId, 'agent', {
+      title: 'We are checking your application',
+      body: 'Our team will text you, usually within 24 hours.',
+      data: { type: 'agent.application', status: decided.status },
+    });
+    return decided;
+  }
+
+  /**
+   * When a country switches the agent ID check back on (Settings, Identity): agents approved, or waiting for a
+   * decision, without one go back to their application, with only that step left, and offline. An errand
+   * they already have can still be finished. Run in the settings save's transaction; returns who, to tell them.
+   */
+  async reopenForIdCheck(tx: Tx, countryCode: string): Promise<Reopened[]> {
+    const which = and(
+      eq(agentApplications.countryCode, countryCode),
+      inArray(agentApplications.status, ['approved', 'review', 'checking']),
+      isNull(agentApplications.identityOutcome),
+    );
+    // Held first, to know which were approved: the update can only say what each became.
+    const before = await tx
+      .select({ userId: agentApplications.userId, status: agentApplications.status })
+      .from(agentApplications)
+      .where(which)
+      .for('update');
+    if (!before.length) return [];
+    const userIds = before.map((r) => r.userId);
+    await tx
+      .update(agentApplications)
+      .set({
+        status: 'draft',
+        submittedAt: null,
+        decidedAt: null,
+        decidedBy: null,
+        decisionNote: null,
+        updatedAt: new Date(),
+      })
+      .where(inArray(agentApplications.userId, userIds));
+    await tx
+      .update(agentPresence)
+      .set({ online: false, updatedAt: new Date() })
+      .where(inArray(agentPresence.userId, userIds));
+    return before.map((r) => ({ userId: r.userId, wasApproved: r.status === 'approved' }));
+  }
+
+  /** Tells agents their application needs their ID check now, once the change is saved. */
+  async tellToCheckId(agents: Reopened[]) {
+    for (const { userId, wasApproved } of agents) {
+      await this.push
+        .notifyUser(userId, 'agent', {
+          title: wasApproved ? 'Check your ID to keep taking errands' : 'Check your ID to finish your application',
+          body: 'It takes a couple of minutes, in your application.',
+          data: { type: 'agent.application', status: 'draft' },
+        })
+        .catch((error: unknown) => this.logger.warn(`Couldn't tell ${userId} to check their ID: ${String(error)}`));
+    }
+  }
+
   /**
    * Support's decision, made inside the caller's transaction so it is audited with it. Approving needs an
    * application in review (or one declined by mistake) with no failed check, and claims the agent's NIN as
@@ -531,12 +652,14 @@ export class AgentApplicationService implements IdentityOwner {
       .where(eq(agentApplications.userId, input.userId))
       .for('update');
     if (!app) throw notFound('application_not_found', 'This person has no agent application');
-    const from = { approve: ['review', 'rejected'], reject: ['review'], reopen: ['rejected'] }[input.decision];
+    // One in review without an ID check can be reopened too, so the agent can take it.
+    const reopenable = app.identityOutcome === null ? ['rejected', 'review'] : ['rejected'];
+    const from = { approve: ['review', 'rejected'], reject: ['review'], reopen: reopenable }[input.decision];
     if (!from.includes(app.status)) {
       throw conflict(
         input.decision === 'reopen' ? 'not_declined' : 'not_in_review',
         input.decision === 'reopen'
-          ? 'Only a declined application can be reopened'
+          ? 'Only a declined application, or one without an ID check, can be reopened'
           : 'Only an application in review can be decided',
         { status: app.status },
       );
@@ -577,6 +700,13 @@ export class AgentApplicationService implements IdentityOwner {
       return { before: app, after: row! };
     }
 
+    // Where the country has the agent ID check on, nobody is approved without one: reopen it for them.
+    if (app.identityOutcome === null) {
+      const saved = await this.countries.currentSettingsIfAny(app.countryCode, tx);
+      if (saved?.settings.identity.agentCheck ?? true) {
+        throw conflict('identity_needed', "This agent hasn't checked their ID. Reopen the application so they can.");
+      }
+    }
     const failed = app.checks.filter((c) => c.outcome === 'failed');
     if (failed.length) {
       throw unprocessable('check_failed', 'A check failed, so this application can only be declined', {
@@ -584,7 +714,9 @@ export class AgentApplicationService implements IdentityOwner {
       });
     }
     let idFingerprint = app.idFingerprint;
-    if (!idFingerprint && app.pendingIdFingerprint) {
+    // An ID check started and never finished proved nothing: approving without one claims no ID.
+    const unproven = app.identityOutcome === null;
+    if (!idFingerprint && app.pendingIdFingerprint && !unproven) {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'id:' + app.pendingIdFingerprint}))`);
       const [holder] = await tx
         .select({ userId: agentApplications.userId, status: agentApplications.status })
@@ -617,7 +749,7 @@ export class AgentApplicationService implements IdentityOwner {
     }
     const [row] = await tx
       .update(agentApplications)
-      .set({ status: 'approved', idFingerprint, ...decided })
+      .set({ status: 'approved', idFingerprint, ...(unproven ? { pendingIdFingerprint: null } : {}), ...decided })
       .where(eq(agentApplications.userId, input.userId))
       .returning();
     // A payout account waiting because its name only nearly matched was looked at with the application, so

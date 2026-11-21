@@ -8,7 +8,7 @@ import { Button, Text } from '@/ui/kit';
 import { ObScreen, Question, TextBox } from '@/ui/onboarding';
 
 export default function Name() {
-  const { updateProfile, user } = useSession();
+  const { updateProfile, user, api } = useSession();
   const [first, setFirst] = useState(user?.firstName ?? '');
   const [last, setLast] = useState(user?.lastName ?? '');
   const [email, setEmail] = useState(user?.email ?? '');
@@ -27,8 +27,8 @@ export default function Name() {
         // Clearing a saved email removes it.
         ...(email.trim() ? { email: email.trim() } : user?.email ? { email: null } : {}),
       });
-      // Customers check their ID next, as every customer is verified; agents' applications have it.
-      router.replace(VARIANT === 'agent' ? '/home' : '/verify');
+      // Customers check their ID next, where the country asks for it; agents' applications have it.
+      router.replace(VARIANT === 'agent' || !(await customerCheckAsked(api)) ? '/home' : '/verify');
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -101,3 +101,12 @@ export default function Name() {
 const styles = StyleSheet.create({
   pair: { flexDirection: 'row', gap: 8 },
 });
+
+/** Whether the customer's country asks them to check their ID; when it can't be told, the check screen decides. */
+async function customerCheckAsked(api: ReturnType<typeof useSession>['api']) {
+  try {
+    return (await api.get<{ required?: boolean }>('/v1/me/identity')).required !== false;
+  } catch {
+    return true;
+  }
+}

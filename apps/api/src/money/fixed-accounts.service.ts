@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { CountrySettings } from '@jiffo/shared';
 import { and, desc, eq, gt, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
@@ -72,19 +73,31 @@ export class FixedAccountsService {
   ) {}
 
   /**
-   * The ways to add money on offer in a country now. There is always one: with own account numbers off, or
-   * not issued by the provider in use, one-time account numbers are offered whatever the setting says.
+   * The ways to add money on offer in a country now, to this customer when one is given. There is always one:
+   * with own account numbers off, not issued by the provider in use, or not open to the customer, one-time
+   * account numbers are offered whatever the setting says.
    */
-  async offer(countryCode: string) {
+  async offer(countryCode: string, userId?: string) {
     const { settings } = await this.countries.currentSettings(countryCode);
     const payments = this.providers.current('payments');
-    const fixed = settings.topUps.fixedAccount && supports(payments);
+    const fixed =
+      settings.topUps.fixedAccount && supports(payments) && (!userId || (await this.openTo(userId, settings)));
     return { settings, payments, fixed, oneTime: settings.topUps.oneTimeAccount || !fixed };
+  }
+
+  /**
+   * Own account numbers need a verified ID: the provider checks the BVN against the name sent, and only the ID
+   * check proves that name, so an invented one can't be tried against a stranger's BVN. Where the country asks
+   * for the check, a customer without one is asked to take it first; where it doesn't (Settings, Identity),
+   * they're for customers who took one anyway.
+   */
+  private async openTo(userId: string, settings: CountrySettings) {
+    return settings.identity.customerCheck || (await this.customerIdentity.verified(userId));
   }
 
   /** The ways to add money on offer, and the customer's own account number when they have one. */
   async view(auth: AuthContext) {
-    const { payments, fixed, oneTime } = await this.offer(auth.countryCode);
+    const { payments, fixed, oneTime } = await this.offer(auth.countryCode, auth.userId);
     let account = await this.shown(auth.userId, payments.name, fixed);
     if (
       account?.status === 'pending' &&
@@ -118,6 +131,13 @@ export class FixedAccountsService {
     }
     if (!payments.issueFixedAccount || !payments.fixedAccountState) {
       throw conflict('fixed_accounts_unsupported', 'Own account numbers are not on offer right now');
+    }
+    // Where the country doesn't ask for the ID check, `assertVerified` above lets everyone through.
+    if (!(await this.customerIdentity.verified(auth.userId))) {
+      throw conflict(
+        'fixed_account_needs_id',
+        'Own account numbers need a verified ID. Add money with a one-time account number instead.',
+      );
     }
     // One that works already, even at a provider admin has switched from, is the customer's account.
     const working = await this.working(auth.userId, payments.name);

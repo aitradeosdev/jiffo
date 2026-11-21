@@ -63,6 +63,16 @@ export class DeviceSecurityService {
     this.pinKey = subKey(Buffer.from(config.PIN_KEY, 'hex'), 'jiffo app pin');
   }
 
+  /** Whether this country's agents take selfie checks (Settings, Identity: on wherever they check their ID). */
+  private async agentSelfies(countryCode: string) {
+    try {
+      return (await this.countries.currentSettingsIfAny(countryCode))?.settings.identity.agentCheck ?? true;
+    } catch {
+      // A stored version that no longer reads: the safer answer.
+      return true;
+    }
+  }
+
   /** What the app needs to know to guide the person: a key on this phone, a PIN, and whether it's locked. */
   async status(auth: AuthContext) {
     const [[device], [user]] = await Promise.all([
@@ -157,8 +167,11 @@ export class DeviceSecurityService {
       .where(eq(devices.id, auth.deviceId));
     if (!device?.key) throw forbidden('device_key_needed', 'Set up this phone for money actions first');
     // A new phone, or one a sign-in check doubted, first shows it's the agent holding it (A4, X4, MB3, A10).
+    // Only where agents check their ID: the selfie compares with the face kept from it.
     const selfie = phoneSelfieReason(device);
-    if (selfie && auth.app === 'agent') throw forbidden('selfie_needed', SELFIE_WHY[selfie], { reason: selfie });
+    if (selfie && auth.app === 'agent' && (await this.agentSelfies(auth.countryCode))) {
+      throw forbidden('selfie_needed', SELFIE_WHY[selfie], { reason: selfie });
+    }
     if (!request.nonce || !request.signature) throw forbidden('signature_needed', 'Confirm this on your phone');
     if (pin !== false && !pin) throw forbidden('pin_missing', 'Enter your app PIN');
     return { key: device.key, nonce: request.nonce, signature: request.signature };

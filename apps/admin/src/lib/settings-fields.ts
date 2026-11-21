@@ -143,6 +143,18 @@ export const SECTIONS: Section[] = [
     about: 'Which documents people can verify with, and how.',
     fields: [
       {
+        path: 'identity.customerCheck',
+        label: 'Customers check their ID',
+        kind: 'bool',
+        help: "Before adding money or requesting an errand. Off: customers do both without one, and the app doesn't ask.",
+      },
+      {
+        path: 'identity.agentCheck',
+        label: 'Agents check their ID',
+        kind: 'bool',
+        help: "In their application, with selfie checks after. Off: no ID or selfie checks, and staff decide every application. Switched back on, agents approved without one go back to their application, offline, until they've checked it.",
+      },
+      {
         path: 'identity.customerIdTypes',
         label: 'IDs customers can verify with',
         kind: 'multi',

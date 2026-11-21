@@ -586,6 +586,7 @@ function ApplicationCard({
               id={id}
               status={app.status}
               failed={app.checks.filter((c) => c.outcome === 'failed').map((c) => c.label)}
+              noIdCheck={app.identityOutcome === null}
             />
           </div>
         ) : null}

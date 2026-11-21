@@ -13,6 +13,7 @@ import { sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { admins, categories, settingsVersions, states } from '../db/schema';
 import { badRequest, conflict, notFound } from '../common/errors';
+import { AgentApplicationService, type Reopened } from '../agents/application.service';
 import { AuditService } from './audit.service';
 import { requireCountry } from './countries';
 import type { AdminContext } from './admin.types';
@@ -31,6 +32,7 @@ export class SettingsAdminService {
     private readonly audit: AuditService,
     private readonly identity: IdentityChecksService,
     private readonly providers: ProvidersService,
+    private readonly applications: AgentApplicationService,
   ) {}
 
   private country(code: string) {
@@ -157,7 +159,8 @@ export class SettingsAdminService {
 
   async saveSettings(admin: AdminContext, code: string, input: { basedOn: number; settings: unknown; note: string }) {
     const parsed = await this.validated(code, input);
-    return this.db.transaction(async (tx) => {
+    let reopened: Reopened[] = [];
+    const saved = await this.db.transaction(async (tx) => {
       // One save at a time per country: a second save made at the same moment then sees the first's version.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'settings:' + code}))`);
       const [latest] = await tx
@@ -182,15 +185,21 @@ export class SettingsAdminService {
         data: parsed as CountrySettings,
         createdBy: admin.adminId,
       });
+      // The agent ID check switched back on: agents approved without one go back to their application.
+      if (before.success && !before.data.identity.agentCheck && parsed.identity.agentCheck) {
+        reopened = await this.applications.reopenForIdCheck(tx, code);
+      }
       await this.audit.record(tx, admin, {
         action: 'settings.save',
         targetType: 'settings',
         targetId: `${code}:${version}`,
         countryCode: code,
-        data: { version, note: input.note, changes },
+        data: { version, note: input.note, changes, ...(reopened.length ? { agentsToCheckId: reopened.length } : {}) },
       });
       return { version, changes };
     });
+    if (reopened.length) void this.applications.tellToCheckId(reopened);
+    return saved;
   }
 
   /* ---------- Categories ---------- */
