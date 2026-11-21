@@ -1,7 +1,9 @@
+import { eq, sql } from 'drizzle-orm';
 import { io, type Socket } from 'socket.io-client';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_MATCHING_SETTINGS } from '@jiffo/shared';
+import { agentPresence } from '../src/db/schema';
 import {
   act,
   adminAs,
@@ -84,7 +86,13 @@ describe('the board', () => {
         .set(agent.headers)
         .expect(200)
     ).body as {
-      errands: Array<{ id: string; travelSeconds: number; travelEstimated: boolean; perKmKobo: number }>;
+      errands: Array<{
+        id: string;
+        travelSeconds: number;
+        travelEstimated: boolean;
+        perKmKobo: number;
+        agentEarnsKobo: number;
+      }>;
     };
   function connect(person: Person): Promise<Socket> {
     const socket = io(`${t.url}/realtime`, {
@@ -164,5 +172,75 @@ describe('the board', () => {
     expect(await watch(socket, { lat: 6.45, lng: 3.47 })).toMatchObject({ ok: false, error: { code: 'not_here' } });
     const customerSocket = await connect(customer);
     expect(await watch(customerSocket, IKEJA)).toMatchObject({ ok: false });
+  });
+
+  it('works the order out from where the stops really are, not the rounded places agents see', async () => {
+    // Twenty metres apart, either side of where the places agents see are rounded to.
+    const pickup = { lat: 6.5849, lng: 3.36 };
+    const agent = await agentAt(pickup);
+    const errand = await createErrand(t, customer, {
+      stops: [
+        { kind: 'pickup', label: 'Shop', address: 'Oba Akinjobi Way, Ikeja', ...pickup },
+        { kind: 'dropoff', label: 'Home', address: 'Oba Akinjobi Way, Ikeja', lat: 6.5851, lng: 3.36 },
+      ],
+    });
+    const shown = (await board(agent, pickup)).errands.find((e) => e.id === errand.id)!;
+    // A trip under a km counts as one: they earn it all per km.
+    expect(shown.perKmKobo).toBe(shown.agentEarnsKobo);
+  });
+
+  it('tells watchers of an urgent errand on the board where offers are off, and not of one being offered', async () => {
+    const watcher = await agentAt(IKEJA);
+    const socket = await connect(watcher);
+    expect(await watch(socket, IKEJA)).toEqual({ ok: true });
+    const got = heard(socket);
+    const urgentAt = (at: { lat: number; lng: number }) =>
+      createErrand(t, customer, {
+        urgent: true,
+        stops: [
+          { kind: 'pickup', label: 'Shop', address: 'Isaac John St, Ikeja GRA', ...at },
+          { kind: 'dropoff', label: 'Home', address: 'Allen Avenue, Ikeja', lat: at.lat + 0.01, lng: at.lng },
+        ],
+      });
+    // Offered one at a time: not on the board, so nothing to say about it.
+    const offered = await urgentAt(east(0.4));
+    await settle();
+    expect(got.some((c) => c.errandId === offered.id)).toBe(false);
+    await matching({ offers: false });
+    try {
+      const open = await urgentAt(east(0.6));
+      await settle();
+      expect(got).toContainEqual({ errandId: open.id, change: 'added' });
+    } finally {
+      await matching({ offers: true });
+    }
+  });
+
+  it('lets only an approved agent online with a recent position watch', async () => {
+    const offline = await agentAt(IKEJA);
+    await t.db.update(agentPresence).set({ online: false }).where(eq(agentPresence.userId, offline.userId));
+    expect(await watch(await connect(offline), IKEJA)).toMatchObject({ ok: false, error: { code: 'go_online' } });
+
+    const stale = await agentAt(IKEJA);
+    await t.db
+      .update(agentPresence)
+      .set({ locatedAt: sql`now() - interval '1 hour'` })
+      .where(eq(agentPresence.userId, stale.userId));
+    expect(await watch(await connect(stale), IKEJA)).toMatchObject({ ok: false, error: { code: 'go_online' } });
+
+    const applying = await signIn(t, 'agent', { unapproved: true });
+    await t.db.insert(agentPresence).values({
+      userId: applying.userId,
+      countryCode: 'NG',
+      online: true,
+      lat: IKEJA.lat,
+      lng: IKEJA.lng,
+      location: sql`ST_SetSRID(ST_MakePoint(${IKEJA.lng}, ${IKEJA.lat}), 4326)::geography`,
+      locatedAt: new Date(),
+    });
+    expect(await watch(await connect(applying), IKEJA)).toMatchObject({
+      ok: false,
+      error: { code: 'application_pending' },
+    });
   });
 });

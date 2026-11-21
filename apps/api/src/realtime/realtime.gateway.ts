@@ -15,6 +15,7 @@ import { DB, type Db } from '../db/database.module';
 import { agentPresence, errandStops, errands, type AppName } from '../db/schema';
 import { haversineMeters } from '../adapters/maps';
 import { CountriesService } from '../countries/countries.service';
+import { AgentApplicationService } from '../agents/application.service';
 import { SessionVerifier } from '../auth/auth.guard';
 import { RateLimiter } from '../common/rate-limit';
 import type { AuthContext } from '../auth/auth.types';
@@ -52,6 +53,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnModuleInit, OnMod
     @Inject(DB) private readonly db: Db,
     private readonly limiter: RateLimiter,
     private readonly countries: CountriesService,
+    private readonly applications: AgentApplicationService,
   ) {}
 
   onModuleInit() {
@@ -74,6 +76,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnModuleInit, OnMod
     this.sweeping = true;
     try {
       await this.recheck();
+      await this.recheckBoard();
     } catch (error) {
       this.logger.error(`Re-checking live connections failed: ${(error as Error).message}`);
     } finally {
@@ -112,6 +115,24 @@ export class RealtimeGateway implements OnGatewayConnection, OnModuleInit, OnMod
         if (!room.startsWith(ERRAND_PREFIX)) continue;
         if (!participantRole(byId.get(room.slice(ERRAND_PREFIX.length)), auth)) await socket.leave(room);
       }
+    }
+  }
+
+  /** An agent who went offline stops watching the board until they watch it again (M11). */
+  private async recheckBoard() {
+    const watching = [...this.server.sockets.values()].filter(
+      (s) => s.connected && s.data.auth && [...s.rooms].some((r) => r.startsWith(BOARD_PREFIX)),
+    );
+    if (!watching.length) return;
+    const watcherIds = [...new Set(watching.map((s) => (s.data.auth as AuthContext).userId))];
+    const online = await this.db
+      .select({ userId: agentPresence.userId })
+      .from(agentPresence)
+      .where(and(inArray(agentPresence.userId, watcherIds), eq(agentPresence.online, true)));
+    const still = new Set(online.map((o) => o.userId));
+    for (const socket of watching) {
+      if (still.has((socket.data.auth as AuthContext).userId)) continue;
+      for (const room of [...socket.rooms]) if (room.startsWith(BOARD_PREFIX)) await socket.leave(room);
     }
   }
 
@@ -168,16 +189,38 @@ export class RealtimeGateway implements OnGatewayConnection, OnModuleInit, OnMod
     if (!(await this.limiter.hit('presence', `u:${auth.userId}`)).ok) {
       return { ok: false, error: { code: 'rate_limited', message: 'Too many requests. Try again in a minute.' } };
     }
-    const [[presence], current] = await Promise.all([
+    const [[presence], current, approved] = await Promise.all([
       this.db
-        .select({ lat: agentPresence.lat, lng: agentPresence.lng })
+        .select({
+          lat: agentPresence.lat,
+          lng: agentPresence.lng,
+          online: agentPresence.online,
+          locatedAt: agentPresence.locatedAt,
+        })
         .from(agentPresence)
         .where(eq(agentPresence.userId, auth.userId)),
       this.countries.currentSettingsIfAny(auth.countryCode),
+      this.applications.approved(auth.userId),
     ]);
+    // As the board itself: an approved agent, online, where their phone said they are a moment ago.
+    if (!approved) {
+      return {
+        ok: false,
+        error: {
+          code: 'application_pending',
+          message: 'Finish your application, and once it is approved you can take errands',
+        },
+      };
+    }
     const nearKm = (current?.settings.security ?? DEFAULT_SECURITY_SETTINGS).boardNearKm;
-    const reachKm = (current?.settings.matching ?? DEFAULT_MATCHING_SETTINGS).boardRadiusKm;
-    if (presence?.lat == null || presence.lng == null) {
+    const matching = current?.settings.matching ?? DEFAULT_MATCHING_SETTINGS;
+    const reachKm = matching.boardRadiusKm;
+    const fresh =
+      !!presence?.locatedAt && Date.now() - presence.locatedAt.getTime() <= matching.locationFreshMinutes * 60_000;
+    if (!presence?.online || !fresh) {
+      return { ok: false, error: { code: 'go_online', message: 'Go online to see and take errands' } };
+    }
+    if (presence.lat == null || presence.lng == null) {
       return { ok: false, error: { code: 'not_here', message: 'The board shows errands near where you are' } };
     }
     if (haversineMeters({ lat: presence.lat, lng: presence.lng }, parsed.data) > nearKm * 1000) {

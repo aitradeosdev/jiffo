@@ -127,10 +127,30 @@ export function useBoardWatch(at: { lat: number; lng: number } | null) {
       socket.off('ready', again);
     };
   }, [socket]);
+  // Refused (the server hasn't the agent's latest position yet, or too many asks): asked again shortly, rather
+  // than going without live updates until the agent moves on or five minutes pass.
+  const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => clearTimeout(retry.current ?? undefined), []);
   useEffect(() => {
     if (!socket || !at || !socket.connected) return;
     if (!watchAgain(last.current, at, Date.now())) return;
     last.current = { at, when: Date.now() };
-    socket.emit('board.watch', at);
+    socket
+      .timeout(10_000)
+      .emitWithAck('board.watch', at)
+      .then((ack: { ok: boolean }) => {
+        if (ack?.ok) return;
+        last.current = null;
+        clearTimeout(retry.current ?? undefined);
+        retry.current = setTimeout(() => {
+          const now = here.current;
+          if (!now || !socket.connected) return;
+          last.current = { at: now, when: Date.now() };
+          socket.emit('board.watch', now);
+        }, 15_000);
+      })
+      .catch(() => {
+        last.current = null;
+      });
   }, [socket, at]);
 }

@@ -34,14 +34,18 @@ export function boardCell(at: { lat: number; lng: number }) {
   return `${Math.floor(at.lat / CELL_DEGREES)}:${Math.floor(at.lng / CELL_DEGREES)}`;
 }
 
-/** The cells an agent watches: theirs and enough around it that any pickup within their reach is in one. */
+/**
+ * The cells an agent watches: theirs and enough around it that any pickup within their reach is in one. Cells are
+ * narrower east to west away from the equator, so more are watched that way there.
+ */
 export function boardCellsAround(at: { lat: number; lng: number }, reachKm: number) {
-  const rings = Math.max(1, Math.ceil(reachKm / CELL_KM));
+  const northSouth = Math.max(1, Math.ceil(reachKm / CELL_KM));
+  const eastWest = Math.max(1, Math.ceil(reachKm / (CELL_KM * Math.max(0.1, Math.cos((at.lat * Math.PI) / 180)))));
   const lat = Math.floor(at.lat / CELL_DEGREES);
   const lng = Math.floor(at.lng / CELL_DEGREES);
   const cells: string[] = [];
-  for (let i = -rings; i <= rings; i++) {
-    for (let j = -rings; j <= rings; j++) cells.push(`${lat + i}:${lng + j}`);
+  for (let i = -northSouth; i <= northSouth; i++) {
+    for (let j = -eastWest; j <= eastWest; j++) cells.push(`${lat + i}:${lng + j}`);
   }
   return cells;
 }

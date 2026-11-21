@@ -352,11 +352,26 @@ export class ErrandsService implements OnModuleInit {
       () => 'prospect',
     );
     const earns = await Promise.all(rows.map((r) => this.agentEarns(r.errand, tier)));
-    // "Best for you" (docs/matching.md, M11): quickest to reach, then most per km of the whole trip, then newest.
+    // "Best for you" (docs/matching.md, M11): quickest to reach, then most per km of the whole trip, then newest,
+    // worked out from where the stops really are, not the rounded places agents are shown.
+    const exact = rows.length
+      ? await this.db
+          .select({ errandId: errandStops.errandId, lat: errandStops.lat, lng: errandStops.lng })
+          .from(errandStops)
+          .where(
+            inArray(
+              errandStops.errandId,
+              rows.map((r) => r.errand.id),
+            ),
+          )
+          .orderBy(errandStops.errandId, errandStops.seq)
+      : [];
+    const stopsOf = new Map<string, Array<{ lat: number; lng: number }>>();
+    for (const st of exact) stopsOf.set(st.errandId, [...(stopsOf.get(st.errandId) ?? []), st]);
     const pickups = views.map((v, i) => ({
       id: v.id,
-      lat: v.stops[0]!.lat,
-      lng: v.stops[0]!.lng,
+      lat: stopsOf.get(v.id)![0]!.lat,
+      lng: stopsOf.get(v.id)![0]!.lng,
       straightMeters: Math.round(Number(rows[i]!.distanceMeters)),
     }));
     const travel = rules.boardTravelTimes
@@ -364,8 +379,9 @@ export class ErrandsService implements OnModuleInit {
       : new Map(pickups.map((p) => [p.id, TravelTimesService.estimate(p.straightMeters, rules)]));
     const listed = views.map((v, i) => {
       const toPickup = travel.get(v.id)!;
+      const real = stopsOf.get(v.id)!;
       let along = 0;
-      for (let s = 1; s < v.stops.length; s++) along += haversineMeters(v.stops[s - 1]!, v.stops[s]!);
+      for (let s = 1; s < real.length; s++) along += haversineMeters(real[s - 1]!, real[s]!);
       return {
         ...v,
         distanceMeters: Math.round(Number(rows[i]!.distanceMeters)),
@@ -607,7 +623,7 @@ export class ErrandsService implements OnModuleInit {
     // errands sent in its state just now (M5).
     await this.offers.errandCreated(created);
     // On the board for agents around it at once (M11), unless offered one at a time instead.
-    if (!created.urgent) this.realtime.boardChanged(created.id, 'added');
+    if (!created.urgent || !settings.matching.offers) this.realtime.boardChanged(created.id, 'added');
 
     return this.viewOne(created, 'customer', auth.userId);
   }

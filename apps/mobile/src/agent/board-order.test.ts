@@ -1,13 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { sortBoard, watchAgain } from './board-order';
 
-const job = (
-  id: string,
-  o: Partial<{ distanceMeters: number; agentEarnsKobo: number; createdAt: string; buy: boolean }>,
-) => ({
+const job = (id: string, o: Partial<{ distanceMeters: number; feeKobo: number; createdAt: string; buy: boolean }>) => ({
   id,
   distanceMeters: 1_000,
-  agentEarnsKobo: 200_000,
+  feeKobo: 200_000,
   createdAt: '2026-11-21T10:00:00.000Z',
   buy: false,
   ...o,
@@ -16,12 +13,12 @@ const job = (
 /** The board's orders (docs/matching.md, M11): best for you as the server sends it, or the agent's choice. */
 describe('the board order', () => {
   const list = [
-    job('a', { distanceMeters: 2_000, agentEarnsKobo: 300_000, createdAt: '2026-11-21T10:01:00.000Z' }),
-    job('b', { distanceMeters: 500, agentEarnsKobo: 100_000, createdAt: '2026-11-21T10:03:00.000Z', buy: true }),
-    job('c', { distanceMeters: 1_000, agentEarnsKobo: 200_000, createdAt: '2026-11-21T10:02:00.000Z' }),
+    job('a', { distanceMeters: 2_000, feeKobo: 300_000, createdAt: '2026-11-21T10:01:00.000Z' }),
+    job('b', { distanceMeters: 500, feeKobo: 100_000, createdAt: '2026-11-21T10:03:00.000Z', buy: true }),
+    job('c', { distanceMeters: 1_000, feeKobo: 200_000, createdAt: '2026-11-21T10:02:00.000Z' }),
   ];
 
-  it('keeps best for you as it came, and sorts by nearest, what they earn, or newest', () => {
+  it('keeps best for you as it came, and sorts by nearest, the fee shown, or newest', () => {
     expect(sortBoard(list, 'best').map((j) => j.id)).toEqual(['a', 'b', 'c']);
     expect(sortBoard(list, 'near').map((j) => j.id)).toEqual(['b', 'c', 'a']);
     expect(sortBoard(list, 'fee').map((j) => j.id)).toEqual(['a', 'c', 'b']);

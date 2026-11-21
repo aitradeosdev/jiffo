@@ -38,4 +38,11 @@ describe('the board', () => {
     // A pickup within reach is in a watched cell.
     expect(around).toContain(boardCell({ lat: 6.581 + 0.09, lng: 3.355 - 0.09 }));
   });
+
+  it('watches more cells east and west far from the equator, where they are narrower', () => {
+    // At 45°, a tenth of a degree east is under 8 km: two rings that way, one north and south.
+    const far = boardCellsAround({ lat: 45.01, lng: 7.01 }, 10);
+    expect(far).toHaveLength(3 * 5);
+    expect(far).toContain(boardCell({ lat: 45.01, lng: 7.01 + 9 / (111 * Math.cos((45 * Math.PI) / 180)) }));
+  });
 });

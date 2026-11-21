@@ -1,7 +1,7 @@
 import { agentTierLabel } from '@jiffo/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useIsFocused } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSession } from '../auth/session';
 import { ApiError, errorMessage } from '../api/client';
@@ -41,8 +41,11 @@ interface Earnings {
 const DEFAULT_RADIUS_KM = 10;
 /** Live updates keep the board current (M11); this catches up on any missed while the connection dropped. */
 const REFRESH_MS = 60_000;
-/** A burst of board changes reloads it once. */
-const RELOAD_AFTER_MS = 1_500;
+/**
+ * Board changes reload it at most this often, within the board's limit (30 a minute), so a busy area never has
+ * it refused; a burst in between makes one reload.
+ */
+const RELOAD_EVERY_MS = 4_000;
 export const km = (m: number) => (m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`);
 
 /**
@@ -89,6 +92,8 @@ export function AgentBoard() {
       setBoard(await api.get<Board>(`/v1/errands/board?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}`));
       setError(null);
     } catch (e) {
+      // Asked too often: the board shown stays, and the next reload catches up.
+      if (e instanceof ApiError && e.status === 429) return;
       // Refused (an urgent errand to finish, say): the errands shown before can't be taken now.
       if (e instanceof ApiError) setBoard(null);
       setError(errorMessage(e));
@@ -112,15 +117,20 @@ export function AgentBoard() {
   // Live (M11): errands coming on and going off the board around the agent. One taken goes at once; new or
   // changed ones reload the board, once for a burst of them.
   useBoardWatch(presence.online ? presence.coords : null);
+  const focused = useIsFocused();
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastReload = useRef(0);
   useEffect(() => () => clearTimeout(reloadTimer.current ?? undefined), []);
   useRealtimeEvent<{ errandId: string; change: 'added' | 'removed' | 'changed' }>('board.changed', (c) => {
     if (c.change === 'removed') return drop(c.errandId);
-    if (reloadTimer.current) return;
+    // Behind another screen, it loads again when it comes back to the front.
+    if (!focused || reloadTimer.current) return;
+    const wait = Math.max(0, lastReload.current + RELOAD_EVERY_MS - Date.now());
     reloadTimer.current = setTimeout(() => {
       reloadTimer.current = null;
+      lastReload.current = Date.now();
       void load();
-    }, RELOAD_AFTER_MS);
+    }, wait);
   });
   // A slow check besides, for changes missed while the connection was down.
   useFocusEffect(

@@ -3,7 +3,7 @@ export type BoardSort = 'best' | 'near' | 'fee' | 'newest' | 'buy';
 
 interface Sortable {
   distanceMeters: number;
-  agentEarnsKobo: number;
+  feeKobo: number;
   createdAt: string;
   buy: boolean;
 }
@@ -12,7 +12,8 @@ interface Sortable {
 export function sortBoard<T extends Sortable>(list: T[], sort: BoardSort): T[] {
   const out = [...list];
   if (sort === 'near') out.sort((a, b) => a.distanceMeters - b.distanceMeters);
-  if (sort === 'fee') out.sort((a, b) => b.agentEarnsKobo - a.agentEarnsKobo);
+  // By the fee each card shows.
+  if (sort === 'fee') out.sort((a, b) => b.feeKobo - a.feeKobo);
   if (sort === 'newest') out.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   if (sort === 'buy') return out.filter((j) => j.buy);
   return out;
