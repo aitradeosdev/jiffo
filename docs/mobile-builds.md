@@ -37,11 +37,21 @@ All the commands below run in a terminal in the repository's `apps/mobile` folde
 
    Put the two ids in `apps/mobile/eas-projects.json` as `customer` and `agent`, and commit the file. The ids aren't secret. The build settings below (`eas env:set`) are kept per account, so set them again in the new one.
 
-5. Optional: real maps on Android need a Google Maps key with the Maps SDK for Android turned on. Without one, the maps are blank and everything else works. Save it for every build, both apps:
+5. Google's map in the apps. Both phones draw Google's map: places are found with Google, whose terms keep its results off other companies' maps. Each phone needs its own key, from the same Google Cloud project as the API's key or another:
+   - **Android:** a key with the Maps SDK for Android turned on, restricted to Android apps (the two package names, `com.jiffoapp.customer` and `com.jiffoapp.agent`, with their signing certificates' SHA-1 from EAS).
+   - **iPhone:** a key with the Maps SDK for iOS turned on, restricted to iOS apps (the two bundle IDs, the same names).
+
+   The keys go inside the apps, so anyone could read them from an installed app. The restrictions make them useless anywhere else. Save each for every build, both apps:
 
    ```bash
-   eas env:set --scope account --name GOOGLE_MAPS_ANDROID_API_KEY --value <your key> --environment development --environment preview --environment production --visibility sensitive
+   eas env:set --scope account --name GOOGLE_MAPS_ANDROID_API_KEY --value <your Android key> --environment development --environment preview --environment production --visibility sensitive
    ```
+
+   ```bash
+   eas env:set --scope account --name GOOGLE_MAPS_IOS_API_KEY --value <your iPhone key> --environment development --environment preview --environment production --visibility sensitive
+   ```
+
+   Without them, development and preview builds still work: Android's map is blank, and the iPhone draws Apple's map instead. A store build (`production-agent`, `production-customer`) on Expo's servers stops with an error naming the missing key, so neither ships.
 
 ## The API the app talks to
 

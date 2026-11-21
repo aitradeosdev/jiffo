@@ -44,6 +44,62 @@ const pluginOptions = (name: string) => {
   return Array.isArray(entry) ? (entry[1] as Record<string, Record<string, unknown>>) : undefined;
 };
 
+/** The map's keys and plugin options as a build with these settings reads them. */
+const mapsWith = (env: Record<string, string>) => {
+  const saved = { ...process.env };
+  Object.assign(process.env, env);
+  try {
+    const config = appConfig({ config: {} } as Parameters<typeof appConfig>[0]);
+    const entry = config.plugins?.find((p) => Array.isArray(p) && p[0] === 'react-native-maps');
+    return { plugin: (entry as [string, Record<string, unknown>])[1], extra: config.extra! };
+  } finally {
+    for (const key of Object.keys(env)) delete process.env[key];
+    Object.assign(process.env, saved);
+  }
+};
+
+/**
+ * Both phones draw Google's map, as places are found with Google, whose terms keep its results off other
+ * companies' maps. The keys go in at build time.
+ */
+describe("Google's map in the apps", () => {
+  it('goes in the iPhone build with its key, and the app is told so', () => {
+    const maps = mapsWith({ GOOGLE_MAPS_ANDROID_API_KEY: 'android-key', GOOGLE_MAPS_IOS_API_KEY: 'ios-key' });
+    expect(maps.plugin).toEqual({ androidGoogleMapsApiKey: 'android-key', iosGoogleMapsApiKey: 'ios-key' });
+    expect(maps.extra.googleMapsOnIos).toBe(true);
+  });
+
+  it("leaves an iPhone build without the key on Apple's map, outside the store builds", () => {
+    const maps = mapsWith({
+      EAS_BUILD: 'true',
+      EAS_BUILD_PROFILE: 'preview-customer',
+      EAS_BUILD_PLATFORM: 'ios',
+      EXPO_PUBLIC_API_URL: 'https://api.example.com',
+    });
+    expect(maps.plugin.iosGoogleMapsApiKey).toBeUndefined();
+    expect(maps.extra.googleMapsOnIos).toBe(false);
+  });
+
+  it("stops a store build without its phone's key, rather than ship Apple's map or a blank one", () => {
+    const store = {
+      EAS_BUILD: 'true',
+      EAS_BUILD_PROFILE: 'production-agent',
+      EXPO_PUBLIC_API_URL: 'https://api.example.com',
+    };
+    expect(() => mapsWith({ ...store, EAS_BUILD_PLATFORM: 'ios', GOOGLE_MAPS_ANDROID_API_KEY: 'a' })).toThrow(
+      'GOOGLE_MAPS_IOS_API_KEY',
+    );
+    expect(() => mapsWith({ ...store, EAS_BUILD_PLATFORM: 'android', GOOGLE_MAPS_IOS_API_KEY: 'i' })).toThrow(
+      'GOOGLE_MAPS_ANDROID_API_KEY',
+    );
+    // Each phone's build needs only its own key.
+    expect(mapsWith({ ...store, EAS_BUILD_PLATFORM: 'ios', GOOGLE_MAPS_IOS_API_KEY: 'i' }).extra.googleMapsOnIos).toBe(
+      true,
+    );
+    expect(() => mapsWith({ ...store, EAS_BUILD_PLATFORM: 'android', GOOGLE_MAPS_ANDROID_API_KEY: 'a' })).not.toThrow();
+  });
+});
+
 /**
  * Release builds of both Android apps are shrunk and obfuscated with R8 (docs/security-plan.md, MB7), so the
  * Java and Kotlin in them are harder to read and patch. The keep rules only keep what native code and the
