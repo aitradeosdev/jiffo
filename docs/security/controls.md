@@ -53,7 +53,7 @@ How Jiffo protects people, money and data, area by area. What is required is in 
 - **Live or Test, per country (Settings, Security, Sign-in codes):** Live, the default, texts each code.
   - **Test, for trying the apps without an SMS provider:** no text is sent. The code goes back to the app, which shows it at the bottom of the code screen with a button to use it. Every other rule holds: the limits, the wait before another code, the tries, a single use.
   - **What it costs:** anyone can sign in to any number in that country, so use it only while nobody real uses the apps there. Switching needs a second admin's approval, like every settings change, and every page of the admin panel warns while a country is in Test.
-  - **Production:** a production server refuses to save Test, and texts every code even where Test was saved before. The one exception is a server set up with `ALLOW_TEST_SIGN_IN_CODES=true`, for one nobody real uses, such as a shared test server run in production mode.
+  - **Production:** a production server refuses to save Test, and texts every code even where Test was saved before. The panel then warns that Test is saved but ignored, as no settings save for that country goes through until it's switched to Live. The one exception is a server set up with `ALLOW_TEST_SIGN_IN_CODES=true`, for one nobody real uses, such as a shared test server run in production mode.
   - **Kept apart:** each code shown in the app is marked so in the database (`otp_challenges.shown_in_app`), so sign-ins made with one can be found later.
 - **A new phone:** signing in on one signs the others out of that app, and they get a push saying so.
 - **Copied refresh tokens:**

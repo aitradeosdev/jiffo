@@ -43,18 +43,32 @@ const SECTIONS: Array<NavItem & { needs: Permission }> = [
 
 /**
  * On every page while a country's sign-in codes are in Test (Settings, Security): no texts are sent and the app
- * shows each code, so anyone can sign in to any number there.
+ * shows each code, so anyone can sign in to any number there. Also while Test is saved where this server texts
+ * codes all the same (production), since no settings save for that country goes through until it is fixed.
  */
 function TestCodesWarning({ countries }: { countries: Country[] }) {
-  const testing = countries.filter((c) => c.signInCodes === 'test');
-  if (!testing.length) return null;
-  const names = testing.map((c) => c.name).join(', ');
+  const names = (mode: Country['signInCodes']) =>
+    countries
+      .filter((c) => c.signInCodes === mode)
+      .map((c) => c.name)
+      .join(', ');
+  const testing = names('test');
+  const ignored = names('test_ignored');
+  if (!testing && !ignored) return null;
   return (
-    <div className="mb-6">
-      <Notice tone="warn">
-        Sign-in codes are in Test in {names}: no texts are sent and the app shows each code, so anyone can sign in to
-        any number there. Switch them to Live in Settings, Security, before real people use the apps.
-      </Notice>
+    <div className="mb-6 space-y-2">
+      {testing ? (
+        <Notice tone="warn">
+          Sign-in codes are in Test in {testing}: no texts are sent and the app shows each code, so anyone can sign in
+          to any number there. Switch them to Live in Settings, Security, before real people use the apps.
+        </Notice>
+      ) : null}
+      {ignored ? (
+        <Notice tone="warn">
+          Sign-in codes are saved as Test in {ignored}, but this server is in production and texts them all the same.
+          Switch them to Live in Settings, Security: until then, settings changes there are refused.
+        </Notice>
+      ) : null}
     </div>
   );
 }

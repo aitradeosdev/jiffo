@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { and, count, eq, gt } from 'drizzle-orm';
+import { and, count, desc, eq, gt } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { APP_CONFIG, type AppConfig } from '../src/config/app-config';
 import { OtpService } from '../src/auth/otp.service';
-import { alerts, otpChallenges } from '../src/db/schema';
+import { alerts, otpChallenges, settingsVersions } from '../src/db/schema';
 import { adminAs, approved, createTestApp, randomIp, randomPhone, type TestApp } from './helpers';
 
 /**
@@ -42,6 +42,14 @@ describe('sign-in codes, Live and Test', () => {
     );
   }
   const codes = (signInCodes: string) => security({ signInCodes });
+  /** How the admin panel says a country's sign-in codes are sent. */
+  const shownFor = async (code: string) =>
+    (
+      (await request(t.http).get('/v1/admin/me').set(owner.headers).expect(200)).body.countries as Array<{
+        code: string;
+        signInCodes: string;
+      }>
+    ).find((c) => c.code === code)?.signInCodes;
   const ask = (phone: string, ip = randomIp()) =>
     request(t.http).post('/v1/auth/otp/request').set('x-forwarded-for', ip).send({ phone });
   const verify = (phone: string, code: string, ip = randomIp()) =>
@@ -116,11 +124,12 @@ describe('sign-in codes, Live and Test', () => {
     try {
       config.NODE_ENV = 'production';
       config.ALLOW_TEST_SIGN_IN_CODES = false;
-      // Saved while it was allowed: codes are texted all the same.
+      // Saved while it was allowed: codes are texted all the same, and the panel says why the setting reads Test.
       const phone = randomPhone();
       const sent = (await ask(phone).expect(200)).body;
       expect(sent).not.toHaveProperty('testCode');
       expect(t.messaging.lastCodeFor(phone)).toMatch(/^\d{6}$/);
+      expect(await shownFor('NG')).toBe('test_ignored');
       // And it can't be saved again.
       const refused = await codes('test');
       expect(refused.status).toBe(400);
@@ -135,6 +144,23 @@ describe('sign-in codes, Live and Test', () => {
       config.NODE_ENV = before.env;
       config.ALLOW_TEST_SIGN_IN_CODES = before.allowed;
     }
+  });
+
+  it("keep the panel working when a country's saved settings no longer read", async () => {
+    const [latest] = await t.db
+      .select()
+      .from(settingsVersions)
+      .where(eq(settingsVersions.countryCode, 'NG'))
+      .orderBy(desc(settingsVersions.version))
+      .limit(1);
+    // A version a later, stricter rule refuses: the panel must still open, to save the one that fixes it.
+    await t.db.insert(settingsVersions).values({
+      countryCode: 'NG',
+      version: latest!.version + 1,
+      data: { ...latest!.data, security: { ...latest!.data.security, signInCodes: 'bogus' as 'live' } },
+    });
+    expect(await shownFor('NG')).toBe('live');
+    expect((await codes('live')).status).toBe(200);
   });
 
   it('show in the admin panel which countries are in Test', async () => {
