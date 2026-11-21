@@ -164,6 +164,61 @@ describe('service areas', () => {
       .expect(201);
   });
 
+  it('take a long shared edge drawn by hand, a thin sliver over the line, as no overlap', async () => {
+    // About 11 m over Bodija along its 4.4 km western edge: almost 5 hectares, but no wider than a drawn line.
+    await admin('post', '/areas')
+      .send({ cityId: ibadan.id, name: 'Apete', boundary: box(3.8, 7.3, 3.9001, 7.5) })
+      .expect(201);
+  });
+
+  it('put a point on a shared edge in the area of the city it is really in', async () => {
+    const egbeda = (
+      await admin('post', '/cities')
+        .send({ stateId: oyo.id, name: 'Egbeda', boundary: box(4.05, 7.3, 4.3, 7.5) })
+        .expect(201)
+    ).body;
+    const central = (
+      await admin('post', '/areas')
+        .send({ cityId: egbeda.id, name: 'Egbeda Central', boundary: box(4.05, 7.35, 4.1, 7.4) })
+        .expect(201)
+    ).body;
+    // An Ibadan area drawn about 44 m over the city line, into Egbeda Central: named to come first.
+    const akobo = (
+      await admin('post', '/areas')
+        .send({ cityId: ibadan.id, name: 'Akobo', boundary: box(4.0, 7.35, 4.0504, 7.4) })
+        .expect(201)
+    ).body;
+    for (const id of [central.id, akobo.id]) await admin('patch', `/areas/${id}`).send({ enabled: true }).expect(200);
+    await admin('patch', `/cities/${egbeda.id}`).send({ enabled: true }).expect(200);
+    const onTheLine = [
+      { kind: 'pickup', label: 'Shop', address: 'Egbeda', lat: 7.37, lng: 4.0502 },
+      { kind: 'dropoff', label: 'Home', address: 'Egbeda', lat: 7.375, lng: 4.06 },
+    ];
+    const sent = (await send(onTheLine).expect(201)).body;
+    const [row] = await t.db.select().from(errands).where(eq(errands.id, sent.id));
+    expect(row!.areaId).toBe(central.id);
+  });
+
+  it('take a city redrawn and an area added to it at the same moment, without either failing', async () => {
+    for (let i = 0; i < 3; i++) {
+      const [redrawn, added] = await Promise.all([
+        admin('patch', `/cities/${ibadan.id}`).send({ boundary: IBADAN }),
+        admin('post', '/areas')
+          .send({ cityId: ibadan.id, name: `Moniya ${i}`, boundary: box(3.8, 7.4 + i * 0.02, 3.81, 7.41 + i * 0.02) })
+          .then((r) => r),
+      ]);
+      expect(redrawn.status, JSON.stringify(redrawn.body)).toBe(200);
+      expect([201, 422]).toContain(added.status);
+    }
+  });
+
+  it('leave Ogun State out of the development area for Lagos', async () => {
+    // Sango-Ota, Ogun State, just over the Lagos border.
+    const ota = { kind: 'pickup', label: 'Shop', address: 'Sango-Ota', lat: 6.69, lng: 3.23 };
+    const res = await send([ota, { ...ota, kind: 'dropoff', lat: 6.6143, lng: 3.358 }]);
+    expect(res.body.error).toMatchObject({ code: 'outside_service_area', stops: [0] });
+  });
+
   it('are changed only by those who may change settings', async () => {
     const ops = await adminAs(t, 'operations');
     await admin('get', '/service-areas?country=NG', ops).expect(200);

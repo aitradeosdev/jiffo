@@ -20,7 +20,8 @@ Jiffo works in areas, drawn in cities, in states, in a country.
 
 - **Drawing:** admin draws each city in a state, and each area in a city, on a map. The rules for a shape:
   - an area stays inside its city;
-  - areas in a city never overlap, and neither do cities, though they can share an edge (100 m and one hectare of slack for a hand-drawn line);
+  - areas in a city never overlap, and neither do cities, though they can share an edge. A hand-drawn shared edge may overlap by under a hectare, or by a strip no wider than 100 m on average, however long;
+  - where two areas share an edge, a point on it counts in the area of the city it is really in;
   - a shape can't cross itself.
 - **Switching on:** each one is switched on separately, and starts off.
 - **Where errands are taken:** only when every stop is inside an area that is on, in a city, state and country that are on.

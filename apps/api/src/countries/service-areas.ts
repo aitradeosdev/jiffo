@@ -60,7 +60,8 @@ export class ServiceAreasService {
         join states s on s.id = c.state_id and s.enabled and s.country_code = ${countryCode}
         join countries k on k.code = s.country_code and k.enabled
         where a.enabled and ST_Covers(a.boundary, ST_SetSRID(ST_MakePoint(p.lng, p.lat), 4326))
-        order by a.name
+        -- Two areas can share a hand-drawn edge: the one whose city the point is really in comes first.
+        order by ST_Covers(c.boundary, ST_SetSRID(ST_MakePoint(p.lng, p.lat), 4326)) desc, a.name
         limit 1
       ) a on true
       left join cities c on c.id = a.city_id
@@ -82,18 +83,25 @@ export class ServiceAreasService {
 }
 
 /**
- * Roughly the whole of Lagos State, for development and tests: drawn as one city with one area, so errands can be
- * tried before anyone has drawn real ones (`pnpm admin dev-areas`). Never used in production.
+ * Roughly Lagos State, for development and tests: drawn as one city with one area, so errands can be tried before
+ * anyone has drawn real ones (`pnpm admin dev-areas`). A rough outline that keeps off Ogun State's towns over the
+ * border, such as Sango-Ota. Never used in production.
  */
 export const LAGOS_DEV_BOUNDARY: BoundaryInput = {
   type: 'Polygon',
   coordinates: [
     [
-      [2.7, 6.35],
-      [4.4, 6.35],
-      [4.4, 6.75],
-      [2.7, 6.75],
-      [2.7, 6.35],
+      [2.7, 6.37],
+      [4.35, 6.37],
+      [4.35, 6.55],
+      [3.95, 6.65],
+      [3.65, 6.7],
+      [3.4, 6.7],
+      [3.3, 6.64],
+      [3.15, 6.6],
+      [3.05, 6.47],
+      [2.7, 6.47],
+      [2.7, 6.37],
     ],
   ],
 };
@@ -111,7 +119,7 @@ export async function addDevLagos(db: Db) {
       insert into cities (state_id, name, enabled, boundary) values (${state.id}, 'Lagos', true, ${shape}) returning id`);
     await tx.execute(sql`
       insert into areas (city_id, name, enabled, boundary)
-      values (${city[0]!.id}, 'All of Lagos (development)', true, ${shape})`);
+      values (${city[0]!.id}, 'Lagos (development outline)', true, ${shape})`);
   });
   return true;
 }

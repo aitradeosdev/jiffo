@@ -10,8 +10,16 @@ import type { AdminContext } from './admin.types';
 
 /** How far outside its city an area may reach, for a hand-drawn edge (metres). */
 const EDGE_TOLERANCE_M = 100;
-/** Overlap between two cities, or two areas of one city, allowed for a hand-drawn shared edge (square metres). */
+/**
+ * Overlap between two cities, or two areas of one city, taken as a hand-drawn shared edge: under a hectare, or a
+ * sliver no wider on average than the edge slack, however long the edge.
+ */
 const OVERLAP_TOLERANCE_M2 = 10_000;
+const overlapsBeyondEdge = (other: ReturnType<typeof sql>, shape: ReturnType<typeof sql>) => sql`(
+  select ST_Area(i::geography) > ${OVERLAP_TOLERANCE_M2}
+    -- Average width of the overlap: twice its area over its perimeter, for a thin strip.
+    and 2 * ST_Area(i::geography) / nullif(ST_Perimeter(i::geography), 0) > ${EDGE_TOLERANCE_M}
+  from (select ST_Intersection(${other}, ${shape}) as i) x)`;
 /** The smallest area that can be drawn, so a stray click doesn't make one (square metres). */
 const SMALLEST_M2 = 10_000;
 /** The largest city, to catch a shape drawn at the wrong zoom (square metres): a little over Lagos State twice. */
@@ -19,10 +27,12 @@ const LARGEST_CITY_M2 = 10_000 * 1_000_000;
 
 type Change = { name?: string; boundary?: BoundaryInput; enabled?: boolean };
 
-const isUniqueViolation = (error: unknown) =>
-  typeof error === 'object' &&
-  error !== null &&
-  ((error as { code?: string }).code === '23505' || (error as { cause?: { code?: string } }).cause?.code === '23505');
+/** The error codes PostGIS gives for a shape it can't read: an internal error, or an invalid parameter. */
+const SHAPE_ERRORS = new Set(['XX000', '22023']);
+const sqlState = (error: unknown) =>
+  (error as { code?: string; cause?: { code?: string } })?.cause?.code ?? (error as { code?: string })?.code;
+
+const isUniqueViolation = (error: unknown) => sqlState(error) === '23505';
 
 /**
  * Where Jiffo works, as admin draws it (docs/admin-panel.md, Places): cities in states and areas in cities, each
@@ -112,14 +122,24 @@ export class ServiceAreasAdminService {
 
   async updateCity(admin: AdminContext, id: string, change: Change) {
     return this.db.transaction(async (tx) => {
+      // The country's lock first, as every change takes it, then the row: in any other order, a change to the
+      // city and an area being added to it would each wait for the other.
+      await this.lockCountry(
+        tx,
+        await this.countryOf(
+          tx,
+          sql`select s.country_code as code from cities c
+        join states s on s.id = c.state_id where c.id = ${id}`,
+          'city',
+        ),
+      );
       const [before] = await tx
         .select({ city: cities, countryCode: states.countryCode, state: states.code })
         .from(cities)
         .innerJoin(states, eq(states.id, cities.stateId))
         .where(eq(cities.id, id))
-        .for('update', { of: cities });
+        .for('no key update', { of: cities });
       if (!before) throw notFound('city_not_found', 'City not found');
-      await this.lockCountry(tx, before.countryCode);
       let size: number | undefined;
       if (change.boundary) {
         size = await this.checkShape(tx, change.boundary, LARGEST_CITY_M2);
@@ -183,15 +203,24 @@ export class ServiceAreasAdminService {
 
   async updateArea(admin: AdminContext, id: string, change: Change) {
     return this.db.transaction(async (tx) => {
+      await this.lockCountry(
+        tx,
+        await this.countryOf(
+          tx,
+          sql`select s.country_code as code from areas a
+        join cities c on c.id = a.city_id join states s on s.id = c.state_id where a.id = ${id}`,
+          'area',
+        ),
+      );
+      // No key update: errands being sent in the area, which point at it, aren't held up by the change.
       const [before] = await tx
         .select({ area: areas, countryCode: states.countryCode, city: cities.name })
         .from(areas)
         .innerJoin(cities, eq(cities.id, areas.cityId))
         .innerJoin(states, eq(states.id, cities.stateId))
         .where(eq(areas.id, id))
-        .for('update', { of: areas });
+        .for('no key update', { of: areas });
       if (!before) throw notFound('area_not_found', 'Area not found');
-      await this.lockCountry(tx, before.countryCode);
       let size: number | undefined;
       if (change.boundary) {
         size = await this.checkShape(tx, change.boundary, LARGEST_CITY_M2);
@@ -215,6 +244,13 @@ export class ServiceAreasAdminService {
     });
   }
 
+  /** The country a city or area is in, read before any lock. */
+  private async countryOf(tx: Tx, query: ReturnType<typeof sql>, kind: 'city' | 'area') {
+    const { rows } = await tx.execute<{ code: string }>(query);
+    if (!rows[0]) throw notFound(`${kind}_not_found`, kind === 'city' ? 'City not found' : 'Area not found');
+    return rows[0].code;
+  }
+
   /** One change to a country's map at a time, so two overlapping shapes can't both pass the checks at once. */
   private async lockCountry(tx: Tx, countryCode: string) {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'service-areas:' + countryCode}))`);
@@ -228,8 +264,12 @@ export class ServiceAreasAdminService {
         rows: [row],
       } = await tx.execute<{ valid: boolean; m2: number | string }>(sql`
         select ST_IsValid(g) as valid, ST_Area(g::geography) as m2 from (select ${shapeOf(boundary)} as g) s`));
-    } catch {
-      throw unprocessable('invalid_boundary', "This shape can't be used. Redraw it.");
+    } catch (error) {
+      // PostGIS refusing the shape itself; anything else (the database down, a timeout) is an error to report.
+      if (SHAPE_ERRORS.has(sqlState(error) ?? '')) {
+        throw unprocessable('invalid_boundary', "This shape can't be used. Redraw it.");
+      }
+      throw error;
     }
     const m2 = Number(row?.m2 ?? 0);
     if (!row?.valid) throw unprocessable('invalid_boundary', 'The shape crosses itself. Redraw it.');
@@ -243,7 +283,7 @@ export class ServiceAreasAdminService {
       select c.name from cities c join states s on s.id = c.state_id
       where s.country_code = ${countryCode} and (${self}::uuid is null or c.id <> ${self}::uuid)
         and ST_Intersects(c.boundary, ${shapeOf(boundary)})
-        and ST_Area(ST_Intersection(c.boundary, ${shapeOf(boundary)})::geography) > ${OVERLAP_TOLERANCE_M2}
+        and ${overlapsBeyondEdge(sql`c.boundary`, shapeOf(boundary))}
       limit 1`);
     if (rows.length)
       throw unprocessable('cities_overlap', `It overlaps ${rows[0]!.name}. Cities can only share an edge.`);
@@ -259,7 +299,7 @@ export class ServiceAreasAdminService {
       select a.name from areas a
       where a.city_id = ${cityId} and (${self}::uuid is null or a.id <> ${self}::uuid)
         and ST_Intersects(a.boundary, ${shapeOf(boundary)})
-        and ST_Area(ST_Intersection(a.boundary, ${shapeOf(boundary)})::geography) > ${OVERLAP_TOLERANCE_M2}
+        and ${overlapsBeyondEdge(sql`a.boundary`, shapeOf(boundary))}
       limit 1`);
     if (rows.length)
       throw unprocessable('areas_overlap', `It overlaps ${rows[0]!.name}. Areas can only share an edge.`);
