@@ -22,6 +22,7 @@ import { normaliseEmail } from './admin-auth.service';
 import { PeopleAdminService } from './people-admin.service';
 import { ProvidersAdminService } from './providers-admin.service';
 import { SettingsAdminService } from './settings-admin.service';
+import { PricesAdminService, type PriceChange } from './prices-admin.service';
 import { maskPhone } from './masking';
 import { TeamService, type TeamChange } from './team.service';
 
@@ -50,6 +51,7 @@ export class ApprovalRequests implements OnModuleInit {
     private readonly team: TeamService,
     private readonly people: PeopleAdminService,
     private readonly providers: ProvidersAdminService,
+    private readonly prices: PricesAdminService,
   ) {}
 
   onModuleInit() {
@@ -59,6 +61,7 @@ export class ApprovalRequests implements OnModuleInit {
     run('settings_change', (as, p) =>
       this.settings.saveSettings(as, p.code as string, p.input as { basedOn: number; settings: unknown; note: string }),
     );
+    run('price_change', (as, p) => this.prices.save(as, p as unknown as PriceChange));
     run('team_invite', (as, p) =>
       this.team.invite(as, p as { email: string; name: string; role: AdminRole; phone: string }),
     );
@@ -137,6 +140,23 @@ export class ApprovalRequests implements OnModuleInit {
       countryCode: code,
       targetType: 'settings',
       targetId: code,
+    });
+  }
+
+  /**
+   * Prices for a state, city or area (Settings, Places), as every change to prices (D4, X10). Checked now, so
+   * a change that can't be saved is refused before it waits, and again when approved.
+   */
+  async priceChange(admin: AdminContext, input: PriceChange) {
+    const { place, summary } = await this.prices.describe(input);
+    return this.approvals.submit(admin, {
+      kind: 'price_change',
+      payload: { ...input },
+      summary,
+      note: input.note,
+      countryCode: place.countryCode,
+      targetType: input.scope,
+      targetId: input.id,
     });
   }
 

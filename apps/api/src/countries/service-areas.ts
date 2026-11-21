@@ -31,6 +31,7 @@ export type ServedAt = {
   areaName: string;
   cityId: string;
   cityName: string;
+  stateId: string;
   stateCode: string;
   stateName: string;
 };
@@ -49,7 +50,7 @@ export class ServiceAreasService {
     const at = JSON.stringify(points.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) })));
     const { rows } = await db.execute<ServedAt & { idx: number | string }>(sql`
       select p.idx, a.id as "areaId", a.name as "areaName", c.id as "cityId", c.name as "cityName",
-        s.code as "stateCode", s.name as "stateName"
+        s.id as "stateId", s.code as "stateCode", s.name as "stateName"
       from (
         select (e->>'lng')::float8 as lng, (e->>'lat')::float8 as lat, idx
         from jsonb_array_elements(${at}::jsonb) with ordinality as x(e, idx)
@@ -74,6 +75,7 @@ export class ServiceAreasService {
             areaName: r.areaName,
             cityId: r.cityId,
             cityName: r.cityName,
+            stateId: r.stateId,
             stateCode: r.stateCode,
             stateName: r.stateName,
           }

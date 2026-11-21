@@ -11,7 +11,7 @@
 - **ID checks:** customers' ID checks by state. Those the provider couldn't settle wait in review, longest first; operations verifies or declines each from the customer's page (never with an ID another customer holds), or reopens a declined one so they can check again. The decline's reason is shown to the customer. The providers page says which IDs each identity provider checks.
 - **Money:** what Jiffo holds, earns and pays providers (net revenue), top-ups by way of paying in, customers' own account numbers and what issuing them cost, withdrawals and the nightly check against the payment provider.
 - **Settings:** prices, fees, commission, timers, limits and identity rules as versioned settings, plus categories and states. Identity has a switch each for customers' and agents' ID checks (docs/security/controls.md, Identity checks). Sign-in codes can be switched to Test per country (Settings, Security): no texts are sent and the app shows each code, and every page warns while one is on.
-- **Places:** where Jiffo works, by country, state, city and area (below).
+- **Places:** where Jiffo works, by country, state, city and area, and the prices each sets (below).
 - **Team and audit log:** who can use the panel, and every change anyone made in it.
 
 ## Places: where Jiffo works
@@ -34,6 +34,11 @@ Jiffo works in areas, drawn in cities, in states, in a country.
   - **Reshaping and switching:** "Reshape" moves the corners of one already drawn, and can rename it; its switch turns it on or off.
   - **Pasting:** a shape drawn in another tool can be pasted as GeoJSON instead.
   - **The reason:** each change asks for one, as everywhere in Settings.
+- **Prices per place:** a state, city or area can set its own prices: the base fee, the rate per km, the lowest fee allowed and the customer's service fee (its percentage, least and most).
+  - **Falling back:** each field is set or left empty; an empty one comes from the level above (area, then city, then state, then the country's settings).
+  - **Where:** in Places, "Prices" on a state, city or area. The form shows the value from above in grey for each field left empty.
+  - **Approval:** a change waits for a second admin's approval, like every price change, and is refused if it would leave this place, or any city or area below it, with a service fee minimum above its cap.
+  - **Errands already sent:** an errand is priced where its pickup is, and keeps those prices for life. A later change never alters one already sent, even when its fee is raised.
 - **The map's key:** `GOOGLE_MAPS_BROWSER_KEY` in the panel's settings.
   - **Which key:** a Google key with the Maps JavaScript API turned on, restricted to the panel's own address (HTTP referrers), as it is sent to the browser. It can be in the same Google Cloud project as the apps' keys.
   - **Cost:** loading the map is free up to 10,000 times a month, far more than staff use.

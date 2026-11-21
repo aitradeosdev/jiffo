@@ -32,6 +32,8 @@ import {
   type AdminRole,
   type CountrySettings,
   type ErrandState,
+  type PriceOverride,
+  type Prices,
 } from '@jiffo/shared';
 
 /** PostGIS point (longitude, latitude). Written with ST_MakePoint, read back through the lat/lng columns. */
@@ -120,6 +122,27 @@ export const areas = pgTable(
     uniqueIndex('areas_city_name_uq').on(t.cityId, sql`lower(${t.name})`),
     index('areas_boundary_gix').using('gist', t.boundary),
   ],
+);
+
+/**
+ * Prices a state, city or area sets for itself (Settings, Places): each change is a new version, the highest
+ * current; what one leaves out comes from the level above. Changed only with a second admin's approval.
+ */
+export const priceOverrides = pgTable(
+  'price_overrides',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scope: text('scope', { enum: ['state', 'city', 'area'] }).notNull(),
+    scopeId: uuid('scope_id').notNull(),
+    countryCode: char('country_code', { length: 2 })
+      .notNull()
+      .references(() => countries.code),
+    version: integer('version').notNull(),
+    data: jsonb('data').$type<PriceOverride>().notNull(),
+    createdBy: uuid('created_by'),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('price_overrides_scope_version_uq').on(t.scope, t.scopeId, t.version)],
 );
 
 /** Every saved change to a country's settings is a new version; the highest version is current. */
@@ -534,6 +557,11 @@ export const errands = pgTable(
     stateCode: text('state_code').notNull(),
     /** The area the pickup is in, worked out by the server when the errand was sent. Null for older errands. */
     areaId: uuid('area_id').references(() => areas.id),
+    /**
+     * The prices it was sent with, from its area, city and state, else the country (Settings, Places): kept, so a
+     * later price change never changes it. Null for errands from before area prices, which use the country's.
+     */
+    prices: jsonb('prices').$type<Prices>(),
     customerId: uuid('customer_id')
       .notNull()
       .references(() => users.id),

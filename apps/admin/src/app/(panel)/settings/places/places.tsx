@@ -4,15 +4,23 @@ import { useActionState, useEffect, useMemo, useState } from 'react';
 import { ReasonInput } from '@/components/reason';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, Card, Notice, buttonClass, inputClass } from '@/components/ui';
+import { applyPrices, PRICE_FIELDS, type PriceOverride, type Prices } from '@jiffo/shared';
+import { PRICE_LABELS, priceInput } from '@/lib/prices';
 import { boundaryField, editableOnMap, parseBoundary, type Boundary } from '@/lib/shapes';
-import { createArea, createCity, updatePlace } from '../actions';
+import { createArea, createCity, savePrices, updatePlace } from '../actions';
 import { PlacesMap, type MapShape } from './map';
 
+/** The prices a place sets now, and their version: 0, with nothing set, before the first. */
+export interface SavedPrices {
+  version: number;
+  data: PriceOverride;
+}
 export interface PlaceArea {
   id: string;
   name: string;
   enabled: boolean;
   boundary: Boundary;
+  prices: SavedPrices;
 }
 export interface PlaceCity extends PlaceArea {
   areas: PlaceArea[];
@@ -22,11 +30,23 @@ export interface PlaceState {
   code: string;
   name: string;
   enabled: boolean;
+  prices: SavedPrices;
   cities: PlaceCity[];
 }
 
-/** What is being drawn: a new city, a new area in a city, or a new shape (and name) for one. */
+/** Setting a state's, city's or area's prices: what it sets now, and what it would take from the levels above. */
+type PriceTask = {
+  kind: 'prices';
+  scope: 'state' | 'city' | 'area';
+  id: string;
+  name: string;
+  saved: SavedPrices;
+  above: PriceOverride[];
+};
+
+/** What is being drawn: a new city, a new area in a city, or a new shape (and name) for one; or prices set. */
 type Task =
+  | PriceTask
   | { kind: 'new-city' }
   | { kind: 'new-area'; cityId: string; cityName: string }
   | { kind: 'reshape'; place: 'city' | 'area'; id: string; name: string; boundary: Boundary };
@@ -35,7 +55,17 @@ type Task =
  * Settings, Places: pick a state, see its cities and areas on the map, draw new ones and reshape them, and switch
  * each on. Errands are taken only inside an area that is on, in a city and state that are on.
  */
-export function Places({ states, canEdit, mapsKey }: { states: PlaceState[]; canEdit: boolean; mapsKey: string }) {
+export function Places({
+  states,
+  countryPrices,
+  canEdit,
+  mapsKey,
+}: {
+  states: PlaceState[];
+  countryPrices: Prices | null;
+  canEdit: boolean;
+  mapsKey: string;
+}) {
   const [stateId, setStateId] = useState(
     () => (states.find((s) => s.cities.length) ?? states.find((s) => s.code === 'LA') ?? states[0])?.id ?? '',
   );
@@ -62,7 +92,8 @@ export function Places({ states, canEdit, mapsKey }: { states: PlaceState[]; can
     setDrawing((d) => d + 1);
   };
 
-  const target = task?.kind === 'reshape' ? task.id : task?.kind === 'new-area' ? task.cityId : null;
+  const target =
+    task?.kind === 'reshape' || task?.kind === 'prices' ? task.id : task?.kind === 'new-area' ? task.cityId : null;
   // The one being reshaped is drawn by the drawing tool instead, unless it has holes, which the tool can't take.
   const inTool = task?.kind === 'reshape' && editableOnMap(task.boundary) ? task.id : null;
   const shapes = useMemo<MapShape[]>(
@@ -118,6 +149,25 @@ export function Places({ states, canEdit, mapsKey }: { states: PlaceState[]; can
               </option>
             ))}
           </select>
+          {state && countryPrices && !task ? (
+            <button
+              type="button"
+              className="mt-3 text-sm font-semibold text-ink-2 underline"
+              onClick={() =>
+                start({
+                  kind: 'prices',
+                  scope: 'state',
+                  id: state.id,
+                  name: state.name,
+                  saved: state.prices,
+                  above: [],
+                })
+              }
+            >
+              Prices for {state.name}
+              {Object.keys(state.prices.data).length ? ' (own)' : ''}
+            </button>
+          ) : null}
           {state && !state.enabled ? (
             <div className="mt-3">
               <Notice tone="warn">{state.name} is off in Settings, States: no errands here until it is on.</Notice>
@@ -125,7 +175,15 @@ export function Places({ states, canEdit, mapsKey }: { states: PlaceState[]; can
           ) : null}
         </Card>
 
-        {task && canEdit ? (
+        {task?.kind === 'prices' && countryPrices ? (
+          <PricePanel
+            key={round}
+            task={task}
+            countryPrices={countryPrices}
+            canEdit={canEdit}
+            onDone={() => start(null)}
+          />
+        ) : task && task.kind !== 'prices' && canEdit ? (
           <DrawPanel
             key={round}
             task={task}
@@ -163,6 +221,19 @@ export function Places({ states, canEdit, mapsKey }: { states: PlaceState[]; can
                     onReshape={() =>
                       start({ kind: 'reshape', place: 'city', id: city.id, name: city.name, boundary: city.boundary })
                     }
+                    onPrices={
+                      countryPrices && !task
+                        ? () =>
+                            start({
+                              kind: 'prices',
+                              scope: 'city',
+                              id: city.id,
+                              name: city.name,
+                              saved: city.prices,
+                              above: [state.prices.data],
+                            })
+                        : undefined
+                    }
                   />
                   <ul className="ml-4 space-y-1.5 border-l border-line pl-3">
                     {city.areas.map((area) => (
@@ -179,6 +250,19 @@ export function Places({ states, canEdit, mapsKey }: { states: PlaceState[]; can
                               name: area.name,
                               boundary: area.boundary,
                             })
+                          }
+                          onPrices={
+                            countryPrices && !task
+                              ? () =>
+                                  start({
+                                    kind: 'prices',
+                                    scope: 'area',
+                                    id: area.id,
+                                    name: area.name,
+                                    saved: area.prices,
+                                    above: [state.prices.data, city.prices.data],
+                                  })
+                              : undefined
                           }
                         />
                       </li>
@@ -240,11 +324,14 @@ function PlaceRow({
   item,
   canEdit,
   onReshape,
+  onPrices,
 }: {
   place: 'city' | 'area';
   item: PlaceArea;
   canEdit: boolean;
   onReshape: () => void;
+  /** Opens its prices: anyone can look; those who may change settings can change them. */
+  onPrices?: () => void;
 }) {
   const [result, action] = useActionState(updatePlace, {});
   return (
@@ -272,6 +359,11 @@ function PlaceRow({
             Reshape
           </button>
         </>
+      ) : null}
+      {onPrices ? (
+        <button type="button" className="text-sm font-semibold text-ink-2 underline" onClick={onPrices}>
+          Prices{Object.keys(item.prices.data).length ? ' (own)' : ''}
+        </button>
       ) : null}
       {result.error ? (
         <div className="basis-full">
@@ -402,6 +494,96 @@ function DrawPanel({
             Cancel
           </button>
         </div>
+      </form>
+    </Card>
+  );
+}
+
+/**
+ * A state's, city's or area's prices: each field it sets, or empty to take the level above's, shown as the
+ * placeholder. Saving asks a second admin to approve (Approvals).
+ */
+function PricePanel({
+  task,
+  countryPrices,
+  canEdit,
+  onDone,
+}: {
+  task: PriceTask;
+  countryPrices: Prices;
+  canEdit: boolean;
+  onDone: () => void;
+}) {
+  const [result, action] = useActionState(savePrices, {});
+  useEffect(() => {
+    if (result.ok) onDone();
+  }, [result, onDone]);
+  const inherited = applyPrices(countryPrices, task.above);
+  const from = task.scope === 'state' ? 'the country' : task.scope === 'city' ? 'the state' : 'the city';
+  return (
+    <Card title={`Prices for ${task.name}`}>
+      <p className="-mt-1 mb-3 text-sm text-ink-3">
+        Leave a field empty to use {from}&apos;s, shown in grey. Errands already sent keep the prices they were sent
+        with; a change waits for a second admin&apos;s approval.
+      </p>
+      <form action={action} className="space-y-3">
+        <ReasonInput after={result} />
+        <input type="hidden" name="scope" value={task.scope} />
+        <input type="hidden" name="id" value={task.id} />
+        <input type="hidden" name="basedOn" value={task.saved.version} />
+        <div className="grid grid-cols-2 gap-3">
+          {PRICE_FIELDS.map((field) => {
+            const { label, percent } = PRICE_LABELS[field];
+            return (
+              <label key={field} className="block text-sm">
+                <span className="font-semibold">{label}</span>
+                <span className="mt-1.5 flex items-center gap-1.5">
+                  {percent ? null : <span className="text-ink-3">₦</span>}
+                  <input
+                    name={field}
+                    inputMode="decimal"
+                    defaultValue={priceInput(field, task.saved.data[field])}
+                    placeholder={priceInput(field, inherited[field])}
+                    disabled={!canEdit}
+                    className={inputClass}
+                  />
+                  {percent ? <span className="text-ink-3">%</span> : null}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        {canEdit ? (
+          <>
+            <div>
+              <label className="block text-sm font-semibold" htmlFor="price-note">
+                What changes, and why
+              </label>
+              <input
+                id="price-note"
+                name="note"
+                required
+                minLength={3}
+                maxLength={500}
+                placeholder="For example: errands take longer in Lekki's traffic"
+                className={`${inputClass} mt-1.5`}
+              />
+            </div>
+            <Notice>{result.error}</Notice>
+            <div className="flex gap-2">
+              <SubmitButton small pendingLabel="Saving…">
+                Ask for approval
+              </SubmitButton>
+              <button type="button" className={buttonClass('ghost', true)} onClick={onDone}>
+                Cancel
+              </button>
+            </div>
+          </>
+        ) : (
+          <button type="button" className={buttonClass('ghost', true)} onClick={onDone}>
+            Close
+          </button>
+        )}
       </form>
     </Card>
   );

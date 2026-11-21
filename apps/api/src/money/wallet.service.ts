@@ -325,7 +325,7 @@ export class WalletService {
     if (errand.status !== 'completed' || !errand.agentId)
       throw conflict('tip_not_available', 'You can tip once the errand is complete');
     const [settings, { currency }, tier] = await Promise.all([
-      this.countries.settingsAt(errand.countryCode, errand.settingsVersion),
+      this.countries.errandSettings(errand),
       this.countries.basics(errand.countryCode),
       errand.agentTier ?? this.agents.tier(errand.agentId),
     ]);

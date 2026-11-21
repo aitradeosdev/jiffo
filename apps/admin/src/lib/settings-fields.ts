@@ -46,7 +46,8 @@ const ID_TYPES = [
 export const SECTIONS: Section[] = [
   {
     title: 'Suggested errand fee',
-    about: 'What the apps suggest from the distance. Customers can offer more.',
+    about:
+      "What the apps suggest from the distance. Customers can offer more. These are the country's: a state, city or area can set its own in Places.",
     fields: [
       { path: 'pricing.baseFeeKobo', label: 'Base fee', kind: 'naira' },
       { path: 'pricing.ratePerKmKobo', label: 'Per kilometre', kind: 'naira' },
@@ -55,7 +56,8 @@ export const SECTIONS: Section[] = [
   },
   {
     title: 'Fees and commission',
-    about: 'The customer pays the service fee on top of the errand fee; the agent pays commission out of it.',
+    about:
+      'The customer pays the service fee on top of the errand fee; the agent pays commission out of it. A state, city or area can set its own service fee in Places.',
     fields: [
       { path: 'fees.serviceFeeBps', label: 'Service fee', kind: 'percent', help: 'Of the errand fee' },
       { path: 'fees.serviceFeeMinKobo', label: 'Service fee, at least', kind: 'naira' },

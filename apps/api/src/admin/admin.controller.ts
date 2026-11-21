@@ -35,6 +35,7 @@ import {
   PROVIDER_CATEGORIES,
   RISK_FLAG_STATUSES,
   RISK_QUEUES,
+  PriceOverrideSchema,
 } from '@jiffo/shared';
 import { forbidden, notFound } from '../common/errors';
 import { ZodBody } from '../common/zod-body';
@@ -96,6 +97,14 @@ const AreaId = new ParseUUIDPipe({ exceptionFactory: () => notFound('area_not_fo
 const PlaceName = z.string().trim().min(2).max(60);
 const NewCityBody = z.object({ stateId: z.string().uuid(), name: PlaceName, boundary: BoundaryInput });
 const NewAreaBody = z.object({ cityId: z.string().uuid(), name: PlaceName, boundary: BoundaryInput });
+const PriceChangeBody = z.object({
+  scope: z.enum(['state', 'city', 'area']),
+  id: z.string().uuid(),
+  /** The version of the place's prices this change was made from: 0 when it had none. */
+  basedOn: z.number().int().min(0),
+  prices: PriceOverrideSchema,
+  note: z.string().trim().min(3).max(500),
+});
 const PlaceChangeBody = z
   .object({ name: PlaceName, boundary: BoundaryInput, enabled: z.boolean() })
   .partial()
@@ -463,6 +472,18 @@ export class AdminController {
     @Body(new ZodBody(PlaceChangeBody)) body: z.infer<typeof PlaceChangeBody>,
   ) {
     return this.serviceAreas.updateArea(admin, id, body);
+  }
+
+  /** Prices for a state, city or area (Settings, Places): waits for a second admin's approval. */
+  @Post('prices')
+  @HttpCode(200)
+  @Needs('settings')
+  async priceChange(
+    @CurrentAdmin() admin: AdminContext,
+    @Body(new ZodBody(PriceChangeBody)) body: z.infer<typeof PriceChangeBody>,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return held(res, await this.gated.priceChange(admin, body));
   }
 
   @Get('money/summary')

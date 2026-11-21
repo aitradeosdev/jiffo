@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
-import { CountrySettingsSchema, type CountrySettings } from '@jiffo/shared';
+import { CountrySettingsSchema, withPrices, type CountrySettings, type Prices } from '@jiffo/shared';
 import { DB, type Db, type Tx } from '../db/database.module';
 import { categories, countries, settingsVersions, states } from '../db/schema';
 import { notFound } from '../common/errors';
@@ -85,6 +85,14 @@ export class CountriesService {
       .where(and(eq(settingsVersions.countryCode, countryCode), eq(settingsVersions.version, version)));
     if (!row) throw notFound('settings_missing', `No settings version ${version} for ${countryCode}`);
     return CountrySettingsSchema.parse(row.data);
+  }
+
+  /**
+   * The settings an errand runs under: its country's version when it was sent, with the prices it was sent with
+   * (its area's, Settings, Places). An errand from before area prices uses the country's.
+   */
+  async errandSettings(errand: { countryCode: string; settingsVersion: number; prices?: Prices | null }) {
+    return withPrices(await this.settingsAt(errand.countryCode, errand.settingsVersion), errand.prices);
   }
 
   enabledStates(countryCode: string) {
