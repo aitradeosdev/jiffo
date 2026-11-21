@@ -3,6 +3,7 @@ import { io, type Socket } from 'socket.io-client';
 import { API_URL } from '../config';
 import { useSession } from '../auth/session';
 import { pinningReady } from '../security/pinning';
+import { watchAgain } from '../agent/board-order';
 
 const RealtimeContext = createContext<Socket | null>(null);
 
@@ -98,4 +99,38 @@ export function useErrandSubscription(errandId: string | undefined) {
       socket.emit('errand.unsubscribe', { errandId });
     };
   }, [socket, errandId]);
+}
+
+/**
+ * The agent's board, kept live (docs/matching.md, M11): while online, the app tells the server where it is, so it
+ * hears of errands coming on and going off the board around there. Told again after moving a km, every five
+ * minutes, and on reconnecting. Null stops nothing: the server forgets on disconnect.
+ */
+export function useBoardWatch(at: { lat: number; lng: number } | null) {
+  const socket = useContext(RealtimeContext);
+  const last = useRef<{ at: { lat: number; lng: number }; when: number } | null>(null);
+  const here = useRef(at);
+  here.current = at;
+  useEffect(() => {
+    if (!socket) return;
+    // A new connection has joined no board rooms: watch again at once.
+    const again = () => {
+      last.current = null;
+      const now = here.current;
+      if (now) {
+        last.current = { at: now, when: Date.now() };
+        socket.emit('board.watch', now);
+      }
+    };
+    socket.on('ready', again);
+    return () => {
+      socket.off('ready', again);
+    };
+  }, [socket]);
+  useEffect(() => {
+    if (!socket || !at || !socket.connected) return;
+    if (!watchAgain(last.current, at, Date.now())) return;
+    last.current = { at, when: Date.now() };
+    socket.emit('board.watch', at);
+  }, [socket, at]);
 }

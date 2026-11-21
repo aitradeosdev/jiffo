@@ -313,6 +313,14 @@ export class ErrandNotifier {
     const note = noteFor(event, r);
     if (note?.chat && agentId) await this.chat.system(after.id, agentId, note.chat, { event });
 
+    // Agents watching the board around it see it come on, go off (taken, cancelled, expired) or change (M11).
+    if (before.status === 'requested' && after.status !== 'requested') this.realtime.boardChanged(after.id, 'removed');
+    else if (before.status !== 'requested' && after.status === 'requested')
+      this.realtime.boardChanged(after.id, 'added');
+    else if (after.status === 'requested' && after.feeKobo !== before.feeKobo) {
+      this.realtime.boardChanged(after.id, 'changed');
+    }
+
     const update = { errandId: after.id, status: after.status, version: after.version, event };
     this.realtime.toErrand(after.id, 'errand.updated', update);
     this.realtime.toUser(after.customerId, 'customer', 'errand.updated', update);

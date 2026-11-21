@@ -1,7 +1,9 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { and, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import {
+  byBestForYou,
   canRevealPin,
+  perKmKobo,
   nextState,
   serviceFee,
   withPrices,
@@ -50,6 +52,8 @@ import { EligibilityService } from '../matching/eligibility.service';
 import { MatchBlocksService } from '../matching/match-blocks.service';
 import { OffersService } from '../matching/offers.service';
 import { agentEarnsKobo } from './agent-earns';
+import { ROAD_FACTOR, TravelTimesService } from '../matching/travel-times';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { UploadsService } from '../files/uploads.service';
 import { RiskFlagsService } from '../risk/risk-flags.service';
 import { EvidenceService } from './evidence.service';
@@ -167,6 +171,8 @@ export class ErrandsService implements OnModuleInit {
     private readonly eligibility: EligibilityService,
     private readonly matchBlocks: MatchBlocksService,
     private readonly offers: OffersService,
+    private readonly travelTimes: TravelTimesService,
+    private readonly realtime: RealtimeGateway,
   ) {}
 
   onModuleInit() {
@@ -346,12 +352,31 @@ export class ErrandsService implements OnModuleInit {
       () => 'prospect',
     );
     const earns = await Promise.all(rows.map((r) => this.agentEarns(r.errand, tier)));
-    return {
-      errands: views.map((v, i) => ({
+    // "Best for you" (docs/matching.md, M11): quickest to reach, then most per km of the whole trip, then newest.
+    const pickups = views.map((v, i) => ({
+      id: v.id,
+      lat: v.stops[0]!.lat,
+      lng: v.stops[0]!.lng,
+      straightMeters: Math.round(Number(rows[i]!.distanceMeters)),
+    }));
+    const travel = rules.boardTravelTimes
+      ? await this.travelTimes.boardTimes(me, pickups, rules)
+      : new Map(pickups.map((p) => [p.id, TravelTimesService.estimate(p.straightMeters, rules)]));
+    const listed = views.map((v, i) => {
+      const toPickup = travel.get(v.id)!;
+      let along = 0;
+      for (let s = 1; s < v.stops.length; s++) along += haversineMeters(v.stops[s - 1]!, v.stops[s]!);
+      return {
         ...v,
         distanceMeters: Math.round(Number(rows[i]!.distanceMeters)),
         agentEarnsKobo: earns[i]!,
-      })),
+        travelSeconds: toPickup.durationSeconds,
+        travelEstimated: toPickup.estimated,
+        perKmKobo: perKmKobo(earns[i]!, toPickup.distanceMeters, along * ROAD_FACTOR),
+      };
+    });
+    return {
+      errands: listed.sort(byBestForYou),
       hiddenByPreferences: Math.max(0, (counts[0]?.all ?? 0) - (counts[0]?.wanted ?? 0)),
       // How far the board reaches for this agent: their work radius, within what admin allows.
       reachKm: Math.min(q.radiusKm, agentReachKm(me, rules)),
@@ -581,6 +606,8 @@ export class ErrandsService implements OnModuleInit {
     // An urgent errand is offered to one agent at a time (docs/matching.md, M6), the first offer with the other
     // errands sent in its state just now (M5).
     await this.offers.errandCreated(created);
+    // On the board for agents around it at once (M11), unless offered one at a time instead.
+    if (!created.urgent) this.realtime.boardChanged(created.id, 'added');
 
     return this.viewOne(created, 'customer', auth.userId);
   }

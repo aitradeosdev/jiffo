@@ -74,6 +74,7 @@ export const DEFAULT_MATCHING_SETTINGS = {
   acceptanceMinOffers: 10,
   pauseBelowBps: null,
   pauseMinutes: 30,
+  boardTravelTimes: false,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -467,6 +468,12 @@ const CountrySettingsObject = z.object({
        */
       pauseBelowBps: z.number().int().min(1).max(9_999).nullable().default(null),
       pauseMinutes: z.number().int().min(5).max(1_440).default(30),
+      /**
+       * The board's "Best for you" order (M11) goes by travel time to each pickup: from the maps provider for the
+       * nearest ten when on (each a paid lookup, shared by agents nearby for ten minutes), else estimated from the
+       * distance at the fallback speed.
+       */
+      boardTravelTimes: z.boolean().default(false),
     })
     .refine((m) => (m.searchStepsKm.at(-1) ?? 0) <= m.boardRadiusKm, {
       message: "The last search step can't reach past how far the board reaches",
