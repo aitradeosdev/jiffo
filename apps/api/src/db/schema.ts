@@ -496,7 +496,12 @@ export const otpChallenges = pgTable(
 );
 
 /** Agent-only details. A row is created the first time an agent's profile is read or changed. */
-export const AGENT_PROFILE_DEFAULTS = { tier: 'bronze', categoryKeys: null, takesPurchases: true } as const;
+export const AGENT_PROFILE_DEFAULTS = {
+  tier: 'bronze',
+  categoryKeys: null,
+  takesPurchases: true,
+  workRadiusKm: null,
+} as const;
 const tierCheck = (column: unknown) => sql`${column} in (${sql.raw(AGENT_TIERS.map((t) => `'${t}'`).join(', '))})`;
 
 export const agentProfiles = pgTable(
@@ -513,16 +518,47 @@ export const agentProfiles = pgTable(
     categoryKeys: text('category_keys').array(),
     /** Whether the agent takes errands where they buy the items. */
     takesPurchases: boolean('takes_purchases').notNull().default(AGENT_PROFILE_DEFAULTS.takesPurchases),
+    /** How far the agent will travel to a pickup, in km; null for as far as matching allows (docs/matching.md). */
+    workRadiusKm: smallint('work_radius_km'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [check('agent_profiles_tier_ck', tierCheck(t.tier))],
+  (t) => [
+    check('agent_profiles_tier_ck', tierCheck(t.tier)),
+    check('agent_profiles_work_radius_ck', sql`${t.workRadiusKm} between 1 and 50`),
+  ],
 );
 
 /**
  * Where an agent is and whether they take errands now. The agent app reports it while online or on an
  * errand; it is cleared when they go offline with nothing running, so a location is never kept longer.
  */
+/**
+ * "Don't match me again" (docs/matching.md, M1): someone chose, on an errand they shared, never to be matched
+ * with the other person. Matching keeps the two apart either way; the other person isn't told.
+ */
+export const matchBlocks = pgTable(
+  'match_blocks',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    otherUserId: uuid('other_user_id')
+      .notNull()
+      .references(() => users.id),
+    /** The errand they chose it on. */
+    errandId: uuid('errand_id')
+      .notNull()
+      .references(() => errands.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.otherUserId] }),
+    index('match_blocks_other_idx').on(t.otherUserId),
+    check('match_blocks_not_self_ck', sql`${t.userId} <> ${t.otherUserId}`),
+  ],
+);
+
 export const agentPresence = pgTable(
   'agent_presence',
   {

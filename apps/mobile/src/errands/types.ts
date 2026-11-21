@@ -44,6 +44,8 @@ export interface ErrandView {
   /** Only on a single errand's view, for its customer and agent: short-lived photo links. */
   photos?: { items: string[]; dropoff: string | null };
   ratedByMe?: boolean;
+  /** Single errand view: this person chose "Don't match me again" with the other (never the other's choice). */
+  noMatch?: boolean;
   /** Customer only: a tip was already given on this errand. */
   tipped?: boolean;
   /** Single errand view: what is held in escrow now. */

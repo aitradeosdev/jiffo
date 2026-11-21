@@ -12,6 +12,8 @@ export interface MatchAgent {
   /** The categories they take; null for all. */
   categoryKeys: string[] | null;
   takesPurchases: boolean;
+  /** How far they said they'd travel to a pickup; null for as far as Jiffo allows. */
+  workRadiusKm: number | null;
   held: HeldErrand[];
 }
 
@@ -23,8 +25,11 @@ export interface MatchErrand {
   buy: boolean;
   /** From the agent's position to the pickup, in a straight line. */
   pickupMeters: number;
-  /** A flag links its customer and this agent: one of PAIR_FLAG_KINDS not cleared, or a repeat pairing confirmed. */
-  pairFlagged: boolean;
+  /**
+   * Its customer and this agent are kept apart: a flag links them (one of PAIR_FLAG_KINDS not cleared, or of
+   * CONFIRMED_PAIR_FLAG_KINDS confirmed), or either chose not to be matched with the other again.
+   */
+  keptApart: boolean;
   /** This agent left it, or its customer replaced them on it. */
   gaveUp: boolean;
 }
@@ -42,6 +47,10 @@ export type MatchRefusal =
   | 'gave_up';
 
 type Rules = Pick<CountrySettings['matching'], 'boardRadiusKm' | 'maxBoardErrands'>;
+
+/** How far from the agent a pickup may be, in km: their own work radius, within what admin allows. */
+export const agentReachKm = (agent: Pick<MatchAgent, 'workRadiusKm'>, rules: Pick<Rules, 'boardRadiusKm'>) =>
+  Math.min(agent.workRadiusKm ?? rules.boardRadiusKm, rules.boardRadiusKm);
 
 /**
  * Whether the errands the agent holds let them take one more: an urgent errand is held alone, apart from a
@@ -64,8 +73,8 @@ export function matchRefusal(agent: MatchAgent, errand: MatchErrand, rules: Rule
   if (held) return held;
   if (agent.categoryKeys && !agent.categoryKeys.includes(errand.categoryKey)) return 'category_off';
   if (errand.buy && !agent.takesPurchases) return 'no_purchases';
-  if (errand.pickupMeters > rules.boardRadiusKm * 1000) return 'too_far';
-  if (errand.pairFlagged) return 'unavailable';
+  if (errand.pickupMeters > agentReachKm(agent, rules) * 1000) return 'too_far';
+  if (errand.keptApart) return 'unavailable';
   if (errand.gaveUp) return 'gave_up';
   return null;
 }

@@ -11,6 +11,7 @@ import { fonts } from '../theme/tokens';
 import { Button, Field, Text } from '../ui/kit';
 import { Avatar, Icon } from '../ui/parts';
 import { PageFooter } from '../ui/floating';
+import { NoMatch } from '../errands/no-match';
 import { Lines } from '../errands/trip';
 import { shortWhen } from '../errands/when';
 import type { ErrandView } from '../errands/types';
@@ -154,6 +155,9 @@ export function AgentDone({ errand, onRated }: { errand: ErrandView; onRated: ()
             )}
           </View>
         ) : null}
+        <View style={styles.block}>
+          <NoMatch errand={errand} name={name} />
+        </View>
         {error ? (
           <Text tone="danger" accessibilityLiveRegion="polite">
             {error}

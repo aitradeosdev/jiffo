@@ -10,6 +10,8 @@ const PreferencesBody = z
     /** null receives every category; an empty list is not allowed (the agent would see nothing). */
     categoryKeys: z.array(z.string().min(1).max(40)).min(1).max(50).nullable(),
     takesPurchases: z.boolean(),
+    /** How far they will travel to a pickup, in whole km; null for as far as matching allows. */
+    workRadiusKm: z.number().int().min(1).max(50).nullable(),
   })
   .partial()
   .refine((b) => Object.keys(b).length > 0, 'Nothing to update');
