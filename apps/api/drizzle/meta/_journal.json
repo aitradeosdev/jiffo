@@ -309,6 +309,13 @@
       "when": 1795280475433,
       "tag": "0043_service_areas",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795283122171,
+      "tag": "0044_area_prices",
+      "breakpoints": true
     }
   ]
 }

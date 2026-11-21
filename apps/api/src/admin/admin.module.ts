@@ -8,6 +8,7 @@ import { ProvidersAdminService } from './providers-admin.service';
 import { MoneyAdminService } from './money-admin.service';
 import { SettingsAdminService } from './settings-admin.service';
 import { ServiceAreasAdminService } from './service-areas-admin.service';
+import { PricesAdminService } from './prices-admin.service';
 import { PushModule } from '../push/push.module';
 import { AdminAuthController } from './admin-auth.controller';
 import { AdminAuthService } from './admin-auth.service';
@@ -44,6 +45,7 @@ import { StaffAlertsAdminService } from './staff-alerts-admin.service';
     ProvidersAdminService,
     SettingsAdminService,
     ServiceAreasAdminService,
+    PricesAdminService,
     TeamService,
     StaffMail,
     PasskeysService,

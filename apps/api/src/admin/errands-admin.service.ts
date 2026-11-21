@@ -366,7 +366,7 @@ export class ErrandsAdminService {
           .orderBy(asc(journalEntries.createdAt), asc(postings.id)),
         this.db.select().from(errandRatings).where(eq(errandRatings.errandId, id)),
         this.wallet.heldFor(id, errand.countryCode),
-        this.countries.settingsAt(errand.countryCode, errand.settingsVersion),
+        this.countries.errandSettings(errand),
         this.wallet.customerBalance(errand.customerId, errand.countryCode),
       ]);
 
@@ -505,7 +505,7 @@ export class ErrandsAdminService {
     if (input.event !== 'resolve_complete') return { errand, toAgentKobo: 0 };
     const [held, settings] = await Promise.all([
       this.wallet.heldFor(id, errand.countryCode),
-      this.countries.settingsAt(errand.countryCode, errand.settingsVersion),
+      this.countries.errandSettings(errand),
     ]);
     const standard = splitFeeEscrow({
       feeKobo: errand.feeKobo,

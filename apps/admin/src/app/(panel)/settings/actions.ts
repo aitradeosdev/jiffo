@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { api, reasonOf, ASKED, isPending, messageOf } from '@/lib/api';
+import { pricesFromForm } from '@/lib/prices';
 
 export interface SaveState {
   error?: string;
@@ -164,4 +165,35 @@ export async function updatePlace(_: Result, form: FormData): Promise<Result> {
       },
     });
   }, '/settings/places');
+}
+
+export type PricesResult = { error?: string; ok?: boolean };
+
+/**
+ * Prices for a state, city or area (Places). Every price change waits for a second admin (D4, X10), so a saved
+ * request goes to Approvals; what the form leaves empty comes from the level above.
+ */
+export async function savePrices(_: PricesResult, form: FormData): Promise<PricesResult> {
+  const read = pricesFromForm(form);
+  if (read.error) return { error: read.error };
+  let pending = false;
+  try {
+    const res = await api('/admin/prices', {
+      reason: reasonOf(form),
+      method: 'POST',
+      body: {
+        scope: String(form.get('scope') ?? ''),
+        id: String(form.get('id') ?? ''),
+        basedOn: Number(form.get('basedOn') ?? 0),
+        prices: read.prices,
+        note: String(form.get('note') ?? ''),
+      },
+    });
+    pending = isPending(res);
+  } catch (error) {
+    return { error: messageOf(error) };
+  }
+  if (pending) redirect(ASKED);
+  revalidatePath('/settings/places');
+  return { ok: true };
 }

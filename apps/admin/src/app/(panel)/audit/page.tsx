@@ -9,11 +9,12 @@ import {
   PROVIDER_CATEGORY_INFO,
   providerInfo,
 } from '@jiffo/shared';
-import { STAFF_ALERT_LABELS, type StaffAlertKind } from '@jiffo/shared';
+import { formatNaira, STAFF_ALERT_LABELS, type StaffAlertKind } from '@jiffo/shared';
 import { api, getCountry, getMe } from '@/lib/api';
 import { ResolveStaffAlertForm } from './staff-alerts';
 import { dateTime, money } from '@/lib/format';
 import { FIELD_BY_PATH } from '@/lib/settings-fields';
+import { PRICE_LABELS, type PriceField } from '@/lib/prices';
 
 export const metadata: Metadata = { title: 'Audit log' };
 
@@ -123,6 +124,18 @@ function describe(entry: Entry, names: Map<string, string>, currencyOf: (code: s
           c.path === 'enabled' ? (c.to ? 'errands open' : 'errands closed') : `agent sign-ups ${String(c.to)}`,
         )
         .join(', ')}`;
+    case 'prices.change': {
+      const changes = (entry.data.changes as Array<{ field: string; to: number | null }>) ?? [];
+      return `Changed the prices for ${String(entry.data.place)}: ${
+        changes
+          .map((c) => {
+            const info = PRICE_LABELS[c.field as PriceField];
+            if (!info) return c.field;
+            return `${info.label.toLowerCase()} ${c.to === null ? 'as above' : info.percent ? `${c.to / 100}%` : formatNaira(c.to)}`;
+          })
+          .join(', ') || 'nothing'
+      }`;
+    }
     case 'city.create':
       return `Drew the city ${String(entry.data.name)} in ${String(entry.data.state)} (${String(entry.data.km2)} km²)`;
     case 'area.create':

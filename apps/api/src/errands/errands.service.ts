@@ -7,6 +7,7 @@ import {
   splitFeeEscrow,
   nextState,
   serviceFee,
+  withPrices,
   suggestedFee,
   TERMINAL_STATES,
   type AgentTier,
@@ -21,6 +22,7 @@ import { DB, type Db, type Tx } from '../db/database.module';
 import { earningHolds, errandEvents, errandRatings, errandStops, errands, journalEntries, users } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
 import { ServiceAreasService } from '../countries/service-areas';
+import { PricesService } from '../countries/prices.service';
 import type { AuthContext } from '../auth/auth.types';
 import { decrypt, encrypt, errandPinKey, numericCode, pinDigest, safeEqual } from '../common/crypto';
 import { ApiError, badRequest, conflict, forbidden, locked, notFound, tooMany, unprocessable } from '../common/errors';
@@ -135,6 +137,7 @@ export class ErrandsService implements OnModuleInit {
     @Inject(ERRAND_TIMERS) private readonly timers: ErrandTimers,
     private readonly countries: CountriesService,
     private readonly serviceAreas: ServiceAreasService,
+    private readonly prices: PricesService,
     private readonly notifier: ErrandNotifier,
     private readonly wallet: WalletService,
     private readonly agents: AgentsService,
@@ -408,18 +411,27 @@ export class ErrandsService implements OnModuleInit {
 
   /* ---------- Creating ---------- */
 
-  /** Distance, time and the suggested fee for a route, under the country's current pricing. */
+  /**
+   * Distance, time and the suggested fee for a route, under the prices where its pickup is now (its area, city
+   * and state, then the country's). Only where Jiffo works: every stop inside a switched-on area.
+   */
   async quote(auth: AuthContext, stops: Array<{ lat: number; lng: number }>) {
-    const [{ settings }, route] = await Promise.all([
+    const [{ settings }, served, route] = await Promise.all([
       this.countries.currentSettings(auth.countryCode),
+      this.serviceAreas.servedAt(auth.countryCode, stops),
       this.maps.route(stops),
     ]);
-    const suggestedFeeKobo = suggestedFee(settings.pricing, route.distanceMeters);
+    const outside = served.flatMap((at, i) => (at ? [] : [i]));
+    if (outside.length) {
+      throw unprocessable('outside_service_area', "Jiffo doesn't work there yet", { stops: outside });
+    }
+    const here = withPrices(settings, await this.prices.pricesAt(settings, served[0]!));
+    const suggestedFeeKobo = suggestedFee(here.pricing, route.distanceMeters);
     return {
       ...route,
       suggestedFeeKobo,
-      minFeeKobo: settings.pricing.minFeeKobo,
-      serviceFeeKobo: serviceFee(suggestedFeeKobo, settings.fees),
+      minFeeKobo: here.pricing.minFeeKobo,
+      serviceFeeKobo: serviceFee(suggestedFeeKobo, here.fees),
     };
   }
 
@@ -429,7 +441,7 @@ export class ErrandsService implements OnModuleInit {
     // Every customer is verified, so agents know who they run errands for.
     await this.customerIdentity.assertVerified(auth.userId);
     const country = customer.countryCode;
-    const [{ version, settings }, served, category] = await Promise.all([
+    const [{ version, settings: countrySettings }, served, category] = await Promise.all([
       this.countries.currentSettings(country),
       // Where Jiffo works: every stop inside a switched-on area. The pickup's area gives the errand its state,
       // whatever the app said.
@@ -441,6 +453,9 @@ export class ErrandsService implements OnModuleInit {
       throw unprocessable('outside_service_area', "Jiffo doesn't work there yet", { stops: outside });
     }
     const pickupArea = served[0]!;
+    // The prices where the pickup is (its area, city and state, then the country's): kept with the errand.
+    const prices = await this.prices.pricesAt(countrySettings, pickupArea);
+    const settings = withPrices(countrySettings, prices);
     if (!category) throw unprocessable('category_not_available', 'This category is not available');
     if (input.feeKobo < settings.pricing.minFeeKobo) {
       throw unprocessable('fee_too_low', 'The fee is below the minimum', { minFeeKobo: settings.pricing.minFeeKobo });
@@ -467,6 +482,7 @@ export class ErrandsService implements OnModuleInit {
           countryCode: country,
           stateCode: pickupArea.stateCode,
           areaId: pickupArea.areaId,
+          prices,
           customerId: customer.id,
           categoryKey: category.key,
           buy: input.buy ?? category.buyDefault,
@@ -523,13 +539,14 @@ export class ErrandsService implements OnModuleInit {
       .select({
         countryCode: errands.countryCode,
         settingsVersion: errands.settingsVersion,
+        prices: errands.prices,
         agentTier: errands.agentTier,
       })
       .from(errands)
       .where(eq(errands.id, errandId));
     if (!row) return null;
     const [settings, { currency }, tier] = await Promise.all([
-      this.countries.settingsAt(row.countryCode, row.settingsVersion),
+      this.countries.errandSettings(row),
       this.countries.basics(row.countryCode),
       acceptingAgentId ? this.agents.tier(acceptingAgentId) : Promise.resolve<AgentTier>(row.agentTier ?? 'bronze'),
     ]);
@@ -597,7 +614,7 @@ export class ErrandsService implements OnModuleInit {
           : Promise.resolve([]),
         mayHoldMoney ? this.wallet.heldFor(errand.id, errand.countryCode) : Promise.resolve(empty.held),
         // A new price's service fee follows the settings the errand was created under, as accepting it will.
-        offer !== null ? this.countries.settingsAt(errand.countryCode, errand.settingsVersion) : Promise.resolve(null),
+        offer !== null ? this.countries.errandSettings(errand) : Promise.resolve(null),
         completed
           ? this.db
               .select({ event: errandEvents.event })
@@ -688,7 +705,7 @@ export class ErrandsService implements OnModuleInit {
 
   /** What the agent keeps from the fee after commission at their tier, under the errand's own settings. */
   private async agentEarns(errand: ErrandRow, tier: AgentTier) {
-    const settings = await this.countries.settingsAt(errand.countryCode, errand.settingsVersion);
+    const settings = await this.countries.errandSettings(errand);
     return splitFeeEscrow({
       feeKobo: errand.feeKobo,
       serviceFeeKobo: errand.serviceFeeKobo,

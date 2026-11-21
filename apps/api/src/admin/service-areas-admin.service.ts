@@ -4,6 +4,9 @@ import { DB, type Db, type Tx } from '../db/database.module';
 import { areas, cities, states } from '../db/schema';
 import { conflict, notFound, unprocessable } from '../common/errors';
 import { shapeOf, type BoundaryInput } from '../countries/service-areas';
+import { countryPrices } from '@jiffo/shared';
+import { CountriesService } from '../countries/countries.service';
+import { PricesService } from '../countries/prices.service';
 import { AuditService } from './audit.service';
 import { requireCountry } from './countries';
 import type { AdminContext } from './admin.types';
@@ -44,6 +47,8 @@ export class ServiceAreasAdminService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly audit: AuditService,
+    private readonly prices: PricesService,
+    private readonly countries: CountriesService,
   ) {}
 
   /** Every state of the country, with its cities and their areas, boundaries as GeoJSON. */
@@ -79,18 +84,33 @@ export class ServiceAreasAdminService {
         .where(eq(states.countryCode, countryCode))
         .orderBy(asc(areas.name)),
     ]);
+    const [saved, current] = await Promise.all([
+      this.prices.latest([
+        ...stateRows.map((s) => ({ scope: 'state' as const, id: s.id })),
+        ...cityRows.map((c) => ({ scope: 'city' as const, id: c.id })),
+        ...areaRows.map((a) => ({ scope: 'area' as const, id: a.id })),
+      ]),
+      this.countries.currentSettingsIfAny(countryCode),
+    ]);
+    const pricesOf = (scope: 'state' | 'city' | 'area', id: string) => saved.get(`${scope}:${id}`)!;
     const parsed = <T extends { boundary: string }>(row: T) => ({
       ...row,
       boundary: JSON.parse(row.boundary) as unknown,
     });
     return {
+      // The country's own prices, which a state, city or area falls back to (Settings, Places).
+      countryPrices: current ? countryPrices(current.settings) : null,
       states: stateRows.map((s) => ({
         ...s,
+        prices: pricesOf('state', s.id),
         cities: cityRows
           .filter((c) => c.stateId === s.id)
           .map((c) => ({
             ...parsed(c),
-            areas: areaRows.filter((a) => a.cityId === c.id).map(parsed),
+            prices: pricesOf('city', c.id),
+            areas: areaRows
+              .filter((a) => a.cityId === c.id)
+              .map((a) => ({ ...parsed(a), prices: pricesOf('area', a.id) })),
           })),
       })),
     };

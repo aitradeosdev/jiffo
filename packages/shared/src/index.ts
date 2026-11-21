@@ -7,3 +7,4 @@ export * from './providers';
 export * from './risk';
 export * from './chat-warnings';
 export * from './pinning';
+export * from './prices';
