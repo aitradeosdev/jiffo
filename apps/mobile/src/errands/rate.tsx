@@ -11,6 +11,7 @@ import { Button, Field, Text } from '@/ui/kit';
 import { Avatar, Icon } from '@/ui/parts';
 import { PageFooter } from '@/ui/floating';
 import { COMPLETED_BY_TEXT, stepTime } from './stage';
+import { NoMatch } from './no-match';
 import { Lines } from './trip';
 import type { ErrandView } from './types';
 
@@ -163,6 +164,12 @@ export function CustomerRate({ errand, onDone }: { errand: ErrandView; onDone: (
             </>
           )}
         </View>
+
+        {errand.agent ? (
+          <View style={styles.block}>
+            <NoMatch errand={errand} name={name} />
+          </View>
+        ) : null}
 
         <View style={styles.block}>
           <Text variant="sec" accessibilityRole="header">

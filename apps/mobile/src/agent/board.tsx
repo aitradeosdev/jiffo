@@ -25,6 +25,8 @@ export type BoardErrand = ErrandView & { distanceMeters: number; agentEarnsKobo:
 interface Board {
   errands: BoardErrand[];
   hiddenByPreferences: number;
+  /** How far it reaches for this agent: their work radius, within what Jiffo allows (an older API sends none). */
+  reachKm?: number;
 }
 interface Earnings {
   todayKobo: number;
@@ -82,6 +84,7 @@ export function AgentBoard() {
       setError(errorMessage(e));
     }
   }, [api, presence.online, radiusKm]);
+  const reachKm = board?.reachKm ?? radiusKm;
   // The first fix after going online loads the board straight away.
   const located = !!presence.coords;
   useEffect(() => {
@@ -174,7 +177,7 @@ export function AgentBoard() {
         ))}
 
         {online ? (
-          <OnlineHead onOffline={() => presence.setOnline(false)} busy={presence.switching} radiusKm={radiusKm} />
+          <OnlineHead onOffline={() => presence.setOnline(false)} busy={presence.switching} radiusKm={reachKm} />
         ) : (
           <OfflineHead tier={earnings.data?.tier} />
         )}
@@ -220,7 +223,7 @@ export function AgentBoard() {
               <Empty
                 icon="search"
                 title="No errands right now"
-                body={`New errands within ${radiusKm} km show here and on the map. This list updates by itself.`}
+                body={`New errands within ${reachKm} km show here and on the map. This list updates by itself.`}
               />
             ) : null}
             <List inset={72}>

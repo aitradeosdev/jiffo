@@ -38,7 +38,7 @@ describe('agent profile', () => {
   it('starts every agent on Bronze, receiving every category', async () => {
     const agent = await signIn(t, 'agent');
     const res = await request(t.http).get('/v1/agent/profile').set(agent.headers).expect(200);
-    expect(res.body).toEqual({ tier: 'bronze', categoryKeys: null, takesPurchases: true });
+    expect(res.body).toEqual({ tier: 'bronze', categoryKeys: null, takesPurchases: true, workRadiusKm: null });
     // Reading the profile writes nothing.
     expect(await t.db.select().from(agentProfiles).where(eq(agentProfiles.userId, agent.userId))).toHaveLength(0);
     await request(t.http).get('/v1/agent/profile').set(customer.headers).expect(403);
@@ -56,7 +56,12 @@ describe('agent profile', () => {
       .set(agent.headers)
       .send({ categoryKeys: ['parcel', 'food', 'parcel'], takesPurchases: false })
       .expect(200);
-    expect(updated.body).toEqual({ tier: 'bronze', categoryKeys: ['parcel', 'food'], takesPurchases: false });
+    expect(updated.body).toEqual({
+      tier: 'bronze',
+      categoryKeys: ['parcel', 'food'],
+      takesPurchases: false,
+      workRadiusKm: null,
+    });
     const filtered = await board(agent);
     const shown = ids(filtered);
     expect(shown).toContain(parcel.id);

@@ -8,6 +8,7 @@ const agent = (over: Partial<MatchAgent> = {}): MatchAgent => ({
   userId: 'agent-1',
   categoryKeys: null,
   takesPurchases: true,
+  workRadiusKm: null,
   held: [],
   ...over,
 });
@@ -18,7 +19,7 @@ const errand = (over: Partial<MatchErrand> = {}): MatchErrand => ({
   categoryKey: 'parcel',
   buy: false,
   pickupMeters: 1_500,
-  pairFlagged: false,
+  keptApart: false,
   gaveUp: false,
   ...over,
 });
@@ -49,8 +50,17 @@ describe('who may get an errand', () => {
     expect(matchRefusal(agent(), errand({ pickupMeters: rules.boardRadiusKm * 1000 + 1 }), rules)).toBe('too_far');
   });
 
-  it('keeps apart a customer and an agent flagged together', () => {
-    expect(matchRefusal(agent(), errand({ pairFlagged: true }), rules)).toBe('unavailable');
+  it("keeps to the agent's own work radius, within Jiffo's reach", () => {
+    const near = agent({ workRadiusKm: 3 });
+    expect(matchRefusal(near, errand({ pickupMeters: 3_000 }), rules)).toBeNull();
+    expect(matchRefusal(near, errand({ pickupMeters: 3_001 }), rules)).toBe('too_far');
+    // A radius wider than admin allows reaches only as far as admin allows.
+    const wide = agent({ workRadiusKm: 50 });
+    expect(matchRefusal(wide, errand({ pickupMeters: rules.boardRadiusKm * 1000 + 1 }), rules)).toBe('too_far');
+  });
+
+  it('keeps apart a customer and an agent flagged together, or when either chose not to be matched again', () => {
+    expect(matchRefusal(agent(), errand({ keptApart: true }), rules)).toBe('unavailable');
   });
 
   it('never gives an errand back to an agent who left it or was replaced on it', () => {

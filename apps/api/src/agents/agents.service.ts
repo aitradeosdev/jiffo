@@ -12,6 +12,8 @@ export interface AgentProfile {
   /** null receives every category. */
   categoryKeys: string[] | null;
   takesPurchases: boolean;
+  /** How far they will travel to a pickup, in km; null for as far as matching allows. */
+  workRadiusKm: number | null;
 }
 
 /** Agent-only details. An agent with no row yet simply has the defaults. */
@@ -28,6 +30,7 @@ export class AgentsService {
         tier: agentProfiles.tier,
         categoryKeys: agentProfiles.categoryKeys,
         takesPurchases: agentProfiles.takesPurchases,
+        workRadiusKm: agentProfiles.workRadiusKm,
       })
       .from(agentProfiles)
       .where(eq(agentProfiles.userId, userId));
@@ -52,7 +55,10 @@ export class AgentsService {
     return { ...profile, categoryKeys: live.length > 0 ? live : null };
   }
 
-  /** The agent chooses their categories and whether they take purchase errands. The tier is admin's. */
+  /**
+   * The agent chooses their categories, whether they take purchase errands and how far they will travel. The
+   * tier is admin's.
+   */
   async updatePreferences(auth: AuthContext, input: Partial<Omit<AgentProfile, 'tier'>>) {
     if (input.categoryKeys) {
       const active = new Set((await this.countries.activeCategories(auth.countryCode)).map((c) => c.key));
@@ -65,6 +71,7 @@ export class AgentsService {
         ? { categoryKeys: input.categoryKeys && [...new Set(input.categoryKeys)] }
         : {}),
       ...(input.takesPurchases !== undefined ? { takesPurchases: input.takesPurchases } : {}),
+      ...(input.workRadiusKm !== undefined ? { workRadiusKm: input.workRadiusKm } : {}),
     };
     await this.db
       .insert(agentProfiles)

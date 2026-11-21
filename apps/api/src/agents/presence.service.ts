@@ -292,8 +292,13 @@ export class PresenceService {
     return { lat: row.lat, lng: row.lng, at: row.at };
   }
 
-  /** How many agents are online within a radius of a point (never who or where). */
-  async onlineNear(countryCode: string, lat: number, lng: number, radiusMeters: number, excludeUserId: string) {
+  /**
+   * How many agents are online within a radius of a customer's pickup (never who or where), counting only those
+   * the errand could reach: not the customer, not past an agent's own work radius, and not kept apart by
+   * "Don't match me again" either way.
+   */
+  async onlineNear(countryCode: string, lat: number, lng: number, radiusMeters: number, customerId: string) {
+    const here = point(lat, lng);
     const [row] = await this.db
       .select({ n: sql<number>`count(*)::int` })
       .from(agentPresence)
@@ -302,9 +307,15 @@ export class PresenceService {
           eq(agentPresence.countryCode, countryCode),
           eq(agentPresence.online, true),
           eq(agentPresence.mocked, false),
-          ne(agentPresence.userId, excludeUserId),
+          ne(agentPresence.userId, customerId),
           gt(agentPresence.locatedAt, new Date(Date.now() - ONLINE_FOR_MS)),
-          sql`ST_DWithin(${agentPresence.location}, ${point(lat, lng)}, ${radiusMeters})`,
+          sql`ST_DWithin(${agentPresence.location}, ${here}, ${radiusMeters})`,
+          sql`not exists (select 1 from agent_profiles ap where ap.user_id = ${agentPresence.userId}
+            and ap.work_radius_km is not null
+            and not ST_DWithin(${agentPresence.location}, ${here}, ap.work_radius_km * 1000))`,
+          sql`not exists (select 1 from match_blocks b
+            where (b.user_id = ${customerId} and b.other_user_id = ${agentPresence.userId})
+              or (b.other_user_id = ${customerId} and b.user_id = ${agentPresence.userId}))`,
         ),
       );
     return row?.n ?? 0;

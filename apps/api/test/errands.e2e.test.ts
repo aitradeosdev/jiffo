@@ -259,7 +259,7 @@ describe('errands', () => {
       await get(abroad, errand.id, 404);
       await act(t, abroad, errand.id, 'accept', {}, 404);
       const board = await boardRequest(t, abroad, 'lat=6.4480&lng=3.4700').expect(200);
-      expect(board.body).toEqual({ errands: [], hiddenByPreferences: 0 });
+      expect(board.body).toMatchObject({ errands: [], hiddenByPreferences: 0 });
     });
   });
 

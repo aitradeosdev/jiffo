@@ -10,18 +10,24 @@ import { useResource } from '@/api/useResource';
 import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
 import { Button, Text } from '@/ui/kit';
-import { IconCircle, List, Row, Toggle } from '@/ui/parts';
+import { Chip, IconCircle, List, Row, Toggle } from '@/ui/parts';
+import { radiusChoices, radiusChosen, radiusNote, reachLabel } from '@/agent/radius';
 import { PageFooter, PageHeader } from '@/ui/floating';
 
 interface Profile {
   tier: string;
   categoryKeys: string[] | null;
   takesPurchases: boolean;
+  /** How far they will travel to a pickup, in km; null for as far as Jiffo allows. */
+  workRadiusKm?: number | null;
 }
 
+/** How far Jiffo lets agents reach until the country's settings arrive, or from an older API. */
+const DEFAULT_ALLOWED_KM = 10;
+
 /**
- * Which errands the agent wants, after the prototype: purchase errands, and each category on or off.
- * Every change saves at once and applies to new requests, not errands already accepted.
+ * Which errands the agent wants, after the prototype: how far they will travel, purchase errands, and each
+ * category on or off. Every change saves at once and applies to new requests, not errands already accepted.
  */
 export default function Preferences() {
   const c = useColors();
@@ -33,6 +39,8 @@ export default function Preferences() {
   const profile = useResource<Profile>('/v1/agent/profile');
   const [chosen, setChosen] = useState<Set<string> | null>(null);
   const [buys, setBuys] = useState(true);
+  const [radius, setRadius] = useState<number | null>(null);
+  const allowedKm = config?.settings.matching?.boardRadiusKm ?? DEFAULT_ALLOWED_KM;
   const [error, setError] = useState<string | null>(null);
   const all = config?.categories ?? [];
   // The switches as the agent left them, read without waiting for a render, and saves one at a time.
@@ -50,6 +58,7 @@ export default function Preferences() {
       current.current = next;
       setChosen(next.chosen);
       setBuys(next.buys);
+      setRadius(saved.workRadiusKm ?? null);
     },
     [config],
   );
@@ -58,10 +67,12 @@ export default function Preferences() {
   }, [profile.data, seed]);
 
   // Saves straight away, in order. If one fails, the switches go back to what the server has.
-  const save = (next: { chosen?: Set<string>; buys?: boolean }) => {
-    current.current = { ...current.current, ...next };
+  const save = (next: { chosen?: Set<string>; buys?: boolean; radius?: number | null }) => {
+    const { radius: nextRadius, ...rest } = next;
+    current.current = { ...current.current, ...rest };
     if (next.chosen) setChosen(next.chosen);
     if (next.buys !== undefined) setBuys(next.buys);
+    if (nextRadius !== undefined) setRadius(nextRadius);
     setError(null);
     queue.current = queue.current.then(async () => {
       try {
@@ -69,6 +80,7 @@ export default function Preferences() {
           // Every category on means "all", so new categories reach the agent too.
           ...(next.chosen ? { categoryKeys: next.chosen.size === all.length ? null : [...next.chosen] } : {}),
           ...(next.buys !== undefined ? { takesPurchases: next.buys } : {}),
+          ...(nextRadius !== undefined ? { workRadiusKm: nextRadius } : {}),
         });
       } catch (e) {
         setError(errorMessage(e));
@@ -121,6 +133,30 @@ export default function Preferences() {
               ? "Everything is on to start. You'll only get requests that match, and you can change this any time."
               : "Urgent requests and the board only show errands that match. Changes apply to new requests, not errands you've accepted."}
           </Text>
+        </View>
+
+        <View style={{ gap: 8 }}>
+          <Text variant="sec" accessibilityRole="header">
+            How far you&apos;ll travel
+          </Text>
+          <Text variant="note" tone="ink3">
+            Errands whose pickup is further away don&apos;t reach you.
+          </Text>
+          <View style={styles.chips}>
+            {radiusChoices(allowedKm, profile.data?.workRadiusKm ?? null).map((km) => (
+              <Chip
+                key={km ?? 'any'}
+                label={reachLabel(km, allowedKm)}
+                selected={radiusChosen(radius, allowedKm) === km}
+                onPress={() => save({ radius: km })}
+              />
+            ))}
+          </View>
+          {radiusNote(radius, allowedKm) ? (
+            <Text variant="note" tone="ink3">
+              {radiusNote(radius, allowedKm)}
+            </Text>
+          ) : null}
         </View>
 
         <View style={[styles.buy, { backgroundColor: c.surface2 }]}>
@@ -176,5 +212,6 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: 16, paddingBottom: 28, gap: 16 },
   buy: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14 },
   buyTitle: { fontFamily: fonts.bold, fontSize: 15.5 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   secRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
 });

@@ -12,7 +12,7 @@ import { and, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { AgentsService } from '../agents/agents.service';
 import { conflict, forbidden, unprocessable, type ApiError } from '../common/errors';
 import { DB, type Db, type Tx } from '../db/database.module';
-import { agentPresence, errandEvents, errands, riskFlags } from '../db/schema';
+import { agentPresence, errandEvents, errands, matchBlocks, riskFlags } from '../db/schema';
 
 const MINUTE_MS = 60_000;
 
@@ -103,6 +103,7 @@ export class EligibilityService {
       lng: here.lng,
       categoryKeys: prefs.categoryKeys,
       takesPurchases: prefs.takesPurchases,
+      workRadiusKm: prefs.workRadiusKm,
       held: held.map((e) => ({
         urgent: e.urgent,
         // A scheduled errand taken ahead isn't under way until it starts.
@@ -113,7 +114,8 @@ export class EligibilityService {
 
   /**
    * The board's query leaves out, before its limit, errands this agent may not take for who they are with or
-   * what they did: a customer flagged with them, and an errand they left or were replaced on.
+   * what they did: a customer kept apart from them (a flag, or "Don't match me again" either way), and an
+   * errand they left or were replaced on.
    */
   boardExclusions(agentId: string) {
     const list = (kinds: readonly string[]) =>
@@ -127,19 +129,23 @@ export class EligibilityService {
           or (f.kind in (${list(CONFIRMED_PAIR_FLAG_KINDS)}) and f.status = 'confirmed'))
         and ((f.user_id = ${agentId} and f.other_user_id = ${errands.customerId})
           or (f.other_user_id = ${agentId} and f.user_id = ${errands.customerId})))`,
+      sql`not exists (select 1 from match_blocks b
+        where (b.user_id = ${agentId} and b.other_user_id = ${errands.customerId})
+          or (b.other_user_id = ${agentId} and b.user_id = ${errands.customerId}))`,
       sql`not exists (select 1 from errand_events ev where ev.errand_id = ${errands.id}
         and ev.event in ('withdraw', 'release_agent') and ev.data->>'agentId' = ${agentId})`,
     );
   }
 
   /**
-   * For these errands and this agent: the customers flagged with the agent (not cleared, or for a repeat
-   * pairing, confirmed), and the errands the agent left or was replaced on.
+   * For these errands and this agent: the customers kept apart from the agent (a flag not cleared, or for
+   * those that need it confirmed, or "Don't match me again" either way), and the errands the agent left or was
+   * replaced on.
    */
   async facts(agentId: string, rows: Array<{ id: string; customerId: string }>, db: Db | Tx = this.db) {
-    if (!rows.length) return { pairs: new Set<string>(), gaveUp: new Set<string>() };
+    if (!rows.length) return { apart: new Set<string>(), gaveUp: new Set<string>() };
     const customers = [...new Set(rows.map((r) => r.customerId))];
-    const [flags, left] = await Promise.all([
+    const [flags, blocks, left] = await Promise.all([
       db
         .select({ userId: riskFlags.userId, otherUserId: riskFlags.otherUserId })
         .from(riskFlags)
@@ -156,6 +162,15 @@ export class EligibilityService {
           ),
         ),
       db
+        .select({ userId: matchBlocks.userId, otherUserId: matchBlocks.otherUserId })
+        .from(matchBlocks)
+        .where(
+          or(
+            and(eq(matchBlocks.userId, agentId), inArray(matchBlocks.otherUserId, customers)),
+            and(eq(matchBlocks.otherUserId, agentId), inArray(matchBlocks.userId, customers)),
+          ),
+        ),
+      db
         .select({ errandId: errandEvents.errandId })
         .from(errandEvents)
         .where(
@@ -169,8 +184,10 @@ export class EligibilityService {
           ),
         ),
     ]);
+    const otherOf = (r: { userId: string; otherUserId: string | null }) =>
+      r.userId === agentId ? r.otherUserId! : r.userId;
     return {
-      pairs: new Set(flags.map((f) => (f.userId === agentId ? f.otherUserId! : f.userId))),
+      apart: new Set([...flags, ...blocks].map(otherOf)),
       gaveUp: new Set(left.map((l) => l.errandId)),
     };
   }

@@ -5360,6 +5360,18 @@
                   },
                   "takesPurchases": {
                     "type": "boolean"
+                  },
+                  "workRadiusKm": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "additionalProperties": false
@@ -6693,6 +6705,70 @@
           }
         },
         "x-rate-limit": "chat"
+      }
+    },
+    "/v1/errands/{id}/no-match": {
+      "delete": {
+        "operationId": "MatchBlocksController.matchAgain",
+        "tags": [
+          "MatchBlocks"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default"
+      },
+      "put": {
+        "operationId": "MatchBlocksController.noMatch",
+        "tags": [
+          "MatchBlocks"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default"
       }
     },
     "/v1/errands/{id}/pin": {
