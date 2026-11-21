@@ -28,7 +28,11 @@ export const PROVIDER_CATEGORY_INFO: Record<ProviderCategory, { label: string; a
   },
   calls: { label: 'Calls', about: 'Masked calls between a customer and their agent.' },
   push: { label: 'Push notifications', about: 'Notifications to the apps.' },
-  maps: { label: 'Maps', about: 'Place search and driving distances for prices.' },
+  maps: {
+    label: 'Maps',
+    about:
+      'Place search and driving distances for prices, from Google Maps or Mapbox. It doesn\'t change the map the apps draw.',
+  },
   storage: {
     label: 'File storage',
     about:
@@ -312,6 +316,22 @@ export const PROVIDERS: ProviderInfo[] = [
         secret: true,
         required: true,
         hint: 'With the Places API (New) and Routes API enabled, and restricted to the API server.',
+      },
+    ],
+  },
+  {
+    key: 'mapbox',
+    category: 'maps',
+    name: 'Mapbox',
+    about: 'The Search Box API for place search, and the Directions API for driving distances.',
+    fields: [
+      {
+        key: 'accessToken',
+        label: 'Access token',
+        secret: true,
+        required: true,
+        hint: 'A token made for the API server on the Tokens page of your Mapbox account, with no URL restriction: the server calls Mapbox, not a web page.',
+        placeholder: 'pk.…',
       },
     ],
   },

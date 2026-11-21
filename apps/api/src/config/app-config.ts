@@ -79,7 +79,7 @@ const EnvSchema = z
     IOS_BUNDLE_ID_CUSTOMER: z.string().default('com.jiffoapp.customer'),
     IOS_BUNDLE_ID_AGENT: z.string().default('com.jiffoapp.agent'),
     CHAT_PROVIDER: z.enum(['builtin']).default('builtin'),
-    MAPS_PROVIDER: z.enum(['google', 'fake']).default('fake'),
+    MAPS_PROVIDER: z.enum(['google', 'mapbox', 'fake']).default('fake'),
     /** memory keeps files in the API process: development and tests only. */
     STORAGE_PROVIDER: z.enum(['s3', 'memory']).default('memory'),
     /**
@@ -98,6 +98,7 @@ const EnvSchema = z
      */
     PUBLIC_API_URL: z.string().url().default('http://localhost:3000'),
     GOOGLE_MAPS_API_KEY: z.string().optional(),
+    MAPBOX_ACCESS_TOKEN: z.string().optional(),
     PAYMENTS_PROVIDER: z.enum(['paystack', 'fake']).default('fake'),
     /**
      * Identity checks for agents. "none" turns them off: agents can't send applications until a provider is
@@ -194,6 +195,9 @@ const EnvSchema = z
     }
     if (env.MAPS_PROVIDER === 'google') {
       need(!!env.GOOGLE_MAPS_API_KEY, 'GOOGLE_MAPS_API_KEY', 'required when MAPS_PROVIDER is google');
+    }
+    if (env.MAPS_PROVIDER === 'mapbox') {
+      need(!!env.MAPBOX_ACCESS_TOKEN, 'MAPBOX_ACCESS_TOKEN', 'required when MAPS_PROVIDER is mapbox');
     }
     if (env.PAYMENTS_PROVIDER === 'paystack') {
       need(!!env.PAYSTACK_SECRET_KEY, 'PAYSTACK_SECRET_KEY', 'required when PAYMENTS_PROVIDER is paystack');

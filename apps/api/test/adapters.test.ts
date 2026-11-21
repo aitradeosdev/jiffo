@@ -4,7 +4,7 @@ import { AfricasTalkingMessagingAdapter, TermiiMessagingAdapter } from '../src/a
 import { AfricasTalkingCallsAdapter, TwilioCallsAdapter } from '../src/adapters/calls';
 import { FcmPushAdapter } from '../src/adapters/push';
 import { FlutterwavePaymentsAdapter, parseFlutterwaveDate, PaystackPaymentsAdapter } from '../src/adapters/payments';
-import { GoogleMapsAdapter } from '../src/adapters/maps';
+import { GoogleMapsAdapter, MapboxMapsAdapter } from '../src/adapters/maps';
 import { createHmac } from 'node:crypto';
 import { decrypt, encrypt } from '../src/common/crypto';
 import { loadConfig } from '../src/config/app-config';
@@ -515,6 +515,163 @@ describe('Google maps', () => {
     ]);
     expect(route).toEqual({ distanceMeters: 9_120, durationSeconds: 1_260 });
     expect(JSON.parse(String(calls[0]!.init.body)).intermediates).toHaveLength(1);
+  });
+});
+
+describe('Mapbox maps', () => {
+  const TOKEN = 'pk.test-token-1';
+  const query = (url: string) => new URL(url).searchParams;
+
+  it('searches with the token and session, in the country, near the person (longitude first)', async () => {
+    const { impl, calls } = fakeFetch(() =>
+      Response.json({
+        suggestions: [
+          {
+            name: 'Shoprite',
+            mapbox_id: 'dXJuOm1ieHBvaTox',
+            feature_type: 'poi',
+            place_formatted: 'Lekki, Lagos, Nigeria',
+          },
+          {
+            name: '12 Admiralty Way',
+            mapbox_id: 'dXJuOm1ieGFkcjoy',
+            feature_type: 'address',
+            full_address: '12 Admiralty Way, Lekki',
+          },
+        ],
+      }),
+    );
+    const maps = new MapboxMapsAdapter(TOKEN, impl);
+    const found = await maps.autocomplete({
+      query: 'shoprite',
+      countryCode: 'NG',
+      near: { lat: 6.4, lng: 3.4 },
+      sessionToken: 's1',
+    });
+    expect(found).toEqual([
+      { placeId: 'dXJuOm1ieHBvaTox', title: 'Shoprite', subtitle: 'Lekki, Lagos, Nigeria' },
+      { placeId: 'dXJuOm1ieGFkcjoy', title: '12 Admiralty Way', subtitle: '12 Admiralty Way, Lekki' },
+    ]);
+    const url = calls[0]!.url;
+    expect(url.startsWith('https://api.mapbox.com/search/searchbox/v1/suggest?')).toBe(true);
+    expect(Object.fromEntries(query(url))).toMatchObject({
+      q: 'shoprite',
+      access_token: TOKEN,
+      session_token: 's1',
+      country: 'ng',
+      proximity: '3.4,6.4',
+    });
+  });
+
+  it('makes a session token when the app sent none, as Mapbox needs one', async () => {
+    const { impl, calls } = fakeFetch(() => Response.json({ suggestions: [] }));
+    await new MapboxMapsAdapter(TOKEN, impl).autocomplete({ query: 'lekki', countryCode: 'NG' });
+    expect(query(calls[0]!.url).get('session_token')).toMatch(/^[0-9a-f-]{36}$/);
+    expect(query(calls[0]!.url).has('proximity')).toBe(false);
+  });
+
+  it('reads place details from retrieve, in the same session: position, address and state', async () => {
+    const { impl, calls } = fakeFetch(() =>
+      Response.json({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [3.4761, 6.4442] },
+            properties: {
+              name: 'Shoprite',
+              mapbox_id: 'dXJuOm1ieHBvaTox',
+              full_address: 'Lekki-Epe Expressway, Lekki, Lagos, Nigeria',
+              context: { region: { name: 'Lagos', region_code: 'LA' }, country: { country_code: 'NG' } },
+            },
+          },
+        ],
+      }),
+    );
+    const maps = new MapboxMapsAdapter(TOKEN, impl);
+    expect(await maps.place('dXJuOm1ieHBvaTox', 's1')).toEqual({
+      placeId: 'dXJuOm1ieHBvaTox',
+      name: 'Shoprite',
+      address: 'Lekki-Epe Expressway, Lekki, Lagos, Nigeria',
+      lat: 6.4442,
+      lng: 3.4761,
+      region: 'Lagos',
+    });
+    const url = calls[0]!.url;
+    expect(url.startsWith('https://api.mapbox.com/search/searchbox/v1/retrieve/dXJuOm1ieHBvaTox?')).toBe(true);
+    expect(query(url).get('session_token')).toBe('s1');
+  });
+
+  it('treats an unknown place as not found, and other failures as unavailable, never showing the token', async () => {
+    let status = 404;
+    const { impl } = fakeFetch(() => new Response('{"message":"Not Found"}', { status }));
+    const maps = new MapboxMapsAdapter(TOKEN, impl);
+    expect(await maps.place('stale-id')).toBeNull();
+    status = 200;
+    const empty = new MapboxMapsAdapter(TOKEN, (async () => Response.json({ features: [] })) as typeof fetch);
+    expect(await empty.place('abc')).toBeNull();
+    status = 500;
+    const failed = await maps.place('abc').catch((e: unknown) => e);
+    expect(failed).toMatchObject({ status: 503 });
+    expect(JSON.stringify(failed)).not.toContain(TOKEN);
+    const down = new MapboxMapsAdapter(TOKEN, (async () => {
+      throw new Error(`connect failed for https://api.mapbox.com/?access_token=${TOKEN}`);
+    }) as typeof fetch);
+    const offline = await down.autocomplete({ query: 'lekki', countryCode: 'NG' }).catch((e: unknown) => e);
+    expect(offline).toMatchObject({ status: 503 });
+    expect(String((offline as Error).message)).not.toContain(TOKEN);
+    const broken = new MapboxMapsAdapter(TOKEN, (async () => new Response('<html>', { status: 200 })) as typeof fetch);
+    await expect(broken.place('abc')).rejects.toMatchObject({ status: 503 });
+  });
+
+  it('reads the driving distance and duration through every stop', async () => {
+    const { impl, calls } = fakeFetch(() =>
+      Response.json({ code: 'Ok', routes: [{ distance: 9120.4, duration: 1259.6 }] }),
+    );
+    const maps = new MapboxMapsAdapter(TOKEN, impl);
+    const route = await maps.route([
+      { lat: 6.4474, lng: 3.4723 },
+      { lat: 6.4386, lng: 3.5235 },
+      { lat: 6.4311, lng: 3.4158 },
+    ]);
+    expect(route).toEqual({ distanceMeters: 9_120, durationSeconds: 1_260 });
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe('/directions/v5/mapbox/driving/3.4723,6.4474;3.5235,6.4386;3.4158,6.4311');
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ access_token: TOKEN, overview: 'false' });
+  });
+
+  it('falls back to the straight-line estimate when there is no route or the service fails', async () => {
+    const points = [
+      { lat: 6.4474, lng: 3.4723 },
+      { lat: 6.4311, lng: 3.4158 },
+    ];
+    for (const respond of [
+      () => Response.json({ code: 'NoRoute', routes: [] }),
+      () => new Response('{"message":"Too Many Requests"}', { status: 429 }),
+      () => new Response('{"code":"InvalidInput"}', { status: 422 }),
+    ]) {
+      const route = await new MapboxMapsAdapter(TOKEN, fakeFetch(respond).impl).route(points);
+      expect(route.distanceMeters).toBeGreaterThan(8_000);
+    }
+    // More stops than Mapbox takes in one route: estimated without asking.
+    const { impl, calls } = fakeFetch(() => Response.json({ code: 'Ok', routes: [{ distance: 1, duration: 1 }] }));
+    const many = Array.from({ length: 26 }, (_, i) => ({ lat: 6.4 + i / 1000, lng: 3.4 }));
+    expect((await new MapboxMapsAdapter(TOKEN, impl).route(many)).distanceMeters).toBeGreaterThan(1);
+    expect(calls).toHaveLength(0);
+    expect(await new MapboxMapsAdapter(TOKEN, impl).route([points[0]!])).toEqual({
+      distanceMeters: 0,
+      durationSeconds: 0,
+    });
+  });
+
+  it("tests the token for the panel, with Mapbox's own words when it is refused", async () => {
+    const ok = new MapboxMapsAdapter(TOKEN, fakeFetch(() => Response.json({ suggestions: [] })).impl);
+    expect(await ok.check()).toBe('Connected. Place search works.');
+    const refused = new MapboxMapsAdapter(
+      TOKEN,
+      fakeFetch(() => new Response('{"message":"Invalid Token"}', { status: 401 })).impl,
+    );
+    await expect(refused.check()).rejects.toThrow('Mapbox answered 401: Invalid Token');
   });
 });
 

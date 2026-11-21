@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { providerFetch } from './provider-fetch';
 import { unavailable } from '../common/errors';
 
@@ -28,8 +29,8 @@ export interface RouteEstimate {
 }
 
 /**
- * Address search, place details and route distance. Google Maps at launch; another country's provider
- * is another implementation. Keys stay on the server: the apps only ever talk to Jiffo.
+ * Address search, place details and route distance: Google Maps or Mapbox, chosen in the panel (Settings,
+ * Providers). Keys stay on the server: the apps only ever talk to Jiffo.
  */
 export interface MapsAdapter {
   readonly name: string;
@@ -194,6 +195,138 @@ export class GoogleMapsAdapter implements MapsAdapter {
       const route = body?.routes?.[0];
       if (!route?.distanceMeters) return estimateRoute(points);
       return { distanceMeters: route.distanceMeters, durationSeconds: Number.parseInt(route.duration ?? '0', 10) };
+    } catch {
+      // Pricing must still work if the routes service is down: fall back to the straight-line estimate.
+      return estimateRoute(points);
+    }
+  }
+}
+
+const MAPBOX = 'https://api.mapbox.com';
+/** The most points Mapbox routes in one request. */
+const MAPBOX_MAX_POINTS = 25;
+
+/**
+ * Mapbox: the Search Box API for search and details (suggest, then retrieve), the Directions API for driving
+ * distance. The token goes in the address, as Mapbox takes it only there, so no error here ever includes an
+ * address it was sent to.
+ */
+export class MapboxMapsAdapter implements MapsAdapter {
+  readonly name = 'mapbox';
+
+  constructor(
+    private readonly accessToken: string,
+    private readonly fetchImpl: typeof fetch = providerFetch,
+  ) {}
+
+  private url(path: string, params: Record<string, string | undefined>) {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) if (value !== undefined) query.set(key, value);
+    query.set('access_token', this.accessToken);
+    return `${MAPBOX}${path}?${query}`;
+  }
+
+  /** For the panel's Test button: one place search, with Mapbox's own words if it is refused. */
+  async check() {
+    const res = await this.fetchImpl(
+      this.url('/search/searchbox/v1/suggest', { q: 'Lagos', country: 'ng', session_token: randomUUID() }),
+    ).catch(() => {
+      throw new Error("Mapbox couldn't be reached");
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { message?: string } | null;
+      throw new Error(`Mapbox answered ${res.status}: ${body?.message ?? 'no details'}`);
+    }
+    return 'Connected. Place search works.';
+  }
+
+  /** Returns null when Mapbox says the thing doesn't exist or can't be asked for (an unknown or stale id). */
+  private async call<T>(url: string): Promise<T | null> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url);
+    } catch {
+      // The error may quote the address, token and all: it is never passed on.
+      throw unavailable('maps_unavailable', 'Address search is not available right now');
+    }
+    if (res.status === 404 || res.status === 400 || res.status === 422) return null;
+    if (!res.ok) throw unavailable('maps_unavailable', 'Address search is not available right now');
+    try {
+      return (await res.json()) as T;
+    } catch {
+      throw unavailable('maps_unavailable', 'Address search is not available right now');
+    }
+  }
+
+  async autocomplete(input: { query: string; near?: LatLng; countryCode: string; sessionToken?: string }) {
+    const body = await this.call<{
+      suggestions?: Array<{ name?: string; mapbox_id?: string; place_formatted?: string; full_address?: string }>;
+    }>(
+      this.url('/search/searchbox/v1/suggest', {
+        q: input.query.slice(0, 256),
+        country: input.countryCode.toLowerCase(),
+        // Mapbox needs one, and bills a search and its pick as one session when they share it.
+        session_token: input.sessionToken ?? randomUUID(),
+        proximity: input.near ? `${input.near.lng},${input.near.lat}` : undefined,
+        limit: '8',
+        language: 'en',
+      }),
+    );
+    return (body?.suggestions ?? [])
+      .filter((s) => !!s.mapbox_id)
+      .map((s) => ({
+        placeId: s.mapbox_id!,
+        title: s.name ?? s.full_address ?? '',
+        subtitle: s.place_formatted ?? s.full_address ?? '',
+      }));
+  }
+
+  async place(placeId: string, sessionToken?: string) {
+    const body = await this.call<{
+      features?: Array<{
+        geometry?: { coordinates?: [number, number] };
+        properties?: {
+          name?: string;
+          mapbox_id?: string;
+          full_address?: string;
+          place_formatted?: string;
+          context?: { region?: { name?: string } };
+        };
+      }>;
+    }>(
+      this.url(`/search/searchbox/v1/retrieve/${encodeURIComponent(placeId)}`, {
+        session_token: sessionToken ?? randomUUID(),
+        language: 'en',
+      }),
+    );
+    const feature = body?.features?.[0];
+    const [lng, lat] = feature?.geometry?.coordinates ?? [];
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+    const p = feature?.properties ?? {};
+    const address = p.full_address ?? p.place_formatted ?? '';
+    return {
+      placeId: p.mapbox_id ?? placeId,
+      name: p.name ?? address,
+      address,
+      lat,
+      lng,
+      region: p.context?.region?.name ?? null,
+    };
+  }
+
+  async route(points: LatLng[]) {
+    if (points.length < 2) return { distanceMeters: 0, durationSeconds: 0 };
+    if (points.length > MAPBOX_MAX_POINTS) return estimateRoute(points);
+    // Longitude first, to 6 decimals (about 10 cm), which keeps the address short.
+    const coord = (n: number) => String(Number(n.toFixed(6)));
+    const path = points.map((p) => `${coord(p.lng)},${coord(p.lat)}`).join(';');
+    try {
+      const body = await this.call<{ code?: string; routes?: Array<{ distance?: number; duration?: number }> }>(
+        this.url(`/directions/v5/mapbox/driving/${path}`, { overview: 'false', steps: 'false' }),
+      );
+      const route = body?.code === 'Ok' ? body.routes?.[0] : undefined;
+      if (!route?.distance) return estimateRoute(points);
+      return { distanceMeters: Math.round(route.distance), durationSeconds: Math.round(route.duration ?? 0) };
     } catch {
       // Pricing must still work if the routes service is down: fall back to the straight-line estimate.
       return estimateRoute(points);

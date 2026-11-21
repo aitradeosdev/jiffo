@@ -1,6 +1,6 @@
 import { isProviderCategory, type ProviderCategory } from '@jiffo/shared';
 import { PostmarkEmailAdapter, ResendEmailAdapter, SesEmailAdapter } from '../adapters/email';
-import { GoogleMapsAdapter } from '../adapters/maps';
+import { GoogleMapsAdapter, MapboxMapsAdapter } from '../adapters/maps';
 import { AfricasTalkingMessagingAdapter, TermiiMessagingAdapter } from '../adapters/messaging';
 import { AfricasTalkingCallsAdapter, TwilioCallsAdapter } from '../adapters/calls';
 import { FlutterwavePaymentsAdapter, PaystackPaymentsAdapter } from '../adapters/payments';
@@ -145,6 +145,7 @@ export const BUILDERS: {
   },
   maps: {
     google: (v) => new GoogleMapsAdapter(v.apiKey!),
+    mapbox: (v) => new MapboxMapsAdapter(v.accessToken!),
   },
   storage: {
     s3: (v, ctx) =>

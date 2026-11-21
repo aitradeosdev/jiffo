@@ -1,7 +1,7 @@
 import { CallsAdapter, FakeCallsAdapter, UnconfiguredCallsAdapter } from '../adapters/calls';
 import { FakeIdentityAdapter, IdentityAdapter, UnconfiguredIdentityAdapter } from '../adapters/identity';
 import { ConsoleEmailAdapter, MemoryEmailAdapter, type EmailAdapter } from '../adapters/email';
-import { FakeMapsAdapter, GoogleMapsAdapter, type MapsAdapter } from '../adapters/maps';
+import { FakeMapsAdapter, GoogleMapsAdapter, MapboxMapsAdapter, type MapsAdapter } from '../adapters/maps';
 import {
   ConsoleMessagingAdapter,
   MemoryMessagingAdapter,
@@ -79,9 +79,11 @@ export function envAdapters(c: AppConfig): Adapters {
     maps:
       c.MAPS_PROVIDER === 'google'
         ? new GoogleMapsAdapter(c.GOOGLE_MAPS_API_KEY!)
-        : live
-          ? new NotConfiguredMaps()
-          : new FakeMapsAdapter(),
+        : c.MAPS_PROVIDER === 'mapbox'
+          ? new MapboxMapsAdapter(c.MAPBOX_ACCESS_TOKEN!)
+          : live
+            ? new NotConfiguredMaps()
+            : new FakeMapsAdapter(),
     storage:
       c.STORAGE_PROVIDER === 's3'
         ? new S3StorageAdapter(c.S3_BUCKET!, c.S3_REGION, storageEndpoint(c.S3_ENDPOINT, { production: live }))
