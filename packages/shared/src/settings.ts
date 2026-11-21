@@ -61,6 +61,9 @@ export const DEFAULT_MATCHING_SETTINGS = {
   weights: { travel: 60, reliability: 20, rating: 10, waiting: 10 },
   tierBoosts: { bronze: 0, silver: 0, gold: 0, platinum: 0 },
   newAgentErrands: 10,
+  offerSeconds: 20,
+  missedOffersOffline: 3,
+  dispatchRetrySeconds: 15,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -409,6 +412,12 @@ const CountrySettingsObject = z.object({
         .default(() => ({ ...DEFAULT_MATCHING_SETTINGS.tierBoosts })),
       /** Errands an agent completes before their own reliability and rating count; until then, the state's. */
       newAgentErrands: z.number().int().min(0).max(1_000).default(10),
+      /** How long an agent has to answer an offer for an urgent errand before it moves to the next (M6). */
+      offerSeconds: z.number().int().min(5).max(120).default(20),
+      /** Offers in a row an agent lets run out before they are taken offline. 0: never. */
+      missedOffersOffline: z.number().int().min(0).max(20).default(3),
+      /** With no one to offer an urgent errand to, how soon to look again. */
+      dispatchRetrySeconds: z.number().int().min(5).max(300).default(15),
     })
     .default(() => structuredClone(DEFAULT_MATCHING_SETTINGS)),
   /** The emergency button (docs/security-plan.md, E9). */

@@ -24,7 +24,16 @@ import {
 import type { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db, type Tx } from '../db/database.module';
-import { earningHolds, errandEvents, errandRatings, errandStops, errands, journalEntries, users } from '../db/schema';
+import {
+  earningHolds,
+  errandEvents,
+  errandOffers,
+  errandRatings,
+  errandStops,
+  errands,
+  journalEntries,
+  users,
+} from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
 import { ServiceAreasService } from '../countries/service-areas';
 import { PricesService } from '../countries/prices.service';
@@ -41,6 +50,7 @@ import { CustomerIdentityService } from '../identity/customer-identity.service';
 import { haversineMeters, MAPS, type MapsAdapter } from '../adapters/maps';
 import { EligibilityService } from '../matching/eligibility.service';
 import { MatchBlocksService } from '../matching/match-blocks.service';
+import { OffersService } from '../matching/offers.service';
 import { UploadsService } from '../files/uploads.service';
 import { RiskFlagsService } from '../risk/risk-flags.service';
 import { EvidenceService } from './evidence.service';
@@ -157,6 +167,7 @@ export class ErrandsService implements OnModuleInit {
     private readonly evidence: EvidenceService,
     private readonly eligibility: EligibilityService,
     private readonly matchBlocks: MatchBlocksService,
+    private readonly offers: OffersService,
   ) {}
 
   onModuleInit() {
@@ -262,11 +273,9 @@ export class ErrandsService implements OnModuleInit {
     if (haversineMeters(me, q) > security.boardNearKm * 1000) {
       throw unprocessable('not_here', 'The board shows errands near where you are');
     }
-    // What the errands the agent holds leave room for: errands from the board, urgent ones, both, or neither,
-    // when the board says why.
-    const boardFull = heldRefusal(me.held, false, rules);
-    const urgentFull = heldRefusal(me.held, true, rules);
-    if (boardFull && urgentFull) throw this.eligibility.refusal(boardFull);
+    // The board has only errands that aren't urgent: with no room for one of those, it says why.
+    const full = heldRefusal(me.held, false, rules);
+    if (full) throw this.eligibility.refusal(full);
     const tier = await this.agents.tier(auth.userId);
     const here = sql`ST_SetSRID(ST_MakePoint(${me.lng}, ${me.lat}), 4326)::geography`;
     const distance = sql<number>`ST_Distance(${errandStops.location}, ${here})`;
@@ -275,6 +284,8 @@ export class ErrandsService implements OnModuleInit {
     const open = and(
       eq(errands.status, 'requested'),
       eq(errands.countryCode, auth.countryCode),
+      // Urgent errands are offered to one agent at a time instead (docs/matching.md, M6).
+      eq(errands.urgent, false),
       ne(errands.customerId, auth.userId),
       sql`ST_DWithin(${errandStops.location}, ${here}, ${reach})`,
     );
@@ -286,10 +297,7 @@ export class ErrandsService implements OnModuleInit {
       me.takesPurchases ? undefined : eq(errands.buy, false),
     );
     // Left out in the query, so the limit counts only errands the agent may take.
-    const allowed = and(
-      boardFull ? eq(errands.urgent, true) : urgentFull ? eq(errands.urgent, false) : undefined,
-      this.eligibility.boardExclusions(auth.userId),
-    );
+    const allowed = and(this.eligibility.boardExclusions(auth.userId));
     const pickupOf = and(eq(errandStops.errandId, errands.id), eq(errandStops.seq, 0));
     const [found, counts] = await Promise.all([
       this.db
@@ -541,6 +549,8 @@ export class ErrandsService implements OnModuleInit {
     });
     // Moderation flags it for the Risk queue if it asks for cash or money sent, or ends where it starts (E5).
     this.risk.errandCreated(created, input.stops);
+    // An urgent errand is offered to one agent at a time (docs/matching.md, M6).
+    await this.offers.errandChanged(created);
 
     return this.viewOne(created, 'customer', auth.userId);
   }
@@ -867,6 +877,7 @@ export class ErrandsService implements OnModuleInit {
     }
     await this.notifier.transitioned(outcome.result);
     await this.afterAgentLeft(outcome.result.before, outcome.result.after);
+    await this.offers.errandChanged(outcome.result.after);
     return this.viewOne(outcome.result.after, outcome.role, auth.userId);
   }
 
@@ -888,6 +899,9 @@ export class ErrandsService implements OnModuleInit {
   /** A timer came due. It applies only if the errand has not moved since the timer was set. */
   async applyTimer(job: ErrandTimerJob) {
     if (job.event === 'release_reminder') return this.remindRelease(job);
+    // Offers' timers act on the offer, whatever the errand's version now (docs/matching.md, M6).
+    if (job.event === 'offer_expire') return job.offerId ? this.offers.expire(job.offerId) : undefined;
+    if (job.event === 'offer_dispatch') return this.offers.retry(job.errandId);
     const money = await this.settingsOf(job.errandId);
     if (!money) return;
     const { settings } = money;
@@ -910,6 +924,7 @@ export class ErrandsService implements OnModuleInit {
     if (result) {
       await this.notifier.transitioned(result);
       await this.afterAgentLeft(result.before, result.after);
+      await this.offers.errandChanged(result.after);
     }
   }
 
@@ -950,6 +965,7 @@ export class ErrandsService implements OnModuleInit {
     });
     await this.notifier.transitioned(result);
     await this.afterAgentLeft(result.before, result.after);
+    await this.offers.errandChanged(result.after);
     return { id: result.after.id, status: result.after.status, version: result.after.version };
   }
 
@@ -977,6 +993,7 @@ export class ErrandsService implements OnModuleInit {
     for (const r of results) {
       await this.notifier.transitioned(r);
       await this.afterAgentLeft(r.before, r.after);
+      await this.offers.errandChanged(r.after);
     }
   }
 
@@ -1099,6 +1116,23 @@ export class ErrandsService implements OnModuleInit {
           live.matching,
         );
         if (refused) throw this.eligibility.refusal(refused);
+        // An urgent errand goes to the agent it is offered to, while the offer stands (docs/matching.md, M7):
+        // one conditional change, in this transaction, with the errand locked.
+        if (errand.urgent) {
+          const [taken] = await tx
+            .update(errandOffers)
+            .set({ status: 'accepted', answeredAt: now })
+            .where(
+              and(
+                eq(errandOffers.errandId, errand.id),
+                eq(errandOffers.agentId, auth.userId),
+                eq(errandOffers.status, 'open'),
+                gt(errandOffers.expiresAt, now),
+              ),
+            )
+            .returning({ id: errandOffers.id });
+          if (!taken) throw conflict('not_offered', 'This errand is offered to another agent');
+        }
         const pin = numericCode(4);
         const key = errandPinKey(this.config.PIN_KEY, errand.id);
         return {

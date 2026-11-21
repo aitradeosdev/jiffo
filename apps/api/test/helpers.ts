@@ -21,6 +21,7 @@ import {
   adminSessions,
   agentApplications,
   agentPresence,
+  errandOffers,
   agentSelfieChecks,
   customerVerifications,
   deposits,
@@ -422,9 +423,45 @@ export async function onlineAtPickup(t: TestApp, agent: Person, errandId: string
 }
 
 /**
+ * The agent holds the open offer for an urgent errand, as if it had been offered to them (docs/matching.md, M6),
+ * for tests about something else: any other open offer for the errand or the agent is withdrawn first.
+ */
+export async function offerTo(t: TestApp, agent: Person, errandId: string) {
+  const [errand] = await t.db
+    .select({ urgent: errands.urgent, feeKobo: errands.feeKobo, countryCode: errands.countryCode })
+    .from(errands)
+    .where(eq(errands.id, errandId));
+  if (!errand?.urgent) return;
+  await t.db
+    .update(errandOffers)
+    .set({ status: 'withdrawn' })
+    .where(
+      and(
+        eq(errandOffers.status, 'open'),
+        sql`(${errandOffers.errandId} = ${errandId} or ${errandOffers.agentId} = ${agent.userId})`,
+      ),
+    );
+  const now = new Date();
+  await t.db.insert(errandOffers).values({
+    errandId,
+    agentId: agent.userId,
+    countryCode: errand.countryCode,
+    feeKobo: errand.feeKobo,
+    rank: 1,
+    score: 1,
+    parts: {},
+    travelSeconds: 60,
+    travelEstimated: true,
+    straightMeters: 100,
+    offeredAt: now,
+    expiresAt: new Date(now.getTime() + 60_000),
+  });
+}
+
+/**
  * Sends an errand event. As an agent's phone would, it is online at the pickup to accept (and is back as the
- * test had it after), reports the drop-off position before the hand-off steps, and sends a photo only after
- * the wait: tests of those rules call the API themselves.
+ * test had it after), holds the offer for an urgent errand, reports the drop-off position before the hand-off
+ * steps, and sends a photo only after the wait: tests of those rules call the API themselves.
  */
 export async function act(
   t: TestApp,
@@ -435,6 +472,7 @@ export async function act(
   status = 200,
 ) {
   const putBack = event === 'accept' ? await onlineAtPickup(t, person, errandId) : null;
+  if (event === 'accept') await offerTo(t, person, errandId);
   if (['mark_delivered', 'confirm_pin', 'send_dropoff_photo'].includes(event)) await atDropoff(t, person, errandId);
   if (event === 'send_dropoff_photo') await waitedAtDropoff(t, errandId);
   const res = await request(t.http).post(`/v1/errands/${errandId}/events`).set(person.headers).send({ event, data });

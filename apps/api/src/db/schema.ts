@@ -691,6 +691,50 @@ export const errandEvents = pgTable(
   ],
 );
 
+/** What became of an offer (docs/matching.md, M6). withdrawn: the errand was cancelled or taken another way. */
+export const OFFER_STATUSES = ['open', 'accepted', 'declined', 'expired', 'withdrawn'] as const;
+export type OfferStatus = (typeof OFFER_STATUSES)[number];
+
+/**
+ * Every offer of an urgent errand to an agent, one at a time (docs/matching.md, M6, M15): to whom, in what
+ * order, scored how, and what they did. The database keeps one open offer per errand and one per agent.
+ * Kept like the errand's other records.
+ */
+export const errandOffers = pgTable(
+  'errand_offers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    errandId: uuid('errand_id')
+      .notNull()
+      .references(() => errands.id),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => users.id),
+    countryCode: char('country_code', { length: 2 }).notNull(),
+    status: text('status', { enum: OFFER_STATUSES }).notNull().default('open'),
+    /** The errand's fee when offered: once the customer raises it, those who said no are asked again. */
+    feeKobo: kobo('fee_kobo').notNull(),
+    /** Their place in the ranking when offered, from 1. */
+    rank: smallint('rank').notNull(),
+    score: doublePrecision('score').notNull(),
+    /** The score's parts (travel, reliability, rating, waiting, boost, total). */
+    parts: jsonb('parts').$type<Record<string, number>>().notNull(),
+    travelSeconds: integer('travel_seconds').notNull(),
+    /** The travel time was estimated, not from the maps provider. */
+    travelEstimated: boolean('travel_estimated').notNull(),
+    straightMeters: integer('straight_meters').notNull(),
+    offeredAt: timestamp('offered_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    answeredAt: timestamp('answered_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('errand_offers_open_errand_uq').on(t.errandId).where(sql`status = 'open'`),
+    uniqueIndex('errand_offers_open_agent_uq').on(t.agentId).where(sql`status = 'open'`),
+    index('errand_offers_errand_idx').on(t.errandId, t.offeredAt),
+    index('errand_offers_agent_idx').on(t.agentId, t.offeredAt),
+  ],
+);
+
 /* ---------- Chat ---------- */
 
 /** One conversation per agent assignment, so a new agent never sees what the customer said to the last one. */

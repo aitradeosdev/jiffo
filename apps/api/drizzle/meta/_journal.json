@@ -337,6 +337,13 @@
       "when": 1795293225422,
       "tag": "0047_events_by_actor",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1795293934091,
+      "tag": "0048_errand_offers",
+      "breakpoints": true
     }
   ]
 }
