@@ -60,11 +60,16 @@ const SMILE_ID_PLUGINS: NonNullable<ExpoConfig['plugins']> = [
  * Release builds of both Android apps are shrunk and obfuscated with R8 (docs/security-plan.md, MB7). Each
  * native library ships its own keep rules for what it reaches by name (docs/security/sdks.md lists them), and
  * our two modules need none beyond Expo's. These keep the file and line numbers, so a crash report can be read
- * back with the build's mapping file, with every file named the same.
+ * back with the build's mapping file, with every file named the same, and Room's databases, which its own rules
+ * left unmade.
  */
 const ANDROID_KEEP_RULES = `
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# Room makes each database's generated class through its no-argument constructor, by reflection: WorkManager's
+# WorkDatabase_Impl, as Android starts the app. R8 took the constructor for unused and the app closed at once.
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
 `;
 
 export default ({ config }: ConfigContext): ExpoConfig => {
