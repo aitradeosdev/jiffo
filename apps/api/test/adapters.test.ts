@@ -72,7 +72,7 @@ describe('FCM push', () => {
     await adapter.send(['live'], n);
 
     expect(calls.filter((c) => c.url.includes('oauth2'))).toHaveLength(1);
-    const sends = calls.filter((c) => c.url.includes('fcm.googleapis.com'));
+    const sends = calls.filter((c) => new URL(c.url).hostname === 'fcm.googleapis.com');
     expect(sends[0]!.url).toBe('https://fcm.googleapis.com/v1/projects/jiffo-test/messages:send');
     expect((sends[0]!.init.headers as Record<string, string>).authorization).toBe('Bearer ya29.test');
     expect(JSON.parse(String(sends[0]!.init.body)).message).toMatchObject({
@@ -91,7 +91,7 @@ describe('FCM push', () => {
     await adapter.send(['live'], { title: 'New errand', body: 'Parcel', ring: true });
     await adapter.send(['live'], { title: 'Errand complete', body: 'Paid' });
     const [offer, plain] = calls
-      .filter((c) => c.url.includes('fcm.googleapis.com'))
+      .filter((c) => new URL(c.url).hostname === 'fcm.googleapis.com')
       .map((c) => JSON.parse(String(c.init.body)).message);
     expect(offer).toMatchObject({
       android: { priority: 'high', notification: { channel_id: 'offers', sound: 'default' } },
