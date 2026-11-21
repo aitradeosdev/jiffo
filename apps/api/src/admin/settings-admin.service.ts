@@ -7,6 +7,7 @@ import {
   settingChanges,
   type CountrySettings,
 } from '@jiffo/shared';
+import { APP_CONFIG, type AppConfig, testSignInCodesAllowed } from '../config/app-config';
 import { IdentityChecksService } from '../identity/identity-checks.service';
 import { ProvidersService } from '../providers/providers.service';
 import { sql } from 'drizzle-orm';
@@ -29,6 +30,7 @@ const issuesOf = (error: { issues: Array<{ path: PropertyKey[]; message: string 
 export class SettingsAdminService {
   constructor(
     @Inject(DB) private readonly db: Db,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly audit: AuditService,
     private readonly identity: IdentityChecksService,
     private readonly providers: ProvidersService,
@@ -101,6 +103,19 @@ export class SettingsAdminService {
     const parsed = CountrySettingsSchema.safeParse(input.settings);
     if (!parsed.success) {
       throw badRequest('invalid_settings', 'Some settings are not valid', { issues: issuesOf(parsed.error) });
+    }
+    // Test sign-in codes let anyone sign in to any number in the country: never on a production server, unless
+    // it is set up to allow them (one nobody real uses).
+    if (parsed.data.security.signInCodes === 'test' && !testSignInCodesAllowed(this.config)) {
+      throw badRequest('invalid_settings', 'Some settings are not valid', {
+        issues: [
+          {
+            path: 'security.signInCodes',
+            message:
+              "Test sign-in codes show the code in the app, so anyone could sign in to any number. This server is in production and doesn't allow them: keep Live.",
+          },
+        ],
+      });
     }
     // Customers must keep a way to add money: own account numbers alone need a provider that issues them.
     const payments = this.providers.current('payments');

@@ -31,6 +31,7 @@ export const DEFAULT_SECURITY_SETTINGS = {
   boardNearKm: 5,
   ownAccountTriesPerDay: 3,
   smsCodesDailyAlert: 5_000,
+  signInCodes: 'live' as 'live' | 'test',
   disputeSplitApprovalKobo: 2_000_000,
   busyAgentErrands: 50,
   approvalExpiryHours: 72,
@@ -203,6 +204,12 @@ export const CountrySettingsSchema = z.object({
       ownAccountTriesPerDay: z.number().int().min(1).max(20).default(3),
       /** Sign-in codes sent in the country in a day above which finance hears of it: each is a paid SMS. */
       smsCodesDailyAlert: z.number().int().min(1).max(1_000_000).default(5_000),
+      /**
+       * live texts each sign-in code. test sends no text and gives the code to the app, which shows it on the
+       * code screen: for trying the apps without an SMS provider. Anyone can then sign in to any number in the
+       * country, so production refuses test unless the server allows it (ALLOW_TEST_SIGN_IN_CODES).
+       */
+      signInCodes: z.enum(['live', 'test']).default('live'),
       /**
        * A dispute split paying the agent more than this (fee, items and wallet charge together) needs a second
        * admin's approval (D4, E7). 0 means every split does.

@@ -100,6 +100,11 @@ export interface Country {
   name: string;
   currency: string;
   timezone: string;
+  /**
+   * How sign-in codes reach people there: test shows them in the app, so anyone can sign in; test_ignored is
+   * Test saved where this server texts them all the same (production), which no settings save takes until fixed.
+   */
+  signInCodes: 'live' | 'test' | 'test_ignored';
 }
 
 export type Permission = AdminPermission;

@@ -23,7 +23,9 @@ export default function Code() {
     prefix = '',
     resend = '60',
   } = useLocalSearchParams<{ phone: string; prefix: string; resend: string }>();
-  const { verifyCode, requestCode } = useSession();
+  const { verifyCode, requestCode, testCodeFor } = useSession();
+  // Where sign-in codes are in Test, no text was sent: the code is shown at the bottom instead.
+  const testCode = testCodeFor(phone);
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -75,13 +77,37 @@ export default function Code() {
     }
   }
 
+  // Pinned to the bottom, above the keyboard, so it's in view while the code is typed.
+  const testBox = testCode ? (
+    <View style={[styles.test, { backgroundColor: c.surface2 }]} accessibilityLiveRegion="polite">
+      <Text variant="small" tone="ink3">
+        Test mode: no text was sent. Your code is
+      </Text>
+      <Text style={styles.testCode} accessibilityLabel={`Your code is ${testCode.split('').join(' ')}`}>
+        {testCode}
+      </Text>
+      <Text
+        variant="sub"
+        style={{ fontFamily: fonts.bold, textDecorationLine: 'underline' }}
+        onPress={() => {
+          if (busy) return;
+          setCode(testCode);
+          void verify(testCode);
+        }}
+        accessibilityRole="button"
+      >
+        Use this code
+      </Text>
+    </View>
+  ) : null;
+
   return (
-    <ObScreen onBack={changeNumber} progress={0.5}>
+    <ObScreen onBack={changeNumber} progress={0.5} footer={testBox}>
       <Question
         title="Enter the 6-digit code"
         sub={
           <>
-            Sent by text to {formatE164(phone, prefix)}.{' '}
+            {testCode ? 'For' : 'Sent by text to'} {formatE164(phone, prefix)}.{' '}
             <Text
               variant="sub"
               style={{ fontFamily: fonts.bold, textDecorationLine: 'underline' }}
@@ -149,7 +175,7 @@ export default function Code() {
       <List>
         <Row
           icon="history"
-          title="Resend code by text"
+          title={testCode ? 'Get a new code' : 'Resend code by text'}
           subtitle={left > 0 ? `Available in ${clock(left)}` : 'Send a new code now'}
           onPress={sendAgain}
           disabled={left > 0 || busy}
@@ -163,6 +189,8 @@ const styles = StyleSheet.create({
   otp: { flexDirection: 'row', gap: 8 },
   cell: { flex: 1, height: 60, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   digit: { fontFamily: fonts.extrabold, fontSize: 26, fontVariant: ['tabular-nums'] },
+  test: { borderRadius: 12, padding: 14, gap: 4, alignItems: 'center' },
+  testCode: { fontFamily: fonts.extrabold, fontSize: 24, letterSpacing: 4, fontVariant: ['tabular-nums'] },
   // Over the boxes, there for taps and screen readers, with its own text and caret invisible.
   overlay: { color: 'transparent', backgroundColor: 'transparent', fontSize: 16 },
 });

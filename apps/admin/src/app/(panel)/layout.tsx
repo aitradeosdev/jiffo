@@ -19,7 +19,8 @@ import {
   TeamIcon,
 } from '@/components/icons';
 import { Wordmark } from '@/components/wordmark';
-import { api, getCountry, getMe, type Permission } from '@/lib/api';
+import { Notice } from '@/components/ui';
+import { api, getCountry, getMe, type Country, type Permission } from '@/lib/api';
 import { chooseCountry, signOut } from './actions';
 import { CountrySelect, Nav, type NavItem } from './nav';
 
@@ -39,6 +40,38 @@ const SECTIONS: Array<NavItem & { needs: Permission }> = [
   { href: '/team', label: 'Team', icon: <TeamIcon />, needs: 'team' },
   { href: '/audit', label: 'Audit log', icon: <AuditIcon />, needs: 'team' },
 ];
+
+/**
+ * On every page while a country's sign-in codes are in Test (Settings, Security): no texts are sent and the app
+ * shows each code, so anyone can sign in to any number there. Also while Test is saved where this server texts
+ * codes all the same (production), since no settings save for that country goes through until it is fixed.
+ */
+function TestCodesWarning({ countries }: { countries: Country[] }) {
+  const names = (mode: Country['signInCodes']) =>
+    countries
+      .filter((c) => c.signInCodes === mode)
+      .map((c) => c.name)
+      .join(', ');
+  const testing = names('test');
+  const ignored = names('test_ignored');
+  if (!testing && !ignored) return null;
+  return (
+    <div className="mb-6 space-y-2">
+      {testing ? (
+        <Notice tone="warn">
+          Sign-in codes are in Test in {testing}: no texts are sent and the app shows each code, so anyone can sign in
+          to any number there. Switch them to Live in Settings, Security, before real people use the apps.
+        </Notice>
+      ) : null}
+      {ignored ? (
+        <Notice tone="warn">
+          Sign-in codes are saved as Test in {ignored}, but this server is in production and texts them all the same.
+          Switch them to Live in Settings, Security: until then, settings changes there are refused.
+        </Notice>
+      ) : null}
+    </div>
+  );
+}
 
 /** Every signed-in page: the sections on the left (on top on small screens), the page on the right. */
 export default async function PanelLayout({ children }: { children: ReactNode }) {
@@ -107,7 +140,10 @@ export default async function PanelLayout({ children }: { children: ReactNode })
         </div>
       </aside>
       <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
-        <div className="mx-auto max-w-6xl">{children}</div>
+        <div className="mx-auto max-w-6xl">
+          <TestCodesWarning countries={me.countries} />
+          {children}
+        </div>
       </main>
     </div>
   );
