@@ -138,6 +138,17 @@ export const CountrySettingsSchema = z.object({
   }),
   identity: z.object({
     /**
+     * Customers check their ID, with a selfie, before adding money or requesting errands. Off: they do both
+     * without one, and the customer app doesn't ask for one.
+     */
+    customerCheck: z.boolean().default(true),
+    /**
+     * Agents check their ID in their application, and take selfie checks after (A4, I2, I8). Off: they apply
+     * without one, every application waits for a person, and there are no selfie checks, which compare with
+     * the face kept from it. Switched back on, agents approved without one go back to their application.
+     */
+    agentCheck: z.boolean().default(true),
+    /**
      * IDs a customer may verify with, one of them: the NIN or BVN, with a selfie. Settings saved when ID
      * documents could be chosen for customers read as both numbers (see customerIdTypesOf); saving such a
      * list is refused.
@@ -392,6 +403,8 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
     minWithdrawalKobo: 10_000,
   },
   identity: {
+    customerCheck: true,
+    agentCheck: true,
     customerIdTypes: ['nin', 'bvn'],
     agentIdTypes: ['nin', 'bvn'],
     requireBvnForAgents: true,
@@ -426,6 +439,9 @@ export function publicSettings(s: CountrySettings) {
     /** The ways to add money admin turned on (a fixed account also needs a provider that issues them). */
     topUps: s.topUps,
     identity: {
+      /** Whether customers and agents check their ID here: the apps leave its screens out when not. */
+      customerCheck: s.identity.customerCheck,
+      agentCheck: s.identity.agentCheck,
       customerIdTypes: s.identity.customerIdTypes,
       agentIdTypes: s.identity.agentIdTypes,
     },

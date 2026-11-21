@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { View } from 'react-native';
 import { ProviderName, providerName, useApplication, type Application, type CheckOutcome } from '@/agent/application';
 import { Confirmed, Waiting } from '@/agent/apply-parts';
@@ -44,6 +44,8 @@ export default function Identity() {
   const back = () => router.dismissTo('/apply');
 
   if (!app) return null;
+  // Not asked for where the country has the agent ID check off.
+  if (app.identityRequired === false) return <Redirect href="/apply" />;
 
   const onFinished = async (result: FinishResult | 'pending') => {
     setOutcome(result === 'pending' ? 'pending' : (result.outcome ?? 'review'));

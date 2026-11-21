@@ -66,7 +66,14 @@ export class AgentSelfieService implements SelfieOwner {
     return {
       security: { ...DEFAULT_SECURITY_SETTINGS, ...(saved?.settings.security ?? {}) },
       tries: saved?.settings.identity.selfieTries ?? 3,
+      // Selfie checks compare with the face kept from the agent's ID check: none without it.
+      on: saved?.settings.identity.agentCheck ?? true,
     };
+  }
+
+  /** Whether this country's agents take selfie checks: only where they check their ID. */
+  private async selfiesOn(countryCode: string) {
+    return (await this.settings(countryCode)).on;
   }
 
   /** A selfie check passed since `since`. */
@@ -93,6 +100,7 @@ export class AgentSelfieService implements SelfieOwner {
 
   /** Why going online needs a selfie first, if it does. With `roll`, a random check may be asked for. */
   private async reasonToGoOnline(auth: AuthContext, roll: boolean): Promise<SelfieReason | null> {
+    if (!(await this.selfiesOn(auth.countryCode))) return null;
     const [user] = await this.db.select({ due: users.selfieDue }).from(users).where(eq(users.id, auth.userId));
     if (user?.due) return 'random';
     const { security } = await this.settings(auth.countryCode);
@@ -116,6 +124,7 @@ export class AgentSelfieService implements SelfieOwner {
    * (A4, X4), or a sign-in a check doubted (MB3, A10).
    */
   private async neededOnThisPhone(auth: AuthContext) {
+    if (!(await this.selfiesOn(auth.countryCode))) return null;
     const [device] = await this.db
       .select({ selfieNeeded: devices.selfieNeeded, selfieFor: devices.selfieFor })
       .from(devices)
@@ -153,6 +162,7 @@ export class AgentSelfieService implements SelfieOwner {
 
   /** A phone the app check doubts (MB3): a money action on it needs a selfie passed in the last few minutes. */
   async assertFreshForDevice(auth: AuthContext) {
+    if (!(await this.selfiesOn(auth.countryCode))) return;
     if (!(await this.fresh(auth.userId))) throw this.needed('device_check');
   }
 
@@ -161,6 +171,7 @@ export class AgentSelfieService implements SelfieOwner {
    * Asked before a signed request's single-use code is used, and again where the change is made.
    */
   async assertFreshForPayoutChange(auth: AuthContext) {
+    if (!(await this.selfiesOn(auth.countryCode))) return;
     const [current] = await this.db
       .select({ id: payoutAccounts.id })
       .from(payoutAccounts)
@@ -174,6 +185,9 @@ export class AgentSelfieService implements SelfieOwner {
    * from the agent's first check (that check's reference is the enrolled id).
    */
   async start(auth: AuthContext, asked?: 'payout_change' | 'device_check') {
+    if (!(await this.selfiesOn(auth.countryCode))) {
+      throw conflict('selfie_off', "Selfie checks aren't used here");
+    }
     const [app] = await this.db
       .select({
         provider: agentApplications.identityProvider,

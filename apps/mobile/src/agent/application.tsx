@@ -15,6 +15,8 @@ export type CheckOutcome = 'passed' | 'failed' | 'review';
 export interface Application {
   status: ApplicationStatus;
   steps: { basics: boolean; identity: boolean; address: boolean; bank: boolean; prefs: boolean; learn: boolean };
+  /** Whether the country asks agents to check their ID (Settings, Identity): the step is left out when not. */
+  identityRequired: boolean;
   /** Started with the provider, and its result not back yet. */
   identityChecking: boolean;
   /**

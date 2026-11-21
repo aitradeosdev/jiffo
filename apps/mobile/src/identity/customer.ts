@@ -6,6 +6,8 @@ import type { IdentityOptions } from './check';
 
 /** The customer's identity check, as GET /v1/me/identity gives it. */
 export interface CustomerIdentity extends IdentityOptions {
+  /** Whether the country asks customers to check their ID (Settings, Identity): its screens are left out when not. */
+  required: boolean;
   status: 'none' | 'checking' | 'verified' | 'review' | 'failed' | 'declined';
   idType: IdType | null;
   /** How the current or last check ran. */

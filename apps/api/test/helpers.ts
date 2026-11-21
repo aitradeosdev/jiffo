@@ -271,6 +271,8 @@ export async function signIn(
         // Checked with the development provider, which keeps the face for selfie checks.
         identityProvider: 'fake',
         identityReference: `jid-${randomUUID()}`,
+        identityOutcome: 'passed',
+        identityCheckedAt: new Date(),
       })
       .onConflictDoNothing();
   }
@@ -522,17 +524,18 @@ export const uniqueNin = (ending = '4567') => `${uniqueDigits(7)}${ending}`;
 /**
  * Fills in every step of an agent's application, short of sending it: basics, identity, address, a payout
  * account, preferences and the terms. The agent's name must be Tunde Bakare, as the fake provider's record is.
+ * `identity: false` leaves the identity step out, as in a country whose settings have the agent ID check off.
  */
-export async function completeApplication(t: TestApp, agent: Person, nin = uniqueNin()) {
+export async function completeApplication(
+  t: TestApp,
+  agent: Person,
+  nin = uniqueNin(),
+  options: { identity?: boolean } = {},
+) {
   const call = (method: 'post' | 'put' | 'patch', path: string, body: Record<string, unknown> = {}) =>
     request(t.http)[method](`/v1/agent/application${path}`).set(agent.headers).send(body);
   await call('patch', '', { stateCode: 'LA', area: 'Lekki' }).expect(200);
-  const started = await call('post', '/identity', { nin, bvn: '22212345678', consent: true }).expect(200);
-  // The app hands this to the provider's SDK.
-  if (started.body.provider !== 'fake' || typeof started.body.sdkToken !== 'string') {
-    throw new Error(`identity start: ${JSON.stringify(started.body)}`);
-  }
-  await call('post', '/identity/finish').expect(200);
+  if (options.identity !== false) await checkAgentId(t, agent, nin);
   await call('put', '/address', {
     address: '14 Fola Osibo Road, Lekki Phase 1',
     emergency: { name: 'Ngozi Bakare', phone: '+2348034471902', relationship: 'Sibling' },
@@ -542,6 +545,19 @@ export async function completeApplication(t: TestApp, agent: Person, nin = uniqu
   await signed(t, agent).put('/v1/payout-account').send({ bankCode: '058', accountNumber }).expect(200);
   await request(t.http).patch('/v1/agent/profile').set(agent.headers).send({ takesPurchases: true }).expect(200);
   await call('post', '/terms', { accepted: true }).expect(200);
+  return nin;
+}
+
+/** The identity step of an agent's application, as the app runs it with the development provider. */
+export async function checkAgentId(t: TestApp, agent: Person, nin = uniqueNin()) {
+  const call = (path: string, body: Record<string, unknown> = {}) =>
+    request(t.http).post(`/v1/agent/application${path}`).set(agent.headers).send(body);
+  const started = await call('/identity', { nin, bvn: '22212345678', consent: true }).expect(200);
+  // The app hands this to the provider's SDK.
+  if (started.body.provider !== 'fake' || typeof started.body.sdkToken !== 'string') {
+    throw new Error(`identity start: ${JSON.stringify(started.body)}`);
+  }
+  await call('/identity/finish').expect(200);
   return nin;
 }
 

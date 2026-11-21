@@ -87,10 +87,12 @@ function Checklist({ app }: { app: Application }) {
   const { setApp } = useApplication();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const done = STEPS.filter((s) => app.steps[s.key]).length;
-  const all = done === STEPS.length;
-  const next = STEPS.find((s) => !app.steps[s.key])?.key;
-  const left = STEPS.length - done;
+  // The ID check is left out where the country doesn't ask agents for one.
+  const steps = STEPS.filter((s) => s.key !== 'identity' || app.identityRequired !== false);
+  const done = steps.filter((s) => app.steps[s.key]).length;
+  const all = done === steps.length;
+  const next = steps.find((s) => !app.steps[s.key])?.key;
+  const left = steps.length - done;
 
   const submit = async () => {
     setBusy(true);
@@ -116,7 +118,11 @@ function Checklist({ app }: { app: Application }) {
           ) : null}
           <Button label="Submit application" onPress={submit} disabled={!all} loading={busy} />
           <Text variant="note" tone="ink3" style={{ textAlign: 'center' }}>
-            {all ? `${ProviderName(app)} runs the checks straight away.` : `${left} step${left > 1 ? 's' : ''} left`}
+            {all
+              ? app.identityRequired === false
+                ? 'Our team checks your application, usually within a day.'
+                : `${ProviderName(app)} runs the checks straight away.`
+              : `${left} step${left > 1 ? 's' : ''} left`}
           </Text>
         </View>
       }
@@ -136,20 +142,20 @@ function Checklist({ app }: { app: Application }) {
             Progress
           </Text>
           <Text variant="small" style={{ fontFamily: fonts.bold, fontVariant: ['tabular-nums'] }}>
-            {done} of {STEPS.length} done
+            {done} of {steps.length} done
           </Text>
         </View>
         <View
           accessibilityRole="progressbar"
           accessibilityLabel="Application progress"
-          accessibilityValue={{ min: 0, max: STEPS.length, now: done }}
+          accessibilityValue={{ min: 0, max: steps.length, now: done }}
           style={[styles.bar, { backgroundColor: c.surface3 }]}
         >
-          <View style={[styles.barFill, { width: `${(done / STEPS.length) * 100}%`, backgroundColor: c.ink }]} />
+          <View style={[styles.barFill, { width: `${(done / steps.length) * 100}%`, backgroundColor: c.ink }]} />
         </View>
       </View>
       <List>
-        {STEPS.map((s) => {
+        {steps.map((s) => {
           const isDone = app.steps[s.key];
           return (
             <Row

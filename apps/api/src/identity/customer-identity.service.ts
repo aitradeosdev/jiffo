@@ -69,6 +69,8 @@ export class CustomerIdentityService implements IdentityOwner {
     const settings = await this.settingsFor(userId);
     const options = this.checks.options('customer', settings.identity);
     return {
+      /** Whether this country asks customers to check their ID: the app leaves the check out when not. */
+      required: settings.identity.customerCheck,
       /** none, checking, verified, review, failed or declined. */
       status: row?.status ?? 'none',
       idType: row?.idType ?? null,
@@ -89,6 +91,10 @@ export class CustomerIdentityService implements IdentityOwner {
 
   /** Starts a check with the ID the customer chose. Any number goes to the provider and is not kept. */
   async start(userId: string, input: { idType?: string; idNumber?: string }) {
+    // Each check is paid for: none starts where the country doesn't ask for one.
+    if (!(await this.settingsFor(userId)).identity.customerCheck) {
+      throw conflict('identity_check_off', "You don't need to check your ID here");
+    }
     const row = await this.load(userId);
     if (row?.status === 'verified') throw conflict('already_verified', "You're already verified");
     if (row?.status === 'declined') {
@@ -316,12 +322,14 @@ export class CustomerIdentityService implements IdentityOwner {
     return { before, after: after! };
   }
 
-  /** Whether the customer may add money and request errands. */
+  /** Whether the customer passed their ID check. */
   async verified(userId: string) {
     return (await this.load(userId))?.status === 'verified';
   }
 
+  /** Refuses a customer who hasn't checked their ID, where the country asks for it. */
   async assertVerified(userId: string) {
+    if (!(await this.settingsFor(userId)).identity.customerCheck) return;
     if (!(await this.verified(userId))) {
       throw forbidden('identity_required', 'Verify your ID first. It takes a couple of minutes.');
     }
