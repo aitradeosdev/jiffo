@@ -21,7 +21,11 @@ const broadKeeps = (rules: string) =>
       /^-keep(?:classmembers|classmembernames|classeswithmembers|classeswithmembernames|names)?[\s,]/.test(line),
     )
     .filter((line) => {
-      const pattern = /\b(?:class|interface|enum)\s+(\S+)/.exec(line)?.[1] ?? '';
+      // A rule for the classes that extend or implement one class is as narrow as that class's name.
+      const pattern =
+        /\b(?:extends|implements)\s+(\S+)/.exec(line)?.[1] ??
+        /\b(?:class|interface|enum)\s+(\S+)/.exec(line)?.[1] ??
+        '';
       return !/^[A-Za-z_]\w*\.[A-Za-z_]\w*(?:\.|$)/.test(pattern);
     });
 
@@ -59,6 +63,13 @@ describe('Android release builds', () => {
     expect(broadKeeps(rules)).toEqual([]);
   });
 
+  it("keep the constructors Room's databases are made with, by reflection, as the app starts", () => {
+    // WorkManager's WorkDatabase_Impl, made through its no-argument constructor while Android starts the app:
+    // without it the app closed at once ("Failed to create an instance of class androidx.work.impl.WorkDatabase").
+    const rules = String(android?.extraProguardRules ?? '');
+    expect(rules).toMatch(/-keep class \* extends androidx\.room\.RoomDatabase \{\s*<init>\(\);\s*\}/);
+  });
+
   it('see a keep rule that keeps everything, or everything under a top-level package', () => {
     expect(
       broadKeeps(`-keep class ** { *; }
@@ -66,13 +77,16 @@ describe('Android release builds', () => {
 -keep class com.** { *; }
 -keepclassmembers class * { *; }
 -keepnames interface *
--keep class com.usesmileid.bridge.** { *; }`),
+-keep class * extends ** { *; }
+-keep class com.usesmileid.bridge.** { *; }
+-keep class * extends androidx.room.RoomDatabase { <init>(); }`),
     ).toEqual([
       '-keep class ** { *; }',
       '-keep,allowshrinking class **.* { *; }',
       '-keep class com.** { *; }',
       '-keepclassmembers class * { *; }',
       '-keepnames interface *',
+      '-keep class * extends ** { *; }',
     ]);
   });
 });

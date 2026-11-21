@@ -59,6 +59,7 @@ Android release builds are shrunk and obfuscated with R8 (`expo-build-properties
 | Smile ID (`usesmileid_bridge`, `usesmileid_mlkit_face`, kamera) and Google's ML Kit | Smile ID's own consumer rules, which keep their module and analyser classes, and ML Kit's in its library |
 | Play Integrity, Google Maps, Lottie | Their own consumer rules, in their libraries |
 | `expo-notifications`, `expo-location`, `expo-task-manager` | Their own consumer rules |
+| Room, through WorkManager (which `react-native-maps` uses for map tiles) | Ours: Room makes each database's generated class through its no-argument constructor, by reflection, as the app starts, and its own rules left R8 free to remove it. The first release build closed at once on a real phone until `ANDROID_KEEP_RULES` kept it |
 
 A library added later is checked the same way: its rules, or one added to `ANDROID_KEEP_RULES` in `app.config.ts`, with a release build tried on a phone before it ships.
 
