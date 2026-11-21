@@ -1,0 +1,5 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": { "modules": ["SocketPinningModule"] },
+  "android": { "modules": ["com.jiffo.socketpinning.SocketPinningModule"] }
+}

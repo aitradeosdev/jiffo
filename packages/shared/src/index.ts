@@ -6,3 +6,4 @@ export * from './admin';
 export * from './providers';
 export * from './risk';
 export * from './chat-warnings';
+export * from './pinning';

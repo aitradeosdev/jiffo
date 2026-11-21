@@ -11,6 +11,7 @@ import { deviceKeyRemove } from '../../modules/device-key';
 import { phoneId } from '../../modules/app-attest';
 import { networkHeaders } from './network';
 import type { CodeSent, SignedIn, User } from '../api/types';
+import { pinnedFetch } from '../security/pinning';
 
 const TOKENS_KEY = `jiffo.${VARIANT}.tokens`;
 
@@ -52,6 +53,8 @@ let onSignedOut: () => void = () => undefined;
 export const sharedApi = createApiClient({
   baseUrl: API_URL,
   store: tokenStore,
+  // Each request waits for certificate pinning to start (MB7).
+  fetchImpl: pinnedFetch,
   onSignedOut: () => onSignedOut(),
   headers: networkHeaders,
 });

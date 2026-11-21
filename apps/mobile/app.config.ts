@@ -43,6 +43,100 @@ export const apiUrlFor = (env: Record<string, string | undefined>) => {
   return url;
 };
 
+/** The longest pins may be set to last: a forgotten build falls back to normal certificate checks in time. */
+const PIN_MAX_DAYS = 400;
+
+export interface PinningSettings {
+  /** The hosts pinned: the API's, unless PINNING_HOSTS names them. Exactly these, not their subdomains. */
+  hosts: string[];
+  /** Base64 SHA-256 hashes of certificate authorities' public keys (SPKI), each with the authority's name. */
+  pins: { ca: string; hash: string }[];
+  /** yyyy-MM-dd (UTC): from this day the apps check certificates as normal, without the pins. */
+  expires: string;
+  /** Where the apps fetch the signed remote switch, on a host they don't pin. */
+  switchUrl: string;
+  /** The switch's Ed25519 public key, base64 (32 bytes), from `pnpm --filter @jiffo/api pinning-switch keygen`. */
+  switchKey: string;
+  /**
+   * When the build was made: a switch signed before it can't turn its pins off, so an old "off" can't be replayed
+   * to a new install, which has kept no later "on".
+   */
+  issuedAfter: string;
+}
+
+/**
+ * Certificate pinning's build settings (docs/security/pinning.md, MB7), or null while no pins are set: it ships
+ * off. Once PINNING_PINS is set the build stops unless the settings follow the rules: authorities' keys, never the
+ * server's own certificate, at least two from two different authorities, an end date, and a signed switch on a
+ * host that isn't pinned.
+ */
+export function pinningFor(env: Record<string, string | undefined>, now = Date.now()): PinningSettings | null {
+  const list = (value: string | undefined) =>
+    (value ?? '')
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+  const entries = list(env.PINNING_PINS);
+  if (!entries.length) return null;
+  const fail = (why: string): never => {
+    throw new Error(`Certificate pinning (docs/security/pinning.md): ${why}`);
+  };
+
+  const pins = entries.map((entry) => {
+    const at = entry.lastIndexOf(':');
+    const ca = at > 0 ? entry.slice(0, at).trim() : '';
+    const hash = entry.slice(at + 1).trim();
+    if (!/^[a-z0-9][a-z0-9.-]*$/i.test(ca)) {
+      fail(`each pin in PINNING_PINS is written authority:hash, naming its certificate authority (${entry})`);
+    }
+    if (!/^[A-Za-z0-9+/]{43}=$/.test(hash) || Buffer.from(hash, 'base64').length !== 32) {
+      fail(`a pin must be the base64 SHA-256 hash of a certificate authority's public key (${entry})`);
+    }
+    return { ca, hash };
+  });
+  if (pins.length < 2) fail('PINNING_PINS needs at least two pins, so one can take over from the other');
+  if (new Set(pins.map((p) => p.hash)).size !== pins.length) fail('PINNING_PINS has the same pin twice');
+  if (new Set(pins.map((p) => p.ca.toLowerCase())).size < 2) {
+    fail('PINNING_PINS needs pins from at least two different certificate authorities');
+  }
+
+  const expires = env.PINNING_EXPIRES ?? '';
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(expires) ? Date.parse(`${expires}T00:00:00Z`) : NaN;
+  if (Number.isNaN(end) || end <= now) fail('PINNING_EXPIRES must be a day after today, written yyyy-MM-dd');
+  if (end - now > PIN_MAX_DAYS * 86_400_000) fail('PINNING_EXPIRES may be at most 13 months away');
+
+  const api = new URL(apiUrlFor(env));
+  if (api.protocol !== 'https:') fail("the API's address (EXPO_PUBLIC_API_URL) must be https:// to be pinned");
+  // Host names as the phone compares them: lowercase, no scheme, port or path.
+  const hosts = list(env.PINNING_HOSTS).length ? list(env.PINNING_HOSTS).map((h) => h.toLowerCase()) : [api.hostname];
+  for (const host of hosts) {
+    if (!/^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host)) {
+      fail(`PINNING_HOSTS takes plain host names, such as api.example.com (${host})`);
+    }
+  }
+  if (!hosts.includes(api.hostname)) fail(`PINNING_HOSTS must include the API's host (${api.hostname})`);
+
+  const switchUrl = env.PINNING_SWITCH_URL ?? '';
+  if (!switchUrl) fail('PINNING_SWITCH_URL must name where the signed switch is published');
+  let switchHost = '';
+  try {
+    const url = new URL(switchUrl);
+    if (url.protocol !== 'https:') fail('PINNING_SWITCH_URL must be https://');
+    switchHost = url.hostname;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Certificate pinning')) throw error;
+    fail('PINNING_SWITCH_URL must be a full https:// address');
+  }
+  if (hosts.includes(switchHost)) {
+    fail('PINNING_SWITCH_URL must be on a host that is not pinned, so it can still be fetched when the pins fail');
+  }
+  const switchKey = env.PINNING_SWITCH_KEY ?? '';
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(switchKey) || Buffer.from(switchKey, 'base64').length !== 32) {
+    fail('PINNING_SWITCH_KEY must be the switch public key `pinning-switch keygen` printed');
+  }
+  return { hosts, pins, expires, switchUrl, switchKey, issuedAfter: new Date(now).toISOString() };
+}
+
 /**
  * The Expo project of the app being built, for EAS builds: each store app is its own project, named in
  * eas-projects.json once `eas init` has made it (docs/mobile-builds.md). Not a secret.
@@ -171,6 +265,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // The Google Cloud project linked to the apps in Play Console, for Play Integrity (MB3). Not a secret.
       playCloudProjectNumber: process.env.PLAY_CLOUD_PROJECT_NUMBER ?? '',
       ...easProject(EAS_PROJECTS, variant),
+      // Certificate pinning (MB7): null, so off, until its build settings are filled in.
+      pinning: pinningFor(process.env),
     },
   };
 };

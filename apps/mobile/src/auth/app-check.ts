@@ -3,6 +3,7 @@ import { appAttest } from '../../modules/app-attest';
 import { API_URL, VARIANT } from '../config';
 import { secureStorage } from '../storage';
 import { createApiClient } from '../api/client';
+import { pinnedFetch } from '../security/pinning';
 import { attestationHeaders, type AttestDeps } from './attestation';
 import { sha256Hex } from './hash';
 import { deviceKey } from './install-key';
@@ -14,6 +15,7 @@ const APPLE_KEY_HOLD = `jiffo.${VARIANT}.appAttestKeyHold`;
 const publicApi = createApiClient({
   baseUrl: API_URL,
   store: { get: async () => null, set: async () => undefined },
+  fetchImpl: pinnedFetch,
 });
 
 const deps: AttestDeps = {

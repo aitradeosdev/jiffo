@@ -269,7 +269,7 @@ The owner asked for anything in the plan that contradicts what was built to be c
 | MB4 | missing | | Root, emulator, hooking-tool and mock-location signals. | implement (fix 10) |
 | MB5 | partly | `apps/mobile/app/(app)/_layout.tsx` | Screens need sign-in. Link parameters aren't validated. | implement (fix 10) |
 | MB6 | done | Expo modules, maps, socket.io client | A written list of the SDKs used. | implement (fix 8) |
-| MB7 | partly | `apps/mobile/app.config.ts` (R8 through `expo-build-properties`), keep rules listed in `docs/security/sdks.md`; test: `release-build` | Android release builds are shrunk and obfuscated with R8, with unused resources dropped; each native library's own keep rules apply. Certificate pinning is still to come. | obfuscation done (after launch, built early); pinning to come, shipped off |
+| MB7 | done (pinning shipped off) | `apps/mobile/app.config.ts` (R8 through `expo-build-properties`; pinning's build settings, `pinningFor`), `src/security/pinning*.ts`, `modules/socket-pinning`, `apps/api/src/pinning/switch*.ts`, `packages/shared/src/pinning.ts`; tests: `release-build`, `pinning-settings`, `pinning-core`, `switch-verify`, `pinning-switch`, shared `pinning`; docs/security/pinning.md | Android release builds are shrunk and obfuscated with R8. Certificate pinning is built and ships off: when turned on with build settings, it pins the API's certificate authorities (at least two, from two authorities) for requests and WebSockets, until an end date after which certificates are checked as usual, with a remote switch the server signs that can turn it off for up to 7 days. | done (after launch, built early); turning pinning on is an owner task |
 | MB8 | owner | | Mapping against MASVS and the OWASP Top 10s, checked by the penetration test. | owner |
 
 ## Changes to features already built (X)
@@ -442,7 +442,7 @@ One area per pull request, abuse tests first. Every one that touches login, mone
 
     Covers X1–X3, E5, E6, E8, E9, C1, C3, G1, G4, I3, F3.
 
-**After launch:** F4, MB7's certificate pinning (A10, C7, D8 and MB7's obfuscation are done), and referrals and promos (F1, F2, X5) when they are built.
+**After launch:** F4 (A10, C7, D8 and MB7 are done; MB7's pinning ships off until turned on), and referrals and promos (F1, F2, X5) when they are built.
 
 ## Owner's tasks
 
@@ -472,6 +472,7 @@ What each needs from the code is provided as noted.
   - **Apple:** turn on App Attest for both App IDs, and give the API the team id (`APPLE_TEAM_ID`).
   - Then turn Settings, Security, App checks to Enforce, once the store builds have been out for a while with no unexpected failures in the record.
   - **Shared phones (fix 11):** when setting up Play App Signing for the second app, choose to sign it with the same key as the first, so Android gives both apps the same phone id and a customer and agent on one phone can be told apart from two phones. In the Play Data safety form and Apple's privacy labels, declare the device id as collected for fraud prevention and security.
+- **Certificate pinning (MB7):** once hosting and its certificate authority are chosen, turn pinning on as docs/security/pinning.md says: two pins from two authorities, an end date, the switch's key and its published document, then the staging tests on an Android phone and an iPhone before production.
 - **Penetration test** before launch, in the plan's scope, then yearly.
 - **Legal:**
   - CBN opinion on the pooled wallet

@@ -40,6 +40,9 @@ uses it.
 | `@smileid/usesmileid_mlkit_face`, `@smileid/usesmileid_vision_face` | Finding the face in the selfie camera: Google's ML Kit on Android, Apple's Vision on iOS, on the phone | Nothing beyond the phone |
 | `react-native-quick-crypto`, `react-native-quick-base64`, `react-native-nitro-modules` | Required by Smile ID's SDK, which signs its own requests to Smile ID | Nothing beyond the app |
 | `lottie-react-native` | Required by Smile ID's SDK, for its animations | Nothing beyond the app |
+| `react-native-ssl-public-key-pinning` 1.2.6, with TrustKit on iOS | Certificate pinning for the app's requests (MB7), shipped off until its build settings are set (docs/security/pinning.md). OkHttp's certificate pinner on Android, TrustKit on iOS. Its last release was in July 2025; it builds with React Native 0.88 (checked with a release build) | Nothing beyond the app: it only checks the API's certificates |
+| `modules/socket-pinning` (Jiffo's own), with SocketRocket on iOS | The same pins for the live connection's WebSocket, which the library doesn't cover | Nothing beyond the app |
+| `@noble/curves` 2.4.0 | Checking the Ed25519 signature on the pinning switch (MB7), in JavaScript. Audited, no native code | Nothing beyond the app |
 | `expo-brightness`, `expo-file-system`, `expo-haptics`, `expo-keep-awake`, `expo-screen-orientation` | Required by Smile ID's SDK: screen brightness and orientation while the selfie is taken, the selfie file until it is sent, haptics | The screen and the app's own files |
 
 Smile ID's optional peers that only add device metadata (`expo-battery`, `expo-cellular`, `expo-network`, `expo-sensors`, `@react-native-async-storage/async-storage`) aren't installed.

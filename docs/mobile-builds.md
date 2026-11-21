@@ -124,4 +124,6 @@ Install `preview-agent` on an Android phone, and `preview-customer` if you can. 
 
 A screen that closes the app, or a feature that fails only in the release build, is a missing keep rule. Note what you did just before, and the time, so the crash can be found in the build's log.
 
+Certificate pinning ships off, so these builds don't pin. Its own staging tests, once it's turned on, are in docs/security/pinning.md.
+
 An app installed outside Google Play fails Play Integrity, so its app check counts as doubtful (MB3). That's expected, and only asks an agent for a selfie before money moves.
