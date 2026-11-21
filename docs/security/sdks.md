@@ -28,7 +28,7 @@ uses it.
 | `expo-dev-client` | Development builds only, to try the native key before a store build; the store builds don't include its launcher | Nothing beyond the app |
 | `expo-device` | The phone's model, for the list of signed-in devices, and whether it's a real phone before asking for push | Device model |
 | `expo-location`, `expo-task-manager` | An agent's live location while on a job, and the customer's own location when they choose it | Location, with the person's permission |
-| `react-native-maps` | Maps for errands and live tracking | The platform's map service |
+| `react-native-maps` | Maps for errands and live tracking: Google's map on both phones (Apple's on an iPhone built without its Google key) | Google Maps (Maps SDK for Android and for iOS) |
 | `expo-image-picker` | Photos in chat, receipts, proof of delivery and selfies | Camera and photos, with permission |
 | `expo-image-manipulator` | Saving each photo as a JPEG no larger than the server keeps, before it is sent (C1). Smile ID's SDK needs it too | The photo being sent |
 | `expo-notifications` | Push notifications | The platform's push service |

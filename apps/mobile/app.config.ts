@@ -43,6 +43,32 @@ export const apiUrlFor = (env: Record<string, string | undefined>) => {
   return url;
 };
 
+/**
+ * The Google Maps keys for the map drawn in the apps (Maps SDK for Android, Maps SDK for iOS). Both phones draw
+ * Google's map: places are found with Google, whose terms keep its results off other companies' maps. An iPhone
+ * build without its key draws Apple's map, and an Android one a blank map, so a store build made on Expo's
+ * servers stops without its phone's key (docs/mobile-builds.md).
+ */
+export const googleMapsFor = (env: Record<string, string | undefined>) => {
+  const android = env.GOOGLE_MAPS_ANDROID_API_KEY || undefined;
+  const ios = env.GOOGLE_MAPS_IOS_API_KEY || undefined;
+  const profile = env.EAS_BUILD_PROFILE ?? '';
+  if (env.EAS_BUILD === 'true' && /^production/.test(profile)) {
+    const missing =
+      env.EAS_BUILD_PLATFORM === 'android' && !android
+        ? 'GOOGLE_MAPS_ANDROID_API_KEY'
+        : env.EAS_BUILD_PLATFORM === 'ios' && !ios
+          ? 'GOOGLE_MAPS_IOS_API_KEY'
+          : null;
+    if (missing) {
+      throw new Error(
+        `The ${profile} build for ${env.EAS_BUILD_PLATFORM} needs ${missing} in its EAS environment, or its map would be ${missing.includes('IOS') ? "Apple's" : 'blank'} (docs/mobile-builds.md)`,
+      );
+    }
+  }
+  return { android, ios };
+};
+
 /** The longest pins may be set to last: a forgotten build falls back to normal certificate checks in time. */
 const PIN_MAX_DAYS = 400;
 
@@ -168,6 +194,7 @@ const ANDROID_KEEP_RULES = `
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const v = VARIANTS[variant];
+  const googleMaps = googleMapsFor(process.env);
   return {
     ...config,
     name: v.name,
@@ -239,8 +266,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
                 "Jiffo uses your location to show where you are on the map, and to tell Jiffo's safety team where you are if you press Emergency.",
             },
       ],
-      // Android draws Google Maps and needs a key at build time; iOS uses Apple Maps, which needs none.
-      ['react-native-maps', { androidGoogleMapsApiKey: process.env.GOOGLE_MAPS_ANDROID_API_KEY }],
+      // Both phones draw Google's map, each with its own key at build time; an iPhone build without one draws
+      // Apple's (googleMapsFor).
+      [
+        'react-native-maps',
+        {
+          androidGoogleMapsApiKey: googleMaps.android,
+          ...(googleMaps.ios ? { iosGoogleMapsApiKey: googleMaps.ios } : {}),
+        },
+      ],
       // Smile ID's selfie checks (docs/security-plan.md, I2, I8). Only the agent app uses them, but native
       // modules are linked into both builds, which compile only with these settings.
       ...SMILE_ID_PLUGINS,
@@ -265,6 +299,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // The Google Cloud project linked to the apps in Play Console, for Play Integrity (MB3). Not a secret.
       playCloudProjectNumber: process.env.PLAY_CLOUD_PROJECT_NUMBER ?? '',
       ...easProject(EAS_PROJECTS, variant),
+      // Whether the iPhone build has Google's map in it, to draw it rather than Apple's (src/ui/map/engine.ts).
+      googleMapsOnIos: !!googleMaps.ios,
       // Certificate pinning (MB7): null, so off, until its build settings are filled in.
       pinning: pinningFor(process.env),
     },
