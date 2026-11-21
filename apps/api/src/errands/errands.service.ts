@@ -578,8 +578,9 @@ export class ErrandsService implements OnModuleInit {
     });
     // Moderation flags it for the Risk queue if it asks for cash or money sent, or ends where it starts (E5).
     this.risk.errandCreated(created, input.stops);
-    // An urgent errand is offered to one agent at a time (docs/matching.md, M6).
-    await this.offers.errandChanged(created);
+    // An urgent errand is offered to one agent at a time (docs/matching.md, M6), the first offer with the other
+    // errands sent in its state just now (M5).
+    await this.offers.errandCreated(created);
 
     return this.viewOne(created, 'customer', auth.userId);
   }
@@ -941,6 +942,7 @@ export class ErrandsService implements OnModuleInit {
     if (job.event === 'offer_expire') return job.offerId ? this.offers.expire(job.offerId) : undefined;
     if (job.event === 'offer_dispatch') return this.offers.retry(job.errandId);
     if (job.event === 'raise_prompt') return this.promptRaise(job);
+    if (job.event === 'offer_batch') return this.offers.runBatch(job.errandId);
     const money = await this.settingsOf(job.errandId);
     if (!money) return;
     const { settings } = money;

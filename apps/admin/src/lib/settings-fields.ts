@@ -487,6 +487,12 @@ export const SECTIONS: Section[] = [
         help: "Offered one agent at a time within the first distance, then the next, then to every agent within the last at once, the first to accept getting it. Further each time, with commas between them; the last no further than the board's reach. A raised fee starts again.",
       },
       {
+        path: 'matching.batchSeconds',
+        label: "An urgent errand's first offer waits",
+        kind: 'seconds',
+        help: 'So errands sent about the same time in a state are matched together: as many as can get an agent, then the best total. 1 to 30 seconds.',
+      },
+      {
         path: 'matching.offersPerStep',
         label: 'Agents offered it at each step before searching further',
         kind: 'count',

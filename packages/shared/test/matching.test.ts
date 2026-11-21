@@ -116,6 +116,7 @@ describe('the Matching settings', () => {
       newAgentErrands: 10,
       searchStepsKm: [3, 6, 10],
       offersPerStep: 5,
+      batchSeconds: 3,
       offers: true,
       offerSeconds: 20,
       missedOffersOffline: 3,

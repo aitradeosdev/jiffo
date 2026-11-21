@@ -67,6 +67,7 @@ export const DEFAULT_MATCHING_SETTINGS = {
   dispatchRetrySeconds: 15,
   searchStepsKm: [3, 6, 10],
   offersPerStep: 5,
+  batchSeconds: 3,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -439,6 +440,11 @@ const CountrySettingsObject = z.object({
         .default(() => [...DEFAULT_MATCHING_SETTINGS.searchStepsKm]),
       /** Agents offered it one at a time at each step before the search moves out to the next. */
       offersPerStep: z.number().int().min(1).max(50).default(5),
+      /**
+       * How long an urgent errand's first offer waits, so errands sent about the same time in a state are matched
+       * together (M5): as many as can get an agent, with the highest total score.
+       */
+      batchSeconds: z.number().int().min(1).max(30).default(3),
     })
     .refine((m) => (m.searchStepsKm.at(-1) ?? 0) <= m.boardRadiusKm, {
       message: "The last search step can't reach past how far the board reaches",
