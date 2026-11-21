@@ -1,8 +1,12 @@
 import { and, eq, sql } from 'drizzle-orm';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_MATCHING_SETTINGS } from '@jiffo/shared';
 import { agentPresence, errandOffers, errands } from '../src/db/schema';
+import { AgentLocations } from '../src/matching/agent-locations';
+import { MatchingRedis } from '../src/matching/matching-redis';
+import { OffersService } from '../src/matching/offers.service';
+import { RankingService } from '../src/matching/ranking.service';
 import {
   act,
   adminAs,
@@ -57,6 +61,25 @@ describe('offers', () => {
     await matching(original.settings.matching);
     await t.close();
   });
+  // Each test starts with no offer standing and no urgent errand waiting from the one before.
+  afterEach(async () => {
+    await t.db.update(errandOffers).set({ status: 'withdrawn' }).where(eq(errandOffers.status, 'open'));
+    await t.db
+      .update(errands)
+      .set({ status: 'expired' })
+      .where(and(eq(errands.status, 'requested'), eq(errands.urgent, true)));
+  });
+
+  /** Every agent so far taken offline, for a test that needs only its own. */
+  const alone = async () => {
+    const off = await t.db
+      .update(agentPresence)
+      .set({ online: false, onlineSince: null })
+      .where(eq(agentPresence.online, true))
+      .returning({ userId: agentPresence.userId });
+    const locations = t.app.get(AgentLocations);
+    for (const o of off) await locations.remove(o.userId, 'NG');
+  };
 
   /** An agent online at a spot, with a phone that takes pushes. */
   const agentAt = async (at: { lat: number; lng: number }) => {
@@ -197,6 +220,25 @@ describe('offers', () => {
       const [presence] = await t.db.select().from(agentPresence).where(eq(agentPresence.userId, missing.userId));
       expect(presence!.online).toBe(false);
       expect(pushesTo(missing).at(-1)).toMatchObject({ title: expect.stringMatching(/offline/i) });
+
+      // The app's heartbeat, still saying online, doesn't put them back: only the agent going online does.
+      const report = (body: Record<string, unknown>) =>
+        request(t.http)
+          .put('/v1/agent/presence')
+          .set(missing.headers)
+          .send({ ...east(0.1), ...body })
+          .expect(200);
+      expect((await report({ online: true })).body).toMatchObject({ online: false, offlineReason: 'missed_offers' });
+      expect((await request(t.http).get('/v1/agent/presence').set(missing.headers).expect(200)).body).toMatchObject({
+        online: false,
+        offlineReason: 'missed_offers',
+      });
+      expect((await report({ online: true, tapped: true })).body).toMatchObject({ online: true });
+      expect((await report({ online: true })).body.online).toBe(true);
+      expect((await request(t.http).get('/v1/agent/presence').set(missing.headers).expect(200)).body).toMatchObject({
+        online: true,
+        offlineReason: null,
+      });
     } finally {
       await matching({ missedOffersOffline: DEFAULT_MATCHING_SETTINGS.missedOffersOffline });
     }
@@ -233,6 +275,120 @@ describe('offers', () => {
     expect(later?.delayMs).toBe(DEFAULT_MATCHING_SETTINGS.dispatchRetrySeconds * 1000);
     const arrived = await agentAt({ lat: 6.4333, lng: 4.21 });
     await t.timers.fireWhere((job) => job.event === 'offer_dispatch' && job.errandId === errand.id);
+    expect((await openOffer(errand.id))?.agentId).toBe(arrived.userId);
+  });
+
+  it('keeps offering when finding the next agent fails for a moment', async () => {
+    await alone();
+    const first = await agentAt(east(0.5));
+    const second = await agentAt(east(0.6));
+    const errand = await urgentAt();
+    const offer = (await openOffer(errand.id))!;
+    expect(offer.agentId).toBe(first.userId);
+    const failing = vi.spyOn(t.app.get(RankingService), 'ranked').mockRejectedValueOnce(new Error('Maps down'));
+    try {
+      // The no is kept, and the agent told so, whatever happens next.
+      await decline(first, offer.id).expect(200);
+    } finally {
+      failing.mockRestore();
+    }
+    expect(await openOffer(errand.id)).toBeUndefined();
+    await t.timers.fireWhere((job) => job.event === 'offer_dispatch' && job.errandId === errand.id);
+    expect((await openOffer(errand.id))?.agentId).toBe(second.userId);
+  });
+
+  it('looks past the agents who said no, however short the shortlist', async () => {
+    await matching({ shortlistSize: 2 });
+    try {
+      await alone();
+      const agents = [await agentAt(east(0.5)), await agentAt(east(0.6)), await agentAt(east(0.7))];
+      const errand = await urgentAt();
+      for (const agent of agents.slice(0, 2)) {
+        const offer = (await openOffer(errand.id))!;
+        expect(offer.agentId).toBe(agent.userId);
+        await decline(agent, offer.id).expect(200);
+      }
+      expect((await openOffer(errand.id))?.agentId).toBe(agents[2]!.userId);
+    } finally {
+      await matching({ shortlistSize: DEFAULT_MATCHING_SETTINGS.shortlistSize });
+    }
+  });
+
+  it('ends an offer whose timer never came, freeing the errand and the agent', async () => {
+    await alone();
+    const lost = await agentAt(east(0.5));
+    const next = await agentAt(east(0.6));
+    const first = await urgentAt();
+    const stuck = (await openOffer(first.id))!;
+    expect(stuck.agentId).toBe(lost.userId);
+    const timeUp = (id: string, agoMs: number) =>
+      t.db
+        .update(errandOffers)
+        .set({ expiresAt: new Date(Date.now() - agoMs) })
+        .where(eq(errandOffers.id, id));
+    // Its time was up a minute ago, but its timer never came (lost as Redis failed, say): the sweep ends it.
+    await timeUp(stuck.id, 60_000);
+    await t.jobs.run('offers.sweep');
+    expect((await offersOf(first.id)).find((o) => o.id === stuck.id)).toMatchObject({ status: 'expired' });
+    const again = (await openOffer(first.id))!;
+    expect(again.agentId).toBe(next.userId);
+    // And the agent can be offered the next errand.
+    const second = await urgentAt();
+    expect((await openOffer(second.id))?.agentId).toBe(lost.userId);
+
+    // An errand whose offer's time is up is offered again as soon as it changes, sweep or not.
+    await timeUp(again.id, 1_000);
+    await act(t, customer, first.id, 'raise_fee', { amountKobo: 300_000 });
+    const raised = (await openOffer(first.id))!;
+    expect(raised.agentId).toBe(next.userId);
+    expect(raised.expiresAt.getTime()).toBeGreaterThan(Date.now());
+    expect((await offersOf(first.id)).find((o) => o.id === again.id)).toMatchObject({ status: 'expired' });
+  });
+
+  it('puts urgent errands on the board for anyone to take while offers are off, and offers them once on', async () => {
+    await matching({ offers: false });
+    try {
+      await alone();
+      const agent = await agentAt(east(0.5));
+      const other = await agentAt(east(0.6));
+      const errand = await urgentAt();
+      expect(await offersOf(errand.id)).toHaveLength(0);
+      const board = await request(t.http)
+        .get(`/v1/errands/board?lat=${east(0.5).lat}&lng=${east(0.5).lng}&radiusKm=50`)
+        .set(agent.headers)
+        .expect(200);
+      expect((board.body.errands as Array<{ id: string }>).some((e) => e.id === errand.id)).toBe(true);
+      expect((await accept(agent, errand.id)).status).toBe(200);
+
+      // Waiting while they're off, and offered once they're on again.
+      const waiting = await urgentAt();
+      await matching({ offers: true });
+      await t.timers.fireWhere((job) => job.event === 'offer_dispatch' && job.errandId === waiting.id);
+      expect((await openOffer(waiting.id))?.agentId).toBe(other.userId);
+    } finally {
+      await matching({ offers: true });
+    }
+  });
+
+  it('keeps one look again waiting per errand, for longer than its timer takes', async () => {
+    await alone();
+    const errand = await urgentAt();
+    const offers = t.app.get(OffersService);
+    await offers.dispatch(errand.id);
+    await offers.dispatch(errand.id);
+    const looks = t.timers.pending.filter((p) => p.job.event === 'offer_dispatch' && p.job.errandId === errand.id);
+    expect(looks).toHaveLength(1);
+    // A timer that comes late doesn't let a second one start meanwhile.
+    const redis = t.app.get(MatchingRedis).client;
+    expect(await redis.ttl(`offers:retry:${errand.id}`)).toBeGreaterThan(
+      DEFAULT_MATCHING_SETTINGS.dispatchRetrySeconds,
+    );
+
+    // The look and its timer lost (Redis failing, say): the sweep looks again.
+    await redis.del(`offers:retry:${errand.id}`);
+    t.timers.pending.splice(t.timers.pending.indexOf(looks[0]!), 1);
+    const arrived = await agentAt(east(0.5));
+    await t.jobs.run('offers.sweep');
     expect((await openOffer(errand.id))?.agentId).toBe(arrived.userId);
   });
 

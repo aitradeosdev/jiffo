@@ -456,6 +456,12 @@ export const SECTIONS: Section[] = [
         help: "Until then, their reliability and rating are the state's average, so new agents get errands too.",
       },
       {
+        path: 'matching.offers',
+        label: 'Offer urgent errands to one agent at a time',
+        kind: 'bool',
+        help: 'The best-ranked agent gets a ringing offer, then the next. Off: urgent errands are on the board for any agent to take, as before; use it if the agent app with the offer screen is not out yet.',
+      },
+      {
         path: 'matching.offerSeconds',
         label: 'An agent has this long to answer an urgent errand',
         kind: 'seconds',

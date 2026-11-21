@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common';
+import { Inject, Module, OnModuleInit } from '@nestjs/common';
+import { RECURRING_JOBS, type RecurringJobs } from '../timers/recurring-jobs';
 import { ChatModule } from '../chat/chat.module';
 import { ErrandNotifier } from './errand-notifier';
 import { ErrandsController } from './errands.controller';
@@ -29,4 +30,14 @@ import { ERRANDS } from './errands.token';
   ],
   exports: [ErrandsService, EvidenceService, CandidatesService, RankingService],
 })
-export class ErrandsModule {}
+export class ErrandsModule implements OnModuleInit {
+  constructor(
+    @Inject(RECURRING_JOBS) private readonly jobs: RecurringJobs,
+    private readonly offers: OffersService,
+  ) {}
+
+  onModuleInit() {
+    // Every minute, end offers whose timer was lost, and look again at urgent errands left with none (M6).
+    this.jobs.register('offers.sweep', '* * * * *', () => this.offers.sweep());
+  }
+}

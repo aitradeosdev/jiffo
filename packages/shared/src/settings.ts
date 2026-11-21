@@ -61,6 +61,7 @@ export const DEFAULT_MATCHING_SETTINGS = {
   weights: { travel: 60, reliability: 20, rating: 10, waiting: 10 },
   tierBoosts: { bronze: 0, silver: 0, gold: 0, platinum: 0 },
   newAgentErrands: 10,
+  offers: true,
   offerSeconds: 20,
   missedOffersOffline: 3,
   dispatchRetrySeconds: 15,
@@ -412,6 +413,11 @@ const CountrySettingsObject = z.object({
         .default(() => ({ ...DEFAULT_MATCHING_SETTINGS.tierBoosts })),
       /** Errands an agent completes before their own reliability and rating count; until then, the state's. */
       newAgentErrands: z.number().int().min(0).max(1_000).default(10),
+      /**
+       * Urgent errands offered to one agent at a time (M6). Off: they're on the board, for any agent with room
+       * for one to take, as before offers.
+       */
+      offers: z.boolean().default(true),
       /** How long an agent has to answer an offer for an urgent errand before it moves to the next (M6). */
       offerSeconds: z.number().int().min(5).max(120).default(20),
       /** Offers in a row an agent lets run out before they are taken offline. 0: never. */

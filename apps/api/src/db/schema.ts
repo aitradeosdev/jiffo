@@ -559,6 +559,10 @@ export const matchBlocks = pgTable(
  * Where an agent is and whether they take errands now. The agent app reports it while online or on an
  * errand; it is cleared when they go offline with nothing running, so a location is never kept longer.
  */
+/** Why Jiffo took an agent offline, when the agent going online again must be their own choice. */
+export const OFFLINE_REASONS = ['missed_offers'] as const;
+export type OfflineReason = (typeof OFFLINE_REASONS)[number];
+
 export const agentPresence = pgTable(
   'agent_presence',
   {
@@ -578,6 +582,11 @@ export const agentPresence = pgTable(
     mocked: boolean('mocked').notNull().default(false),
     /** When they last went online; null while offline. How long they've waited counts from it (matching, M4). */
     onlineSince: timestamp('online_since', { withTimezone: true }),
+    /**
+     * Why Jiffo took them offline, while it matters: after missed offers (M6), only the agent going online again
+     * themselves puts them back, not their app still reporting online.
+     */
+    offlineReason: text('offline_reason', { enum: OFFLINE_REASONS }),
     updatedAt: updatedAt(),
   },
   (t) => [index('agent_presence_location_gix').using('gist', t.location)],

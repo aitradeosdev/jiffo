@@ -344,6 +344,13 @@
       "when": 1795293934091,
       "tag": "0048_errand_offers",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1795295228673,
+      "tag": "0049_offline_reason",
+      "breakpoints": true
     }
   ]
 }

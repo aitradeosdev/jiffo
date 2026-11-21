@@ -92,7 +92,15 @@ export class PresenceService {
    */
   async report(
     auth: AuthContext,
-    input: { online?: boolean; lat?: number; lng?: number; mocked?: boolean; accuracy?: number; fixedAt?: number },
+    input: {
+      online?: boolean;
+      lat?: number;
+      lng?: number;
+      mocked?: boolean;
+      accuracy?: number;
+      fixedAt?: number;
+      tapped?: boolean;
+    },
     attest?: Pick<AttestContext, 'evidence' | 'request'>,
   ) {
     const [running, [current]] = await Promise.all([
@@ -109,11 +117,16 @@ export class PresenceService {
           mocked: agentPresence.mocked,
           accuracy: agentPresence.accuracy,
           fixedAt: agentPresence.fixedAt,
+          offlineReason: agentPresence.offlineReason,
         })
         .from(agentPresence)
         .where(eq(agentPresence.userId, auth.userId)),
     ]);
     let body = { ...input, online: input.online ?? current?.online ?? false };
+    // Taken offline for missed offers (docs/matching.md, M6): back online only by going online themselves, not
+    // by the app's heartbeat still saying online, which is told they're offline and why.
+    const heldOffline = current?.offlineReason === 'missed_offers' && !input.tapped ? current.offlineReason : null;
+    if (heldOffline) body = { ...body, online: false };
     // Going online is for approved agents; going offline always works. An agent not approved yet who still
     // has an errand running keeps sharing where they are for it, but isn't counted as online.
     if (body.online && !(await this.applications.approved(auth.userId))) {
@@ -171,6 +184,8 @@ export class PresenceService {
     // while they stay so, cleared going offline. Decided in the write itself, so a report racing another can't
     // leave an online agent without one.
     const since = { onlineSince: body.online ? sql`coalesce(${agentPresence.onlineSince}, ${now})` : null };
+    // Online again, or offline by their own choice: why Jiffo took them offline no longer matters.
+    const reason = body.online || input.online === false ? { offlineReason: null } : {};
     await this.db
       .insert(agentPresence)
       .values({
@@ -183,7 +198,7 @@ export class PresenceService {
       })
       .onConflictDoUpdate({
         target: agentPresence.userId,
-        set: { countryCode: auth.countryCode, online: body.online, ...place, ...since, updatedAt: now },
+        set: { countryCode: auth.countryCode, online: body.online, ...place, ...since, ...reason, updatedAt: now },
       });
     this.keepLive(
       auth.userId,
@@ -239,7 +254,12 @@ export class PresenceService {
         running: following,
       });
     }
-    return { online: body.online, sharingLocation: sharing, ...(selfieNeeded ? { selfieNeeded } : {}) };
+    return {
+      online: body.online,
+      sharingLocation: sharing,
+      ...(selfieNeeded ? { selfieNeeded } : {}),
+      ...(heldOffline ? { offlineReason: heldOffline } : {}),
+    };
   }
 
   /**
@@ -302,7 +322,8 @@ export class PresenceService {
         .limit(1),
     ]);
     const fresh = !!row?.locatedAt && Date.now() - row.locatedAt.getTime() < ONLINE_FOR_MS;
-    return { online: !!row?.online && fresh, onErrand: !!busy };
+    // Why Jiffo took them offline, if it did, so the app can say so.
+    return { online: !!row?.online && fresh, onErrand: !!busy, offlineReason: row?.offlineReason ?? null };
   }
 
   /** The agent's position for this errand's customer, if the errand gets it now (sharedWith) and it's recent. */

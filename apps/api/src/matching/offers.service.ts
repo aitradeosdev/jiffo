@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { formatNaira } from '@jiffo/shared';
-import { and, asc, desc, eq, gt, gte, inArray, sql } from 'drizzle-orm';
+import { DEFAULT_MATCHING_SETTINGS, formatNaira } from '@jiffo/shared';
+import { and, asc, desc, eq, gt, gte, inArray, lt, lte, sql } from 'drizzle-orm';
 import { haversineMeters } from '../adapters/maps';
 import { PresenceService } from '../agents/presence.service';
 import { notFound } from '../common/errors';
@@ -25,6 +25,15 @@ import { RankingService, type Ranked } from './ranking.service';
 
 type ErrandRow = typeof errands.$inferSelect;
 type OfferRow = typeof errandOffers.$inferSelect;
+
+/**
+ * A look again for an errand still waiting is kept this much longer than its timer takes, so a timer that comes
+ * late doesn't let a second one start meanwhile.
+ */
+const RETRY_SLACK_SECONDS = 30;
+/** An offer still open this long after its time was up has lost its timer: the sweep ends it. */
+const STALE_AFTER_MS = 30_000;
+const retryKey = (errandId: string) => `offers:retry:${errandId}`;
 
 /**
  * Urgent errands offered to one agent at a time (docs/matching.md, M6): the best-ranked agent who may take it
@@ -53,34 +62,75 @@ export class OffersService {
    * agent gone); once it has left waiting, an offer still open for it is withdrawn. Never fails the change.
    */
   async errandChanged(errand: ErrandRow) {
-    try {
-      if (errand.status !== 'requested') await this.withdraw(errand.id);
-      else if (errand.urgent) await this.dispatch(errand.id);
-    } catch (error) {
-      this.logger.warn(`Offering errand ${errand.id} failed: ${(error as Error).message}`);
+    if (errand.status === 'requested') {
+      if (errand.urgent) await this.dispatch(errand.id);
+      return;
     }
+    await this.withdraw(errand.id).catch((error: Error) =>
+      this.logger.warn(`Withdrawing the offer for errand ${errand.id} failed: ${error.message}`),
+    );
   }
 
-  /** The open offer for an errand, if any. */
+  /** The offer standing for an errand, if any: open, and its time not up. */
   private async openFor(errandId: string) {
     const [open] = await this.db
       .select({ id: errandOffers.id })
       .from(errandOffers)
-      .where(and(eq(errandOffers.errandId, errandId), eq(errandOffers.status, 'open')));
+      .where(
+        and(
+          eq(errandOffers.errandId, errandId),
+          eq(errandOffers.status, 'open'),
+          gt(errandOffers.expiresAt, new Date()),
+        ),
+      );
     return open ?? null;
   }
 
   /**
    * Offers a waiting urgent errand to the best-ranked agent who may take it now, hasn't said no to it at this
-   * fee and holds no other offer, unless someone holds an offer for it already. With no one, looks again later.
+   * fee and holds no other offer, unless someone holds an offer for it already. With no one, or if finding
+   * them fails, looks again soon. Never fails: what went wrong is logged.
    */
   async dispatch(errandId: string): Promise<void> {
+    const known: { version?: number; retrySeconds?: number } = {};
+    try {
+      await this.offerNext(errandId, known);
+    } catch (error) {
+      this.logger.warn(`Offering errand ${errandId} failed, looking again soon: ${(error as Error).message}`);
+      await this.later(
+        errandId,
+        known.version ?? 0,
+        known.retrySeconds ?? DEFAULT_MATCHING_SETTINGS.dispatchRetrySeconds,
+      ).catch((e: Error) => this.logger.warn(`Looking again at errand ${errandId} failed: ${e.message}`));
+    }
+  }
+
+  private async offerNext(errandId: string, known: { version?: number; retrySeconds?: number }) {
     const [errand] = await this.db.select().from(errands).where(eq(errands.id, errandId));
     if (!errand || errand.status !== 'requested' || !errand.urgent) return;
-    if (await this.openFor(errandId)) return;
+    known.version = errand.version;
     const rules = (await this.countries.currentSettings(errand.countryCode)).settings.matching;
-    const [ranked, passed] = await Promise.all([
-      this.ranking.ranked(errandId),
+    known.retrySeconds = rules.dispatchRetrySeconds;
+    // Offers off for the country: the errand is on the board instead. Looked at again soon all the same, so
+    // turning offers on offers the errands waiting then.
+    if (!rules.offers) return this.later(errandId, errand.version, rules.dispatchRetrySeconds);
+    // An offer for it still open after its time was up (its timer late, or lost) no longer holds it.
+    const timeUp = await this.db
+      .update(errandOffers)
+      .set({ status: 'expired' })
+      .where(
+        and(
+          eq(errandOffers.errandId, errandId),
+          eq(errandOffers.status, 'open'),
+          lte(errandOffers.expiresAt, new Date()),
+        ),
+      )
+      .returning();
+    for (const o of timeUp) await this.ended(o, { offerAgain: false });
+    if (await this.openFor(errandId)) return;
+    // Left out before the shortlist is drawn up, so they never take the places of agents who could be asked:
+    // who said no to it at this fee, and who holds another offer (one at a time, kept by the database too).
+    const [passed, holding] = await Promise.all([
       this.db
         .select({ agentId: errandOffers.agentId })
         .from(errandOffers)
@@ -91,10 +141,14 @@ export class OffersService {
             eq(errandOffers.feeKobo, errand.feeKobo),
           ),
         ),
+      this.db
+        .select({ agentId: errandOffers.agentId })
+        .from(errandOffers)
+        .where(and(eq(errandOffers.countryCode, errand.countryCode), eq(errandOffers.status, 'open'))),
     ]);
-    const said = new Set(passed.map((p) => p.agentId));
+    const skip = new Set([...passed, ...holding].map((p) => p.agentId));
+    const ranked = await this.ranking.ranked(errandId, skip);
     for (const [i, r] of ranked.entries()) {
-      if (said.has(r.agentId)) continue;
       const now = new Date();
       const offer = await this.db.transaction(async (tx) => {
         // The errand as it is now, locked as accepting locks it: still waiting, at the fee ranked for.
@@ -126,7 +180,7 @@ export class OffersService {
         return row ?? null;
       });
       if (offer === 'stop') return;
-      // The agent holds another offer, or someone else offered this errand first.
+      // The agent was offered another errand meanwhile, or someone else offered this errand first.
       if (!offer) {
         if (await this.openFor(errandId)) return;
         continue;
@@ -135,24 +189,64 @@ export class OffersService {
         { errandId, event: 'offer_expire', status: 'requested', version: errand.version, offerId: offer.id },
         rules.offerSeconds * 1000,
       );
-      await this.tell(offer, errand, r);
+      // The offer stands if the push fails: the agent's app also shows it (GET /v1/agent/offers/current).
+      await this.tell(offer, errand, r).catch((error: Error) =>
+        this.logger.warn(`Telling agent ${offer.agentId} of an offer failed: ${error.message}`),
+      );
       return;
     }
-    // No one can take it now: look again soon, while it waits, with one look at a time waiting per errand.
+    // No one can take it now: look again soon.
+    await this.later(errandId, errand.version, rules.dispatchRetrySeconds);
+  }
+
+  /**
+   * Looks at a waiting errand again soon, with one look waiting per errand: marked in Redis for longer than the
+   * timer takes, so one that comes late doesn't let a second start.
+   */
+  private async later(errandId: string, version: number, retrySeconds: number) {
     const first = await this.redis.client
-      .set(`offers:retry:${errandId}`, '1', 'EX', rules.dispatchRetrySeconds, 'NX')
+      .set(retryKey(errandId), '1', 'EX', retrySeconds + RETRY_SLACK_SECONDS, 'NX')
       .catch(() => 'OK');
     if (first !== 'OK') return;
     await this.timers.schedule(
-      { errandId, event: 'offer_dispatch', status: 'requested', version: errand.version, key: String(Date.now()) },
-      rules.dispatchRetrySeconds * 1000,
+      { errandId, event: 'offer_dispatch', status: 'requested', version, key: String(Date.now()) },
+      retrySeconds * 1000,
     );
   }
 
   /** The look again is due: the next one may be scheduled. */
   async retry(errandId: string) {
-    await this.redis.client.del(`offers:retry:${errandId}`).catch(() => undefined);
+    await this.redis.client.del(retryKey(errandId)).catch(() => undefined);
     await this.dispatch(errandId);
+  }
+
+  /**
+   * Every minute: ends offers still open well after their time was up, whose timer was lost (Redis failing as it
+   * was set, say), and looks again at waiting urgent errands with no offer standing and no look waiting, so
+   * neither an errand nor an agent stays held by a timer that never came.
+   */
+  async sweep() {
+    const lost = await this.db
+      .update(errandOffers)
+      .set({ status: 'expired' })
+      .where(and(eq(errandOffers.status, 'open'), lt(errandOffers.expiresAt, new Date(Date.now() - STALE_AFTER_MS))))
+      .returning();
+    for (const o of lost) await this.ended(o, { offerAgain: true });
+    const waiting = await this.db
+      .select({ id: errands.id })
+      .from(errands)
+      .where(
+        and(
+          eq(errands.status, 'requested'),
+          eq(errands.urgent, true),
+          sql`not exists (select 1 from ${errandOffers} o where o.errand_id = ${errands.id} and o.status = 'open')`,
+        ),
+      );
+    for (const w of waiting) {
+      const looking = await this.redis.client.exists(retryKey(w.id)).catch(() => 0);
+      if (!looking) await this.dispatch(w.id);
+    }
+    return lost.length;
   }
 
   /** Rings the agent's phone, and tells their open app. */
@@ -189,22 +283,26 @@ export class OffersService {
     return { status: 'declined' as const };
   }
 
-  /**
-   * The offer's time is up: it goes to the next agent. An agent who lets several run out in a row since going
-   * online is taken offline, and told.
-   */
+  /** The offer's time is up: it goes to the next agent. */
   async expire(offerId: string) {
     const [offer] = await this.db
       .update(errandOffers)
       .set({ status: 'expired' })
       .where(and(eq(errandOffers.id, offerId), eq(errandOffers.status, 'open')))
       .returning();
-    if (!offer) return;
-    this.realtime.toUser(offer.agentId, 'agent', 'offer.gone', { offerId, errandId: offer.errandId });
+    if (offer) await this.ended(offer, { offerAgain: true });
+  }
+
+  /**
+   * After an offer ran out: the agent's app is told, an agent who let several run out in a row since going
+   * online is taken offline, and the errand is offered to the next agent unless that is under way already.
+   */
+  private async ended(offer: OfferRow, { offerAgain }: { offerAgain: boolean }) {
+    this.realtime.toUser(offer.agentId, 'agent', 'offer.gone', { offerId: offer.id, errandId: offer.errandId });
     await this.offlineIfMissing(offer.agentId, offer.countryCode).catch((error: Error) =>
       this.logger.warn(`Checking missed offers failed: ${error.message}`),
     );
-    await this.dispatch(offer.errandId);
+    if (offerAgain) await this.dispatch(offer.errandId);
   }
 
   private async offlineIfMissing(agentId: string, countryCode: string) {
@@ -223,9 +321,10 @@ export class OffersService {
       .orderBy(desc(errandOffers.offeredAt))
       .limit(n);
     if (recent.length < n || recent.some((o) => o.status !== 'expired')) return;
+    // Kept offline until they go online again themselves, not by their app still reporting online.
     const [off] = await this.db
       .update(agentPresence)
-      .set({ online: false, onlineSince: null, updatedAt: new Date() })
+      .set({ online: false, onlineSince: null, offlineReason: 'missed_offers', updatedAt: new Date() })
       .where(and(eq(agentPresence.userId, agentId), eq(agentPresence.online, true)))
       .returning({ userId: agentPresence.userId });
     if (!off) return;

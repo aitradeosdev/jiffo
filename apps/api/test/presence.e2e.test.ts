@@ -41,6 +41,7 @@ describe('agent presence and live location', () => {
     expect((await request(t.http).get('/v1/agent/presence').set(near.headers).expect(200)).body).toEqual({
       online: true,
       onErrand: false,
+      offlineReason: null,
     });
 
     // Going offline with nothing running stops counting and forgets where the agent was.
@@ -106,6 +107,7 @@ describe('agent presence and live location', () => {
     expect((await request(t.http).get('/v1/agent/presence').set(agent.headers).expect(200)).body).toEqual({
       online: false,
       onErrand: true,
+      offlineReason: null,
     });
 
     const socket = io(`${t.url}/realtime`, {

@@ -273,9 +273,12 @@ export class ErrandsService implements OnModuleInit {
     if (haversineMeters(me, q) > security.boardNearKm * 1000) {
       throw unprocessable('not_here', 'The board shows errands near where you are');
     }
-    // The board has only errands that aren't urgent: with no room for one of those, it says why.
-    const full = heldRefusal(me.held, false, rules);
-    if (full) throw this.eligibility.refusal(full);
+    // Urgent errands are offered to one agent at a time instead (docs/matching.md, M6), unless offers are off
+    // for the country: then they're on the board too, for an agent with room for one. With room for nothing
+    // the board has, it says why.
+    const boardFull = heldRefusal(me.held, false, rules);
+    const urgentShown = !rules.offers && !heldRefusal(me.held, true, rules);
+    if (boardFull && !urgentShown) throw this.eligibility.refusal(boardFull);
     const tier = await this.agents.tier(auth.userId);
     const here = sql`ST_SetSRID(ST_MakePoint(${me.lng}, ${me.lat}), 4326)::geography`;
     const distance = sql<number>`ST_Distance(${errandStops.location}, ${here})`;
@@ -284,8 +287,8 @@ export class ErrandsService implements OnModuleInit {
     const open = and(
       eq(errands.status, 'requested'),
       eq(errands.countryCode, auth.countryCode),
-      // Urgent errands are offered to one agent at a time instead (docs/matching.md, M6).
-      eq(errands.urgent, false),
+      // Never on the board while they're offered instead, so not counted as left out by preferences either.
+      rules.offers ? eq(errands.urgent, false) : undefined,
       ne(errands.customerId, auth.userId),
       sql`ST_DWithin(${errandStops.location}, ${here}, ${reach})`,
     );
@@ -297,7 +300,10 @@ export class ErrandsService implements OnModuleInit {
       me.takesPurchases ? undefined : eq(errands.buy, false),
     );
     // Left out in the query, so the limit counts only errands the agent may take.
-    const allowed = and(this.eligibility.boardExclusions(auth.userId));
+    const allowed = and(
+      boardFull ? eq(errands.urgent, true) : urgentShown ? undefined : eq(errands.urgent, false),
+      this.eligibility.boardExclusions(auth.userId),
+    );
     const pickupOf = and(eq(errandStops.errandId, errands.id), eq(errandStops.seq, 0));
     const [found, counts] = await Promise.all([
       this.db
@@ -1117,8 +1123,8 @@ export class ErrandsService implements OnModuleInit {
         );
         if (refused) throw this.eligibility.refusal(refused);
         // An urgent errand goes to the agent it is offered to, while the offer stands (docs/matching.md, M7):
-        // one conditional change, in this transaction, with the errand locked.
-        if (errand.urgent) {
+        // one conditional change, in this transaction, with the errand locked. With offers off, to anyone.
+        if (errand.urgent && live.matching.offers) {
           const [taken] = await tx
             .update(errandOffers)
             .set({ status: 'accepted', answeredAt: now })

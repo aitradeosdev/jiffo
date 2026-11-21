@@ -18,6 +18,11 @@ const PresenceBody = z
     /** How far off the phone says the fix might be, in metres, and when it took it (ms), for the GPS checks (G1). */
     accuracy: z.number().min(0).max(1_000_000).optional(),
     fixedAt: z.number().int().positive().optional(),
+    /**
+     * Sent by the Go online button: the agent chose to go online now. An agent Jiffo took offline for missed
+     * offers comes back online only so (docs/matching.md, M6), not by the app still reporting online.
+     */
+    tapped: z.boolean().optional(),
   })
   .refine((b) => (b.lat === undefined) === (b.lng === undefined), 'Send lat and lng together');
 
