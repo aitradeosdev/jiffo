@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, gt, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { agentApplications, agentPresence, otpChallenges, settingsVersions } from '../src/db/schema';
+import { agentApplications, agentPresence, otpChallenges } from '../src/db/schema';
 import {
   adminAs,
   agentWithMoney,
@@ -34,7 +34,7 @@ describe('ID check switches', () => {
   let owner: Awaited<ReturnType<typeof adminAs>>;
   /** Decides agent applications. */
   let ops: Awaited<ReturnType<typeof adminAs>>;
-  let original: { version: number };
+  let original: { settings: { identity: Record<string, unknown> } };
 
   beforeAll(async () => {
     t = await createTestApp();
@@ -43,9 +43,8 @@ describe('ID check switches', () => {
     original = (await request(t.http).get('/v1/admin/settings?country=NG').set(owner.headers).expect(200)).body;
   });
   afterAll(async () => {
-    await t.db
-      .delete(settingsVersions)
-      .where(and(eq(settingsVersions.countryCode, 'NG'), gt(settingsVersions.version, original.version)));
+    // Saved back as a new version: errands made here keep the version they were made under.
+    await identity(original.settings.identity);
     await t.close();
   });
 

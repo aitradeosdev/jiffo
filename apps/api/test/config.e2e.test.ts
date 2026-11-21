@@ -34,6 +34,8 @@ describe('country config', () => {
     expect(res.body.settings.identity).toEqual({
       customerIdTypes: ['nin', 'bvn'],
       agentIdTypes: ['nin', 'bvn'],
+      customerCheck: true,
+      agentCheck: true,
     });
   });
 
