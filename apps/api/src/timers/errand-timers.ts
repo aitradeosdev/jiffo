@@ -14,6 +14,8 @@ export type TimerEvent =
   | 'offer_expire'
   /** Look again for someone to offer an urgent errand to. */
   | 'offer_dispatch'
+  /** Offer the urgent errands waiting for a first offer in the errand's state together (docs/matching.md, M5). */
+  | 'offer_batch'
   /** Still waiting: ask the customer whether to raise the fee (docs/matching.md, M8). */
   | 'raise_prompt';
 

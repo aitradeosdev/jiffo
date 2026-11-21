@@ -350,8 +350,19 @@ export function errandBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
-export async function createErrand(t: TestApp, customer: Person, overrides: Record<string, unknown> = {}) {
+/**
+ * Sends an errand. An urgent one's first offer waits for its state's batch (docs/matching.md, M5), which is run
+ * here as if its moment had come, so tests about something else see the offer at once; `batch: 'leave'` leaves it
+ * waiting, for tests of batching.
+ */
+export async function createErrand(
+  t: TestApp,
+  customer: Person,
+  overrides: Record<string, unknown> = {},
+  options: { batch?: 'run' | 'leave' } = {},
+) {
   const res = await request(t.http).post('/v1/errands').set(customer.headers).send(errandBody(overrides)).expect(201);
+  if (overrides.urgent && options.batch !== 'leave') await t.timers.fireWhere((job) => job.event === 'offer_batch');
   return res.body as { id: string; status: string; version: number; buy: boolean; allowedEvents: string[] };
 }
 

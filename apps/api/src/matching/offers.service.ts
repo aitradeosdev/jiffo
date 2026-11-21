@@ -1,12 +1,13 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
+  bestAssignment,
   DEFAULT_MATCHING_SETTINGS,
   formatNaira,
   searchRadiusKm,
   searchStep,
   type CountrySettings,
 } from '@jiffo/shared';
-import { and, asc, desc, eq, gt, gte, inArray, lt, lte, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, sql } from 'drizzle-orm';
 import { haversineMeters } from '../adapters/maps';
 import { AgentsService } from '../agents/agents.service';
 import { PresenceService } from '../agents/presence.service';
@@ -44,6 +45,30 @@ const RETRY_SLACK_SECONDS = 30;
 /** An offer still open this long after its time was up has lost its timer: the sweep ends it. */
 const STALE_AFTER_MS = 30_000;
 const retryKey = (errandId: string) => `offers:retry:${errandId}`;
+/** The batch waiting in an errand's state (M5). */
+const batchKey = (errand: Pick<ErrandRow, 'countryCode' | 'stateCode'>) =>
+  `offers:batch:${errand.countryCode}:${errand.stateCode}`;
+/** Errands in one state's batch at most; any more wait for the next. */
+const BATCH_MAX = 50;
+
+/**
+ * Ranked agents in the order offering asks them: those within the first of these search steps by score, then
+ * those in the next step out who aren't nearer, and so on.
+ */
+function ringOrder(ranked: Ranked[], stepsKm: number[]) {
+  return stepsKm.flatMap((km, j) =>
+    ranked.filter((r) => r.straightMeters <= km * 1000 && (j === 0 || r.straightMeters > stepsKm[j - 1]! * 1000)),
+  );
+}
+
+/** The ranked agents within the nearest search step that has any, by score: whom a first offer would ask. */
+function nearestRing(ranked: Ranked[], stepsKm: number[]) {
+  for (const km of stepsKm) {
+    const within = ranked.filter((r) => r.straightMeters <= km * 1000);
+    if (within.length) return within;
+  }
+  return [];
+}
 
 /**
  * Urgent errands offered to one agent at a time (docs/matching.md, M6): the best-ranked agent who may take it
@@ -165,60 +190,163 @@ export class OffersService {
     // Ranked once, as far as the last step reaches, and offered from this step's radius out: further out at once
     // where no one nearer can be asked.
     const ranked = await this.ranking.ranked(errandId, skip, rules.searchStepsKm.at(-1));
-    const rings = rules.searchStepsKm.slice(step.index);
-    const order = rings.flatMap((km, j) =>
-      ranked.filter((r) => r.straightMeters <= km * 1000 && (j === 0 || r.straightMeters > rings[j - 1]! * 1000)),
-    );
-    for (const [i, r] of order.entries()) {
-      const now = new Date();
-      const offer = await this.db.transaction(async (tx) => {
-        // The errand as it is now, locked as accepting locks it: still waiting, at the fee ranked for.
-        const [still] = await tx
-          .select({ status: errands.status, feeKobo: errands.feeKobo })
-          .from(errands)
-          .where(eq(errands.id, errandId))
-          .for('update');
-        if (still?.status !== 'requested' || still.feeKobo !== errand.feeKobo) return 'stop' as const;
-        // The database keeps one open offer per errand and per agent: nothing is written if either holds one.
-        const [row] = await tx
-          .insert(errandOffers)
-          .values({
-            errandId,
-            agentId: r.agentId,
-            countryCode: errand.countryCode,
-            feeKobo: errand.feeKobo,
-            rank: i + 1,
-            score: r.score,
-            parts: { ...r.parts },
-            travelSeconds: r.travel.durationSeconds,
-            travelEstimated: r.travel.estimated,
-            straightMeters: r.straightMeters,
-            offeredAt: now,
-            expiresAt: new Date(now.getTime() + rules.offerSeconds * 1000),
-          })
-          .onConflictDoNothing()
-          .returning();
-        return row ?? null;
-      });
-      if (offer === 'stop') return;
+    for (const [i, r] of ringOrder(ranked, rules.searchStepsKm.slice(step.index)).entries()) {
+      const outcome = await this.offerTo(errand, r, i + 1, rules);
+      if (outcome === 'offered' || outcome === 'stop') return;
       // The agent was offered another errand meanwhile, or someone else offered this errand first.
-      if (!offer) {
-        if (await this.openFor(errandId)) return;
-        continue;
-      }
-      await this.timers.schedule(
-        { errandId, event: 'offer_expire', status: 'requested', version: errand.version, offerId: offer.id },
-        rules.offerSeconds * 1000,
-      );
-      // The offer stands if the push fails: the agent's app also shows it (GET /v1/agent/offers/current).
-      await this.tell(offer, errand, r).catch((error: Error) =>
-        this.logger.warn(`Telling agent ${offer.agentId} of an offer failed: ${error.message}`),
-      );
-      this.searchChanged(errand);
-      return;
+      if (await this.openFor(errandId)) return;
     }
     // No one can take it now: look again soon.
     await this.later(errandId, errand.version, rules.dispatchRetrySeconds);
+  }
+
+  /**
+   * Offers the errand to the agent, at their place in the ranking: 'offered', 'taken' when the agent holds another
+   * offer or the errand already has one (the database keeps one open per agent and per errand), or 'stop' when the
+   * errand no longer waits at the fee it was ranked at.
+   */
+  private async offerTo(
+    errand: ErrandRow,
+    r: Ranked,
+    rank: number,
+    rules: CountrySettings['matching'],
+  ): Promise<'offered' | 'taken' | 'stop'> {
+    const now = new Date();
+    const offer = await this.db.transaction(async (tx) => {
+      // The errand as it is now, locked as accepting locks it: still waiting, at the fee ranked for.
+      const [still] = await tx
+        .select({ status: errands.status, feeKobo: errands.feeKobo })
+        .from(errands)
+        .where(eq(errands.id, errand.id))
+        .for('update');
+      if (still?.status !== 'requested' || still.feeKobo !== errand.feeKobo) return 'stop' as const;
+      const [row] = await tx
+        .insert(errandOffers)
+        .values({
+          errandId: errand.id,
+          agentId: r.agentId,
+          countryCode: errand.countryCode,
+          feeKobo: errand.feeKobo,
+          rank,
+          score: r.score,
+          parts: { ...r.parts },
+          travelSeconds: r.travel.durationSeconds,
+          travelEstimated: r.travel.estimated,
+          straightMeters: r.straightMeters,
+          offeredAt: now,
+          expiresAt: new Date(now.getTime() + rules.offerSeconds * 1000),
+        })
+        .onConflictDoNothing()
+        .returning();
+      return row ?? null;
+    });
+    if (offer === 'stop') return 'stop';
+    if (!offer) return 'taken';
+    await this.timers.schedule(
+      { errandId: errand.id, event: 'offer_expire', status: 'requested', version: errand.version, offerId: offer.id },
+      rules.offerSeconds * 1000,
+    );
+    // The offer stands if the push fails: the agent's app also shows it (GET /v1/agent/offers/current).
+    await this.tell(offer, errand, r).catch((error: Error) =>
+      this.logger.warn(`Telling agent ${offer.agentId} of an offer failed: ${error.message}`),
+    );
+    this.searchChanged(errand);
+    return 'offered';
+  }
+
+  /**
+   * A new urgent errand (docs/matching.md, M5): its first offer waits a few seconds for its state's batch, so
+   * errands sent about the same time are matched together. The customer's request doesn't wait for any of it.
+   */
+  async errandCreated(errand: ErrandRow) {
+    if (errand.status !== 'requested' || !errand.urgent) return;
+    try {
+      const rules = (await this.countries.currentSettings(errand.countryCode)).settings.matching;
+      if (!rules.offers) return await this.dispatch(errand.id);
+      // One batch waiting per state: an errand sent while one waits joins it.
+      const first = await this.redis.client
+        .set(batchKey(errand), '1', 'EX', rules.batchSeconds + RETRY_SLACK_SECONDS, 'NX')
+        .catch(() => 'OK');
+      if (first !== 'OK') return;
+      await this.timers.schedule(
+        { errandId: errand.id, event: 'offer_batch', status: 'requested', version: errand.version },
+        rules.batchSeconds * 1000,
+      );
+    } catch (error) {
+      this.logger.warn(`Batching errand ${errand.id} failed, offering it alone: ${(error as Error).message}`);
+      await this.dispatch(errand.id);
+    }
+  }
+
+  /**
+   * The batch for the errand's state is due (M5): the urgent errands there still waiting for a first offer get
+   * agents together, as many as can get one and with the highest total score, each agent in one assignment at
+   * most (bestAssignment, in @jiffo/shared). Each errand's agents are those in its nearest search step with anyone
+   * in it, as offering one at a time would ask. The rest are offered one at a time from here, which looks again
+   * soon when no one is free.
+   */
+  async runBatch(errandId: string) {
+    const [trigger] = await this.db.select().from(errands).where(eq(errands.id, errandId));
+    if (!trigger) return;
+    await this.redis.client.del(batchKey(trigger)).catch(() => undefined);
+    const waiting = await this.db
+      .select()
+      .from(errands)
+      .where(
+        and(
+          eq(errands.countryCode, trigger.countryCode),
+          eq(errands.stateCode, trigger.stateCode),
+          eq(errands.status, 'requested'),
+          eq(errands.urgent, true),
+          isNull(errands.broadcastFeeKobo),
+          sql`not exists (select 1 from ${errandOffers} o where o.errand_id = ${errands.id})`,
+        ),
+      )
+      .orderBy(asc(errands.createdAt))
+      .limit(BATCH_MAX);
+    if (!waiting.length) return;
+    try {
+      const rules = (await this.countries.currentSettings(trigger.countryCode)).settings.matching;
+      if (!rules.offers) {
+        for (const e of waiting) await this.dispatch(e.id);
+        return;
+      }
+      const holding = await this.db
+        .select({ agentId: errandOffers.agentId })
+        .from(errandOffers)
+        .where(and(eq(errandOffers.countryCode, trigger.countryCode), eq(errandOffers.status, 'open')));
+      const skip = new Set(holding.map((h) => h.agentId));
+      const options = await Promise.all(
+        waiting.map(async (e) => {
+          const ranked = await this.ranking.ranked(e.id, skip, rules.searchStepsKm.at(-1)).catch((error: Error) => {
+            this.logger.warn(`Ranking errand ${e.id} for its batch failed: ${error.message}`);
+            return [] as Ranked[];
+          });
+          return nearestRing(ranked, rules.searchStepsKm);
+        }),
+      );
+      const agents = [...new Set(options.flat().map((r) => r.agentId))];
+      const column = new Map(agents.map((a, j) => [a, j]));
+      const weights = options.map((rankedFor) => {
+        const row: (number | null)[] = agents.map(() => null);
+        for (const r of rankedFor) row[column.get(r.agentId)!] = r.score;
+        return row;
+      });
+      const picked = bestAssignment(weights);
+      // Every assignment is offered before anything else, so offering one errand alone can't take an agent the
+      // batch gave another.
+      const left: string[] = [];
+      for (const [i, e] of waiting.entries()) {
+        const j = picked[i];
+        const r = j === null || j === undefined ? undefined : options[i]!.find((o) => o.agentId === agents[j]);
+        const outcome = r ? await this.offerTo(e, r, options[i]!.indexOf(r) + 1, rules) : 'taken';
+        if (outcome === 'taken') left.push(e.id);
+      }
+      for (const id of left) await this.dispatch(id);
+    } catch (error) {
+      this.logger.warn(`The batch for ${trigger.countryCode}-${trigger.stateCode} failed: ${(error as Error).message}`);
+      for (const e of waiting) await this.dispatch(e.id);
+    }
   }
 
   /** Agents who said no to the errand at its fee, or let the offer run out. */
