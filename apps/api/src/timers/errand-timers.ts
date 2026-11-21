@@ -4,7 +4,16 @@ import IORedis from 'ioredis';
 import type { ErrandState } from '@jiffo/shared';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 
-export type TimerEvent = 'expire' | 'item_lock_timeout' | 'auto_release' | 'unreachable_timeout' | 'release_reminder';
+export type TimerEvent =
+  | 'expire'
+  | 'item_lock_timeout'
+  | 'auto_release'
+  | 'unreachable_timeout'
+  | 'release_reminder'
+  /** An offer's time is up (docs/matching.md, M6). */
+  | 'offer_expire'
+  /** Look again for someone to offer an urgent errand to. */
+  | 'offer_dispatch';
 
 /**
  * A system event due later. It only applies if the errand is still exactly as it was when the timer
@@ -18,6 +27,10 @@ export interface ErrandTimerJob {
   version: number;
   /** For a reminder: the hours after the drop-off photo it is for. */
   remindAt?: number;
+  /** For an offer's time running out: which offer. */
+  offerId?: string;
+  /** Makes a job its own when several of one kind can wait for one errand version (a dispatch retry). */
+  key?: string;
 }
 
 export type TimerHandler = (job: ErrandTimerJob) => Promise<void>;
@@ -75,7 +88,9 @@ export class BullMqErrandTimers implements ErrandTimers, OnApplicationBootstrap,
   async schedule(job: ErrandTimerJob, delayMs: number) {
     await this.queue.add(job.event, job, {
       delay: Math.max(0, delayMs),
-      jobId: `${job.errandId}-${job.version}-${job.event}${job.remindAt ? `-${job.remindAt}` : ''}`,
+      jobId: [job.errandId, job.version, job.event, job.remindAt, job.offerId, job.key]
+        .filter((p) => p !== undefined)
+        .join('-'),
       attempts: 5,
       backoff: { type: 'exponential', delay: 5_000 },
       removeOnComplete: true,

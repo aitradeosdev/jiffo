@@ -72,13 +72,36 @@ describe('FCM push', () => {
     await adapter.send(['live'], n);
 
     expect(calls.filter((c) => c.url.includes('oauth2'))).toHaveLength(1);
-    const sends = calls.filter((c) => c.url.includes('fcm.googleapis.com'));
+    const sends = calls.filter((c) => new URL(c.url).hostname === 'fcm.googleapis.com');
     expect(sends[0]!.url).toBe('https://fcm.googleapis.com/v1/projects/jiffo-test/messages:send');
     expect((sends[0]!.init.headers as Record<string, string>).authorization).toBe('Bearer ya29.test');
     expect(JSON.parse(String(sends[0]!.init.body)).message).toMatchObject({
       notification: { title: 'Hi', body: 'There' },
       data: { errandId: 'e1' },
     });
+  });
+
+  it('rings for an offer: its own Android channel with sound, and time-sensitive with sound on iPhone', async () => {
+    const { impl, calls } = fakeFetch(({ url }) =>
+      url.includes('oauth2')
+        ? Response.json({ access_token: 'ya29.test', expires_in: 3600 })
+        : Response.json({ name: 'projects/jiffo-test/messages/1' }),
+    );
+    const adapter = new FcmPushAdapter(account, impl);
+    await adapter.send(['live'], { title: 'New errand', body: 'Parcel', ring: true });
+    await adapter.send(['live'], { title: 'Errand complete', body: 'Paid' });
+    const [offer, plain] = calls
+      .filter((c) => new URL(c.url).hostname === 'fcm.googleapis.com')
+      .map((c) => JSON.parse(String(c.init.body)).message);
+    expect(offer).toMatchObject({
+      android: { priority: 'high', notification: { channel_id: 'offers', sound: 'default' } },
+      apns: {
+        headers: { 'apns-priority': '10' },
+        payload: { aps: { sound: 'default', 'interruption-level': 'time-sensitive' } },
+      },
+    });
+    expect(plain.android.notification).toBeUndefined();
+    expect(plain.apns.payload).toBeUndefined();
   });
 
   it('needs a complete service account', () => {

@@ -16,11 +16,13 @@ import { RECURRING_JOBS, type MemoryRecurringJobs } from '../src/timers/recurrin
 import type { FakePaymentsAdapter } from '../src/adapters/payments';
 import type { FakeCallsAdapter } from '../src/adapters/calls';
 import { ENV_ADAPTERS, type Adapters } from '../src/providers/env-adapters';
+import { MatchingRedis } from '../src/matching/matching-redis';
 import {
   admins,
   adminSessions,
   agentApplications,
   agentPresence,
+  errandOffers,
   agentSelfieChecks,
   customerVerifications,
   deposits,
@@ -56,6 +58,8 @@ export async function createTestApp(): Promise<TestApp> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = configureApp(moduleRef.createNestApplication({ logger: ['error'], rawBody: true }));
   await app.listen(0, '127.0.0.1');
+  const block = await app.get(MatchingRedis).client.incr('test:phone-blocks');
+  nextPhone = (block * PHONE_BLOCK) % PHONE_SPACE;
   // The stand-ins behind each provider switch, while no provider is switched on in the panel.
   const env = app.get<Adapters>(ENV_ADAPTERS);
   return {
@@ -112,7 +116,15 @@ const PHONE_PREFIXES = [
   '908',
 ];
 const PHONE_PREFIX = PHONE_PREFIXES[Number(process.env.VITEST_POOL_ID ?? 0) % PHONE_PREFIXES.length]!;
-export const randomPhone = () => `+234${PHONE_PREFIX}${randomInt(0, 10_000_000).toString().padStart(7, '0')}`;
+/**
+ * Within a worker, each test app takes its own block of numbers from a count kept for the run (createTestApp)
+ * and hands them out one after another, so no number comes up twice: drawn at random from ten million, a
+ * couple of thousand sign-ins a run met the resend wait now and then.
+ */
+const PHONE_SPACE = 10_000_000;
+const PHONE_BLOCK = 20_000;
+let nextPhone = randomInt(0, PHONE_SPACE);
+export const randomPhone = () => `+234${PHONE_PREFIX}${(nextPhone++ % PHONE_SPACE).toString().padStart(7, '0')}`;
 /** Each test gets its own client IP, so per-IP limits in one test never affect another. */
 export const randomIp = () => `10.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 255)}`;
 
@@ -422,9 +434,45 @@ export async function onlineAtPickup(t: TestApp, agent: Person, errandId: string
 }
 
 /**
+ * The agent holds the open offer for an urgent errand, as if it had been offered to them (docs/matching.md, M6),
+ * for tests about something else: any other open offer for the errand or the agent is withdrawn first.
+ */
+export async function offerTo(t: TestApp, agent: Person, errandId: string) {
+  const [errand] = await t.db
+    .select({ urgent: errands.urgent, feeKobo: errands.feeKobo, countryCode: errands.countryCode })
+    .from(errands)
+    .where(eq(errands.id, errandId));
+  if (!errand?.urgent) return;
+  await t.db
+    .update(errandOffers)
+    .set({ status: 'withdrawn' })
+    .where(
+      and(
+        eq(errandOffers.status, 'open'),
+        sql`(${errandOffers.errandId} = ${errandId} or ${errandOffers.agentId} = ${agent.userId})`,
+      ),
+    );
+  const now = new Date();
+  await t.db.insert(errandOffers).values({
+    errandId,
+    agentId: agent.userId,
+    countryCode: errand.countryCode,
+    feeKobo: errand.feeKobo,
+    rank: 1,
+    score: 1,
+    parts: {},
+    travelSeconds: 60,
+    travelEstimated: true,
+    straightMeters: 100,
+    offeredAt: now,
+    expiresAt: new Date(now.getTime() + 60_000),
+  });
+}
+
+/**
  * Sends an errand event. As an agent's phone would, it is online at the pickup to accept (and is back as the
- * test had it after), reports the drop-off position before the hand-off steps, and sends a photo only after
- * the wait: tests of those rules call the API themselves.
+ * test had it after), holds the offer for an urgent errand, reports the drop-off position before the hand-off
+ * steps, and sends a photo only after the wait: tests of those rules call the API themselves.
  */
 export async function act(
   t: TestApp,
@@ -435,6 +483,7 @@ export async function act(
   status = 200,
 ) {
   const putBack = event === 'accept' ? await onlineAtPickup(t, person, errandId) : null;
+  if (event === 'accept') await offerTo(t, person, errandId);
   if (['mark_delivered', 'confirm_pin', 'send_dropoff_photo'].includes(event)) await atDropoff(t, person, errandId);
   if (event === 'send_dropoff_photo') await waitedAtDropoff(t, errandId);
   const res = await request(t.http).post(`/v1/errands/${errandId}/events`).set(person.headers).send({ event, data });

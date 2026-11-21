@@ -7,6 +7,11 @@ export interface PushNotification {
   body: string;
   /** String values only: both FCM and APNs deliver data as strings. */
   data?: Record<string, string>;
+  /**
+   * An offer to answer within seconds (docs/matching.md, M6): it rings, on Android's offers channel with sound
+   * and as a time-sensitive alert with sound on iPhone, so it gets through even with the app closed.
+   */
+  ring?: boolean;
 }
 
 export interface PushResult {
@@ -85,8 +90,14 @@ export class FcmPushAdapter implements PushAdapter {
               token,
               notification: { title: n.title, body: n.body },
               data: n.data ?? {},
-              android: { priority: 'high' },
-              apns: { headers: { 'apns-priority': '10' } },
+              android: {
+                priority: 'high',
+                ...(n.ring ? { notification: { channel_id: 'offers', sound: 'default' } } : {}),
+              },
+              apns: {
+                headers: { 'apns-priority': '10' },
+                ...(n.ring ? { payload: { aps: { sound: 'default', 'interruption-level': 'time-sensitive' } } } : {}),
+              },
             },
           }),
         });

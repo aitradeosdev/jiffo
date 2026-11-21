@@ -41,7 +41,11 @@ export class CandidatesService {
     private readonly travelTimes: TravelTimesService,
   ) {}
 
-  async forErrand(errandId: string): Promise<Candidate[]> {
+  /**
+   * `skip`: agents left out before the shortlist is drawn up (offers, M6: those who said no to the errand at
+   * this fee, and those holding another offer), so they never take the places of agents who could be asked.
+   */
+  async forErrand(errandId: string, skip: ReadonlySet<string> = new Set()): Promise<Candidate[]> {
     const [row] = await this.db
       .select({ errand: errands, lat: errandStops.lat, lng: errandStops.lng })
       .from(errands)
@@ -52,8 +56,10 @@ export class CandidatesService {
     const pickup = { lat: row.lat, lng: row.lng };
     const rules = (await this.countries.currentSettings(errand.countryCode)).settings.matching;
 
-    // More than the shortlist: some of the nearest won't pass the check.
-    const near = await this.nearest(errand.countryCode, pickup, rules, rules.shortlistSize * 3);
+    // More than the shortlist: some of the nearest are left out, and some won't pass the check.
+    const near = (await this.nearest(errand.countryCode, pickup, rules, rules.shortlistSize * 3 + skip.size)).filter(
+      (n) => !skip.has(n.agentId),
+    );
     const shortlist: Array<Omit<Candidate, 'travel'> & LatLng> = [];
     for (let i = 0; i < near.length && shortlist.length < rules.shortlistSize; i += CHECK_AT_ONCE) {
       const checked = await Promise.all(near.slice(i, i + CHECK_AT_ONCE).map((n) => this.check(n, errand, rules)));

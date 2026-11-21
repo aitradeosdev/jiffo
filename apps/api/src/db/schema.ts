@@ -559,6 +559,10 @@ export const matchBlocks = pgTable(
  * Where an agent is and whether they take errands now. The agent app reports it while online or on an
  * errand; it is cleared when they go offline with nothing running, so a location is never kept longer.
  */
+/** Why Jiffo took an agent offline, when the agent going online again must be their own choice. */
+export const OFFLINE_REASONS = ['missed_offers'] as const;
+export type OfflineReason = (typeof OFFLINE_REASONS)[number];
+
 export const agentPresence = pgTable(
   'agent_presence',
   {
@@ -578,6 +582,11 @@ export const agentPresence = pgTable(
     mocked: boolean('mocked').notNull().default(false),
     /** When they last went online; null while offline. How long they've waited counts from it (matching, M4). */
     onlineSince: timestamp('online_since', { withTimezone: true }),
+    /**
+     * Why Jiffo took them offline, while it matters: after missed offers (M6), only the agent going online again
+     * themselves puts them back, not their app still reporting online.
+     */
+    offlineReason: text('offline_reason', { enum: OFFLINE_REASONS }),
     updatedAt: updatedAt(),
   },
   (t) => [index('agent_presence_location_gix').using('gist', t.location)],
@@ -688,6 +697,54 @@ export const errandEvents = pgTable(
     index('errand_events_errand_idx').on(t.errandId, t.id),
     // Each agent's accepts and withdrawals, for ranking (docs/matching.md, M4).
     index('errand_events_actor_idx').on(t.actorId, t.event, t.id),
+  ],
+);
+
+/** What became of an offer (docs/matching.md, M6). withdrawn: the errand was cancelled or taken another way. */
+export const OFFER_STATUSES = ['open', 'accepted', 'declined', 'expired', 'withdrawn'] as const;
+export type OfferStatus = (typeof OFFER_STATUSES)[number];
+
+/**
+ * Every offer of an urgent errand to an agent, one at a time (docs/matching.md, M6, M15): to whom, in what
+ * order, scored how, and what they did. The database keeps one open offer per errand and one per agent.
+ * Kept like the errand's other records.
+ */
+export const errandOffers = pgTable(
+  'errand_offers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    errandId: uuid('errand_id')
+      .notNull()
+      .references(() => errands.id),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => users.id),
+    countryCode: char('country_code', { length: 2 }).notNull(),
+    status: text('status', { enum: OFFER_STATUSES }).notNull().default('open'),
+    /** The errand's fee when offered: once the customer raises it, those who said no are asked again. */
+    feeKobo: kobo('fee_kobo').notNull(),
+    /** Their place in the ranking when offered, from 1. */
+    rank: smallint('rank').notNull(),
+    score: doublePrecision('score').notNull(),
+    /** The score's parts (travel, reliability, rating, waiting, boost, total). */
+    parts: jsonb('parts').$type<Record<string, number>>().notNull(),
+    travelSeconds: integer('travel_seconds').notNull(),
+    /** The travel time was estimated, not from the maps provider. */
+    travelEstimated: boolean('travel_estimated').notNull(),
+    straightMeters: integer('straight_meters').notNull(),
+    offeredAt: timestamp('offered_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    answeredAt: timestamp('answered_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('errand_offers_open_errand_uq')
+      .on(t.errandId)
+      .where(sql`status = 'open'`),
+    uniqueIndex('errand_offers_open_agent_uq')
+      .on(t.agentId)
+      .where(sql`status = 'open'`),
+    index('errand_offers_errand_idx').on(t.errandId, t.offeredAt),
+    index('errand_offers_agent_idx').on(t.agentId, t.offeredAt),
   ],
 );
 

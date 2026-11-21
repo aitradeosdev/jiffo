@@ -11,6 +11,7 @@ import {
   createTestApp,
   fund,
   LAGOS_STOPS,
+  offerTo,
   signIn,
   type Person,
   type TestApp,
@@ -245,12 +246,12 @@ describe('who may get an errand', () => {
       const urgent = await createErrand(t, customer, { urgent: true });
 
       await act(t, busy, (await createErrand(t, customer)).id, 'accept');
-      expect(await onBoard(busy, urgent.id)).toBe(false);
+      // Even holding its offer: an urgent errand is held alone.
+      await offerTo(t, busy, urgent.id);
       expect((await accept(busy, urgent.id)).body.error.code).toBe('busy');
 
       await act(t, ahead, (await createErrand(t, customer, scheduled())).id, 'accept');
-      expect(await onBoard(ahead, urgent.id)).toBe(true);
-      expect((await accept(ahead, urgent.id)).status).toBe(200);
+      await act(t, ahead, urgent.id, 'accept');
     });
 
     it('lets an agent hold errands from the board up to the cap admin sets', async () => {
@@ -298,18 +299,14 @@ describe('who may get an errand', () => {
       expect(await top(agent, 1)).toEqual([mine.id]);
     });
 
-    it('shows urgent errands to an agent whose only errands are scheduled ones taken ahead, at the cap', async () => {
+    it('shows no urgent errands, which are offered instead, so an agent at the cap is told so', async () => {
       const agent = await signIn(t, 'agent');
       await online(agent);
       for (let i = 0; i < 3; i++) await act(t, agent, (await createErrand(t, customer, scheduled())).id, 'accept');
-      await createErrand(t, customer);
+      expect((await board(agent)).body.error.code).toBe('too_many_errands');
+      // Their errands are all scheduled ones not started: an urgent one offered to them they may still take.
       const urgent = await createErrand(t, customer, { urgent: true });
-      expect(await top(agent, 50)).toEqual(expect.arrayContaining([urgent.id]));
-      const shown = await request(t.http)
-        .get(`/v1/errands/board?lat=${PICKUP.lat}&lng=${PICKUP.lng}&radiusKm=50`)
-        .set(agent.headers)
-        .expect(200);
-      expect((shown.body.errands as Array<{ urgent: boolean }>).every((e) => e.urgent)).toBe(true);
+      await offerTo(t, agent, urgent.id);
       expect((await accept(agent, urgent.id)).status).toBe(200);
     });
   });

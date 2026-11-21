@@ -5213,6 +5213,67 @@
         ]
       }
     },
+    "/v1/agent/offers/current": {
+      "get": {
+        "operationId": "OffersController.current",
+        "tags": [
+          "Offers"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default",
+        "x-apps": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/agent/offers/{id}/decline": {
+      "post": {
+        "operationId": "OffersController.decline",
+        "tags": [
+          "Offers"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default",
+        "x-apps": [
+          "agent"
+        ]
+      }
+    },
     "/v1/agent/presence": {
       "get": {
         "operationId": "PresenceController.get",
@@ -5279,6 +5340,9 @@
                     "type": "integer",
                     "exclusiveMinimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "tapped": {
+                    "type": "boolean"
                   }
                 },
                 "additionalProperties": false
