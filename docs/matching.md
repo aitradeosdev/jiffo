@@ -2,11 +2,13 @@
 
 This document sets how errands reach agents. It follows the way Uber, Bolt and DoorDash dispatch work, adapted to Jiffo. It replaces the matching rules in the product spec where they differ. Every number is a default stored in admin settings per country (group: **Matching**), not a value written into the code.
 
+The owner's decisions after reading this plan, and how the points it leaves open are settled, are in [the audit](matching-audit.md#the-owners-decisions-that-change-the-plan). Where they differ from this plan, they win.
+
 ## How to use this document
 
 1. **Audit first.** Compare the existing matching code with each requirement below, by its ID (M1, M2 and so on). Write the result to `docs/matching-audit.md` as a table: ID, status (done, partly, missing), files involved, and what is missing. Change no code during the audit.
 2. **Build in the order under "Order of work"**, one area per pull request, with tests.
-3. Follow `SECURITY.md` on every change. Accepting an offer is a race and needs the same care as money code.
+3. Follow [the security plan](security-plan.md) on every change. Accepting an offer is a race and needs the same care as money code.
 
 ## The model in one paragraph
 
@@ -23,13 +25,13 @@ Urgent errands are **dispatched**: the server gathers requests for a few seconds
 
 An agent can be offered an errand, or see it on the board, only if all of these are true:
 
-- They are online and passed today's selfie check, and the app attestation for going online is current (SECURITY.md MB3).
-- Their location was updated in the last 2 minutes and isn't flagged as fake GPS (SECURITY.md G1).
+- They are online and passed today's selfie check, and the app attestation for going online is current (security plan MB3).
+- Their location was updated in the last 2 minutes and isn't flagged as fake GPS (security plan G1).
 - The pickup is within their own work radius and within the current search radius (M8).
 - The category is on in their errand preferences, and purchase errands only reach agents who take them.
 - They have no active errand, unless the back-to-back rule allows it (M10), and no other offer waiting on their screen.
 - They aren't suspended, banned or under review.
-- They aren't the customer's own agent account, neither side chose "Don't match me again", and the pair has no collusion flag (SECURITY.md E6).
+- They aren't the customer's own agent account, neither side chose "Don't match me again", and the pair has no collusion flag (security plan E6).
 - They haven't already declined or let this errand's offer expire, or been replaced by "Get new agent" on it.
 
 ## Live locations and ETA (M2, M3)
@@ -83,7 +85,7 @@ This follows Uber's batched matching. Uber says it waits "just a few seconds" af
 
 ## Accepting safely (M7)
 
-- An offer is accepted with a single conditional database update. It succeeds only if the offer is still open, is addressed to this agent and hasn't expired, and the errand is still unassigned. Then the fee is locked in escrow in the same transaction (SECURITY.md L4).
+- An offer is accepted with a single conditional database update. It succeeds only if the offer is still open, is addressed to this agent and hasn't expired, and the errand is still unassigned. Then the fee is locked in escrow in the same transaction (security plan L4).
 - In the broadcast fallback (M8), the first committed update wins. Everyone else immediately sees "This errand was taken."
 - Test: 50 accept requests at once from different agents produce exactly one assignment and one escrow lock.
 
@@ -149,7 +151,7 @@ This follows Uber's back-to-back trips.
 
 ## Admin settings, group Matching (M14)
 
-Per state where it makes sense, versioned, and changed only with two-person approval (SECURITY.md D4):
+Per state where it makes sense, versioned, and changed only with two-person approval (security plan D4):
 
 - batch interval (3 s), offer window (20 s), shortlist size (10)
 - radius steps (3, 6, 10 km) and offers per step (5)
