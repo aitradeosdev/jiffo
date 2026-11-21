@@ -308,9 +308,19 @@ describe('errands', () => {
       expect(mine).toMatchObject({ role: 'prospect', allowedEvents: ['accept'] });
       expect(mine.distanceMeters).toBeLessThan(500);
 
+      // About 6 km away, on Victoria Island: past a 5 km board, inside Matching's 10.
+      const island = await createErrand(t, person, {
+        stops: [
+          { kind: 'pickup', address: 'Adeola Odeku St, Victoria Island, Lagos', lat: 6.4311, lng: 3.4158 },
+          { kind: 'dropoff', address: 'Awolowo Road, Ikoyi, Lagos', lat: 6.4446, lng: 3.4339 },
+        ],
+      });
       const wide = await boardRequest(t, agent, 'lat=6.4480&lng=3.4700&radiusKm=30').expect(200);
       const order = wide.body.errands.map((e: { id: string }) => e.id);
-      expect(order.indexOf(lekki.id)).toBeLessThan(order.indexOf(ikeja.id));
+      expect(order.indexOf(lekki.id)).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf(lekki.id)).toBeLessThan(order.indexOf(island.id));
+      // Ikeja, 17 km off, is past the reach the Matching settings give, whatever the app asks for.
+      expect(order).not.toContain(ikeja.id);
 
       await boardRequest(t, customer, 'lat=6.4&lng=3.4').expect(403);
     });
