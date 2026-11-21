@@ -9,6 +9,8 @@ import { AgentSelfieService } from './agent-selfie.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { RiskFlagsService } from '../risk/risk-flags.service';
 import { TrailService } from './trail.service';
+import { AgentLocations } from '../matching/agent-locations';
+import type { LatLng } from '../adapters/maps';
 import type { AuthContext } from '../auth/auth.types';
 
 /** States in which the agent is out doing the errand, so the customer may see where they are. */
@@ -65,7 +67,24 @@ export class PresenceService {
     private readonly attestation: AttestationService,
     private readonly trail: TrailService,
     private readonly risk: RiskFlagsService,
+    private readonly locations: AgentLocations,
   ) {}
+
+  /**
+   * Matching's live positions (docs/matching.md, M2): an online agent where their phone really is, and no one
+   * offline or whose position is mocked. Not waited for, so Redis never holds up an agent's report; on one
+   * connection, so the writes keep their order. A failed write is logged; the database stays the record that
+   * matching checks before anyone gets an errand.
+   */
+  private keepLive(agentId: string, countryCode: string, online: boolean, mocked: boolean, at?: LatLng) {
+    const write =
+      !online || mocked
+        ? this.locations.remove(agentId, countryCode)
+        : at
+          ? this.locations.put(agentId, countryCode, at)
+          : Promise.resolve();
+    write.catch((error: Error) => this.logger.warn(`Keeping a live position failed: ${error.message}`));
+  }
 
   /**
    * Going online or offline, and where the agent is. Without `online` (the app reporting from the
@@ -155,6 +174,13 @@ export class PresenceService {
         target: agentPresence.userId,
         set: { countryCode: auth.countryCode, online: body.online, ...place, updatedAt: now },
       });
+    this.keepLive(
+      auth.userId,
+      auth.countryCode,
+      body.online,
+      !!body.mocked,
+      located ? { lat: body.lat!, lng: body.lng! } : undefined,
+    );
     // An errand may have ended while this was being written: if the agent is offline and now idle,
     // forget the position again rather than keep it.
     if (!body.online && sharing) await this.forgetIfIdle(auth.userId);
@@ -223,7 +249,8 @@ export class PresenceService {
         updatedAt: new Date(),
       })
       .where(and(isNotNull(agentPresence.locatedAt), lt(agentPresence.locatedAt, new Date(Date.now() - KEEP_FOR_MS))))
-      .returning({ userId: agentPresence.userId });
+      .returning({ userId: agentPresence.userId, countryCode: agentPresence.countryCode });
+    for (const c of cleared) this.keepLive(c.userId, c.countryCode, false, false);
     if (cleared.length) this.logger.log(`Cleared ${cleared.length} stale agent positions`);
     return cleared.length;
   }

@@ -43,7 +43,17 @@ export interface MapsAdapter {
   place(placeId: string, sessionToken?: string): Promise<Place | null>;
   /** Driving distance through the points in order. */
   route(points: LatLng[]): Promise<RouteEstimate>;
+  /**
+   * How long each origin takes to reach one destination by road, with live traffic where the provider has it
+   * (docs/matching.md, M3): agents to a pickup. null for an origin it found no route from. Fails when the
+   * provider does, so the caller can estimate instead.
+   */
+  travelTimes(origins: LatLng[], destination: LatLng): Promise<Array<RouteEstimate | null>>;
 }
+
+/** Splits a list into parts of at most `size`. */
+const inParts = <T>(items: T[], size: number) =>
+  Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size));
 
 export const MAPS = Symbol('MAPS');
 
@@ -200,11 +210,74 @@ export class GoogleMapsAdapter implements MapsAdapter {
       return estimateRoute(points);
     }
   }
+
+  /** A Route Matrix request, whose failures say why for the log: Google's status and words, never the key. */
+  private async matrix(body: unknown) {
+    let res: Response;
+    try {
+      res = await this.fetchImpl('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-goog-api-key': this.apiKey,
+          'x-goog-fieldmask': 'originIndex,destinationIndex,condition,distanceMeters,duration',
+        },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      throw new Error('Google could not be reached');
+    }
+    const json = (await res.json().catch(() => null)) as unknown;
+    if (!res.ok) {
+      const message = (json as { error?: { message?: string } } | null)?.error?.message;
+      throw new Error(`Google answered ${res.status}: ${message ?? 'no details'}`);
+    }
+    if (!Array.isArray(json)) throw new Error('Google sent no route matrix');
+    return json as Array<{
+      originIndex?: number;
+      condition?: string;
+      status?: { code?: number };
+      distanceMeters?: number;
+      duration?: string;
+    }>;
+  }
+
+  async travelTimes(origins: LatLng[], destination: LatLng) {
+    const waypoint = (p: LatLng) => ({ waypoint: { location: { latLng: { latitude: p.lat, longitude: p.lng } } } });
+    const parts = await Promise.all(
+      inParts(origins, GOOGLE_MATRIX_ORIGINS).map(async (part) => {
+        const elements = await this.matrix({
+          origins: part.map(waypoint),
+          destinations: [waypoint(destination)],
+          travelMode: 'DRIVE',
+          routingPreference: 'TRAFFIC_AWARE',
+        });
+        const times: Array<RouteEstimate | null> = part.map(() => null);
+        for (const e of elements) {
+          // Google leaves zeros out: no index is the first origin's, no distance or time is none at all.
+          const i = e.originIndex ?? 0;
+          if (i >= part.length || e.status?.code) continue;
+          if (e.condition !== 'ROUTE_EXISTS' && (e.condition !== undefined || e.duration === undefined)) continue;
+          times[i] = {
+            distanceMeters: e.distanceMeters ?? 0,
+            durationSeconds: Number.parseInt(e.duration ?? '0', 10),
+          };
+        }
+        return times;
+      }),
+    );
+    return parts.flat();
+  }
 }
+
+/** Origins per Route Matrix request: well inside Google's limit on elements. */
+const GOOGLE_MATRIX_ORIGINS = 100;
 
 const MAPBOX = 'https://api.mapbox.com';
 /** The most points Mapbox routes in one request. */
 const MAPBOX_MAX_POINTS = 25;
+/** The most points a Mapbox matrix with live traffic takes: the pickup and 9 agents. */
+const MAPBOX_TRAFFIC_MATRIX_POINTS = 10;
 /**
  * The kinds of suggestion with a position to pick: not a category ("Supermarket"), which has none, nor a whole
  * state, country or postcode, which is no errand stop.
@@ -357,6 +430,53 @@ export class MapboxMapsAdapter implements MapsAdapter {
       return estimateRoute(points);
     }
   }
+
+  /**
+   * A Matrix request, whose failures say why for the log: Mapbox's status and words. Never the address it was
+   * sent to, which holds the token.
+   */
+  private async matrix(url: string) {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url);
+    } catch {
+      throw new Error('Mapbox could not be reached');
+    }
+    const json = (await res.json().catch(() => null)) as {
+      code?: string;
+      message?: string;
+      durations?: Array<Array<number | null>>;
+      distances?: Array<Array<number | null>>;
+    } | null;
+    if (!res.ok) throw new Error(`Mapbox answered ${res.status}: ${json?.message ?? json?.code ?? 'no details'}`);
+    if (json?.code !== 'Ok' || !json.durations) {
+      throw new Error(`Mapbox sent no matrix${json?.code ? ` (${json.code})` : ''}`);
+    }
+    return json;
+  }
+
+  async travelTimes(origins: LatLng[], destination: LatLng) {
+    const coord = (p: LatLng) => `${Number(p.lng.toFixed(6))},${Number(p.lat.toFixed(6))}`;
+    const parts = await Promise.all(
+      inParts(origins, MAPBOX_TRAFFIC_MATRIX_POINTS - 1).map(async (part) => {
+        const path = [...part, destination].map(coord).join(';');
+        const body = await this.matrix(
+          this.url(`/directions-matrix/v1/mapbox/driving-traffic/${path}`, {
+            sources: part.map((_, i) => i).join(';'),
+            destinations: String(part.length),
+            annotations: 'duration,distance',
+          }),
+        );
+        return part.map((_, i): RouteEstimate | null => {
+          const duration = body.durations?.[i]?.[0];
+          const distance = body.distances?.[i]?.[0];
+          if (duration === null || duration === undefined || distance === null || distance === undefined) return null;
+          return { distanceMeters: Math.round(distance), durationSeconds: Math.round(duration) };
+        });
+      }),
+    );
+    return parts.flat();
+  }
 }
 
 /** Development and tests: a handful of real Lagos places, matched by name. */
@@ -437,5 +557,9 @@ export class FakeMapsAdapter implements MapsAdapter {
 
   async route(points: LatLng[]) {
     return estimateRoute(points);
+  }
+
+  async travelTimes(origins: LatLng[], destination: LatLng) {
+    return origins.map((o) => estimateRoute([o, destination]));
   }
 }

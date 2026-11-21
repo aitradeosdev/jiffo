@@ -103,8 +103,8 @@ export class CountriesService {
       .orderBy(asc(states.name));
   }
 
-  activeCategories(countryCode: string) {
-    return this.db
+  activeCategories(countryCode: string, db: Db | Tx = this.db) {
+    return db
       .select({
         key: categories.key,
         name: categories.name,

@@ -133,6 +133,8 @@ const EnvSchema = z
     /** Errand timers (item lock, auto-release, unreachable, urgent expiry). memory is for tests only. */
     TIMER_PROVIDER: z.enum(['bullmq', 'memory']).default('bullmq'),
     REDIS_URL: z.string().url().default('redis://localhost:6379'),
+    /** Put before matching's Redis keys (live positions, travel times), so two servers' data never mix. */
+    REDIS_PREFIX: z.string().max(60).default('jiffo:'),
     /** Code requests allowed from one IP address per hour, across all phone numbers. */
     OTP_PER_IP_PER_HOUR: z.coerce.number().int().positive().default(30),
     /**

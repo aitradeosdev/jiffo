@@ -390,6 +390,18 @@ export const SECTIONS: Section[] = [
         help: 'Scheduled errands taken ahead count. An urgent errand is always held alone.',
       },
       {
+        path: 'matching.shortlistSize',
+        label: 'Nearest agents whose road travel time is asked for',
+        kind: 'count',
+        help: 'For each errand, from the maps provider. Each is a paid lookup. At most 25.',
+      },
+      {
+        path: 'matching.fallbackSpeedKmh',
+        label: 'Speed when the maps provider gives no travel time',
+        kind: 'count',
+        help: 'In km/h, over roads taken as 30% longer than a straight line.',
+      },
+      {
         path: 'matching.fakeGpsHoldHours',
         label: 'A fake-GPS flag keeps the agent from errands for',
         kind: 'hours',

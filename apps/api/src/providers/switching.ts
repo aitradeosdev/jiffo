@@ -86,6 +86,9 @@ export class SwitchingMaps implements MapsAdapter {
   route(...a: Parameters<MapsAdapter['route']>) {
     return this.providers.current('maps').route(...a);
   }
+  travelTimes(...a: Parameters<MapsAdapter['travelTimes']>) {
+    return this.providers.current('maps').travelTimes(...a);
+  }
 }
 
 export class SwitchingStorage implements StorageAdapter {

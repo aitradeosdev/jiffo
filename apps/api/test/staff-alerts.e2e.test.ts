@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AdminContext } from '../src/admin/admin.types';
 import { StaffOversightService } from '../src/admin/staff-oversight.service';
 import { CountriesService } from '../src/countries/countries.service';
+import { alerts } from '../src/db/schema';
 import { adminAs, createTestApp, fund, signIn, type TestApp } from './helpers';
 
 type Admin = Awaited<ReturnType<typeof adminAs>>;
@@ -161,7 +163,10 @@ describe('alerts about staff', () => {
       .set(owner.headers)
       .send({ note: 'Asked them: a batch of agent applications' })
       .expect(200);
-    expect((await about(verification, 'unusual_id_reveals'))[0]?.resolvedAt).toEqual(expect.any(String));
+    // Read where it is kept: the list shows open alerts first, and the suite's other tests can raise more than
+    // it shows (after staff hours, every money action raises one).
+    const [kept] = await t.db.select({ resolvedAt: alerts.resolvedAt }).from(alerts).where(eq(alerts.id, raised!.id));
+    expect(kept!.resolvedAt).toBeInstanceOf(Date);
   });
 
   it("doesn't let an owner close one about themselves", async () => {

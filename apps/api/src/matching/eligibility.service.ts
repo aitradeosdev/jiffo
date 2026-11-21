@@ -6,13 +6,14 @@ import {
   PAIR_FLAG_KINDS,
   type CountrySettings,
   type MatchAgent,
+  type MatchErrand,
   type MatchRefusal,
 } from '@jiffo/shared';
 import { and, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { AgentsService } from '../agents/agents.service';
 import { conflict, forbidden, unprocessable, type ApiError } from '../common/errors';
 import { DB, type Db, type Tx } from '../db/database.module';
-import { agentPresence, errandEvents, errands, matchBlocks, riskFlags } from '../db/schema';
+import { agentPresence, errandEvents, errands, matchBlocks, riskFlags, users } from '../db/schema';
 
 const MINUTE_MS = 60_000;
 
@@ -51,8 +52,46 @@ export class EligibilityService {
     return REFUSALS[code]();
   }
 
+  /**
+   * How far the agent's position is from the errand's pickup, in metres, as PostGIS measures it on the earth's
+   * shape: the one measure for accepting and for who could be offered it, so no one is shortlisted only to be
+   * refused at the edge of their reach.
+   */
+  async pickupMeters(errandId: string, at: { lat: number; lng: number }, db: Db | Tx = this.db) {
+    const { rows } = await db.execute<{ meters: number | string }>(sql`
+      select ST_Distance(location, ST_SetSRID(ST_MakePoint(${at.lng}, ${at.lat}), 4326)::geography) as meters
+      from errand_stops where errand_id = ${errandId} and seq = 0`);
+    return Number(rows[0]?.meters ?? Infinity);
+  }
+
+  /** An errand as matching checks it for this agent, with what facts() found. */
+  matchErrand(
+    errand: { id: string; customerId: string; urgent: boolean; categoryKey: string; buy: boolean },
+    pickupMeters: number,
+    agentId: string,
+    facts: { apart: Set<string>; gaveUp: Set<string> },
+  ): MatchErrand {
+    return {
+      customerId: errand.customerId,
+      urgent: errand.urgent,
+      categoryKey: errand.categoryKey,
+      buy: errand.buy,
+      pickupMeters,
+      keptApart: agentId !== errand.customerId && facts.apart.has(errand.customerId),
+      gaveUp: facts.gaveUp.has(errand.id),
+    };
+  }
+
   /** The agent now, or the reason they may not get any errand. */
   async agent(agentId: string, rules: CountrySettings['matching'], db: Db | Tx = this.db): Promise<AgentNow> {
+    // As accepting checks it: an active account, with a name for the customer to see.
+    const [account] = await db
+      .select({ status: users.status, firstName: users.firstName })
+      .from(users)
+      .where(eq(users.id, agentId));
+    if (account?.status !== 'active')
+      throw forbidden('account_suspended', 'This account is suspended. Contact support.');
+    if (!account.firstName) throw conflict('profile_incomplete', 'Add your name before taking errands');
     const [here] = await db
       .select({
         online: agentPresence.online,
@@ -89,13 +128,13 @@ export class EligibilityService {
         throw conflict('location_review', "Jiffo is checking your phone's location. You can take errands again soon.");
       }
     }
-    const [held, prefs] = await Promise.all([
-      db
-        .select({ urgent: errands.urgent, status: errands.status, scheduledFor: errands.scheduledFor })
-        .from(errands)
-        .where(and(eq(errands.agentId, agentId), inArray(errands.status, [...AGENT_OUT_STATES]))),
-      this.agents.profile(agentId),
-    ]);
+    // One after the other, on the caller's connection: accepting asks inside its transaction, and a
+    // transaction's connection runs one query at a time.
+    const held = await db
+      .select({ urgent: errands.urgent, status: errands.status, scheduledFor: errands.scheduledFor })
+      .from(errands)
+      .where(and(eq(errands.agentId, agentId), inArray(errands.status, [...AGENT_OUT_STATES])));
+    const prefs = await this.agents.profile(agentId, db);
     const now = Date.now();
     return {
       userId: agentId,
@@ -145,45 +184,44 @@ export class EligibilityService {
   async facts(agentId: string, rows: Array<{ id: string; customerId: string }>, db: Db | Tx = this.db) {
     if (!rows.length) return { apart: new Set<string>(), gaveUp: new Set<string>() };
     const customers = [...new Set(rows.map((r) => r.customerId))];
-    const [flags, blocks, left] = await Promise.all([
-      db
-        .select({ userId: riskFlags.userId, otherUserId: riskFlags.otherUserId })
-        .from(riskFlags)
-        .where(
-          and(
-            or(
-              and(inArray(riskFlags.kind, [...PAIR_FLAG_KINDS]), ne(riskFlags.status, 'cleared')),
-              and(inArray(riskFlags.kind, [...CONFIRMED_PAIR_FLAG_KINDS]), eq(riskFlags.status, 'confirmed')),
-            ),
-            or(
-              and(eq(riskFlags.userId, agentId), inArray(riskFlags.otherUserId, customers)),
-              and(eq(riskFlags.otherUserId, agentId), inArray(riskFlags.userId, customers)),
-            ),
-          ),
-        ),
-      db
-        .select({ userId: matchBlocks.userId, otherUserId: matchBlocks.otherUserId })
-        .from(matchBlocks)
-        .where(
+    // One after the other, on the caller's connection (see agent()).
+    const flags = await db
+      .select({ userId: riskFlags.userId, otherUserId: riskFlags.otherUserId })
+      .from(riskFlags)
+      .where(
+        and(
           or(
-            and(eq(matchBlocks.userId, agentId), inArray(matchBlocks.otherUserId, customers)),
-            and(eq(matchBlocks.otherUserId, agentId), inArray(matchBlocks.userId, customers)),
+            and(inArray(riskFlags.kind, [...PAIR_FLAG_KINDS]), ne(riskFlags.status, 'cleared')),
+            and(inArray(riskFlags.kind, [...CONFIRMED_PAIR_FLAG_KINDS]), eq(riskFlags.status, 'confirmed')),
+          ),
+          or(
+            and(eq(riskFlags.userId, agentId), inArray(riskFlags.otherUserId, customers)),
+            and(eq(riskFlags.otherUserId, agentId), inArray(riskFlags.userId, customers)),
           ),
         ),
-      db
-        .select({ errandId: errandEvents.errandId })
-        .from(errandEvents)
-        .where(
-          and(
-            inArray(
-              errandEvents.errandId,
-              rows.map((r) => r.id),
-            ),
-            inArray(errandEvents.event, ['withdraw', 'release_agent']),
-            sql`${errandEvents.data}->>'agentId' = ${agentId}`,
-          ),
+      );
+    const blocks = await db
+      .select({ userId: matchBlocks.userId, otherUserId: matchBlocks.otherUserId })
+      .from(matchBlocks)
+      .where(
+        or(
+          and(eq(matchBlocks.userId, agentId), inArray(matchBlocks.otherUserId, customers)),
+          and(eq(matchBlocks.otherUserId, agentId), inArray(matchBlocks.userId, customers)),
         ),
-    ]);
+      );
+    const left = await db
+      .select({ errandId: errandEvents.errandId })
+      .from(errandEvents)
+      .where(
+        and(
+          inArray(
+            errandEvents.errandId,
+            rows.map((r) => r.id),
+          ),
+          inArray(errandEvents.event, ['withdraw', 'release_agent']),
+          sql`${errandEvents.data}->>'agentId' = ${agentId}`,
+        ),
+      );
     const otherOf = (r: { userId: string; otherUserId: string | null }) =>
       r.userId === agentId ? r.otherUserId! : r.userId;
     return {

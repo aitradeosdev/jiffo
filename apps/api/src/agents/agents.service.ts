@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { AgentTier } from '@jiffo/shared';
-import { DB, type Db } from '../db/database.module';
+import { DB, type Db, type Tx } from '../db/database.module';
 import { AGENT_PROFILE_DEFAULTS, agentProfiles, users } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
 import type { AuthContext } from '../auth/auth.types';
@@ -24,8 +24,8 @@ export class AgentsService {
     private readonly countries: CountriesService,
   ) {}
 
-  private async stored(userId: string): Promise<AgentProfile> {
-    const [row] = await this.db
+  private async stored(userId: string, db: Db | Tx = this.db): Promise<AgentProfile> {
+    const [row] = await db
       .select({
         tier: agentProfiles.tier,
         categoryKeys: agentProfiles.categoryKeys,
@@ -44,13 +44,14 @@ export class AgentsService {
 
   /**
    * The agent's profile with only categories that are still active. If admin has switched off every
-   * category the agent chose, they receive every category rather than an empty board.
+   * category the agent chose, they receive every category rather than an empty board. Pass the caller's
+   * transaction as `db` to read inside it: one waiting on a second connection can stall a busy server.
    */
-  async profile(userId: string): Promise<AgentProfile> {
-    const profile = await this.stored(userId);
+  async profile(userId: string, db: Db | Tx = this.db): Promise<AgentProfile> {
+    const profile = await this.stored(userId, db);
     if (!profile.categoryKeys) return profile;
-    const [user] = await this.db.select({ countryCode: users.countryCode }).from(users).where(eq(users.id, userId));
-    const active = new Set((await this.countries.activeCategories(user!.countryCode)).map((c) => c.key));
+    const [user] = await db.select({ countryCode: users.countryCode }).from(users).where(eq(users.id, userId));
+    const active = new Set((await this.countries.activeCategories(user!.countryCode, db)).map((c) => c.key));
     const live = profile.categoryKeys.filter((k) => active.has(k));
     return { ...profile, categoryKeys: live.length > 0 ? live : null };
   }
