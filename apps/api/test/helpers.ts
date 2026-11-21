@@ -16,6 +16,7 @@ import { RECURRING_JOBS, type MemoryRecurringJobs } from '../src/timers/recurrin
 import type { FakePaymentsAdapter } from '../src/adapters/payments';
 import type { FakeCallsAdapter } from '../src/adapters/calls';
 import { ENV_ADAPTERS, type Adapters } from '../src/providers/env-adapters';
+import { MatchingRedis } from '../src/matching/matching-redis';
 import {
   admins,
   adminSessions,
@@ -57,6 +58,8 @@ export async function createTestApp(): Promise<TestApp> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = configureApp(moduleRef.createNestApplication({ logger: ['error'], rawBody: true }));
   await app.listen(0, '127.0.0.1');
+  const block = await app.get(MatchingRedis).client.incr('test:phone-blocks');
+  nextPhone = (block * PHONE_BLOCK) % PHONE_SPACE;
   // The stand-ins behind each provider switch, while no provider is switched on in the panel.
   const env = app.get<Adapters>(ENV_ADAPTERS);
   return {
@@ -113,7 +116,15 @@ const PHONE_PREFIXES = [
   '908',
 ];
 const PHONE_PREFIX = PHONE_PREFIXES[Number(process.env.VITEST_POOL_ID ?? 0) % PHONE_PREFIXES.length]!;
-export const randomPhone = () => `+234${PHONE_PREFIX}${randomInt(0, 10_000_000).toString().padStart(7, '0')}`;
+/**
+ * Within a worker, each test app takes its own block of numbers from a count kept for the run (createTestApp)
+ * and hands them out one after another, so no number comes up twice: drawn at random from ten million, a
+ * couple of thousand sign-ins a run met the resend wait now and then.
+ */
+const PHONE_SPACE = 10_000_000;
+const PHONE_BLOCK = 20_000;
+let nextPhone = randomInt(0, PHONE_SPACE);
+export const randomPhone = () => `+234${PHONE_PREFIX}${(nextPhone++ % PHONE_SPACE).toString().padStart(7, '0')}`;
 /** Each test gets its own client IP, so per-IP limits in one test never affect another. */
 export const randomIp = () => `10.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 255)}`;
 
