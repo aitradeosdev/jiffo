@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { DEFAULT_MATCHING_SETTINGS, formatNaira } from '@jiffo/shared';
 import { and, asc, desc, eq, gt, gte, inArray, lt, lte, sql } from 'drizzle-orm';
 import { haversineMeters } from '../adapters/maps';
+import { AgentsService } from '../agents/agents.service';
 import { PresenceService } from '../agents/presence.service';
 import { notFound } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
@@ -15,6 +16,7 @@ import {
   errands,
   users,
 } from '../db/schema';
+import { agentEarnsKobo } from '../errands/agent-earns';
 import { stopArea } from '../errands/errand-view';
 import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -55,6 +57,7 @@ export class OffersService {
     private readonly presence: PresenceService,
     private readonly locations: AgentLocations,
     private readonly redis: MatchingRedis,
+    private readonly agents: AgentsService,
   ) {}
 
   /**
@@ -263,6 +266,7 @@ export class OffersService {
         expiresAt: offer.expiresAt.toISOString(),
       },
       ring: true,
+      tag: offer.id,
     });
     this.realtime.toUser(offer.agentId, 'agent', 'offer.new', {
       offerId: offer.id,
@@ -351,7 +355,8 @@ export class OffersService {
   /**
    * The agent's open offer, as the offer screen shows it (docs/matching.md, M6): what, for how much, the
    * pickup and drop-off areas and how far each is, and who the customer is (first name and initial, verified,
-   * rating, errands done). Never an address, as for any agent before accepting. null with none.
+   * rating, errands done). Never an address, as for any agent before accepting. null with none. With what they'd
+   * earn, and the seconds left by the server's clock, which the app counts down from (a phone's clock can be off).
    */
   async current(agentId: string) {
     const [offer] = await this.db
@@ -363,7 +368,7 @@ export class OffersService {
       );
     if (!offer) return null;
     const { errand } = offer;
-    const [stops, [customer], [verified], [rated], [done]] = await Promise.all([
+    const [stops, [customer], [verified], [rated], [done], earns] = await Promise.all([
       this.db.select().from(errandStops).where(eq(errandStops.errandId, errand.id)).orderBy(asc(errandStops.seq)),
       this.db
         .select({ firstName: users.firstName, lastName: users.lastName })
@@ -381,6 +386,7 @@ export class OffersService {
         .select({ n: sql<number>`count(*)::int` })
         .from(errands)
         .where(and(eq(errands.customerId, errand.customerId), eq(errands.status, 'completed'))),
+      this.agents.tier(agentId).then((tier) => agentEarnsKobo(this.countries, errand, tier)),
     ]);
     const pickup = stops[0]!;
     const dropoff = stops[stops.length - 1]!;
@@ -391,6 +397,9 @@ export class OffersService {
     return {
       id: offer.offer.id,
       expiresAt: offer.offer.expiresAt,
+      secondsLeft: Math.max(0, Math.ceil((offer.offer.expiresAt.getTime() - Date.now()) / 1000)),
+      windowSeconds: Math.round((offer.offer.expiresAt.getTime() - offer.offer.offeredAt.getTime()) / 1000),
+      agentEarnsKobo: earns,
       errand: {
         id: errand.id,
         categoryKey: errand.categoryKey,

@@ -11,8 +11,10 @@ import { Fab, Sheet, Shimmer } from '@/ui/floating';
 import { JiffoMap } from '@/ui/map/map';
 import { StopMark } from '@/ui/map/pins';
 import type { MapPin } from '@/ui/map/types';
+import { useCountryConfig } from '@/api/useCountryConfig';
 import type { ErrandView } from './types';
-import { upcoming, whenLabel } from './when';
+import { waitingCopy } from './waiting';
+import { upcoming } from './when';
 
 const PIN_KIND = { pickup: 'pick', stop: 'stop', dropoff: 'drop' } as const;
 
@@ -43,21 +45,18 @@ export function Matching({
   const [sheetHeight, setSheetHeight] = useState(0);
   const pickup = errand.stops.find((s) => s.kind === 'pickup');
   const scheduled = upcoming(errand.scheduledFor);
+  const { config } = useCountryConfig();
   // Like the prototype: the map centres on the pickup, with rings while nearby agents are asked.
   const pins: MapPin[] = pickup
     ? [{ key: 'pickup', kind: 'pick', lat: pickup.lat, lng: pickup.lng, radar: !scheduled }]
     : [];
 
-  const title = scheduled
-    ? `Scheduled for ${whenLabel(scheduled)}`
-    : errand.urgent
-      ? 'Sending to the nearest agents'
-      : 'Finding your agent';
-  const sub = scheduled
-    ? 'It goes on the board ahead of time, so an agent can accept it early.'
-    : errand.urgent
-      ? 'The first agent to accept gets it.'
-      : `Agents near ${pickup?.label ?? 'your pickup'} can see it and accept.`;
+  const { title, sub } = waitingCopy({
+    urgent: errand.urgent,
+    offers: config?.settings.matching.offers,
+    scheduled,
+    pickupLabel: pickup?.label ?? null,
+  });
 
   return (
     <View style={[styles.fill, { backgroundColor: c.bg }]}>

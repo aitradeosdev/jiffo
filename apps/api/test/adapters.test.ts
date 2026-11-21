@@ -88,13 +88,14 @@ describe('FCM push', () => {
         : Response.json({ name: 'projects/jiffo-test/messages/1' }),
     );
     const adapter = new FcmPushAdapter(account, impl);
-    await adapter.send(['live'], { title: 'New errand', body: 'Parcel', ring: true });
+    await adapter.send(['live'], { title: 'New errand', body: 'Parcel', ring: true, tag: 'offer-1' });
     await adapter.send(['live'], { title: 'Errand complete', body: 'Paid' });
     const [offer, plain] = calls
       .filter((c) => new URL(c.url).hostname === 'fcm.googleapis.com')
       .map((c) => JSON.parse(String(c.init.body)).message);
     expect(offer).toMatchObject({
-      android: { priority: 'high', notification: { channel_id: 'offers', sound: 'default' } },
+      // Tagged, so the app can find the push the phone showed and take it off once the offer has ended.
+      android: { priority: 'high', notification: { channel_id: 'offers', sound: 'default', tag: 'offer-1' } },
       apns: {
         headers: { 'apns-priority': '10' },
         payload: { aps: { sound: 'default', 'interruption-level': 'time-sensitive' } },

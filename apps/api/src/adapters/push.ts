@@ -12,6 +12,11 @@ export interface PushNotification {
    * and as a time-sensitive alert with sound on iPhone, so it gets through even with the app closed.
    */
   ring?: boolean;
+  /**
+   * Names the push on Android, so the app can find it in the tray and take it off (an offer once it has ended),
+   * also when the phone showed it with the app in the background and none of its data is left to go by.
+   */
+  tag?: string;
 }
 
 export interface PushResult {
@@ -92,7 +97,14 @@ export class FcmPushAdapter implements PushAdapter {
               data: n.data ?? {},
               android: {
                 priority: 'high',
-                ...(n.ring ? { notification: { channel_id: 'offers', sound: 'default' } } : {}),
+                ...(n.ring || n.tag
+                  ? {
+                      notification: {
+                        ...(n.ring ? { channel_id: 'offers', sound: 'default' } : {}),
+                        ...(n.tag ? { tag: n.tag } : {}),
+                      },
+                    }
+                  : {}),
               },
               apns: {
                 headers: { 'apns-priority': '10' },

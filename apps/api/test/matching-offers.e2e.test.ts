@@ -132,6 +132,7 @@ describe('offers', () => {
     // It rings: a push marked as an offer, to the agent offered it and no one else.
     expect(pushesTo(nearest).at(-1)).toMatchObject({
       ring: true,
+      tag: offer!.id,
       data: { type: 'errand.offer', errandId: errand.id, offerId: offer!.id },
     });
     expect(pushesTo(other)).toHaveLength(0);
@@ -146,6 +147,14 @@ describe('offers', () => {
     });
     expect(shown.pickup.km).toBeGreaterThan(0.5);
     expect(shown.dropoff.km).toBeGreaterThan(shown.pickup.km);
+    // What they'd earn, as the errand shows it to them, and how long is left by the server's clock.
+    const asProspect = (await request(t.http).get(`/v1/errands/${errand.id}`).set(nearest.headers).expect(200)).body;
+    expect(shown.agentEarnsKobo).toBe(asProspect.agentEarnsKobo);
+    expect(shown.agentEarnsKobo).toBeGreaterThan(0);
+    expect(shown.secondsLeft).toBeGreaterThan(0);
+    expect(shown.secondsLeft).toBeLessThanOrEqual(20);
+    // The whole window, for the countdown bar, however late the app asks.
+    expect(shown.windowSeconds).toBe(20);
     expect((await current(other).expect(200)).body.offer).toBeNull();
 
     // An urgent errand isn't on the board: only the agent offered it can take it.
