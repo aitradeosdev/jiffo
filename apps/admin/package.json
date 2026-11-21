@@ -12,16 +12,20 @@
   },
   "dependencies": {
     "@fontsource-variable/figtree": "^5.3.0",
+    "@googlemaps/js-api-loader": "2.1.3",
     "@jiffo/shared": "workspace:*",
     "@simplewebauthn/browser": "14.0.0",
     "next": "16.4.6",
     "qrcode": "^1.5.4",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "terra-draw": "1.38.0",
+    "terra-draw-google-maps-adapter": "1.7.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.5",
+    "@types/google.maps": "3.66.8",
     "@types/node": "^22.20.5",
     "@types/qrcode": "^1.5.6",
     "@types/react": "~19.3.0",

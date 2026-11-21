@@ -123,6 +123,26 @@ function describe(entry: Entry, names: Map<string, string>, currencyOf: (code: s
           c.path === 'enabled' ? (c.to ? 'errands open' : 'errands closed') : `agent sign-ups ${String(c.to)}`,
         )
         .join(', ')}`;
+    case 'city.create':
+      return `Drew the city ${String(entry.data.name)} in ${String(entry.data.state)} (${String(entry.data.km2)} km²)`;
+    case 'area.create':
+      return `Drew the area ${String(entry.data.name)} in ${String(entry.data.city)} (${String(entry.data.km2)} km²)`;
+    case 'city.update':
+    case 'area.update': {
+      const changes = (entry.data.changes as Array<{ field: string; to: unknown }>) ?? [];
+      const what = changes
+        .map((c) =>
+          c.field === 'enabled'
+            ? c.to
+              ? 'switched on'
+              : 'switched off'
+            : c.field === 'name'
+              ? `renamed ${String(c.to)}`
+              : `reshaped (${String(c.to)})`,
+        )
+        .join(', ');
+      return `Changed the ${entry.action === 'city.update' ? 'city' : 'area'} ${String(entry.data.name)}: ${what || 'nothing'}`;
+    }
     case 'person.suspend':
       return `Suspended ${entry.targetLabel ?? 'an account'}`;
     case 'person.reactivate':

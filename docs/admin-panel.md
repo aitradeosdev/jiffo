@@ -28,6 +28,17 @@ Jiffo works in areas, drawn in cities, in states, in a country.
   - **Switched off:** an area, city or state stops new errands there. Errands already sent go on as before.
   - **The errand's area and state:** the server works out the pickup's area, and its state, from the map. Whatever the app says is never used: before areas, the app named the state, and nothing checked it against the stops.
 - **Who can change them:** anyone who may change settings. Every change is in the audit log: a new boundary by its size, not its points.
+- **In the panel (Settings, Places):**
+  - **Seeing them:** pick a state to see its cities and areas on Google's map. Cities are outlined; areas are green when on and grey when off.
+  - **Drawing:** "Add a city", or "Add an area" under a city, then click the map at each corner and click the first corner again to finish. Drag corners to adjust, then name it and save.
+  - **Reshaping and switching:** "Reshape" moves the corners of one already drawn, and can rename it; its switch turns it on or off.
+  - **Pasting:** a shape drawn in another tool can be pasted as GeoJSON instead.
+  - **The reason:** each change asks for one, as everywhere in Settings.
+- **The map's key:** `GOOGLE_MAPS_BROWSER_KEY` in the panel's settings.
+  - **Which key:** a Google key with the Maps JavaScript API turned on, restricted to the panel's own address (HTTP referrers), as it is sent to the browser. It can be in the same Google Cloud project as the apps' keys.
+  - **Cost:** loading the map is free up to 10,000 times a month, far more than staff use.
+  - **Without it:** shapes can only be pasted.
+  - **Security rules:** only this page lets Google's map load (its data, fonts and workers). Every other page keeps the panel's strict rules.
 
 ## Roles
 

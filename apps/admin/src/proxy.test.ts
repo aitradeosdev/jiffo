@@ -33,6 +33,21 @@ describe('panel proxy', () => {
     expect(open('/invites').status).toBe(307);
   });
 
+  it("lets Google's map load only on the Places page, where areas are drawn", () => {
+    const policy = (path: string) => open(path, `${SESSION_COOKIE}=x`).headers.get('content-security-policy') ?? '';
+    const places = policy('/settings/places');
+    expect(places).toMatch(/connect-src [^;]*https:\/\/\*\.googleapis\.com/);
+    expect(places).toMatch(/font-src [^;]*https:\/\/fonts\.gstatic\.com/);
+    expect(places).toMatch(/style-src [^;]*https:\/\/fonts\.googleapis\.com/);
+    expect(places).toContain('worker-src blob:');
+    // Still no eval in production, and nothing else loosened.
+    expect(contentPolicy('n', false, { maps: true })).not.toContain('unsafe-eval');
+    expect(places).toContain("frame-ancestors 'none'");
+    for (const path of ['/settings', '/settings/placesx', '/errands']) {
+      expect(policy(path)).not.toContain('googleapis');
+    }
+  });
+
   it('allows eval only in development', () => {
     expect(contentPolicy('n', false)).not.toContain('unsafe-eval');
     expect(contentPolicy('n', false)).not.toMatch(/http:|ws:/);
