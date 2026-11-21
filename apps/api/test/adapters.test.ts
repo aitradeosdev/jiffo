@@ -561,6 +561,45 @@ describe('Mapbox maps', () => {
       country: 'ng',
       proximity: '3.4,6.4',
     });
+    // Only kinds with a position to pick: never a category ("Supermarket") or a whole state or country.
+    expect(query(url).get('types')!.split(',').sort()).toEqual(
+      ['address', 'block', 'city', 'district', 'locality', 'neighborhood', 'place', 'poi', 'street'].sort(),
+    );
+  });
+
+  it('leaves out suggestions with nothing to pick, such as categories and brands', async () => {
+    const { impl } = fakeFetch(() =>
+      Response.json({
+        suggestions: [
+          { name: 'Supermarket', mapbox_id: 'cat-1', feature_type: 'category', place_formatted: '' },
+          { name: 'Shoprite', mapbox_id: 'brand-1', feature_type: 'brand', place_formatted: '' },
+          { name: 'Shoprite Lekki', mapbox_id: 'poi-1', feature_type: 'poi', place_formatted: 'Lekki, Lagos' },
+        ],
+      }),
+    );
+    const found = await new MapboxMapsAdapter(TOKEN, impl).autocomplete({ query: 'shoprite', countryCode: 'NG' });
+    expect(found.map((f) => f.placeId)).toEqual(['poi-1']);
+  });
+
+  it('reports a refused search as unavailable rather than as no results', async () => {
+    const { impl } = fakeFetch(() => new Response('{"message":"Invalid input"}', { status: 422 }));
+    await expect(
+      new MapboxMapsAdapter(TOKEN, impl).autocomplete({ query: 'lekki', countryCode: 'NG' }),
+    ).rejects.toMatchObject({ status: 503 });
+  });
+
+  it('takes a state picked as itself as its own state', async () => {
+    const { impl } = fakeFetch(() =>
+      Response.json({
+        features: [
+          {
+            geometry: { coordinates: [7.49, 9.06] },
+            properties: { name: 'Federal Capital Territory', feature_type: 'region', context: { country: {} } },
+          },
+        ],
+      }),
+    );
+    expect((await new MapboxMapsAdapter(TOKEN, impl).place('region-1'))?.region).toBe('Federal Capital Territory');
   });
 
   it('makes a session token when the app sent none, as Mapbox needs one', async () => {
@@ -672,6 +711,18 @@ describe('Mapbox maps', () => {
       fakeFetch(() => new Response('{"message":"Invalid Token"}', { status: 401 })).impl,
     );
     await expect(refused.check()).rejects.toThrow('Mapbox answered 401: Invalid Token');
+    // A redirect says where it pointed (providerFetch's own words, with no token); other errors, which may
+    // quote the address called, token and all, don't.
+    const moved = new MapboxMapsAdapter(TOKEN, (async () => {
+      throw new Error(
+        "The provider answered with a redirect to https://elsewhere.example/, which isn't followed. Check its address.",
+      );
+    }) as typeof fetch);
+    await expect(moved.check()).rejects.toThrow('redirect to https://elsewhere.example/');
+    const down = new MapboxMapsAdapter(TOKEN, (async () => {
+      throw new Error(`fetch failed for https://api.mapbox.com/?access_token=${TOKEN}`);
+    }) as typeof fetch);
+    await expect(down.check()).rejects.toThrow(/^Mapbox couldn't be reached$/);
   });
 });
 

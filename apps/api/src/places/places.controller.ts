@@ -40,7 +40,8 @@ export class PlacesController {
     @Param('placeId') placeId: string,
     @Query(new ZodBody(DetailQuery)) q: z.infer<typeof DetailQuery>,
   ) {
-    if (!/^[\w-]{1,300}$/.test(placeId)) throw notFound('place_not_found', 'Place not found');
+    // Google's ids and Mapbox's base64 ones; the adapters encode them again for the provider's address.
+    if (!/^[\w\-+/=.]{1,300}$/.test(placeId)) throw notFound('place_not_found', 'Place not found');
     const place = await this.maps.place(placeId, q.session);
     if (!place) throw notFound('place_not_found', 'Place not found');
     const { region, ...rest } = place;

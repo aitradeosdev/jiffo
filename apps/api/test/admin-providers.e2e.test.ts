@@ -153,6 +153,13 @@ describe('admin: providers', () => {
         .set(customer.headers)
         .expect(200);
       expect(picked.body).toMatchObject({ name: 'Shoprite', lat: 6.4442, lng: 3.4761, stateCode: 'LA' });
+      // Mapbox ids are base64: whatever characters one has, it reaches Mapbox as it was suggested.
+      const odd = 'dXJu+Om1i/eHBvaT0x==';
+      await request(t.http)
+        .get(`/v1/places/${encodeURIComponent(odd)}?session=s-1`)
+        .set(customer.headers)
+        .expect(200);
+      expect(MapboxMapsAdapter.prototype.place).toHaveBeenLastCalledWith(odd, 's-1');
     } finally {
       await switchProvider(t, 'maps', null);
     }

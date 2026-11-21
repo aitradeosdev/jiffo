@@ -205,6 +205,15 @@ export class GoogleMapsAdapter implements MapsAdapter {
 const MAPBOX = 'https://api.mapbox.com';
 /** The most points Mapbox routes in one request. */
 const MAPBOX_MAX_POINTS = 25;
+/**
+ * The kinds of suggestion with a position to pick: not a category ("Supermarket"), which has none, nor a whole
+ * state, country or postcode, which is no errand stop.
+ */
+const MAPBOX_TYPES = 'poi,address,street,block,neighborhood,locality,district,place,city';
+/** Suggestions that are searches of their own rather than places, which retrieve gives no position for. */
+const MAPBOX_NOT_PLACES = new Set(['category', 'brand', 'query']);
+/** providerFetch's own words for a redirect, which say where it pointed and never quote the address called. */
+const REDIRECT = 'The provider answered with a redirect';
 
 /**
  * Mapbox: the Search Box API for search and details (suggest, then retrieve), the Directions API for driving
@@ -230,7 +239,9 @@ export class MapboxMapsAdapter implements MapsAdapter {
   async check() {
     const res = await this.fetchImpl(
       this.url('/search/searchbox/v1/suggest', { q: 'Lagos', country: 'ng', session_token: randomUUID() }),
-    ).catch(() => {
+    ).catch((error: unknown) => {
+      // Any other error may quote the address called, token and all.
+      if (error instanceof Error && error.message.startsWith(REDIRECT)) throw error;
       throw new Error("Mapbox couldn't be reached");
     });
     if (!res.ok) {
@@ -240,8 +251,12 @@ export class MapboxMapsAdapter implements MapsAdapter {
     return 'Connected. Place search works.';
   }
 
-  /** Returns null when Mapbox says the thing doesn't exist or can't be asked for (an unknown or stale id). */
-  private async call<T>(url: string): Promise<T | null> {
+  /**
+   * Returns null for a place Mapbox doesn't know or won't look up (an unknown or stale id), when `missing` is
+   * allowed. Otherwise a refused request is unavailable, so a broken setup never looks like a search that found
+   * nothing.
+   */
+  private async call<T>(url: string, missing = false): Promise<T | null> {
     let res: Response;
     try {
       res = await this.fetchImpl(url);
@@ -249,7 +264,7 @@ export class MapboxMapsAdapter implements MapsAdapter {
       // The error may quote the address, token and all: it is never passed on.
       throw unavailable('maps_unavailable', 'Address search is not available right now');
     }
-    if (res.status === 404 || res.status === 400 || res.status === 422) return null;
+    if (missing && (res.status === 404 || res.status === 400 || res.status === 422)) return null;
     if (!res.ok) throw unavailable('maps_unavailable', 'Address search is not available right now');
     try {
       return (await res.json()) as T;
@@ -260,7 +275,13 @@ export class MapboxMapsAdapter implements MapsAdapter {
 
   async autocomplete(input: { query: string; near?: LatLng; countryCode: string; sessionToken?: string }) {
     const body = await this.call<{
-      suggestions?: Array<{ name?: string; mapbox_id?: string; place_formatted?: string; full_address?: string }>;
+      suggestions?: Array<{
+        name?: string;
+        mapbox_id?: string;
+        feature_type?: string;
+        place_formatted?: string;
+        full_address?: string;
+      }>;
     }>(
       this.url('/search/searchbox/v1/suggest', {
         q: input.query.slice(0, 256),
@@ -268,12 +289,13 @@ export class MapboxMapsAdapter implements MapsAdapter {
         // Mapbox needs one, and bills a search and its pick as one session when they share it.
         session_token: input.sessionToken ?? randomUUID(),
         proximity: input.near ? `${input.near.lng},${input.near.lat}` : undefined,
+        types: MAPBOX_TYPES,
         limit: '8',
         language: 'en',
       }),
     );
     return (body?.suggestions ?? [])
-      .filter((s) => !!s.mapbox_id)
+      .filter((s) => !!s.mapbox_id && !MAPBOX_NOT_PLACES.has(s.feature_type ?? ''))
       .map((s) => ({
         placeId: s.mapbox_id!,
         title: s.name ?? s.full_address ?? '',
@@ -288,6 +310,7 @@ export class MapboxMapsAdapter implements MapsAdapter {
         properties?: {
           name?: string;
           mapbox_id?: string;
+          feature_type?: string;
           full_address?: string;
           place_formatted?: string;
           context?: { region?: { name?: string } };
@@ -298,6 +321,7 @@ export class MapboxMapsAdapter implements MapsAdapter {
         session_token: sessionToken ?? randomUUID(),
         language: 'en',
       }),
+      true,
     );
     const feature = body?.features?.[0];
     const [lng, lat] = feature?.geometry?.coordinates ?? [];
@@ -310,7 +334,8 @@ export class MapboxMapsAdapter implements MapsAdapter {
       address,
       lat,
       lng,
-      region: p.context?.region?.name ?? null,
+      // A state picked as itself names itself; anything in one names it in its context.
+      region: (p.feature_type === 'region' ? p.name : p.context?.region?.name) ?? null,
     };
   }
 
