@@ -32,6 +32,12 @@ export function useErrand(id: string | undefined) {
     if (focused) reload();
     else missed.current = true;
   });
+  // An urgent errand's search reached further, or opened to everyone (M8): no new version, so asked for here.
+  useRealtimeEvent<{ errandId: string }>('errand.search', (u) => {
+    if (u.errandId !== id) return;
+    if (focused) reload();
+    else missed.current = true;
+  });
   // Coming back (from a top-up or the chat, say), an old refusal no longer applies.
   useFocusEffect(
     useCallback(() => {

@@ -255,6 +255,17 @@ export class ErrandNotifier {
     }
   }
 
+  /** No agent yet (docs/matching.md, M8): would the customer raise the fee to reach more, or keep waiting? */
+  async raisePrompt(errand: ErrandRow) {
+    await this.push
+      .notifyUser(errand.customerId, 'customer', {
+        title: 'No agent yet',
+        body: 'Raising your fee makes your errand worth more to agents nearby. Or keep waiting: it stays open.',
+        data: { type: 'errand.raise_prompt', errandId: errand.id },
+      })
+      .catch((error: Error) => this.logger.warn(`Raise prompt for ${errand.id} failed: ${error.message}`));
+  }
+
   /**
    * An agent is ready, but the wallet no longer covers the errand. Sent at most once per errand every
    * 10 minutes, however many agents try, and it never turns the agent's answer into a different error.

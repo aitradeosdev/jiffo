@@ -242,7 +242,9 @@ describe('errands', () => {
           request(t.http).post(`/v1/errands/${errand.id}/events`).set(a.headers).send({ event: 'accept' }),
         ),
       );
-      expect(results.map((r) => r.status).sort()).toEqual([200, 404]);
+      // The other is told it was taken (docs/matching.md, M7).
+      expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+      expect(results.find((r) => r.status === 409)!.body.error.code).toBe('errand_taken');
     });
   });
 
@@ -379,7 +381,7 @@ describe('errands', () => {
       });
       await act(t, customer, errand.id, 'lock_item_amount');
       const fired = await t.timers.fireAll(errand.id);
-      expect(fired.map((j) => j.event)).toEqual(['item_lock_timeout']);
+      expect(fired.map((j) => j.event)).toEqual(['raise_prompt', 'item_lock_timeout']);
       expect((await get(customer, errand.id)).body.status).toBe('items_locked');
     });
 
@@ -404,7 +406,8 @@ describe('errands', () => {
       await act(t, agent, drop.id, 'start');
       await act(t, agent, drop.id, 'mark_delivered');
       await act(t, agent, drop.id, 'send_dropoff_photo', { photo: await photo(t, agent, drop.id, 'dropoff_photo') });
-      const [job] = await t.timers.fireAll(drop.id);
+      // Its prompt to raise the fee, from when it waited, comes to nothing now.
+      const [job] = (await t.timers.fireAll(drop.id)).filter((j) => j.event !== 'raise_prompt');
       expect(job).toMatchObject({ event: 'auto_release' });
       expect((await get(customer, drop.id)).body.status).toBe('completed');
       const events = await request(t.http).get(`/v1/errands/${drop.id}/events`).set(customer.headers).expect(200);

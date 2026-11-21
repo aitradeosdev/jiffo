@@ -45,7 +45,9 @@ describe('drop-off photos awaiting approval', () => {
     await act(t, agent, errand.id, 'send_dropoff_photo', { photo: await photo(t, agent, errand.id, 'dropoff_photo') });
     return errand.id;
   };
-  const timersOf = (id: string) => t.timers.pending.filter((p) => p.job.errandId === id);
+  // The photo's timers: the prompt to raise the fee, set when the errand was sent, comes to nothing by now.
+  const timersOf = (id: string) =>
+    t.timers.pending.filter((p) => p.job.errandId === id && p.job.event !== 'raise_prompt');
   const fire = (id: string, match: (job: ErrandTimerJob) => boolean) =>
     t.timers.fireWhere((j) => j.errandId === id && match(j));
   const row = async (id: string) => (await t.db.select().from(errands).where(eq(errands.id, id)))[0]!;

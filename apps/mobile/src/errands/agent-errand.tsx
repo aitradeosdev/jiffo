@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { useColors } from '../theme/theme';
@@ -7,7 +7,19 @@ import { IconCircle } from '../ui/parts';
 import { AgentDone } from '../agent/done';
 import { AgentRequest } from '../agent/request';
 import { AgentTrip } from '../agent/trip';
+import { useRealtimeEvent } from '../realtime/realtime';
 import { useErrand } from './use-errand';
+
+/** Why an errand open to everyone (docs/matching.md, M8) left it, as the server says. */
+type GoneWhy = 'taken' | 'ended' | 'offered';
+const GONE: Record<GoneWhy, { title: string; sub: string }> = {
+  taken: { title: 'This errand was taken', sub: 'Another agent accepted it first.' },
+  ended: { title: 'This errand has gone', sub: 'The customer no longer needs it.' },
+  offered: {
+    title: 'No longer open to everyone',
+    sub: 'The customer raised the fee, so it is offered to agents one at a time again. You may get an offer.',
+  },
+};
 
 /**
  * The agent's view of one errand: the request before accepting, the running job, and what it earned
@@ -20,6 +32,11 @@ export function AgentErrand({ id }: { id: string }) {
   // released them, or they left, it went back to matching for other agents.
   const wasMine = useRef(false);
   if (errand?.role === 'agent') wasMine.current = true;
+  // Told while it was open to everyone (M8) that someone else took it, or it went.
+  const [gone, setGone] = useState<GoneWhy | null>(null);
+  useRealtimeEvent<{ errandId: string; taken: boolean; why?: GoneWhy }>('errand.gone', (g) => {
+    if (g.errandId === id) setGone(g.why ?? (g.taken ? 'taken' : 'ended'));
+  });
 
   if (!errand) {
     return (
@@ -29,6 +46,20 @@ export function AgentErrand({ id }: { id: string }) {
     );
   }
   const movedOn = wasMine.current && errand.role === 'prospect';
+  if (gone && errand.role === 'prospect') {
+    return (
+      <View style={[styles.center, { backgroundColor: c.surface, gap: 12, padding: 24 }]}>
+        <IconCircle icon="x" size={64} />
+        <Text variant="title" style={{ textAlign: 'center' }} accessibilityLiveRegion="polite">
+          {GONE[gone].title}
+        </Text>
+        <Text variant="sub" tone="ink3" style={{ textAlign: 'center' }}>
+          {GONE[gone].sub}
+        </Text>
+        <Button label="Back to the board" onPress={() => router.replace('/home')} />
+      </View>
+    );
+  }
   if (errand.role === 'prospect' && !movedOn) {
     return (
       <AgentRequest errand={errand} onAccept={() => act('accept')} accepting={busy === 'accept'} error={actionError} />

@@ -1,6 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { DEFAULT_MATCHING_SETTINGS, formatNaira } from '@jiffo/shared';
-import { and, asc, desc, eq, gt, gte, inArray, lt, lte, sql } from 'drizzle-orm';
+import {
+  DEFAULT_MATCHING_SETTINGS,
+  formatNaira,
+  searchRadiusKm,
+  searchStep,
+  type CountrySettings,
+} from '@jiffo/shared';
+import { and, asc, desc, eq, gt, gte, inArray, lt, lte, ne, sql } from 'drizzle-orm';
 import { haversineMeters } from '../adapters/maps';
 import { AgentsService } from '../agents/agents.service';
 import { PresenceService } from '../agents/presence.service';
@@ -10,6 +16,7 @@ import { DB, type Db } from '../db/database.module';
 import {
   agentPresence,
   customerVerifications,
+  errandBroadcasts,
   errandOffers,
   errandRatings,
   errandStops,
@@ -22,6 +29,7 @@ import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { ERRAND_TIMERS, type ErrandTimers } from '../timers/errand-timers';
 import { AgentLocations } from './agent-locations';
+import { CandidatesService } from './candidates.service';
 import { MatchingRedis } from './matching-redis';
 import { RankingService, type Ranked } from './ranking.service';
 
@@ -58,6 +66,7 @@ export class OffersService {
     private readonly locations: AgentLocations,
     private readonly redis: MatchingRedis,
     private readonly agents: AgentsService,
+    private readonly candidates: CandidatesService,
   ) {}
 
   /**
@@ -66,10 +75,16 @@ export class OffersService {
    */
   async errandChanged(errand: ErrandRow) {
     if (errand.status === 'requested') {
+      // Open to everyone at a fee it no longer has (raised): offered one at a time again, as those told hear.
+      if (errand.broadcastFeeKobo !== null && errand.broadcastFeeKobo !== errand.feeKobo) {
+        await this.reopened(errand).catch((error: Error) =>
+          this.logger.warn(`Telling agents errand ${errand.id} is offered again failed: ${error.message}`),
+        );
+      }
       if (errand.urgent) await this.dispatch(errand.id);
       return;
     }
-    await this.withdraw(errand.id).catch((error: Error) =>
+    await this.withdraw(errand).catch((error: Error) =>
       this.logger.warn(`Withdrawing the offer for errand ${errand.id} failed: ${error.message}`),
     );
   }
@@ -131,27 +146,30 @@ export class OffersService {
       .returning();
     for (const o of timeUp) await this.ended(o, { offerAgain: false });
     if (await this.openFor(errandId)) return;
+    // Open to everyone at this fee already (M8): tell those who have arrived since.
+    if (errand.broadcastFeeKobo === errand.feeKobo) return this.toEveryone(errand, rules);
     // Left out before the shortlist is drawn up, so they never take the places of agents who could be asked:
     // who said no to it at this fee, and who holds another offer (one at a time, kept by the database too).
-    const [passed, holding] = await Promise.all([
-      this.db
-        .select({ agentId: errandOffers.agentId })
-        .from(errandOffers)
-        .where(
-          and(
-            eq(errandOffers.errandId, errandId),
-            inArray(errandOffers.status, ['declined', 'expired']),
-            eq(errandOffers.feeKobo, errand.feeKobo),
-          ),
-        ),
+    const [passed, holding, made] = await Promise.all([
+      this.passed(errand),
       this.db
         .select({ agentId: errandOffers.agentId })
         .from(errandOffers)
         .where(and(eq(errandOffers.countryCode, errand.countryCode), eq(errandOffers.status, 'open'))),
+      this.offersMade(errand),
     ]);
+    // Every step has had its offers: to everyone at once.
+    const step = searchStep(made.n, rules);
+    if (!step) return this.toEveryone(errand, rules);
     const skip = new Set([...passed, ...holding].map((p) => p.agentId));
-    const ranked = await this.ranking.ranked(errandId, skip);
-    for (const [i, r] of ranked.entries()) {
+    // Ranked once, as far as the last step reaches, and offered from this step's radius out: further out at once
+    // where no one nearer can be asked.
+    const ranked = await this.ranking.ranked(errandId, skip, rules.searchStepsKm.at(-1));
+    const rings = rules.searchStepsKm.slice(step.index);
+    const order = rings.flatMap((km, j) =>
+      ranked.filter((r) => r.straightMeters <= km * 1000 && (j === 0 || r.straightMeters > rings[j - 1]! * 1000)),
+    );
+    for (const [i, r] of order.entries()) {
       const now = new Date();
       const offer = await this.db.transaction(async (tx) => {
         // The errand as it is now, locked as accepting locks it: still waiting, at the fee ranked for.
@@ -196,10 +214,116 @@ export class OffersService {
       await this.tell(offer, errand, r).catch((error: Error) =>
         this.logger.warn(`Telling agent ${offer.agentId} of an offer failed: ${error.message}`),
       );
+      this.searchChanged(errand);
       return;
     }
     // No one can take it now: look again soon.
     await this.later(errandId, errand.version, rules.dispatchRetrySeconds);
+  }
+
+  /** Agents who said no to the errand at its fee, or let the offer run out. */
+  private passed(errand: ErrandRow) {
+    return this.db
+      .select({ agentId: errandOffers.agentId })
+      .from(errandOffers)
+      .where(
+        and(
+          eq(errandOffers.errandId, errand.id),
+          inArray(errandOffers.status, ['declined', 'expired']),
+          eq(errandOffers.feeKobo, errand.feeKobo),
+        ),
+      );
+  }
+
+  /** How many agents were offered the errand one at a time at its fee, and the furthest of them, in metres. */
+  private async offersMade(errand: Pick<ErrandRow, 'id' | 'feeKobo'>) {
+    const [row] = await this.db
+      .select({ n: sql<number>`count(*)::int`, farthest: sql<number | null>`max(${errandOffers.straightMeters})` })
+      .from(errandOffers)
+      .where(
+        and(
+          eq(errandOffers.errandId, errand.id),
+          eq(errandOffers.feeKobo, errand.feeKobo),
+          ne(errandOffers.status, 'withdrawn'),
+        ),
+      );
+    return { n: row?.n ?? 0, farthest: row?.farthest ?? null };
+  }
+
+  /**
+   * How far an urgent errand's search reaches now, for its customer (M8): null while it isn't offered (offers off,
+   * or not urgent). They never see who was asked or said no.
+   */
+  async search(errand: ErrandRow, rules: CountrySettings['matching']) {
+    if (!errand.urgent || errand.status !== 'requested' || !rules.offers) return null;
+    const last = rules.searchStepsKm.at(-1)!;
+    if (errand.broadcastFeeKobo === errand.feeKobo) return { radiusKm: last, everyone: true };
+    const made = await this.offersMade(errand);
+    return { radiusKm: searchRadiusKm(made.n, made.farthest, rules), everyone: false };
+  }
+
+  /** The customer's app shows how far the search reaches: it looks again. */
+  private searchChanged(errand: ErrandRow) {
+    this.realtime.toUser(errand.customerId, 'customer', 'errand.search', { errandId: errand.id });
+  }
+
+  /**
+   * The last step (M8): the errand is open to every agent within the last step's radius who may take it, the first
+   * to accept getting it, and on the board for them. Marked once per fee; then those who haven't said no, been
+   * told already or got another offer to answer are told, and it looks again soon, for agents arriving.
+   */
+  private async toEveryone(errand: ErrandRow, rules: CountrySettings['matching']) {
+    if (errand.broadcastFeeKobo !== errand.feeKobo) {
+      const [marked] = await this.db
+        .update(errands)
+        .set({ broadcastFeeKobo: errand.feeKobo })
+        .where(and(eq(errands.id, errand.id), eq(errands.status, 'requested'), eq(errands.feeKobo, errand.feeKobo)))
+        .returning({ id: errands.id });
+      if (!marked) return;
+      this.searchChanged(errand);
+    }
+    const [passed, told, holding] = await Promise.all([
+      this.passed(errand),
+      this.db
+        .select({ agentId: errandBroadcasts.agentId })
+        .from(errandBroadcasts)
+        .where(and(eq(errandBroadcasts.errandId, errand.id), eq(errandBroadcasts.feeKobo, errand.feeKobo))),
+      this.db
+        .select({ agentId: errandOffers.agentId })
+        .from(errandOffers)
+        .where(and(eq(errandOffers.countryCode, errand.countryCode), eq(errandOffers.status, 'open'))),
+    ]);
+    const skip = new Set([...passed, ...told, ...holding].map((p) => p.agentId));
+    const near = await this.candidates.everyoneWithin(errand.id, skip, rules.searchStepsKm.at(-1)!);
+    if (near.length) {
+      // Told once each: an agent another look told already is left out here.
+      const fresh = await this.db
+        .insert(errandBroadcasts)
+        .values(
+          near.map((n) => ({
+            errandId: errand.id,
+            agentId: n.agentId,
+            feeKobo: errand.feeKobo,
+            straightMeters: n.straightMeters,
+          })),
+        )
+        .onConflictDoNothing()
+        .returning();
+      const category = await this.countries.activeCategory(errand.countryCode, errand.categoryKey);
+      for (const f of fresh) {
+        await this.push
+          .notifyUser(f.agentId, 'agent', {
+            title: 'Urgent errand near you',
+            body: `${category?.name ?? 'Errand'} · ${formatNaira(errand.feeKobo)} · ${Math.max(0.1, Math.round(f.straightMeters / 100) / 10)} km away. The first to accept gets it.`,
+            data: { type: 'errand.broadcast', errandId: errand.id },
+          })
+          .catch((error: Error) =>
+            this.logger.warn(`Telling agent ${f.agentId} of an errand failed: ${error.message}`),
+          );
+        this.realtime.toUser(f.agentId, 'agent', 'errand.broadcast', { errandId: errand.id });
+      }
+    }
+    await this.later(errand.id, errand.version, rules.dispatchRetrySeconds);
   }
 
   /**
@@ -342,14 +466,52 @@ export class OffersService {
     });
   }
 
-  /** The errand left waiting another way (cancelled, expired, taken): its open offer is withdrawn. */
-  private async withdraw(errandId: string) {
+  /** No longer open to everyone, at its new fee: those told of it at the old one hear so, once. */
+  private async reopened(errand: ErrandRow) {
+    const was = errand.broadcastFeeKobo!;
+    const [cleared] = await this.db
+      .update(errands)
+      .set({ broadcastFeeKobo: null })
+      .where(and(eq(errands.id, errand.id), eq(errands.broadcastFeeKobo, was)))
+      .returning({ id: errands.id });
+    if (!cleared) return;
+    await this.tellGone(errand.id, was, null, 'offered');
+  }
+
+  /**
+   * Agents told of an errand open to everyone at a fee (M8) hear it's gone from the board: taken, ended
+   * (cancelled or expired), or offered one at a time again (a raised fee). Not the agent who took it.
+   */
+  private async tellGone(
+    errandId: string,
+    feeKobo: number,
+    takenBy: string | null,
+    why: 'taken' | 'ended' | 'offered',
+  ) {
+    const told = await this.db
+      .select({ agentId: errandBroadcasts.agentId })
+      .from(errandBroadcasts)
+      .where(and(eq(errandBroadcasts.errandId, errandId), eq(errandBroadcasts.feeKobo, feeKobo)));
+    for (const t of told) {
+      if (t.agentId === takenBy) continue;
+      this.realtime.toUser(t.agentId, 'agent', 'errand.gone', { errandId, taken: why === 'taken', why });
+    }
+  }
+
+  /**
+   * The errand left waiting another way (cancelled, expired, taken): its open offer is withdrawn, and the agents
+   * told of it while it was open to everyone (M8) are told it was taken, or has gone, all but the one who took it.
+   */
+  private async withdraw(errand: ErrandRow) {
     const gone = await this.db
       .update(errandOffers)
       .set({ status: 'withdrawn', answeredAt: new Date() })
-      .where(and(eq(errandOffers.errandId, errandId), eq(errandOffers.status, 'open')))
+      .where(and(eq(errandOffers.errandId, errand.id), eq(errandOffers.status, 'open')))
       .returning({ id: errandOffers.id, agentId: errandOffers.agentId });
-    for (const g of gone) this.realtime.toUser(g.agentId, 'agent', 'offer.gone', { offerId: g.id, errandId });
+    for (const g of gone)
+      this.realtime.toUser(g.agentId, 'agent', 'offer.gone', { offerId: g.id, errandId: errand.id });
+    if (errand.broadcastFeeKobo === null) return;
+    await this.tellGone(errand.id, errand.broadcastFeeKobo, errand.agentId, errand.agentId ? 'taken' : 'ended');
   }
 
   /**

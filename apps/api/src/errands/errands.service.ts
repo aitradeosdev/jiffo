@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { and, desc, eq, gt, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import {
   canRevealPin,
   nextState,
@@ -272,12 +272,13 @@ export class ErrandsService implements OnModuleInit {
     if (haversineMeters(me, q) > security.boardNearKm * 1000) {
       throw unprocessable('not_here', 'The board shows errands near where you are');
     }
-    // Urgent errands are offered to one agent at a time instead (docs/matching.md, M6), unless offers are off
-    // for the country: then they're on the board too, for an agent with room for one. With room for nothing
-    // the board has, it says why.
+    // Urgent errands are offered to one agent at a time instead (docs/matching.md, M6) until their search reaches
+    // its last step (M8): then they're on the board too, within that step's radius, for an agent with room for
+    // one. With offers off for the country they always are. An agent with no room for an errand from the board is
+    // told why, and still sees urgent ones if they have room for one of those.
     const boardFull = heldRefusal(me.held, false, rules);
-    const urgentShown = !rules.offers && !heldRefusal(me.held, true, rules);
-    if (boardFull && !urgentShown) throw this.eligibility.refusal(boardFull);
+    const urgentRoom = !heldRefusal(me.held, true, rules);
+    if (boardFull && !urgentRoom) throw this.eligibility.refusal(boardFull);
     const tier = await this.agents.tier(auth.userId);
     const here = sql`ST_SetSRID(ST_MakePoint(${me.lng}, ${me.lat}), 4326)::geography`;
     const distance = sql<number>`ST_Distance(${errandStops.location}, ${here})`;
@@ -287,7 +288,15 @@ export class ErrandsService implements OnModuleInit {
       eq(errands.status, 'requested'),
       eq(errands.countryCode, auth.countryCode),
       // Never on the board while they're offered instead, so not counted as left out by preferences either.
-      rules.offers ? eq(errands.urgent, false) : undefined,
+      rules.offers
+        ? or(
+            eq(errands.urgent, false),
+            and(
+              sql`${errands.broadcastFeeKobo} = ${errands.feeKobo}`,
+              sql`ST_DWithin(${errandStops.location}, ${here}, ${rules.searchStepsKm.at(-1)! * 1000})`,
+            ),
+          )
+        : undefined,
       ne(errands.customerId, auth.userId),
       sql`ST_DWithin(${errandStops.location}, ${here}, ${reach})`,
     );
@@ -300,7 +309,7 @@ export class ErrandsService implements OnModuleInit {
     );
     // Left out in the query, so the limit counts only errands the agent may take.
     const allowed = and(
-      boardFull ? eq(errands.urgent, true) : urgentShown ? undefined : eq(errands.urgent, false),
+      boardFull ? eq(errands.urgent, true) : urgentRoom ? undefined : eq(errands.urgent, false),
       this.eligibility.boardExclusions(auth.userId),
     );
     const pickupOf = and(eq(errandStops.errandId, errands.id), eq(errandStops.seq, 0));
@@ -346,6 +355,10 @@ export class ErrandsService implements OnModuleInit {
       hiddenByPreferences: Math.max(0, (counts[0]?.all ?? 0) - (counts[0]?.wanted ?? 0)),
       // How far the board reaches for this agent: their work radius, within what admin allows.
       reachKm: Math.min(q.radiusKm, agentReachKm(me, rules)),
+      // Why errands from the board are left out, when the agent holds as many as they may: only urgent ones show.
+      full: boardFull
+        ? (this.eligibility.refusal(boardFull).getResponse() as { error: { code: string; message: string } }).error
+        : null,
     };
   }
 
@@ -550,6 +563,17 @@ export class ErrandsService implements OnModuleInit {
         actorId: customer.id,
       });
       await this.scheduleTimers(errand!, settings);
+      // Still waiting after a while: the customer is asked whether to raise the fee (docs/matching.md, M8). Not
+      // for one scheduled for later, which waits on the board by design.
+      if (!errand!.scheduledFor || errand!.scheduledFor.getTime() <= Date.now()) {
+        const minutes = errand!.urgent
+          ? settings.timers.raisePricePromptMinutes
+          : settings.timers.boardRaisePromptMinutes;
+        await this.timers.schedule(
+          { errandId: errand!.id, event: 'raise_prompt', status: 'requested', version: errand!.version },
+          minutes * MINUTE_MS,
+        );
+      }
       return errand!;
     });
     // Moderation flags it for the Risk queue if it asks for cash or money sent, or ends where it starts (E5).
@@ -606,6 +630,7 @@ export class ErrandsService implements OnModuleInit {
       settlement: null as Settlement | null,
       agentLocation: null as { lat: number; lng: number; at: Date } | null,
       nearbyAgents: null as { count: number; radiusKm: number } | null,
+      search: null as { radiusKm: number; everyone: boolean } | null,
       prices: null as Prices | null,
       noMatch: false,
     };
@@ -633,6 +658,7 @@ export class ErrandsService implements OnModuleInit {
       [ending],
       agentLocation,
       nearby,
+      search,
       earns,
       settled,
       noMatch,
@@ -686,6 +712,12 @@ export class ErrandsService implements OnModuleInit {
             errand.customerId,
           )
         : Promise.resolve(null),
+      // An urgent errand's customer sees how far its search reaches (M8), never who was asked.
+      role === 'customer' && errand.status === 'requested' && errand.urgent
+        ? this.countries
+            .currentSettings(errand.countryCode)
+            .then(({ settings }) => this.offers.search(errand, settings.matching))
+        : Promise.resolve(null),
       role === 'agent' ? this.agentEarns(errand, errand.agentTier ?? 'bronze') : Promise.resolve(null),
       // Support can pay the agent on an errand it settles as cancelled, too.
       (completed || errand.status === 'cancelled') && role === 'agent'
@@ -713,6 +745,7 @@ export class ErrandsService implements OnModuleInit {
       settlement: settled,
       agentLocation,
       nearbyAgents: nearby === null ? null : { count: nearby, radiusKm: NEARBY_RADIUS_KM },
+      search,
       // Its own prices (its area's, kept when it was sent; the country's for one from before), for the apps'
       // lowest fee and service fee when the fee is raised or a new price offered.
       prices: errand.prices ?? countryPrices(await this.countries.errandSettings(errand)),
@@ -825,6 +858,11 @@ export class ErrandsService implements OnModuleInit {
     const outcome = await this.db.transaction(async (tx) => {
       const [errand] = await tx.select().from(errands).where(eq(errands.id, errandId)).for('update');
       const role = errand ? this.roleFor(errand, auth) : null;
+      // Too late: another agent has just accepted it (docs/matching.md, M7 and M8). Once under way, it's not found,
+      // as for any errand that isn't theirs.
+      if (errand && !role && input.event === 'accept' && auth.app === 'agent' && errand.status === 'accepted') {
+        if (errand.countryCode === auth.countryCode) throw conflict('errand_taken', 'This errand was taken');
+      }
       if (!errand || !role) throw notFound('errand_not_found', 'Errand not found');
       if (role === 'prospect' && input.event !== 'accept') throw notFound('errand_not_found', 'Errand not found');
       if (input.version !== undefined && input.version !== errand.version) {
@@ -902,6 +940,7 @@ export class ErrandsService implements OnModuleInit {
     // Offers' timers act on the offer, whatever the errand's version now (docs/matching.md, M6).
     if (job.event === 'offer_expire') return job.offerId ? this.offers.expire(job.offerId) : undefined;
     if (job.event === 'offer_dispatch') return this.offers.retry(job.errandId);
+    if (job.event === 'raise_prompt') return this.promptRaise(job);
     const money = await this.settingsOf(job.errandId);
     if (!money) return;
     const { settings } = money;
@@ -1116,9 +1155,15 @@ export class ErrandsService implements OnModuleInit {
           live.matching,
         );
         if (refused) throw this.eligibility.refusal(refused);
+        // Open to everyone once its search reached its last step (M8), but only within that step's radius.
+        const toEveryone = errand.urgent && live.matching.offers && errand.broadcastFeeKobo === errand.feeKobo;
+        if (toEveryone && pickupMeters > live.matching.searchStepsKm.at(-1)! * 1000) {
+          throw this.eligibility.refusal('too_far');
+        }
         // An urgent errand goes to the agent it is offered to, while the offer stands (docs/matching.md, M7):
-        // one conditional change, in this transaction, with the errand locked. With offers off, to anyone.
-        if (errand.urgent && live.matching.offers) {
+        // one conditional change, in this transaction, with the errand locked. Open to everyone, and with offers
+        // off: to the first who may take it.
+        if (errand.urgent && live.matching.offers && !toEveryone) {
           const [taken] = await tx
             .update(errandOffers)
             .set({ status: 'accepted', answeredAt: now })
@@ -1280,6 +1325,16 @@ export class ErrandsService implements OnModuleInit {
     if (!errand || errand.version !== job.version || errand.status !== 'photo_pending') return;
     if (errand.releasePausedAt || !errand.releaseDueAt) return;
     await this.notifier.remindRelease(errand, errand.releaseDueAt);
+  }
+
+  /**
+   * The errand still waits as it was sent, its fee never raised: the customer is asked to raise it, or keep waiting.
+   * Nothing is asked once anything changed (a raise, a new price, an agent), as the version then differs.
+   */
+  private async promptRaise(job: ErrandTimerJob) {
+    const [errand] = await this.db.select().from(errands).where(eq(errands.id, job.errandId));
+    if (!errand || errand.status !== 'requested' || errand.version !== job.version) return;
+    await this.notifier.raisePrompt(errand);
   }
 
   /**

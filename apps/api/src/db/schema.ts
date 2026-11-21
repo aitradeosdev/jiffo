@@ -622,6 +622,11 @@ export const errands = pgTable(
     /** The customer's service fee on the current fee. Locked in the fee escrow with it. */
     serviceFeeKobo: kobo('service_fee_kobo').notNull().default(0),
     pendingOfferKobo: kobo('pending_offer_kobo'),
+    /**
+     * An urgent errand whose search reached its last step at this fee (docs/matching.md, M8): open to every agent
+     * who may take it, the first to accept getting it. A raised fee starts the search again.
+     */
+    broadcastFeeKobo: kobo('broadcast_fee_kobo'),
     itemAmountKobo: kobo('item_amount_kobo'),
     scheduledFor: timestamp('scheduled_for', { withTimezone: true }),
     settingsVersion: integer('settings_version').notNull(),
@@ -746,6 +751,26 @@ export const errandOffers = pgTable(
     index('errand_offers_errand_idx').on(t.errandId, t.offeredAt),
     index('errand_offers_agent_idx').on(t.agentId, t.offeredAt),
   ],
+);
+
+/**
+ * Who was told of an urgent errand open to everyone (docs/matching.md, M8), at which fee: told once each, and told
+ * when it was taken. Kept with the offers for the offer log (M15).
+ */
+export const errandBroadcasts = pgTable(
+  'errand_broadcasts',
+  {
+    errandId: uuid('errand_id')
+      .notNull()
+      .references(() => errands.id),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => users.id),
+    feeKobo: kobo('fee_kobo').notNull(),
+    straightMeters: integer('straight_meters').notNull(),
+    toldAt: timestamp('told_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.errandId, t.feeKobo, t.agentId] })],
 );
 
 /* ---------- Chat ---------- */

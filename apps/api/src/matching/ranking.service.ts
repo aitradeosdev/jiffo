@@ -43,9 +43,9 @@ export class RankingService {
     private readonly redis: MatchingRedis,
   ) {}
 
-  /** `skip`: agents left out before the shortlist is drawn up (CandidatesService.forErrand). */
-  async ranked(errandId: string, skip?: ReadonlySet<string>): Promise<Ranked[]> {
-    const found = await this.candidates.forErrand(errandId, skip);
+  /** `skip` and `radiusKm`: who is left out, and how far to look (CandidatesService.forErrand). */
+  async ranked(errandId: string, skip?: ReadonlySet<string>, radiusKm?: number): Promise<Ranked[]> {
+    const found = await this.candidates.forErrand(errandId, skip, radiusKm);
     if (!found.length) return [];
     const [errand] = await this.db
       .select({ countryCode: errands.countryCode, stateCode: errands.stateCode })

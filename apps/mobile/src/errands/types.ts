@@ -71,6 +71,8 @@ export interface ErrandView {
   agentLocation?: { lat: number; lng: number; at: string } | null;
   /** Customer, while matching: how many agents are online near the pickup. */
   nearbyAgents?: { count: number; radiusKm: number } | null;
+  /** Customer, while an urgent errand waits: how far its search reaches, and whether it's open to everyone (M8). */
+  search?: { radiusKm: number; everyone: boolean } | null;
   /** Single errand view, once completed: how the hand-off happened. */
   completedBy?: 'pin' | 'photo' | 'auto' | 'support' | null;
 }

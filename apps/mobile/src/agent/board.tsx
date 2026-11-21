@@ -27,6 +27,8 @@ interface Board {
   hiddenByPreferences: number;
   /** How far it reaches for this agent: their work radius, within what Jiffo allows (an older API sends none). */
   reachKm?: number;
+  /** Why errands from the board are left out (they hold as many as they may): only urgent ones show then. */
+  full?: { code: string; message: string } | null;
 }
 interface Earnings {
   todayKobo: number;
@@ -90,7 +92,13 @@ export function AgentBoard() {
   useEffect(() => {
     if (located) void load();
   }, [located, load]);
-  // New errands don't arrive as live events yet, so the board checks every 20 seconds while in front.
+  // An urgent errand open to everyone near them now, or one they were told of taken or gone (M8): on or off
+  // the board at once.
+  useRealtimeEvent('errand.broadcast', () => void load());
+  useRealtimeEvent<{ errandId: string }>('errand.gone', ({ errandId }) =>
+    setBoard((now) => (now ? { ...now, errands: now.errands.filter((e) => e.id !== errandId) } : now)),
+  );
+  // New errands from the board don't arrive as live events yet, so it checks every 20 seconds while in front.
   useFocusEffect(
     useCallback(() => {
       void load();
@@ -200,6 +208,11 @@ export function AgentBoard() {
               <Chip label="Buying items" selected={sort === 'buy'} onPress={() => setSort('buy')} />
             </ScrollView>
             {error ? <Text tone="danger">{error}</Text> : null}
+            {board?.full ? (
+              <Text variant="sub" tone="ink3" accessibilityLiveRegion="polite">
+                {board.full.message} Urgent errands open to everyone still show here.
+              </Text>
+            ) : null}
             {board?.hiddenByPreferences ? (
               <Pressable
                 accessibilityRole="button"
