@@ -26,7 +26,6 @@ export const DEFAULT_SECURITY_SETTINGS = {
   lowProviderBalanceKobo: 50_000_000,
   handoffDistanceMeters: 200,
   offersPerMinute: 5,
-  maxActiveErrandsPerAgent: 0,
   positionFreshMinutes: 5,
   boardNearKm: 5,
   ownAccountTriesPerDay: 3,
@@ -47,6 +46,14 @@ export const DEFAULT_SECURITY_SETTINGS = {
   idRevealAlertAt: 10,
   staffHoursStart: 7,
   staffHoursEnd: 21,
+};
+
+/** The Matching group's starting values, also used for versions saved before the group existed (docs/matching.md). */
+export const DEFAULT_MATCHING_SETTINGS = {
+  locationFreshMinutes: 2,
+  boardRadiusKm: 10,
+  maxBoardErrands: 3,
+  fakeGpsHoldHours: 24,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -191,11 +198,9 @@ export const CountrySettingsSchema = z.object({
       handoffDistanceMeters: z.number().int().min(0).max(5_000).default(200),
       /** Counter-offers an agent may send on one errand in a minute. */
       offersPerMinute: z.number().int().min(1).max(60).default(5),
-      /** Errands one agent may hold at once, from accepted until done. 0 means no limit. */
-      maxActiveErrandsPerAgent: z.number().int().min(0).max(20).default(0),
       /**
-       * How recent the agent's reported position must be, for the board and the drop-off checks. At most 30:
-       * positions not refreshed for 30 minutes are deleted.
+       * How recent the agent's reported position must be for the drop-off checks. At most 30: positions not
+       * refreshed for 30 minutes are deleted. Matching has its own (matching.locationFreshMinutes).
        */
       positionFreshMinutes: minutes.max(30).default(5),
       /** How far from their own position an agent may look at the board. */
@@ -350,6 +355,30 @@ export const CountrySettingsSchema = z.object({
       signInRiskStepUpAt: z.number().int().min(1).max(20).default(2),
     })
     .default(() => structuredClone(DEFAULT_RISK_SETTINGS)),
+  /** Who may get an errand (docs/matching.md, M1). */
+  matching: z
+    .object({
+      /** How recent an agent's position must be for them to see errands or take one. */
+      locationFreshMinutes: minutes.max(30).default(2),
+      /** How far from the agent a pickup may be, on the board and when accepting. */
+      boardRadiusKm: z.number().int().min(1).max(50).default(10),
+      /**
+       * Errands from the board an agent may hold at once, scheduled ones taken ahead included. An urgent errand
+       * is always held alone.
+       */
+      maxBoardErrands: z.number().int().min(1).max(10).default(3),
+      /**
+       * How long an open fake-GPS flag on an agent keeps them from errands, unless staff clear it sooner, so a
+       * phone's glitch costs a day at most. 0: a flag doesn't hold them.
+       */
+      fakeGpsHoldHours: z
+        .number()
+        .int()
+        .min(0)
+        .max(24 * 7)
+        .default(24),
+    })
+    .default(() => structuredClone(DEFAULT_MATCHING_SETTINGS)),
   /** The emergency button (docs/security-plan.md, E9). */
   safety: z
     .object({
@@ -423,6 +452,7 @@ export const NIGERIA_DEFAULT_SETTINGS: CountrySettings = {
   topUps: { oneTimeAccount: true, fixedAccount: false },
   profiles: { showCustomerPhotoBeforeAccept: false },
   security: DEFAULT_SECURITY_SETTINGS,
+  matching: DEFAULT_MATCHING_SETTINGS,
   risk: DEFAULT_RISK_SETTINGS,
   safety: DEFAULT_SAFETY_SETTINGS,
 };
@@ -454,6 +484,8 @@ export function publicSettings(s: CountrySettings) {
     },
     /** What the emergency button dials (E9). */
     safety: { emergencyNumber: s.safety.emergencyNumber },
+    /** How far the agent's board reaches. */
+    matching: { boardRadiusKm: s.matching.boardRadiusKm },
   };
 }
 export type PublicSettings = ReturnType<typeof publicSettings>;

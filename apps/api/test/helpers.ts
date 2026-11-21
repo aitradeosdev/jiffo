@@ -20,6 +20,7 @@ import {
   admins,
   adminSessions,
   agentApplications,
+  agentPresence,
   agentSelfieChecks,
   customerVerifications,
   deposits,
@@ -364,8 +365,37 @@ export async function waitedAtDropoff(t: TestApp, errandId: string) {
 }
 
 /**
- * Sends an errand event. As an agent's phone would, it reports the drop-off position before the hand-off
- * steps, and a photo is sent only after the wait: tests of those rules call the API themselves.
+ * The agent is online at the errand's pickup, as their phone reported a moment ago: written straight to the
+ * table, so moving between tests' errands isn't taken for a GPS jump.
+ */
+export async function onlineAtPickup(t: TestApp, agent: Person, errandId: string) {
+  const [pickup] = await t.db
+    .select({ lat: errandStops.lat, lng: errandStops.lng, countryCode: errands.countryCode })
+    .from(errandStops)
+    .innerJoin(errands, eq(errands.id, errandStops.errandId))
+    .where(and(eq(errandStops.errandId, errandId), eq(errandStops.seq, 0)));
+  if (!pickup) return;
+  const now = new Date();
+  const place = {
+    countryCode: pickup.countryCode,
+    online: true,
+    lat: pickup.lat,
+    lng: pickup.lng,
+    location: sql`ST_SetSRID(ST_MakePoint(${pickup.lng}, ${pickup.lat}), 4326)::geography`,
+    locatedAt: now,
+    mocked: false,
+    updatedAt: now,
+  };
+  await t.db
+    .insert(agentPresence)
+    .values({ userId: agent.userId, ...place })
+    .onConflictDoUpdate({ target: agentPresence.userId, set: place });
+}
+
+/**
+ * Sends an errand event. As an agent's phone would, it is online at the pickup before accepting, reports the
+ * drop-off position before the hand-off steps, and sends a photo only after the wait: tests of those rules
+ * call the API themselves.
  */
 export async function act(
   t: TestApp,
@@ -375,6 +405,7 @@ export async function act(
   data: Record<string, unknown> = {},
   status = 200,
 ) {
+  if (event === 'accept') await onlineAtPickup(t, person, errandId);
   if (['mark_delivered', 'confirm_pin', 'send_dropoff_photo'].includes(event)) await atDropoff(t, person, errandId);
   if (event === 'send_dropoff_photo') await waitedAtDropoff(t, errandId);
   const res = await request(t.http).post(`/v1/errands/${errandId}/events`).set(person.headers).send({ event, data });

@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { decrypt } from '../src/common/crypto';
-import { agentPresence, errandEvents, errands } from '../src/db/schema';
+import { errandEvents, errands } from '../src/db/schema';
 import { WalletService } from '../src/money/wallet.service';
 import {
   act,
@@ -171,7 +171,7 @@ describe('the errand money path', () => {
   });
 
   describe('limits', () => {
-    it('reads the board’s distance and how recent a position must be from the settings', async () => {
+    it('reads how far from the agent the board may look from the settings', async () => {
       const agent = await signIn(t, 'agent');
       await request(t.http)
         .put('/v1/agent/presence')
@@ -189,18 +189,8 @@ describe('the errand money path', () => {
       try {
         await security({ boardNearKm: 1 });
         expect((await board()).body.error.code).toBe('not_here');
-        await security({ boardNearKm: before.boardNearKm });
-
-        // A position three minutes old counts under the default five, not under two.
-        await t.db
-          .update(agentPresence)
-          .set({ locatedAt: new Date(Date.now() - 3 * 60_000) })
-          .where(eq(agentPresence.userId, agent.userId));
-        expect((await board()).status).toBe(200);
-        await security({ positionFreshMinutes: 2 });
-        expect((await board()).body.error.code).toBe('location_needed');
       } finally {
-        await security({ boardNearKm: before.boardNearKm, positionFreshMinutes: before.positionFreshMinutes });
+        await security({ boardNearKm: before.boardNearKm });
       }
     });
 
@@ -212,20 +202,6 @@ describe('the errand money path', () => {
       });
       expect(res.status).toBe(422);
       expect(res.body.error).toMatchObject({ code: 'item_limit', limitKobo: 3_000_000 });
-    });
-
-    it('lets an agent hold only so many errands at once, as admin sets it now', async () => {
-      const customer = await signIn(t, 'customer');
-      await fund(t, customer, 5_000_000);
-      const agent = await signIn(t, 'agent');
-      const waiting = await Promise.all([0, 1, 2].map(() => createErrand(t, customer)));
-      // Set after the errands were made: it still applies to them.
-      await security({ maxActiveErrandsPerAgent: 2 });
-      for (const e of waiting.slice(0, 2)) await act(t, agent, e.id, 'accept');
-      const third = await event(agent, waiting[2]!.id, 'accept');
-      expect(third.status).toBe(409);
-      expect(third.body.error.code).toBe('too_many_errands');
-      await security({ maxActiveErrandsPerAgent: 0 });
     });
 
     it('takes no more than 5 counter-offers a minute on an errand', async () => {

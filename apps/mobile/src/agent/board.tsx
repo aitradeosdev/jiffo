@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSession } from '../auth/session';
-import { errorMessage } from '../api/client';
+import { ApiError, errorMessage } from '../api/client';
 import { useCountryConfig } from '../api/useCountryConfig';
 import { useResource } from '../api/useResource';
 import { useRealtimeEvent } from '../realtime/realtime';
@@ -32,7 +32,8 @@ interface Earnings {
 }
 type Sort = 'near' | 'fee' | 'buy';
 
-const RADIUS_KM = 10;
+/** How far the board reaches until the country's settings arrive, or from an older API. */
+const DEFAULT_RADIUS_KM = 10;
 const REFRESH_MS = 20_000;
 export const km = (m: number) => (m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`);
 
@@ -50,6 +51,8 @@ export function AgentBoard() {
   const mine = useResource<ErrandView[]>('/v1/errands?limit=10');
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { config } = useCountryConfig();
+  const radiusKm = config?.settings.matching?.boardRadiusKm ?? DEFAULT_RADIUS_KM;
   const [sort, setSort] = useState<Sort>('near');
   const [sheetHeight, setSheetHeight] = useState(0);
   const [areaHeight, setAreaHeight] = useState(0);
@@ -71,12 +74,14 @@ export function AgentBoard() {
     if (!presence.online || !here) return;
     const { lat, lng } = here;
     try {
-      setBoard(await api.get<Board>(`/v1/errands/board?lat=${lat}&lng=${lng}&radiusKm=${RADIUS_KM}`));
+      setBoard(await api.get<Board>(`/v1/errands/board?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}`));
       setError(null);
     } catch (e) {
+      // Refused (an urgent errand to finish, say): the errands shown before can't be taken now.
+      if (e instanceof ApiError) setBoard(null);
       setError(errorMessage(e));
     }
-  }, [api, presence.online]);
+  }, [api, presence.online, radiusKm]);
   // The first fix after going online loads the board straight away.
   const located = !!presence.coords;
   useEffect(() => {
@@ -169,7 +174,7 @@ export function AgentBoard() {
         ))}
 
         {online ? (
-          <OnlineHead onOffline={() => presence.setOnline(false)} busy={presence.switching} />
+          <OnlineHead onOffline={() => presence.setOnline(false)} busy={presence.switching} radiusKm={radiusKm} />
         ) : (
           <OfflineHead tier={earnings.data?.tier} />
         )}
@@ -215,7 +220,7 @@ export function AgentBoard() {
               <Empty
                 icon="search"
                 title="No errands right now"
-                body={`New errands within ${RADIUS_KM} km show here and on the map. This list updates by itself.`}
+                body={`New errands within ${radiusKm} km show here and on the map. This list updates by itself.`}
               />
             ) : null}
             <List inset={72}>
@@ -292,7 +297,7 @@ function OfflineHead({ tier }: { tier?: Earnings['tier'] }) {
   );
 }
 
-function OnlineHead({ onOffline, busy }: { onOffline: () => void; busy: boolean }) {
+function OnlineHead({ onOffline, busy, radiusKm }: { onOffline: () => void; busy: boolean; radiusKm: number }) {
   const c = useColors();
   return (
     <View style={styles.head}>
@@ -302,7 +307,7 @@ function OnlineHead({ onOffline, busy }: { onOffline: () => void; busy: boolean 
           You&apos;re online
         </Text>
         <Text variant="small" tone="ink3">
-          Errands within {RADIUS_KM} km of you
+          Errands within {radiusKm} km of you
         </Text>
       </View>
       <Button
