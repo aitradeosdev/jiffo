@@ -1,6 +1,16 @@
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { act, createErrand, createTestApp, fund, LAGOS_STOPS, signIn, type Person, type TestApp } from './helpers';
+import {
+  act,
+  adminAs,
+  createErrand,
+  createTestApp,
+  fund,
+  LAGOS_STOPS,
+  signIn,
+  type Person,
+  type TestApp,
+} from './helpers';
 
 const PICKUP = { lat: LAGOS_STOPS[0]!.lat, lng: LAGOS_STOPS[0]!.lng };
 
@@ -62,6 +72,10 @@ describe('matching choices', () => {
 
       await preferences(agent, { workRadiusKm: 5 }).expect(200);
       expect((await accept(agent, errand.id)).status).toBe(200);
+      // Support sees it, to tell why an agent misses errands.
+      const support = await adminAs(t, 'support');
+      const page = await request(t.http).get(`/v1/admin/people/${agent.userId}`).set(support.headers).expect(200);
+      expect(page.body.agent.workRadiusKm).toBe(5);
     });
 
     it('is 1 to 50 whole kilometres, or none for as far as Jiffo allows', async () => {
@@ -77,12 +91,19 @@ describe('matching choices', () => {
   });
 
   describe("Don't match me again", () => {
+    /** An errand the agent took and the customer then cancelled: ended, with both people on it. */
+    const ended = async (agent: Person, who = customer) => {
+      const errand = await createErrand(t, who);
+      await act(t, agent, errand.id, 'accept');
+      await act(t, who, errand.id, 'cancel');
+      return errand;
+    };
+
     it('lets a customer choose not to be matched with an agent again, and change their mind', async () => {
       const agent = await signIn(t, 'agent');
       const other = await signIn(t, 'agent');
       for (const a of [agent, other]) await online(a);
-      const first = await createErrand(t, customer);
-      await act(t, agent, first.id, 'accept');
+      const first = await ended(agent);
 
       expect((await noMatch(customer, first.id).expect(200)).body).toEqual({ noMatch: true });
       expect((await view(customer, first.id)).noMatch).toBe(true);
@@ -102,8 +123,7 @@ describe('matching choices', () => {
     it('lets an agent choose not to be matched with a customer again', async () => {
       const agent = await signIn(t, 'agent');
       await online(agent);
-      const first = await createErrand(t, customer);
-      await act(t, agent, first.id, 'accept');
+      const first = await ended(agent);
       await noMatch(agent, first.id).expect(200);
       expect((await view(agent, first.id)).noMatch).toBe(true);
       expect((await view(customer, first.id)).noMatch).toBe(false);
@@ -113,18 +133,47 @@ describe('matching choices', () => {
       expect((await accept(agent, next.id)).body.error.code).toBe('unavailable');
     });
 
-    it('is only for the two people on the errand, once both are on it', async () => {
+    it('is chosen once the errand has ended, when the people on it can no longer change', async () => {
       const errand = await createErrand(t, customer);
       // No agent yet: nobody to keep apart from.
       expect((await noMatch(customer, errand.id)).body.error.code).toBe('no_agent');
       const agent = await signIn(t, 'agent');
       await act(t, agent, errand.id, 'accept');
+      expect((await noMatch(customer, errand.id)).body.error.code).toBe('not_ended');
+      expect((await noMatch(agent, errand.id)).body.error.code).toBe('not_ended');
+      await act(t, customer, errand.id, 'cancel');
+      await noMatch(customer, errand.id).expect(200);
+    });
+
+    it('is only for the two people on the errand, and choosing it twice is one choice', async () => {
+      const agent = await signIn(t, 'agent');
+      const errand = await ended(agent);
       const stranger = await signIn(t, 'agent');
       await noMatch(stranger, errand.id).expect(404);
       await matchAgain(stranger, errand.id).expect(404);
-      // Choosing it twice is the same choice.
       await noMatch(customer, errand.id).expect(200);
       await noMatch(customer, errand.id).expect(200);
+      await matchAgain(customer, errand.id).expect(200);
+    });
+
+    it('counts for the customer only the agents nearby who could take their errand', async () => {
+      const solo = await signIn(t, 'customer');
+      await fund(t, solo, 5_000_000);
+      const [willing, short, apart] = [await signIn(t, 'agent'), await signIn(t, 'agent'), await signIn(t, 'agent')];
+      await noMatch(solo, (await ended(apart, solo)).id).expect(200);
+      const errand = await createErrand(t, solo);
+      const count = async () =>
+        (
+          (await request(t.http).get(`/v1/errands/${errand.id}`).set(solo.headers).expect(200)).body.nearbyAgents as {
+            count: number;
+          }
+        ).count;
+      const before = await count();
+      // About 2 km east of the pickup: inside the 3 km the customer is told about.
+      const east = { lat: PICKUP.lat, lng: PICKUP.lng + 0.018 };
+      for (const a of [willing, short, apart]) await online(a, east);
+      await preferences(short, { workRadiusKm: 1 }).expect(200);
+      expect(await count()).toBe(before + 1);
     });
   });
 });

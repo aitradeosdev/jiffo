@@ -11,7 +11,7 @@ import { useColors } from '@/theme/theme';
 import { fonts } from '@/theme/tokens';
 import { Button, Text } from '@/ui/kit';
 import { Chip, IconCircle, List, Row, Toggle } from '@/ui/parts';
-import { radiusChoices, radiusChosen, reachLabel } from '@/agent/radius';
+import { radiusChoices, radiusChosen, radiusNote, reachLabel } from '@/agent/radius';
 import { PageFooter, PageHeader } from '@/ui/floating';
 
 interface Profile {
@@ -143,7 +143,7 @@ export default function Preferences() {
             Errands whose pickup is further away don&apos;t reach you.
           </Text>
           <View style={styles.chips}>
-            {radiusChoices(allowedKm).map((km) => (
+            {radiusChoices(allowedKm, profile.data?.workRadiusKm ?? null).map((km) => (
               <Chip
                 key={km ?? 'any'}
                 label={reachLabel(km, allowedKm)}
@@ -152,6 +152,11 @@ export default function Preferences() {
               />
             ))}
           </View>
+          {radiusNote(radius, allowedKm) ? (
+            <Text variant="note" tone="ink3">
+              {radiusNote(radius, allowedKm)}
+            </Text>
+          ) : null}
         </View>
 
         <View style={[styles.buy, { backgroundColor: c.surface2 }]}>

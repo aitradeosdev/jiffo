@@ -530,10 +530,6 @@ export const agentProfiles = pgTable(
 );
 
 /**
- * Where an agent is and whether they take errands now. The agent app reports it while online or on an
- * errand; it is cleared when they go offline with nothing running, so a location is never kept longer.
- */
-/**
  * "Don't match me again" (docs/matching.md, M1): someone chose, on an errand they shared, never to be matched
  * with the other person. Matching keeps the two apart either way; the other person isn't told.
  */
@@ -559,6 +555,10 @@ export const matchBlocks = pgTable(
   ],
 );
 
+/**
+ * Where an agent is and whether they take errands now. The agent app reports it while online or on an
+ * errand; it is cleared when they go offline with nothing running, so a location is never kept longer.
+ */
 export const agentPresence = pgTable(
   'agent_presence',
   {

@@ -184,6 +184,7 @@ export class PeopleAdminService {
           tierSetBy: admins.name,
           categoryKeys: agentProfiles.categoryKeys,
           takesPurchases: agentProfiles.takesPurchases,
+          workRadiusKm: agentProfiles.workRadiusKm,
         })
         .from(agentProfiles)
         .leftJoin(admins, eq(admins.id, agentProfiles.tierSetBy))
@@ -286,6 +287,8 @@ export class PeopleAdminService {
             tierSetBy: profile[0]?.tierSetBy ?? null,
             categoryKeys: profile[0]?.categoryKeys ?? null,
             takesPurchases: profile[0]?.takesPurchases ?? true,
+            // How far they will travel to a pickup; null for as far as matching allows. Hides errands past it.
+            workRadiusKm: profile[0]?.workRadiusKm ?? null,
             online:
               !!presence[0]?.online &&
               !!presence[0].locatedAt &&

@@ -66,6 +66,8 @@ interface Detail {
     tierSetBy: string | null;
     categoryKeys: string[] | null;
     takesPurchases: boolean;
+    /** Absent from an older API. */
+    workRadiusKm?: number | null;
     online: boolean;
     lastLocatedAt: string | null;
     availableKobo: number;
@@ -391,6 +393,14 @@ export default async function PersonPage({
                 <div>
                   <dt className="text-ink-3">Buys items</dt>
                   <dd>{d.agent.takesPurchases ? 'Yes' : 'No'}</dd>
+                </div>
+                <div>
+                  <dt className="text-ink-3">Travels to pickups</dt>
+                  <dd>
+                    {d.agent.workRadiusKm
+                      ? `Up to ${d.agent.workRadiusKm} km`
+                      : 'As far as the Matching settings allow'}
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-ink-3">Payout account</dt>
