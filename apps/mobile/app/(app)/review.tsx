@@ -6,6 +6,7 @@ import { goBack } from '@/nav';
 import { FEE_STEP_KOBO, serviceFee } from '@jiffo/shared';
 import { useSession } from '@/auth/session';
 import { ApiError, errorMessage } from '@/api/client';
+import { outsideMessage, outsideStops } from '@/errands/outside';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { useResource } from '@/api/useResource';
 import { draftStops, useDraft } from '@/errands/draft';
@@ -32,6 +33,9 @@ export default function Review() {
   const wallet = useResource<{ balanceKobo: number }>('/v1/wallet');
   const [quote, setQuote] = useState<Quote | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The quote's answer when a stop is outside the areas where Jiffo works: those stops by position (empty when it
+  // doesn't say which). The errand can't be sent until they change.
+  const [outside, setOutside] = useState<number[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [sheetHeight, setSheetHeight] = useState(0);
@@ -52,27 +56,41 @@ export default function Review() {
   const points = JSON.stringify(stops.map(({ lat, lng }) => ({ lat, lng })));
   useEffect(() => {
     // The draft is cleared once the errand is sent, while this screen is still closing.
-    if (JSON.parse(points).length < 2) return;
+    const route = JSON.parse(points) as Array<{ lat: number; lng: number }>;
+    if (route.length < 2) return;
+    // Only the answer for these stops counts: one for stops changed since is dropped.
+    let current = true;
+    setQuote(null);
     setError(null);
+    setOutside(null);
     api
-      .post<Quote>('/v1/errands/quote', { stops: JSON.parse(points) })
-      .then(setQuote)
-      .catch((e) => setError(errorMessage(e)));
+      .post<Quote>('/v1/errands/quote', { stops: route })
+      .then((q) => {
+        if (current) setQuote(q);
+      })
+      .catch((e) => {
+        if (!current) return;
+        const where = outsideStops(e, route.length);
+        if (where) setOutside(where);
+        else setError(errorMessage(e));
+      });
+    return () => {
+      current = false;
+    };
   }, [api, points, attempt]);
 
   const ready = quote && config;
   const fee = ready ? (draft.feeKobo ?? quote.suggestedFeeKobo) : 0;
-  const service = ready ? serviceFee(fee, config.settings.fees) : 0;
+  // The service fee where the pickup is, for whatever fee the customer picks (the country's from an older API).
+  const service = ready ? serviceFee(fee, quote.prices ?? config.settings.fees) : 0;
   const held = fee + service;
   // Unknown until the wallet loads: never tell a funded customer they're short while it does.
   const balance = wallet.data?.balanceKobo ?? null;
   const short = balance === null ? 0 : Math.max(0, held - balance);
   const diff = quote ? fee - quote.suggestedFeeKobo : 0;
-  const stateCode = stops[0]?.stateCode ?? null;
   const canLower = !!quote && fee - FEE_STEP_KOBO >= quote.minFeeKobo;
 
   const request = async () => {
-    if (!stateCode) return setError("Jiffo isn't available at this pickup yet");
     // Checked again on tap: the time may have come too close since the screen last drew.
     if (staleSchedule(draft.scheduledFor)) return tick((n) => n + 1);
     setBusy(true);
@@ -80,7 +98,6 @@ export default function Review() {
     try {
       const errand = await api.post<ErrandView>('/v1/errands', {
         categoryKey: draft.categoryKey,
-        stateCode,
         description: draft.description.trim(),
         buy,
         urgent: draft.urgent,
@@ -125,7 +142,6 @@ export default function Review() {
       label={`${schedule ? 'Schedule errand' : 'Request agent'} · ${naira(held)}`}
       onPress={request}
       loading={busy}
-      disabled={!stateCode}
     />
   );
 
@@ -155,7 +171,14 @@ export default function Review() {
         </View>
 
         {!ready ? (
-          error ? (
+          outside ? (
+            <View style={{ gap: 12 }}>
+              <Text tone="danger" accessibilityLiveRegion="polite">
+                {outsideMessage(stops, outside)}
+              </Text>
+              <Button label="Change the stops" onPress={goBack} />
+            </View>
+          ) : error ? (
             <View style={{ gap: 12 }}>
               <Text tone="danger" accessibilityLiveRegion="polite">
                 {error}
@@ -246,7 +269,6 @@ export default function Review() {
                 The time you picked is less than 15 minutes away. Pick a new time, or send it now.
               </Text>
             ) : null}
-            {!stateCode ? <Text tone="danger">Jiffo isn&apos;t available at this pickup yet.</Text> : null}
             {error ? (
               <Text tone="danger" accessibilityLiveRegion="polite">
                 {error}

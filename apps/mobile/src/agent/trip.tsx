@@ -259,7 +259,8 @@ export function AgentTrip({ errand, actions }: { errand: ErrandView; actions: Ag
         visible={priceOpen}
         onClose={() => setPriceOpen(false)}
         errand={errand}
-        minFeeKobo={config?.settings.pricing.minFeeKobo ?? FEE_STEP_KOBO}
+        // The errand's own lowest fee (its area's, kept from when it was sent), as the server checks.
+        minFeeKobo={errand.prices?.minFeeKobo ?? config?.settings.pricing.minFeeKobo ?? FEE_STEP_KOBO}
         onSend={async (amountKobo) => {
           if (await act('send_offer', { amountKobo })) setPriceOpen(false);
         }}

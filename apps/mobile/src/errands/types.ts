@@ -14,6 +14,8 @@ export interface ErrandView {
   id: string;
   status: ErrandState;
   version: number;
+  /** Its own prices, kept from when it was sent (the single errand view; an older API sends none). */
+  prices?: ErrandPrices | null;
   categoryKey: string;
   buy: boolean;
   urgent: boolean;
@@ -71,12 +73,24 @@ export interface ErrandView {
   completedBy?: 'pin' | 'photo' | 'auto' | 'support' | null;
 }
 
+/** The prices an errand is priced with, where its pickup is (its area's, city's or state's, else the country's). */
+export interface ErrandPrices {
+  baseFeeKobo: number;
+  ratePerKmKobo: number;
+  minFeeKobo: number;
+  serviceFeeBps: number;
+  serviceFeeMinKobo: number;
+  serviceFeeCapKobo: number;
+}
+
 export interface Quote {
   distanceMeters: number;
   durationSeconds: number;
   suggestedFeeKobo: number;
   minFeeKobo: number;
   serviceFeeKobo: number;
+  /** The prices where the pickup is: an older API sends none, and the country's apply. */
+  prices?: ErrandPrices;
 }
 
 export interface PlacePick {
@@ -85,8 +99,12 @@ export interface PlacePick {
   address: string;
   lat: number;
   lng: number;
-  /** The state the place is in, when Jiffo is live there. */
+  /**
+   * The state the place is in, when Jiffo works there (inside one of its areas); null otherwise, or for a place from a
+   * past errand, which is checked again when the errand is priced.
+   */
   stateCode: string | null;
+  areaId?: string | null;
 }
 
 /** The prototype's five steps; the third reads "On the way" when nothing is bought. */

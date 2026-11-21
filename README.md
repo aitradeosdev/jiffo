@@ -138,7 +138,7 @@ pnpm build
 cd apps/api && set -a && . ./.env && set +a && pnpm start
 ```
 
-The API listens on port 3000. `RUN_MIGRATIONS=true` applies the database migrations at start-up, including the Nigeria seed: 37 states, 8 categories and the first settings version. Errands are taken only inside areas drawn in the admin panel (Places). To try the apps before drawing any, add one area covering all of Lagos, for development only:
+The API listens on port 3000. `RUN_MIGRATIONS=true` applies the database migrations at start-up, including the Nigeria seed: 37 states, 8 categories and the first settings version. Errands are taken only inside areas drawn in the admin panel (Places), each of which can set its own prices. In the customer app, a place outside them is refused when picked, naming it, and the errand is priced where its pickup is. To try the apps before drawing any, add one area covering all of Lagos, for development only:
 
 ```bash
 cd apps/api && pnpm build && set -a && . ./.env && set +a && pnpm admin dev-areas
