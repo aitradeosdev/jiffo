@@ -316,7 +316,8 @@ describe('money', () => {
       await act(t, buyer, errand.id, 'release_agent');
       expect((await balanceOf(t, buyer)).balanceKobo).toBe(1_000_000);
 
-      await act(t, agent, errand.id, 'accept');
+      // The replaced agent can't take it again: another does.
+      await act(t, await signIn(t, 'agent'), errand.id, 'accept');
       await act(t, buyer, errand.id, 'cancel');
       expect((await balanceOf(t, buyer)).balanceKobo).toBe(1_000_000);
       const history = await request(t.http).get('/v1/wallet/transactions').set(buyer.headers).expect(200);

@@ -1,7 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { and, desc, eq, gt, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import {
-  AGENT_OUT_STATES,
   canRevealPin,
   commissionBpsFor,
   splitFeeEscrow,
@@ -17,6 +16,10 @@ import {
   type ErrandEvent,
   type ErrandState,
   DEFAULT_SECURITY_SETTINGS,
+  DEFAULT_MATCHING_SETTINGS,
+  heldRefusal,
+  matchRefusal,
+  type MatchErrand,
 } from '@jiffo/shared';
 import type { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
@@ -35,7 +38,8 @@ import { AgentsService } from '../agents/agents.service';
 import { PresenceService, SHARE_STATES, TRAVEL_STATES } from '../agents/presence.service';
 import { AgentApplicationService } from '../agents/application.service';
 import { CustomerIdentityService } from '../identity/customer-identity.service';
-import { MAPS, type MapsAdapter } from '../adapters/maps';
+import { haversineMeters, MAPS, type MapsAdapter } from '../adapters/maps';
+import { EligibilityService } from '../matching/eligibility.service';
 import { UploadsService } from '../files/uploads.service';
 import { RiskFlagsService } from '../risk/risk-flags.service';
 import { EvidenceService } from './evidence.service';
@@ -150,7 +154,26 @@ export class ErrandsService implements OnModuleInit {
     private readonly customerIdentity: CustomerIdentityService,
     private readonly risk: RiskFlagsService,
     private readonly evidence: EvidenceService,
+    private readonly eligibility: EligibilityService,
   ) {}
+
+  /** An errand as matching checks it for this agent (docs/matching.md, M1). */
+  private matchErrand(
+    errand: ErrandRow,
+    pickupMeters: number,
+    agentId: string,
+    facts: { pairs: Set<string>; gaveUp: Set<string> },
+  ): MatchErrand {
+    return {
+      customerId: errand.customerId,
+      urgent: errand.urgent,
+      categoryKey: errand.categoryKey,
+      buy: errand.buy,
+      pickupMeters,
+      pairFlagged: agentId !== errand.customerId && facts.pairs.has(errand.customerId),
+      gaveUp: facts.gaveUp.has(errand.id),
+    };
+  }
 
   onModuleInit() {
     this.timers.setHandler((job) => this.applyTimer(job));
@@ -237,61 +260,59 @@ export class ErrandsService implements OnModuleInit {
     });
   }
 
-  /** Open errands whose pickup is within the radius, nearest first. */
+  /**
+   * The open errands near the agent that they may take (docs/matching.md, M1): nearest first, then newest. The
+   * same check runs again when they accept.
+   */
   async board(auth: AuthContext, q: { lat: number; lng: number; radiusKm: number; limit: number }) {
-    // Only around where the agent's phone last said they are, so the board can't be asked about any place:
-    // the search is centred there, and the place the app asks about must be close to it.
-    const [, current, { rows: positions }] = await Promise.all([
+    const [, current] = await Promise.all([
       this.applications.assertApproved(auth.userId),
       this.countries.currentSettingsIfAny(auth.countryCode),
-      this.db.execute<{
-        at: Date | string | null;
-        lat: number | null;
-        lng: number | null;
-        km: number | string | null;
-        mocked: boolean;
-      }>(
-        sql`
-          select located_at as at, lat, lng, mocked,
-            ST_Distance(location, ST_SetSRID(ST_MakePoint(${q.lng}, ${q.lat}), 4326)::geography) / 1000 as km
-          from agent_presence where user_id = ${auth.userId} and location is not null`,
-      ),
     ]);
     // A country with no settings saved yet keeps the starting rules (and has no errands to show).
     const security = current?.settings.security ?? DEFAULT_SECURITY_SETTINGS;
-    const at = positions[0];
-    if (!at || at.lat === null || at.lng === null || !freshWithin(at.at, security.positionFreshMinutes)) {
-      throw conflict('location_needed', 'Turn on location to see errands near you');
-    }
-    // A mocked position (MB4) shows no errands: it says nothing about where the agent is.
-    if (at.mocked) throw unprocessable('mock_location', 'Turn off mock location to see errands near you');
-    if (Number(at.km) > security.boardNearKm) {
+    const rules = current?.settings.matching ?? DEFAULT_MATCHING_SETTINGS;
+    const me = await this.eligibility.agent(auth.userId, rules);
+    // Only around where the agent's phone last said they are, so the board can't be asked about any place:
+    // the search is centred there, and the place the app asks about must be close to it.
+    if (haversineMeters(me, q) > security.boardNearKm * 1000) {
       throw unprocessable('not_here', 'The board shows errands near where you are');
     }
-    // Only errands in the agent's chosen categories, and purchase errands only if they take them.
-    const [prefs, tier] = await Promise.all([this.agents.profile(auth.userId), this.agents.tier(auth.userId)]);
-    const here = sql`ST_SetSRID(ST_MakePoint(${at.lng}, ${at.lat}), 4326)::geography`;
+    // What the errands the agent holds leave room for: errands from the board, urgent ones, both, or neither,
+    // when the board says why.
+    const boardFull = heldRefusal(me.held, false, rules);
+    const urgentFull = heldRefusal(me.held, true, rules);
+    if (boardFull && urgentFull) throw this.eligibility.refusal(boardFull);
+    const tier = await this.agents.tier(auth.userId);
+    const here = sql`ST_SetSRID(ST_MakePoint(${me.lng}, ${me.lat}), 4326)::geography`;
     const distance = sql<number>`ST_Distance(${errandStops.location}, ${here})`;
+    const reach = Math.min(q.radiusKm, rules.boardRadiusKm) * 1000;
     const open = and(
       eq(errands.status, 'requested'),
       eq(errands.countryCode, auth.countryCode),
       ne(errands.customerId, auth.userId),
-      sql`ST_DWithin(${errandStops.location}, ${here}, ${q.radiusKm * 1000})`,
+      sql`ST_DWithin(${errandStops.location}, ${here}, ${reach})`,
     );
-    const filtered = !!prefs.categoryKeys || !prefs.takesPurchases;
+    // Only errands in the agent's chosen categories, and purchase errands only if they take them.
+    const filtered = !!me.categoryKeys || !me.takesPurchases;
     const wanted = and(
       open,
-      prefs.categoryKeys ? inArray(errands.categoryKey, prefs.categoryKeys) : undefined,
-      prefs.takesPurchases ? undefined : eq(errands.buy, false),
+      me.categoryKeys ? inArray(errands.categoryKey, me.categoryKeys) : undefined,
+      me.takesPurchases ? undefined : eq(errands.buy, false),
+    );
+    // Left out in the query, so the limit counts only errands the agent may take.
+    const allowed = and(
+      boardFull ? eq(errands.urgent, true) : urgentFull ? eq(errands.urgent, false) : undefined,
+      this.eligibility.boardExclusions(auth.userId),
     );
     const pickupOf = and(eq(errandStops.errandId, errands.id), eq(errandStops.seq, 0));
-    const [rows, counts] = await Promise.all([
+    const [found, counts] = await Promise.all([
       this.db
         .select({ errand: errands, distanceMeters: distance })
         .from(errands)
         .innerJoin(errandStops, pickupOf)
-        .where(wanted)
-        .orderBy(distance)
+        .where(and(wanted, allowed))
+        .orderBy(distance, desc(errands.createdAt))
         .limit(q.limit),
       // How many nearby errands the agent's preferences leave out, so the board can say so.
       filtered
@@ -305,6 +326,13 @@ export class ErrandsService implements OnModuleInit {
             .where(open)
         : Promise.resolve([{ all: 0, wanted: 0 }]),
     ]);
+    const facts = await this.eligibility.facts(
+      auth.userId,
+      found.map((r) => ({ id: r.errand.id, customerId: r.errand.customerId })),
+    );
+    const rows = found.filter(
+      (r) => !matchRefusal(me, this.matchErrand(r.errand, Number(r.distanceMeters), auth.userId, facts), rules),
+    );
     const views = await this.views(
       rows.map((r) => r.errand),
       () => 'prospect',
@@ -1056,17 +1084,20 @@ export class ErrandsService implements OnModuleInit {
         if (agent?.status !== 'active')
           throw forbidden('account_suspended', 'This account is suspended. Contact support.');
         if (!agent.firstName) throw conflict('profile_incomplete', 'Add your name before accepting errands');
-        const cap = live.security.maxActiveErrandsPerAgent;
-        if (cap > 0) {
-          // One accept at a time per agent, so the cap on errands held at once can't be raced.
-          await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'agent-accept:' + auth.userId}))`);
-          const [held] = await tx
-            .select({ n: sql<number>`count(*)::int` })
-            .from(errands)
-            .where(and(eq(errands.agentId, auth.userId), inArray(errands.status, [...AGENT_OUT_STATES])));
-          if ((held?.n ?? 0) >= cap)
-            throw conflict('too_many_errands', 'Finish an errand you have before taking another');
-        }
+        // One accept at a time per agent, so the errands they hold can't be raced past the rules.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'agent-accept:' + auth.userId}))`);
+        // The same check as the board's, as matching rules stand now (docs/matching.md, M1).
+        const me = await this.eligibility.agent(auth.userId, live.matching, tx);
+        const { rows: pickup } = await tx.execute<{ meters: number | string }>(sql`
+          select ST_Distance(location, ST_SetSRID(ST_MakePoint(${me.lng}, ${me.lat}), 4326)::geography) as meters
+          from errand_stops where errand_id = ${errand.id} and seq = 0`);
+        const facts = await this.eligibility.facts(auth.userId, [errand], tx);
+        const refused = matchRefusal(
+          me,
+          this.matchErrand(errand, Number(pickup[0]?.meters ?? Infinity), auth.userId, facts),
+          live.matching,
+        );
+        if (refused) throw this.eligibility.refusal(refused);
         const pin = numericCode(4);
         const key = errandPinKey(this.config.PIN_KEY, errand.id);
         return {

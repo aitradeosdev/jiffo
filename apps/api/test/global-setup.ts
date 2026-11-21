@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Client, Pool } from 'pg';
+import { DEFAULT_MATCHING_SETTINGS } from '@jiffo/shared';
 import { addDevLagos } from '../src/countries/service-areas';
 import type { Db } from '../src/db/database.module';
 import { runMigrations } from '../src/db/migrate';
@@ -24,6 +25,15 @@ export default async function setup() {
   // Errands are taken only inside drawn areas: the tests' Lagos places are in one covering the whole state.
   const pool = new Pool({ connectionString: url.toString() });
   await addDevLagos(drizzle(pool, { schema }) as unknown as Db);
+  // A file's tests share agents who take errands without finishing them all, and move them across Lagos in an
+  // instant: they may hold as many errands as the settings allow, and a GPS flag doesn't hold them. Matching's
+  // own tests set its real values.
+  await pool.query(
+    `insert into settings_versions (country_code, version, data)
+     select country_code, version + 1, jsonb_set(data, '{matching}', $1::jsonb)
+     from settings_versions where country_code = 'NG' order by version desc limit 1`,
+    [JSON.stringify({ ...DEFAULT_MATCHING_SETTINGS, maxBoardErrands: 10, fakeGpsHoldHours: 0 })],
+  );
   await pool.end();
 
   Object.assign(process.env, {

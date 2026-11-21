@@ -112,20 +112,21 @@ describe('chat, realtime and push', () => {
     expect((await send(customer, errand.id, 'hello').expect(409)).body.error.code).toBe('chat_closed');
   });
 
-  it('shows the customer the current agent’s chat when an earlier agent comes back', async () => {
+  it('shows the customer the current agent’s chat after a change of agent, and not the last one’s', async () => {
+    // An agent replaced on an errand never takes it again (docs/matching.md, M1): each new agent starts afresh.
     const errand = await createErrand(t, customer);
     const second = await signIn(t, 'agent');
     await act(t, agent, errand.id, 'accept');
+    await send(customer, errand.id, 'For the first agent').expect(201);
     await act(t, customer, errand.id, 'release_agent');
     await act(t, second, errand.id, 'accept');
-    await act(t, customer, errand.id, 'release_agent');
-    await act(t, agent, errand.id, 'accept');
 
     const res = await list(customer, errand.id).expect(200);
     expect(res.body.conversation.open).toBe(true);
-    await send(customer, errand.id, 'Welcome back').expect(201);
-    const seen = await list(agent, errand.id).expect(200);
-    expect(seen.body.messages.map((m: { body: string }) => m.body)).toContain('Welcome back');
+    await send(customer, errand.id, 'Welcome').expect(201);
+    const seen = (await list(second, errand.id).expect(200)).body.messages.map((m: { body: string }) => m.body);
+    expect(seen).toContain('Welcome');
+    expect(seen).not.toContain('For the first agent');
   });
 
   it('keeps chat to the errand’s own people', async () => {

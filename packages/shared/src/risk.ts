@@ -58,7 +58,10 @@ export const RISK_QUEUE_INFO: Record<RiskQueue, { label: string; permission: 'ri
   verification: { label: 'Verification', permission: 'verify' },
 };
 
-/** Why something was flagged. A flag asks a person to look; it never refuses anything by itself. */
+/**
+ * Why something was flagged. A flag asks a person to look; it refuses nothing by itself, except in matching:
+ * a customer and an agent flagged together aren't matched, and an agent flagged for faked GPS waits a while.
+ */
 export const RISK_FLAG_KINDS = [
   'cash_errand',
   'send_money',
@@ -77,6 +80,33 @@ export const RISK_FLAG_KINDS = [
   'risky_sign_in',
 ] as const;
 export type RiskFlagKind = (typeof RISK_FLAG_KINDS)[number];
+
+/**
+ * Flags that link a customer and an agent (E6): while one is open or confirmed, matching keeps the two apart
+ * (docs/matching.md, M1). Only a flag staff cleared lets them be matched again.
+ */
+export const PAIR_FLAG_KINDS = [
+  'pair_shared_phone',
+  'pair_shared_bank',
+  'pair_shared_network',
+  'shared_phone',
+  'shared_payout_account',
+  'same_face',
+] as const satisfies readonly RiskFlagKind[];
+
+/**
+ * Flags that link a customer and an agent but keep them apart only once staff confirm them: working together
+ * often is also what a regular customer and their local agent do, and one errand that looked unusual says
+ * less than a phone, bank account or face they share.
+ */
+export const CONFIRMED_PAIR_FLAG_KINDS = [
+  'repeat_pairing',
+  'no_movement',
+  'fast_high_value',
+] as const satisfies readonly RiskFlagKind[];
+
+/** Flags that an agent's GPS was faked (G1): until staff clear one, it keeps them from errands for a while (M1). */
+export const FAKE_GPS_FLAG_KINDS = ['gps_jump', 'gps_straight'] as const satisfies readonly RiskFlagKind[];
 
 export const RISK_FLAG_INFO: Record<RiskFlagKind, { queue: RiskQueue; label: string; about: string }> = {
   cash_errand: {

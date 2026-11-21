@@ -230,16 +230,10 @@ export const SECTIONS: Section[] = [
         kind: 'count',
       },
       {
-        path: 'security.maxActiveErrandsPerAgent',
-        label: 'Errands one agent may hold at once',
-        kind: 'count',
-        help: 'From accepted until done. 0 means no limit.',
-      },
-      {
         path: 'security.positionFreshMinutes',
         label: "Agent's position counts for",
         kind: 'minutes',
-        help: 'An older position is not used for the board or the drop-off checks. At most 30.',
+        help: 'An older position is not used for the drop-off checks. At most 30. Matching has its own.',
       },
       {
         path: 'security.boardNearKm',
@@ -373,9 +367,40 @@ export const SECTIONS: Section[] = [
     ],
   },
   {
+    title: 'Matching',
+    about:
+      'Who may get an errand. Agents see on the board, and may accept, only errands that pass these checks: online, where they are, near enough, in their categories, and with room for it.',
+    fields: [
+      {
+        path: 'matching.locationFreshMinutes',
+        label: "Agent's position counts for",
+        kind: 'minutes',
+        help: 'An agent whose phone last reported longer ago sees no errands and can take none. At most 30.',
+      },
+      {
+        path: 'matching.boardRadiusKm',
+        label: 'Pickups this far from the agent, at most',
+        kind: 'count',
+        help: 'In kilometres, in a straight line, on the board and when accepting.',
+      },
+      {
+        path: 'matching.maxBoardErrands',
+        label: 'Errands from the board one agent may hold at once',
+        kind: 'count',
+        help: 'Scheduled errands taken ahead count. An urgent errand is always held alone.',
+      },
+      {
+        path: 'matching.fakeGpsHoldHours',
+        label: 'A fake-GPS flag keeps the agent from errands for',
+        kind: 'hours',
+        help: 'From when it was raised, unless staff clear it sooner. 0: the flag alone keeps no one off.',
+      },
+    ],
+  },
+  {
     title: 'Risk flags',
     about:
-      'When errands go to the Risk queue for a person to look at. A flag refuses nothing; staff decide, and flagged errands leave the counts used for agent tiers until cleared.',
+      'When errands go to the Risk queue for a person to look at. Staff decide, and flagged errands leave the counts used for agent tiers until cleared. A customer and an agent who share a phone, bank account, network or face are not matched until staff clear the flag. Working together often, or one errand that looked unusual, keeps them apart only once confirmed.',
     fields: [
       {
         path: 'risk.samePlaceMeters',
