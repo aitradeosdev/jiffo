@@ -9,7 +9,8 @@ import { useResource } from '@/api/useResource';
 import { useRealtimeEvent } from '@/realtime/realtime';
 import { useDraft } from '@/errands/draft';
 import { LiveCard } from '@/errands/live-card';
-import { isActive, type ErrandView, type PlacePick } from '@/errands/types';
+import { recentPlaces } from '@/errands/past';
+import { isActive, type ErrandView } from '@/errands/types';
 import { liveSchedule, whenLabel } from '@/errands/when';
 import { useCurrentLocation } from '@/location';
 import { naira } from '@/money';
@@ -251,31 +252,6 @@ function WhereTo({ when, onPress }: { when: string; onPress: () => void }) {
       </Pressable>
     </Pressable>
   );
-}
-
-/** The last two different places from past errands, kept as the kind of stop they were. */
-function recentPlaces(errands: ErrandView[]) {
-  const seen = new Set<string>();
-  const out: Array<{ kind: 'pickup' | 'dropoff'; place: PlacePick }> = [];
-  for (const e of errands) {
-    for (const s of [...e.stops].reverse()) {
-      if (s.kind === 'stop' || seen.has(s.address)) continue;
-      seen.add(s.address);
-      out.push({
-        kind: s.kind,
-        place: {
-          placeId: `recent:${s.lat},${s.lng}`,
-          name: s.label ?? s.address,
-          address: s.address,
-          lat: s.lat,
-          lng: s.lng,
-          stateCode: e.stateCode,
-        },
-      });
-      if (out.length === 2) return out;
-    }
-  }
-  return out;
 }
 
 const styles = StyleSheet.create({

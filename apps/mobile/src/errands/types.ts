@@ -99,7 +99,10 @@ export interface PlacePick {
   address: string;
   lat: number;
   lng: number;
-  /** The state the place is in, when Jiffo works there (inside one of its areas); null otherwise. */
+  /**
+   * The state the place is in, when Jiffo works there (inside one of its areas); null otherwise, or for a place from a
+   * past errand, which is checked again when the errand is priced.
+   */
   stateCode: string | null;
   areaId?: string | null;
 }

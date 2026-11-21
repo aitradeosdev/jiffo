@@ -7,6 +7,7 @@ import { Button, Text } from '@/ui/kit';
 import { IconCircle } from '@/ui/parts';
 import { PageFooter, PageHeader } from '@/ui/floating';
 import { useDraft } from './draft';
+import { pastPlace } from './past';
 import type { ErrandView, PlacePick } from './types';
 
 /** A cancelled errand, or one no agent took: what happened to the money, and a quick way to try again. */
@@ -14,18 +15,10 @@ export function EndedErrand({ errand }: { errand: ErrandView }) {
   const c = useColors();
   const { reset } = useDraft();
   const expired = errand.status === 'expired';
+  // Checked again when the errand is priced: an area may have been switched off since.
   const place = (kind: 'pickup' | 'stop' | 'dropoff'): PlacePick | null => {
     const s = errand.stops.find((x) => x.kind === kind);
-    return s
-      ? {
-          placeId: `errand:${errand.id}:${s.seq}`,
-          name: s.label ?? s.address,
-          address: s.address,
-          lat: s.lat,
-          lng: s.lng,
-          stateCode: errand.stateCode,
-        }
-      : null;
+    return s ? pastPlace(s, `errand:${errand.id}:${s.seq}`) : null;
   };
   const again = () => {
     reset({
