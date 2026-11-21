@@ -31,7 +31,7 @@ export const PROVIDER_CATEGORY_INFO: Record<ProviderCategory, { label: string; a
   maps: {
     label: 'Maps',
     about:
-      'Place search and driving distances for prices, from Google Maps or Mapbox. It doesn\'t change the map the apps draw.',
+      "Place search and driving distances for prices, from Google Maps or Mapbox. It doesn't change the map the apps draw.",
   },
   storage: {
     label: 'File storage',
