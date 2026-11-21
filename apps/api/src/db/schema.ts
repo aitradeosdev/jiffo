@@ -587,6 +587,8 @@ export const agentPresence = pgTable(
      * themselves puts them back, not their app still reporting online.
      */
     offlineReason: text('offline_reason', { enum: OFFLINE_REASONS }),
+    /** No one-at-a-time offers until then, for a low acceptance rate (M9); the board and everyone-at-once still work. */
+    offersPausedUntil: timestamp('offers_paused_until', { withTimezone: true }),
     updatedAt: updatedAt(),
   },
   (t) => [index('agent_presence_location_gix').using('gist', t.location)],
@@ -737,6 +739,11 @@ export const errandOffers = pgTable(
     /** The travel time was estimated, not from the maps provider. */
     travelEstimated: boolean('travel_estimated').notNull(),
     straightMeters: integer('straight_meters').notNull(),
+    /**
+     * Counts toward the agent's acceptance rate (M9): not when the pickup was far, nor in their first minutes
+     * online, so declining those is free, as the offer screen says.
+     */
+    counts: boolean('counts').notNull().default(true),
     offeredAt: timestamp('offered_at', { withTimezone: true }).notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     answeredAt: timestamp('answered_at', { withTimezone: true }),

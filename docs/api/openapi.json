@@ -5560,6 +5560,31 @@
         ]
       }
     },
+    "/v1/agent/standing": {
+      "get": {
+        "operationId": "StandingController.standing",
+        "tags": [
+          "Standing"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default",
+        "x-apps": [
+          "agent"
+        ]
+      }
+    },
     "/v1/attestation/apple-key": {
       "post": {
         "operationId": "AttestationController.appleKey",

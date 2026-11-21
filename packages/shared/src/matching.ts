@@ -173,3 +173,43 @@ export function searchRadiusKm(offersMade: number, farthestMeters: number | null
   const reached = farthestMeters === null ? 0 : (rules.searchStepsKm.find((km) => km * 1000 >= farthestMeters) ?? last);
   return Math.max(step, reached);
 }
+
+type AcceptanceRules = Pick<
+  CountrySettings['matching'],
+  'freeDeclineKm' | 'freeDeclineMinutes' | 'pauseBelowBps' | 'acceptanceMinOffers'
+>;
+
+/**
+ * Whether an offer counts toward the agent's acceptance rate (docs/matching.md, M9): not one whose pickup is far,
+ * nor one in the first minutes after going online, so declining those is free. Offers to everyone at once never
+ * count, and are kept apart.
+ */
+export function offerCounts(
+  offer: { straightMeters: number; offeredAt: Date; onlineSince: Date | null },
+  rules: Pick<AcceptanceRules, 'freeDeclineKm' | 'freeDeclineMinutes'>,
+): boolean {
+  if (offer.straightMeters > rules.freeDeclineKm * 1000) return false;
+  if (!offer.onlineSince) return false;
+  return offer.offeredAt.getTime() - offer.onlineSince.getTime() >= rules.freeDeclineMinutes * 60_000;
+}
+
+/**
+ * Whether a low acceptance rate pauses the agent's offers now (M9): only where admin set a level, after enough
+ * counted offers, and only below it, compared in whole numbers so a rate exactly at the level never is.
+ */
+export function pausesOffers(
+  offers: { taken: number; answered: number },
+  rules: Pick<AcceptanceRules, 'pauseBelowBps' | 'acceptanceMinOffers'>,
+): boolean {
+  if (rules.pauseBelowBps === null || offers.answered < rules.acceptanceMinOffers) return false;
+  return offers.taken * 10_000 < rules.pauseBelowBps * offers.answered;
+}
+
+/**
+ * A state's reliability, for agents with too little history of their own (M4): its completion and acceptance
+ * rates together, as an agent's own are, so neither newcomers nor the established gain from the difference.
+ */
+export function averageReliability(rates: { completion: number | null; acceptance: number | null }): number {
+  const known = [rates.completion, rates.acceptance].filter((r): r is number => r !== null);
+  return known.length ? known.reduce((a, b) => a + b, 0) / known.length : 1;
+}

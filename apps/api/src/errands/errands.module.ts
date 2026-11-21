@@ -10,13 +10,13 @@ import { MatchBlocksController } from '../matching/match-blocks.controller';
 import { MatchBlocksService } from '../matching/match-blocks.service';
 import { CandidatesService } from '../matching/candidates.service';
 import { RankingService } from '../matching/ranking.service';
-import { OffersController } from '../matching/offers.controller';
+import { OffersController, StandingController } from '../matching/offers.controller';
 import { OffersService } from '../matching/offers.service';
 import { ERRANDS } from './errands.token';
 
 @Module({
   imports: [ChatModule],
-  controllers: [ErrandsController, MatchBlocksController, OffersController],
+  controllers: [ErrandsController, MatchBlocksController, OffersController, StandingController],
   providers: [
     ErrandsService,
     ErrandNotifier,

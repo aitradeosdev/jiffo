@@ -21,7 +21,9 @@ export type FieldKind =
   /** Whole hours, several, typed with commas between them: 2, 12, 20. */
   | 'hoursList'
   /** Distances in km, several, typed with commas between them: 3, 6, 10 (one decimal place at most). */
-  | 'kmList';
+  | 'kmList'
+  /** One distance in km, one decimal place at most. */
+  | 'km';
 
 export interface Field {
   path: string;
@@ -493,6 +495,40 @@ export const SECTIONS: Section[] = [
         help: 'So errands sent about the same time in a state are matched together: as many as can get an agent, then the best total. 1 to 30 seconds.',
       },
       {
+        path: 'matching.freeDeclineKm',
+        label: 'Offers further than this away are free to decline',
+        kind: 'km',
+        help: "They don't count toward the agent's acceptance rate, and the offer screen says so.",
+      },
+      {
+        path: 'matching.freeDeclineMinutes',
+        label: 'Offers this soon after going online are free to decline',
+        kind: 'minutes',
+      },
+      {
+        path: 'matching.acceptanceOffers',
+        label: "Acceptance rate: over an agent's last counted offers",
+        kind: 'count',
+        help: 'A low rate lowers their ranking. 10 to 500.',
+      },
+      {
+        path: 'matching.pauseBelowBps',
+        label: "Pause an agent's offers below this acceptance rate",
+        kind: 'optionalPercent',
+        help: 'Leave empty for never: a low rate then only lowers their ranking. They can still take errands from the board.',
+      },
+      {
+        path: 'matching.acceptanceMinOffers',
+        label: 'Counted offers an agent has before their rate counts',
+        kind: 'count',
+        help: 'In their ranking and for a pause. After a pause, only offers since count toward the next.',
+      },
+      {
+        path: 'matching.pauseMinutes',
+        label: 'Pause their offers for',
+        kind: 'minutes',
+      },
+      {
         path: 'matching.offersPerStep',
         label: 'Agents offered it at each step before searching further',
         kind: 'count',
@@ -638,6 +674,8 @@ export function shown(field: Field | undefined, value: unknown): string {
       return (value as number[]).map((h) => `${h} h`).join(', ') || 'none';
     case 'kmList':
       return (value as number[]).map((km) => `${km} km`).join(', ') || 'none';
+    case 'km':
+      return `${value} km`;
     default:
       return String(value);
   }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import Constants from 'expo-constants';
@@ -7,6 +7,7 @@ import { errorMessage } from '@/api/client';
 import { formatE164 } from '@/auth/phone';
 import { useCountryConfig } from '@/api/useCountryConfig';
 import { useResource } from '@/api/useResource';
+import { useRealtimeEvent } from '@/realtime/realtime';
 import { VARIANT } from '@/config';
 import { useCustomerIdentity } from '@/identity/customer';
 import { useColors } from '@/theme/theme';
@@ -14,6 +15,7 @@ import { fonts } from '@/theme/tokens';
 import { Text } from '@/ui/kit';
 import { Avatar, Icon } from '@/ui/parts';
 import { TabPage } from '@/ui/tab-page';
+import { pausedNote, standingFigures, type Standing } from '@/agent/standing';
 import { useEmergency } from '@/safety/use-emergency';
 
 interface Stats {
@@ -29,6 +31,18 @@ export default function Account() {
   const { api, user, signOut } = useSession();
   const { config } = useCountryConfig();
   const stats = useResource<Stats>('/v1/me/stats');
+  // An agent's acceptance rate, completion rate and errands left this week, beside their rating (M9).
+  const standing = useResource<Standing>(VARIANT === 'agent' ? '/v1/agent/standing' : null);
+  useRealtimeEvent('offers.paused', standing.reloadSoon);
+  // The pause's note goes once it has ended, the screen left open or not.
+  const pausedUntil = standing.data?.offersPausedUntil ?? null;
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    const left = pausedUntil ? Date.parse(pausedUntil) - Date.now() : 0;
+    if (left <= 0) return;
+    const ended = setTimeout(() => rerender((n) => n + 1), Math.min(left + 1_000, 2 ** 31 - 1));
+    return () => clearTimeout(ended);
+  }, [pausedUntil]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<'out' | 'forget' | 'others' | null>(null);
   const [othersDone, setOthersDone] = useState(false);
@@ -78,7 +92,14 @@ export default function Account() {
 
   const s = stats.data;
   return (
-    <TabPage gap={18} refreshing={stats.refreshing} onRefresh={stats.refresh}>
+    <TabPage
+      gap={18}
+      refreshing={stats.refreshing}
+      onRefresh={() => {
+        void standing.refresh();
+        return stats.refresh();
+      }}
+    >
       <View style={styles.acchead}>
         <Avatar name={user?.firstName} size={62} />
         <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
@@ -99,6 +120,20 @@ export default function Account() {
         <Stat value={s ? String(s.errandsCompleted) : '…'} label={agent ? 'Completed' : 'Errands'} />
         <Stat value={s ? String(s.disputes) : '…'} label="Disputes" />
       </View>
+      {agent && standing.data ? (
+        <>
+          <View style={styles.stats}>
+            {standingFigures(standing.data).map((f) => (
+              <Stat key={f.label} value={f.value} label={f.label} />
+            ))}
+          </View>
+          {pausedNote(standing.data.offersPausedUntil, Date.now()) ? (
+            <Text variant="small" tone="urgent">
+              {pausedNote(standing.data.offersPausedUntil, Date.now())}
+            </Text>
+          ) : null}
+        </>
+      ) : null}
 
       {agent ? null : (
         <View style={styles.menu}>

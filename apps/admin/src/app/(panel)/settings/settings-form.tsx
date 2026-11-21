@@ -40,6 +40,8 @@ function fromText(field: Field, text: string): unknown {
   }
   if (!/^\d+(\.\d{1,2})?$/.test(t)) return NaN;
   const n = Number(t);
+  // A distance takes one decimal place: 2.5 km.
+  if (field.kind === 'km') return /^\d+(\.\d)?$/.test(t) ? n : NaN;
   if (
     field.kind === 'naira' ||
     field.kind === 'optionalNaira' ||
@@ -59,7 +61,9 @@ const unreadable = (field: Field) =>
       ? 'Enter whole hours with commas between them, such as 2, 12, 20'
       : field.kind === 'kmList'
         ? 'Enter distances in km with commas between them, such as 3, 6, 10'
-        : 'Enter a whole number';
+        : field.kind === 'km'
+          ? 'Enter a distance in km, with at most one decimal place'
+          : 'Enter a whole number';
 
 const UNIT: Partial<Record<Field['kind'], string>> = {
   naira: '₦',
@@ -70,6 +74,7 @@ const UNIT: Partial<Record<Field['kind'], string>> = {
   hours: 'h',
   hoursList: 'h',
   kmList: 'km',
+  km: 'km',
   seconds: 's',
 };
 
