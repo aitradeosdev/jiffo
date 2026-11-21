@@ -2,8 +2,6 @@ import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { and, desc, eq, gt, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import {
   canRevealPin,
-  commissionBpsFor,
-  splitFeeEscrow,
   nextState,
   serviceFee,
   withPrices,
@@ -51,6 +49,7 @@ import { haversineMeters, MAPS, type MapsAdapter } from '../adapters/maps';
 import { EligibilityService } from '../matching/eligibility.service';
 import { MatchBlocksService } from '../matching/match-blocks.service';
 import { OffersService } from '../matching/offers.service';
+import { agentEarnsKobo } from './agent-earns';
 import { UploadsService } from '../files/uploads.service';
 import { RiskFlagsService } from '../risk/risk-flags.service';
 import { EvidenceService } from './evidence.service';
@@ -760,13 +759,8 @@ export class ErrandsService implements OnModuleInit {
   }
 
   /** What the agent keeps from the fee after commission at their tier, under the errand's own settings. */
-  private async agentEarns(errand: ErrandRow, tier: AgentTier) {
-    const settings = await this.countries.errandSettings(errand);
-    return splitFeeEscrow({
-      feeKobo: errand.feeKobo,
-      serviceFeeKobo: errand.serviceFeeKobo,
-      commissionBps: commissionBpsFor(settings.fees, tier),
-    }).agentKobo;
+  private agentEarns(errand: ErrandRow, tier: AgentTier) {
+    return agentEarnsKobo(this.countries, errand, tier);
   }
 
   /** Runs one event from the customer or agent app through the state machine. */

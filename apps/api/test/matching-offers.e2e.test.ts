@@ -146,6 +146,12 @@ describe('offers', () => {
     });
     expect(shown.pickup.km).toBeGreaterThan(0.5);
     expect(shown.dropoff.km).toBeGreaterThan(shown.pickup.km);
+    // What they'd earn, as the errand shows it to them, and how long is left by the server's clock.
+    const asProspect = (await request(t.http).get(`/v1/errands/${errand.id}`).set(nearest.headers).expect(200)).body;
+    expect(shown.agentEarnsKobo).toBe(asProspect.agentEarnsKobo);
+    expect(shown.agentEarnsKobo).toBeGreaterThan(0);
+    expect(shown.secondsLeft).toBeGreaterThan(15);
+    expect(shown.secondsLeft).toBeLessThanOrEqual(20);
     expect((await current(other).expect(200)).body.offer).toBeNull();
 
     // An urgent errand isn't on the board: only the agent offered it can take it.

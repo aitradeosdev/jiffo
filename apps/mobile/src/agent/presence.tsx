@@ -16,11 +16,15 @@ import {
   stopBackgroundLocation,
 } from './background-location';
 import { lastSent, markSent, REPORT_EVERY_MS, reported } from './background-rules';
+import { offlineMessage } from './offer';
 import { selfieNeeded, withSelfie, type SelfieReason } from './selfie';
 import { useSelfie } from './selfie-gate';
 
 /** Sent this often even when the agent isn't moving, so a parked agent stays visible and online. */
 const HEARTBEAT_MS = 60_000;
+
+/** The server's answer to a report: online or not, and why Jiffo took the agent offline, if it did. */
+type PresenceAnswer = { online: boolean; selfieNeeded?: SelfieReason; offlineReason?: string };
 
 interface Presence {
   /** Taking errands now. */
@@ -66,18 +70,22 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
 
   const send = useCallback(
     async (
-      next: { online: boolean; lat?: number; lng?: number; mocked?: boolean; accuracy?: number; fixedAt?: number },
+      next: {
+        online: boolean;
+        lat?: number;
+        lng?: number;
+        mocked?: boolean;
+        accuracy?: number;
+        fixedAt?: number;
+        /** The agent tapped Go online: an agent Jiffo took offline for missed offers is back only so (M6). */
+        tapped?: boolean;
+      },
       goingOnline = false,
     ) => {
       markSent();
       // Going online carries the app check (MB3), made fresh each time; staying online needs none.
       const checked = goingOnline ? await appCheck('PUT', '/v1/agent/presence', next) : {};
-      return api.withHeaders<{ online: boolean; selfieNeeded?: SelfieReason }>(
-        'PUT',
-        '/v1/agent/presence',
-        next,
-        checked,
-      );
+      return api.withHeaders<PresenceAnswer>('PUT', '/v1/agent/presence', next, checked);
     },
     [api],
   );
@@ -85,7 +93,9 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   // Where things stood when the app opened, and whenever one of the agent's errands changes.
   const refresh = useCallback(async () => {
     try {
-      const r = await api.get<{ online: boolean; onErrand: boolean }>('/v1/agent/presence');
+      const r = await api.get<{ online: boolean; onErrand: boolean; offlineReason?: string | null }>(
+        '/v1/agent/presence',
+      );
       setOnErrand(r.onErrand);
       setKnown(true);
       return r;
@@ -96,7 +106,10 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       const r = await refresh();
-      if (!r?.online || switched.current) return;
+      if (switched.current) return;
+      // Taken offline while the app was closed (missed offers, M6): say why.
+      if (r && !r.online) setError(offlineMessage(r.offlineReason));
+      if (!r?.online) return;
       // Back online after a restart: carry on only if location still works, else say why and go offline.
       const permission = await Location.getForegroundPermissionsAsync().catch(() => null);
       const position = permission?.granted
@@ -159,7 +172,7 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
           // Going online the first time each day needs a selfie (docs/security-plan.md, I8). An agent on an
           // errand is kept sharing their position, offline, until it passes.
           const sent = await withSelfie(async () => {
-            const res = await send({ online: true, ...here }, true);
+            const res = await send({ online: true, tapped: true, ...here }, true);
             if (res.selfieNeeded) {
               throw new ApiError(403, 'selfie_needed', 'Take your selfie to go online.', { reason: res.selfieNeeded });
             }
@@ -182,20 +195,24 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
   );
 
   /**
-   * What the server answered a position sent while online: an agent it had taken offline (the sweep, or
-   * support) needs today's selfie to be online again, so the app shows them offline and says why.
+   * What the server answered a position sent while online: an agent it had taken offline (the sweep, support,
+   * or missed offers) is online again only by going online themselves, so the app shows them offline and why.
    */
-  const wentOffline = useCallback(() => {
+  const wentOffline = useCallback((reason?: string | null) => {
     if (!onlineRef.current) return;
     setOnlineState(false);
-    setError('You went offline. Go online again to carry on.');
+    setError(offlineMessage(reason) ?? 'You went offline. Go online again to carry on.');
   }, []);
   const followServer = useCallback(
-    (res: { online: boolean; selfieNeeded?: SelfieReason }) => {
-      if (!res.online) wentOffline();
+    (res: PresenceAnswer) => {
+      if (!res.online) wentOffline(res.offlineReason);
     },
     [wentOffline],
   );
+  // Taken offline for missed offers while the app is open: told at once, not at the next report.
+  useRealtimeEvent<{ online: boolean; reason?: string }>('presence.updated', (p) => {
+    if (!p.online) wentOffline(p.reason);
+  });
   const followServerError = useCallback(
     (e: unknown) => {
       // Asked for a selfie, or for the app check (MB3), the server is treating this as going online.

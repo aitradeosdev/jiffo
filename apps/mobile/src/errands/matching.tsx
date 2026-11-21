@@ -51,12 +51,13 @@ export function Matching({
   const title = scheduled
     ? `Scheduled for ${whenLabel(scheduled)}`
     : errand.urgent
-      ? 'Sending to the nearest agents'
+      ? 'Finding the nearest agent'
       : 'Finding your agent';
+  // Urgent errands are offered to the nearest free agents first, one at a time where offers are on (M6).
   const sub = scheduled
     ? 'It goes on the board ahead of time, so an agent can accept it early.'
     : errand.urgent
-      ? 'The first agent to accept gets it.'
+      ? 'The nearest free agents are asked first. It goes to the first who accepts.'
       : `Agents near ${pickup?.label ?? 'your pickup'} can see it and accept.`;
 
   return (
