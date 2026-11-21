@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { customerLine, isOfferPush, offerEndsAt, offerFacts, offlineMessage, secondsToGo, type Offer } from './offer';
+import {
+  barShare,
+  customerLine,
+  isOfferPush,
+  isPushForOffer,
+  offerEndsAt,
+  offerFacts,
+  offlineMessage,
+  secondsToGo,
+  type Offer,
+} from './offer';
 
 const offer: Offer = {
   id: 'offer-1',
   expiresAt: '2026-11-21T10:00:20.000Z',
   secondsLeft: 20,
+  windowSeconds: 20,
   agentEarnsKobo: 212_500,
   errand: {
     id: 'errand-1',
@@ -69,5 +80,41 @@ describe('an offer', () => {
     expect(offlineMessage(undefined)).toBeNull();
     // A reason this app doesn't know yet still tells them they're offline.
     expect(offlineMessage('something_new')).toMatch(/offline/i);
+  });
+});
+
+describe("an offer's push", () => {
+  it('is found by its data when the app showed it, or by its tag when the phone did', () => {
+    // Shown by the app (open at the time): the push's data is there.
+    expect(isPushForOffer({ identifier: 'abc', data: { type: 'errand.offer', offerId: 'offer-1' } }, 'offer-1')).toBe(
+      true,
+    );
+    // Shown by the phone (app in the background): only the tag the server set says which offer it was.
+    expect(
+      isPushForOffer(
+        { identifier: 'expo-notifications://foreign_notifications?tag=offer-1&id=0', data: {} },
+        'offer-1',
+      ),
+    ).toBe(true);
+    expect(
+      isPushForOffer(
+        { identifier: 'expo-notifications://foreign_notifications?tag=offer-12&id=0', data: {} },
+        'offer-1',
+      ),
+    ).toBe(false);
+    expect(isPushForOffer({ identifier: 'abc', data: { type: 'errand.offer', offerId: 'offer-2' } }, 'offer-1')).toBe(
+      false,
+    );
+    expect(isPushForOffer({ identifier: 'abc', data: { type: 'chat.message' } }, 'offer-1')).toBe(false);
+  });
+});
+
+describe('the countdown bar', () => {
+  it("shows what's left of the whole window, however late the app asked", () => {
+    expect(barShare(20, 20)).toBe(1);
+    expect(barShare(4, 20)).toBeCloseTo(0.2);
+    expect(barShare(0, 20)).toBe(0);
+    expect(barShare(25, 20)).toBe(1);
+    expect(barShare(5, 0)).toBe(0);
   });
 });

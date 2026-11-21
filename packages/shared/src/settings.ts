@@ -544,8 +544,11 @@ export function publicSettings(s: CountrySettings) {
     },
     /** What the emergency button dials (E9). */
     safety: { emergencyNumber: s.safety.emergencyNumber },
-    /** How far the agent's board reaches. */
-    matching: { boardRadiusKm: s.matching.boardRadiusKm },
+    /**
+     * How far the agent's board reaches, and whether urgent errands are offered one agent at a time (M6), so
+     * the customer's app says how theirs is matched.
+     */
+    matching: { boardRadiusKm: s.matching.boardRadiusKm, offers: s.matching.offers },
   };
 }
 export type PublicSettings = ReturnType<typeof publicSettings>;

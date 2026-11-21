@@ -266,6 +266,7 @@ export class OffersService {
         expiresAt: offer.expiresAt.toISOString(),
       },
       ring: true,
+      tag: offer.id,
     });
     this.realtime.toUser(offer.agentId, 'agent', 'offer.new', {
       offerId: offer.id,
@@ -397,6 +398,7 @@ export class OffersService {
       id: offer.offer.id,
       expiresAt: offer.offer.expiresAt,
       secondsLeft: Math.max(0, Math.ceil((offer.offer.expiresAt.getTime() - Date.now()) / 1000)),
+      windowSeconds: Math.round((offer.offer.expiresAt.getTime() - offer.offer.offeredAt.getTime()) / 1000),
       agentEarnsKobo: earns,
       errand: {
         id: errand.id,

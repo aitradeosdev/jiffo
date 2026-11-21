@@ -6,6 +6,8 @@ export interface Offer {
   expiresAt: string;
   /** By the server's clock when it answered: the app counts down from this, as a phone's clock can be off. */
   secondsLeft: number;
+  /** The whole time the agent had to answer, for the countdown bar. */
+  windowSeconds: number;
   agentEarnsKobo: number;
   errand: {
     id: string;
@@ -53,6 +55,21 @@ export function offerFacts(offer: Offer) {
     `${errand.stopCount} stops`,
     ...(errand.buy ? ['You buy the items'] : []),
   ];
+}
+
+/** How full the countdown bar is: what's left of the whole window, from 0 to 1. */
+export const barShare = (left: number, windowSeconds: number) =>
+  windowSeconds > 0 ? Math.min(1, Math.max(0, left / windowSeconds)) : 0;
+
+/**
+ * Whether a push in the phone's tray is this offer's: by its data when the app showed it, else by the tag the
+ * server gives offer pushes, which is all that's left of one the phone showed with the app in the background.
+ */
+export function isPushForOffer(push: { identifier: string; data: unknown }, offerId: string) {
+  const data = push.data as { offerId?: unknown } | null;
+  if (isOfferPush(data)) return data?.offerId === offerId;
+  const query = push.identifier.split('?')[1] ?? '';
+  return query.split('&').some((part) => part === `tag=${encodeURIComponent(offerId)}`);
 }
 
 /** A push about an offer (the server's data.type), to open the offer screen from. */

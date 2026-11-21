@@ -12,7 +12,7 @@ import { useColors } from '../theme/theme';
 import { fonts } from '../theme/tokens';
 import { Button, Text } from '../ui/kit';
 import { Avatar, Badge, IconCircle, List, Row } from '../ui/parts';
-import { customerLine, isOfferPush, offerEndsAt, offerFacts, secondsToGo, type Offer } from './offer';
+import { barShare, customerLine, isOfferPush, offerEndsAt, offerFacts, secondsToGo, type Offer } from './offer';
 
 /** How long "Time's up" or "Taken by someone else" shows before the screen closes. */
 const ENDED_MS = 2_500;
@@ -30,6 +30,8 @@ export function AgentOffersProvider({ children }: { children: ReactNode }) {
   const [showing, setShowing] = useState<Showing | null>(null);
 
   const load = useCallback(async () => {
+    // Counted from when the app asked, so a slow answer shortens the countdown rather than outlasting the offer.
+    const asked = Date.now();
     try {
       const { offer } = await api.get<{ offer: Offer | null }>('/v1/agent/offers/current');
       setShowing((now) => {
@@ -37,7 +39,7 @@ export function AgentOffersProvider({ children }: { children: ReactNode }) {
         if (!offer) return now && !now.gone ? { ...now, gone: true } : now;
         // The same offer again keeps its countdown; a new one starts its own.
         if (now?.offer.id === offer.id) return now;
-        return { offer, endsAt: offerEndsAt(offer, Date.now()) };
+        return { offer, endsAt: offerEndsAt(offer, asked) };
       });
     } catch {
       // Offline for a moment: the next event, push or return to the app looks again.
@@ -138,15 +140,21 @@ function OfferScreen({ showing, onClose }: { showing: Showing; onClose: () => vo
   };
   const decline = async () => {
     setBusy('decline');
+    setError(null);
     try {
       await api.post(`/v1/agent/offers/${offer.id}/decline`);
-    } catch {
-      // Ended already, or offline: either way it goes to the next agent, as it would when its time is up.
+      onClose();
+    } catch (e) {
+      // Ended already: nothing to say no to. Not sent (offline, say): the screen stays, so the no isn't lost and
+      // counted as a missed offer instead.
+      if (e instanceof ApiError && e.code === 'offer_not_found') onClose();
+      else setError(e instanceof ApiError ? e.message : "Couldn't send that. Check your connection and try again.");
+    } finally {
+      setBusy(null);
     }
-    onClose();
   };
 
-  const share = offer.secondsLeft > 0 ? Math.min(1, left / offer.secondsLeft) : 0;
+  const share = barShare(left, offer.windowSeconds);
   return (
     // The back button doesn't answer it: only Accept or Decline does, or its time running out.
     <Modal visible animationType="slide" onRequestClose={() => undefined} statusBarTranslucent>

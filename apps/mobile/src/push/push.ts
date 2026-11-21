@@ -4,7 +4,7 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { useSession } from '../auth/session';
 import { VARIANT } from '../config';
-import { isOfferPush } from '../agent/offer';
+import { isOfferPush, isPushForOffer } from '../agent/offer';
 
 /** Android's channel for offers (docs/matching.md, M6): the server sends them to it, so they ring through. */
 export const OFFERS_CHANNEL = 'offers';
@@ -88,8 +88,7 @@ export async function dismissOfferPush(offerId: string) {
   if (Platform.OS === 'web') return;
   const shown = await Notifications.getPresentedNotificationsAsync().catch(() => []);
   for (const n of shown) {
-    const data = n.request.content.data as { offerId?: unknown } | undefined;
-    if (isOfferPush(data) && data?.offerId === offerId) {
+    if (isPushForOffer({ identifier: n.request.identifier, data: n.request.content.data }, offerId)) {
       await Notifications.dismissNotificationAsync(n.request.identifier).catch(() => undefined);
     }
   }

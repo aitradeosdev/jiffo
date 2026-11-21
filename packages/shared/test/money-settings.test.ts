@@ -103,6 +103,8 @@ describe('country settings', () => {
     expect(pub.identity).not.toHaveProperty('provider');
     expect(pub.fees).not.toHaveProperty('commissionBps');
     expect(pub.wallet).toEqual({ minDepositKobo: 10_000, maxDepositKobo: null, minWithdrawalKobo: 10_000 });
+    // Whether urgent errands are offered one agent at a time, so the customer's app says how it's matched.
+    expect(pub.matching).toEqual({ boardRadiusKm: 10, offers: true });
   });
 });
 
