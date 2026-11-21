@@ -275,10 +275,10 @@ export class ErrandsService implements OnModuleInit {
     // Urgent errands are offered to one agent at a time instead (docs/matching.md, M6) until their search reaches
     // its last step (M8): then they're on the board too, within that step's radius, for an agent with room for
     // one. With offers off for the country they always are. An agent with no room for an errand from the board is
-    // told why; with offers off, they still see urgent ones if they have room for one of those.
+    // told why, and still sees urgent ones if they have room for one of those.
     const boardFull = heldRefusal(me.held, false, rules);
     const urgentRoom = !heldRefusal(me.held, true, rules);
-    if (boardFull && (rules.offers || !urgentRoom)) throw this.eligibility.refusal(boardFull);
+    if (boardFull && !urgentRoom) throw this.eligibility.refusal(boardFull);
     const tier = await this.agents.tier(auth.userId);
     const here = sql`ST_SetSRID(ST_MakePoint(${me.lng}, ${me.lat}), 4326)::geography`;
     const distance = sql<number>`ST_Distance(${errandStops.location}, ${here})`;
@@ -355,6 +355,10 @@ export class ErrandsService implements OnModuleInit {
       hiddenByPreferences: Math.max(0, (counts[0]?.all ?? 0) - (counts[0]?.wanted ?? 0)),
       // How far the board reaches for this agent: their work radius, within what admin allows.
       reachKm: Math.min(q.radiusKm, agentReachKm(me, rules)),
+      // Why errands from the board are left out, when the agent holds as many as they may: only urgent ones show.
+      full: boardFull
+        ? (this.eligibility.refusal(boardFull).getResponse() as { error: { code: string; message: string } }).error
+        : null,
     };
   }
 
@@ -854,8 +858,9 @@ export class ErrandsService implements OnModuleInit {
     const outcome = await this.db.transaction(async (tx) => {
       const [errand] = await tx.select().from(errands).where(eq(errands.id, errandId)).for('update');
       const role = errand ? this.roleFor(errand, auth) : null;
-      // Too late: another agent accepted it first (docs/matching.md, M7 and M8).
-      if (errand && !role && input.event === 'accept' && auth.app === 'agent' && errand.agentId) {
+      // Too late: another agent has just accepted it (docs/matching.md, M7 and M8). Once under way, it's not found,
+      // as for any errand that isn't theirs.
+      if (errand && !role && input.event === 'accept' && auth.app === 'agent' && errand.status === 'accepted') {
         if (errand.countryCode === auth.countryCode) throw conflict('errand_taken', 'This errand was taken');
       }
       if (!errand || !role) throw notFound('errand_not_found', 'Errand not found');
@@ -1150,10 +1155,15 @@ export class ErrandsService implements OnModuleInit {
           live.matching,
         );
         if (refused) throw this.eligibility.refusal(refused);
+        // Open to everyone once its search reached its last step (M8), but only within that step's radius.
+        const toEveryone = errand.urgent && live.matching.offers && errand.broadcastFeeKobo === errand.feeKobo;
+        if (toEveryone && pickupMeters > live.matching.searchStepsKm.at(-1)! * 1000) {
+          throw this.eligibility.refusal('too_far');
+        }
         // An urgent errand goes to the agent it is offered to, while the offer stands (docs/matching.md, M7):
-        // one conditional change, in this transaction, with the errand locked. Open to everyone once its search
-        // reached its last step (M8), and with offers off: to the first who may take it.
-        if (errand.urgent && live.matching.offers && errand.broadcastFeeKobo !== errand.feeKobo) {
+        // one conditional change, in this transaction, with the errand locked. Open to everyone, and with offers
+        // off: to the first who may take it.
+        if (errand.urgent && live.matching.offers && !toEveryone) {
           const [taken] = await tx
             .update(errandOffers)
             .set({ status: 'accepted', answeredAt: now })

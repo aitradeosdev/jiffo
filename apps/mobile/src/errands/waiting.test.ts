@@ -63,6 +63,8 @@ describe('the prompt to raise the fee', () => {
   it('never comes once the fee was raised, for one scheduled ahead, or without the settings', () => {
     expect(raisePromptDue({ ...errand, feeRaised: true }, null, timers, at(40))).toBe(false);
     expect(raisePromptDue(errand, '2026-11-21T18:00:00.000Z', timers, at(40))).toBe(false);
+    // Nor once a scheduled one's time has come: the server sends no prompt for those.
+    expect(raisePromptDue(errand, '2026-11-21T10:05:00.000Z', timers, at(40))).toBe(false);
     expect(raisePromptDue(errand, null, undefined, at(40))).toBe(false);
   });
 });

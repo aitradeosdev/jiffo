@@ -47,11 +47,12 @@ export function waitingCopy(input: {
  */
 export function raisePromptDue(
   errand: { createdAt: string; urgent: boolean; feeRaised: boolean },
-  scheduled: string | null,
+  /** The errand's schedule, ahead or come: one scheduled is never prompted, as the server never prompts it. */
+  scheduledFor: string | null,
   timers: { raisePricePromptMinutes: number; boardRaisePromptMinutes: number } | undefined,
   now: number,
 ) {
-  if (!timers || scheduled || errand.feeRaised) return false;
+  if (!timers || scheduledFor || errand.feeRaised) return false;
   const minutes = errand.urgent ? timers.raisePricePromptMinutes : timers.boardRaisePromptMinutes;
   return now - Date.parse(errand.createdAt) >= minutes * 60_000;
 }

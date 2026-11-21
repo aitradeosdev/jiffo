@@ -299,11 +299,14 @@ describe('who may get an errand', () => {
       expect(await top(agent, 1)).toEqual([mine.id]);
     });
 
-    it('shows no urgent errands, which are offered instead, so an agent at the cap is told so', async () => {
+    it('tells an agent at the cap so, showing only urgent errands open to everyone, which they may still take', async () => {
       const agent = await signIn(t, 'agent');
       await online(agent);
       for (let i = 0; i < 3; i++) await act(t, agent, (await createErrand(t, customer, scheduled())).id, 'accept');
-      expect((await board(agent)).body.error.code).toBe('too_many_errands');
+      // Their errands are all scheduled ones not started, so an urgent one would fit (docs/matching.md, M8).
+      const atCap = await board(agent).expect(200);
+      expect(atCap.body.full).toMatchObject({ code: 'too_many_errands' });
+      expect((atCap.body.errands as Array<{ urgent: boolean }>).every((e) => e.urgent)).toBe(true);
       // Their errands are all scheduled ones not started: an urgent one offered to them they may still take.
       const urgent = await createErrand(t, customer, { urgent: true });
       await offerTo(t, agent, urgent.id);

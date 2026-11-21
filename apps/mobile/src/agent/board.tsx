@@ -27,6 +27,8 @@ interface Board {
   hiddenByPreferences: number;
   /** How far it reaches for this agent: their work radius, within what Jiffo allows (an older API sends none). */
   reachKm?: number;
+  /** Why errands from the board are left out (they hold as many as they may): only urgent ones show then. */
+  full?: { code: string; message: string } | null;
 }
 interface Earnings {
   todayKobo: number;
@@ -206,6 +208,11 @@ export function AgentBoard() {
               <Chip label="Buying items" selected={sort === 'buy'} onPress={() => setSort('buy')} />
             </ScrollView>
             {error ? <Text tone="danger">{error}</Text> : null}
+            {board?.full ? (
+              <Text variant="sub" tone="ink3" accessibilityLiveRegion="polite">
+                {board.full.message} Urgent errands open to everyone still show here.
+              </Text>
+            ) : null}
             {board?.hiddenByPreferences ? (
               <Pressable
                 accessibilityRole="button"

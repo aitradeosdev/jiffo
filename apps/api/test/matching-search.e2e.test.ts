@@ -178,14 +178,23 @@ describe('the search steps', () => {
     // On the board now, for whoever may take it within the last radius.
     expect(await boardHas(d, east(1), errand.id)).toBe(true);
     expect(await boardHas(beyond, east(5), errand.id)).toBe(false);
+    // Nor can they take it, from beyond the last radius, by going to it some other way.
+    expect((await accept(beyond, errand.id)).body.error.code).toBe('too_far');
 
     expect((await accept(d, errand.id)).status).toBe(200);
     const late = await accept(e, errand.id);
     expect(late.status).toBe(409);
     expect(late.body.error).toMatchObject({ code: 'errand_taken', message: 'This errand was taken' });
     // The others told were told it was taken; the one who took it wasn't.
-    expect(told).toHaveBeenCalledWith(e.userId, 'agent', 'errand.gone', { errandId: errand.id, taken: true });
+    expect(told).toHaveBeenCalledWith(e.userId, 'agent', 'errand.gone', {
+      errandId: errand.id,
+      taken: true,
+      why: 'taken',
+    });
     expect(told).not.toHaveBeenCalledWith(d.userId, 'agent', 'errand.gone', expect.anything());
+    // Long after, it isn't "taken" but not found, as for any errand that isn't theirs.
+    await t.db.update(errands).set({ status: 'started' }).where(eq(errands.id, errand.id));
+    expect((await accept(e, errand.id)).body.error.code).toBe('errand_not_found');
   });
 
   it('starts again at the first radius when the customer raises the fee, asking those who said no again', async () => {
@@ -193,7 +202,17 @@ describe('the search steps', () => {
     const errand = await urgent();
     for (const agent of [a, b, c]) await decline(agent, errand.id);
     expect(await search(errand.id)).toMatchObject({ everyone: true });
+    const d = await agentAt(east(1));
+    await lookAgain(errand.id);
+    expect(pushesTo(d).at(-1)).toMatchObject({ data: { type: 'errand.broadcast' } });
+    const told = vi.spyOn(t.app.get(RealtimeGateway), 'toUser');
     await act(t, customer, errand.id, 'raise_fee', { amountKobo: 300_000 });
+    // Those told it was open to everyone are told it isn't now: it's offered one at a time again.
+    expect(told).toHaveBeenCalledWith(d.userId, 'agent', 'errand.gone', {
+      errandId: errand.id,
+      taken: false,
+      why: 'offered',
+    });
     expect((await openOffer(errand.id))?.agentId).toBe(a.userId);
     expect(await search(errand.id)).toEqual({ radiusKm: 1, everyone: false });
     // Offered one at a time again, so off the board.

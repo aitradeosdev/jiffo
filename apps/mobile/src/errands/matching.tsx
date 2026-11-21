@@ -68,7 +68,7 @@ export function Matching({
     !!onRaise &&
     raisePromptDue(
       { createdAt: errand.createdAt, urgent: errand.urgent, feeRaised: errand.version > 0 },
-      scheduled,
+      errand.scheduledFor,
       config?.settings.timers,
       now,
     );

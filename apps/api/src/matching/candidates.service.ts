@@ -65,10 +65,11 @@ export class CandidatesService {
   }
 
   /**
-   * Every agent within `radiusKm` of the pickup who may take the errand now, nearest first, up to `max`: those an
-   * urgent errand open to everyone is told of (M8). No travel times: no one is ranked.
+   * The agents within `radiusKm` of the pickup who may take the errand now, nearest first, up to `max` at a time:
+   * those an urgent errand open to everyone is told of (M8), the rest on the next look, every few seconds. No
+   * travel times: no one is ranked.
    */
-  async everyoneWithin(errandId: string, skip: ReadonlySet<string>, radiusKm: number, max = 200) {
+  async everyoneWithin(errandId: string, skip: ReadonlySet<string>, radiusKm: number, max = 50) {
     const found = await this.waiting(errandId);
     if (!found) return [];
     const { errand, pickup, rules } = found;

@@ -75,6 +75,12 @@ export class OffersService {
    */
   async errandChanged(errand: ErrandRow) {
     if (errand.status === 'requested') {
+      // Open to everyone at a fee it no longer has (raised): offered one at a time again, as those told hear.
+      if (errand.broadcastFeeKobo !== null && errand.broadcastFeeKobo !== errand.feeKobo) {
+        await this.reopened(errand).catch((error: Error) =>
+          this.logger.warn(`Telling agents errand ${errand.id} is offered again failed: ${error.message}`),
+        );
+      }
       if (errand.urgent) await this.dispatch(errand.id);
       return;
     }
@@ -460,6 +466,38 @@ export class OffersService {
     });
   }
 
+  /** No longer open to everyone, at its new fee: those told of it at the old one hear so, once. */
+  private async reopened(errand: ErrandRow) {
+    const was = errand.broadcastFeeKobo!;
+    const [cleared] = await this.db
+      .update(errands)
+      .set({ broadcastFeeKobo: null })
+      .where(and(eq(errands.id, errand.id), eq(errands.broadcastFeeKobo, was)))
+      .returning({ id: errands.id });
+    if (!cleared) return;
+    await this.tellGone(errand.id, was, null, 'offered');
+  }
+
+  /**
+   * Agents told of an errand open to everyone at a fee (M8) hear it's gone from the board: taken, ended
+   * (cancelled or expired), or offered one at a time again (a raised fee). Not the agent who took it.
+   */
+  private async tellGone(
+    errandId: string,
+    feeKobo: number,
+    takenBy: string | null,
+    why: 'taken' | 'ended' | 'offered',
+  ) {
+    const told = await this.db
+      .select({ agentId: errandBroadcasts.agentId })
+      .from(errandBroadcasts)
+      .where(and(eq(errandBroadcasts.errandId, errandId), eq(errandBroadcasts.feeKobo, feeKobo)));
+    for (const t of told) {
+      if (t.agentId === takenBy) continue;
+      this.realtime.toUser(t.agentId, 'agent', 'errand.gone', { errandId, taken: why === 'taken', why });
+    }
+  }
+
   /**
    * The errand left waiting another way (cancelled, expired, taken): its open offer is withdrawn, and the agents
    * told of it while it was open to everyone (M8) are told it was taken, or has gone, all but the one who took it.
@@ -473,15 +511,7 @@ export class OffersService {
     for (const g of gone)
       this.realtime.toUser(g.agentId, 'agent', 'offer.gone', { offerId: g.id, errandId: errand.id });
     if (errand.broadcastFeeKobo === null) return;
-    const told = await this.db
-      .selectDistinct({ agentId: errandBroadcasts.agentId })
-      .from(errandBroadcasts)
-      .where(eq(errandBroadcasts.errandId, errand.id));
-    const taken = errand.agentId !== null;
-    for (const t of told) {
-      if (t.agentId === errand.agentId) continue;
-      this.realtime.toUser(t.agentId, 'agent', 'errand.gone', { errandId: errand.id, taken });
-    }
+    await this.tellGone(errand.id, errand.broadcastFeeKobo, errand.agentId, errand.agentId ? 'taken' : 'ended');
   }
 
   /**

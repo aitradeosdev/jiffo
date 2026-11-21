@@ -468,7 +468,22 @@ function carryOldCap(raw: unknown) {
   return { ...raw, matching: { ...DEFAULT_MATCHING_SETTINGS, maxBoardErrands: Math.min(cap, 10) } };
 }
 
-export const CountrySettingsSchema = z.preprocess(carryOldCap, CountrySettingsObject);
+/**
+ * A version saved before the search steps (M8) gets the starting ones, ending at its board's reach where that is
+ * nearer than the last of them: the steps may not reach past the board, and a country that chose a shorter reach
+ * must still load.
+ */
+function stepsWithinReach(raw: unknown) {
+  if (!raw || typeof raw !== 'object') return raw;
+  const matching = (raw as { matching?: unknown }).matching;
+  if (!matching || typeof matching !== 'object' || 'searchStepsKm' in matching) return raw;
+  const reach = (matching as { boardRadiusKm?: unknown }).boardRadiusKm;
+  const steps = DEFAULT_MATCHING_SETTINGS.searchStepsKm;
+  if (typeof reach !== 'number' || reach >= steps.at(-1)!) return raw;
+  return { ...raw, matching: { ...matching, searchStepsKm: [...steps.filter((km) => km < reach), reach] } };
+}
+
+export const CountrySettingsSchema = z.preprocess((raw) => stepsWithinReach(carryOldCap(raw)), CountrySettingsObject);
 
 export type CountrySettings = z.infer<typeof CountrySettingsSchema>;
 

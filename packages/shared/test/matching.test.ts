@@ -188,6 +188,20 @@ describe('the search steps', () => {
     expect(parse({ searchStepsKm: [] }).success).toBe(false);
   });
 
+  it("gives a version saved before the steps ones that end at its board's reach, so it still loads", () => {
+    const saved = (boardRadiusKm: number) => {
+      const { searchStepsKm: _s, offersPerStep: _o, ...older } = NIGERIA_DEFAULT_SETTINGS.matching;
+      return CountrySettingsSchema.parse({ ...NIGERIA_DEFAULT_SETTINGS, matching: { ...older, boardRadiusKm } })
+        .matching.searchStepsKm;
+    };
+    expect(saved(10)).toEqual([3, 6, 10]);
+    expect(saved(20)).toEqual([3, 6, 10]);
+    expect(saved(8)).toEqual([3, 6, 8]);
+    expect(saved(5)).toEqual([3, 5]);
+    expect(saved(3)).toEqual([3]);
+    expect(saved(1)).toEqual([1]);
+  });
+
   it('drops the old single widening, which the steps replace', () => {
     expect(CountrySettingsSchema.parse(NIGERIA_DEFAULT_SETTINGS).timers).not.toHaveProperty('urgentWidenMinutes');
   });

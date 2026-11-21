@@ -73,8 +73,14 @@ export function usePushData(handler: (data: Record<string, unknown>, how: 'arriv
     };
     const arrived = Notifications.addNotificationReceivedListener((n) => handle(n, 'arrived'));
     const tapped = Notifications.addNotificationResponseReceivedListener((r) => handle(r.notification, 'tapped'));
+    // The tap that opened the app, handled once: cleared, so mounting again (signing back in, say) doesn't
+    // act on it a second time.
     Notifications.getLastNotificationResponseAsync()
-      .then((r) => r && handle(r.notification, 'tapped'))
+      .then((r) => {
+        if (!r) return;
+        handle(r.notification, 'tapped');
+        Notifications.clearLastNotificationResponse();
+      })
       .catch(() => undefined);
     return () => {
       arrived.remove();
