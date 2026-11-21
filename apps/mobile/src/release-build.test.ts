@@ -44,9 +44,15 @@ const pluginOptions = (name: string) => {
   return Array.isArray(entry) ? (entry[1] as Record<string, Record<string, unknown>>) : undefined;
 };
 
-/** The map's keys and plugin options as a build with these settings reads them. */
+/**
+ * The map's keys and plugin options as a build with these settings, and no others of its kind, reads them: keys or
+ * EAS settings already in the shell running the tests are left out.
+ */
 const mapsWith = (env: Record<string, string>) => {
   const saved = { ...process.env };
+  for (const key of Object.keys(process.env)) {
+    if (/^(GOOGLE_MAPS_|EAS_BUILD|EXPO_PUBLIC_API_URL$)/.test(key)) delete process.env[key];
+  }
   Object.assign(process.env, env);
   try {
     const config = appConfig({ config: {} } as Parameters<typeof appConfig>[0]);

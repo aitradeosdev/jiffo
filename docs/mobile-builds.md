@@ -38,7 +38,9 @@ All the commands below run in a terminal in the repository's `apps/mobile` folde
    Put the two ids in `apps/mobile/eas-projects.json` as `customer` and `agent`, and commit the file. The ids aren't secret. The build settings below (`eas env:set`) are kept per account, so set them again in the new one.
 
 5. Google's map in the apps. Both phones draw Google's map: places are found with Google, whose terms keep its results off other companies' maps. Each phone needs its own key, from the same Google Cloud project as the API's key or another:
-   - **Android:** a key with the Maps SDK for Android turned on, restricted to Android apps (the two package names, `com.jiffoapp.customer` and `com.jiffoapp.agent`, with their signing certificates' SHA-1 from EAS).
+   - **Android:** a key with the Maps SDK for Android turned on, restricted to Android apps: the two package names, `com.jiffoapp.customer` and `com.jiffoapp.agent`, each with two SHA-1 fingerprints:
+     - the EAS signing key's, which `eas credentials` shows, for the builds you install yourself;
+     - the app signing key's, from Play Console (Test and release, App integrity, App signing), for copies installed from Google Play, which Google signs with its own key. Without it, the map is blank in the store apps.
    - **iPhone:** a key with the Maps SDK for iOS turned on, restricted to iOS apps (the two bundle IDs, the same names).
 
    The keys go inside the apps, so anyone could read them from an installed app. The restrictions make them useless anywhere else. Save each for every build, both apps:
@@ -117,7 +119,13 @@ An app can be installed on an iPhone outside the App Store only with a paid Appl
 
    The first time, EAS asks you to sign in to your Apple account and offers to make the certificates and the provisioning profile, with your registered phones: say yes to each. It also sets up the app id with App Attest. A phone registered after a build needs a new build.
 5. When it's done, open the link or QR code on the iPhone and tap **Install**. The app appears on the home screen.
-6. **Development build:** start the bundler as in step 4 for Android, then open the app and tap the bundler under **Development servers**. The first time, allow the app to find devices on the local network.
+6. **Development build:** start the bundler as in step 4 for Android, with `GOOGLE_MAPS_IOS_API_KEY` set to the same key the build had (or without it, if the build had none):
+
+   ```bash
+   GOOGLE_MAPS_IOS_API_KEY=<your iPhone key> EXPO_PUBLIC_API_URL=http://192.168.1.20:3000 pnpm start:agent
+   ```
+
+   A development build takes its settings from the bundler, not from the build, and that's how it knows Google's map is in it. Started without the key, it draws Apple's map. Started with it for a build that had none, the map is empty. Then open the app and tap the bundler under **Development servers**. The first time, allow the app to find devices on the local network.
    **Preview build:** just open the app. R8 is Android only, so the release check below needs no iPhone.
 
 ## What to check on a release build (MB7)

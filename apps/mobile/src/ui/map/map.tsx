@@ -18,7 +18,11 @@ const PIN_LABEL: Partial<Record<MapPin['kind'], string>> = {
 
 const EDGE = 56;
 const CITY_DELTA = 0.035;
-/** Whether this build put Google's map engine in the iPhone app (app.config.ts). */
+/**
+ * Whether this build put Google's map engine in the iPhone app (app.config.ts). Preview and store builds carry
+ * their own settings; a development build takes them from the bundler, which must then be started with the same
+ * GOOGLE_MAPS_IOS_API_KEY as the build (docs/mobile-builds.md).
+ */
 const GOOGLE_MAPS_ON_IOS =
   ((Constants.expoConfig?.extra ?? {}) as { googleMapsOnIos?: boolean }).googleMapsOnIos === true;
 /** Google's map on both phones, styled like the prototype; Apple's on an iPhone built without its Google key. */
