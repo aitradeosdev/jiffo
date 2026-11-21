@@ -167,12 +167,22 @@ export class PresenceService {
       : sharing
         ? {}
         : { lat: null, lng: null, location: null, locatedAt: null, accuracy: null, fixedAt: null };
+    // When they went online, which how long they've waited counts from (matching, M4): set going online, kept
+    // while they stay so, cleared going offline.
+    const since = body.online ? (current?.online ? {} : { onlineSince: now }) : { onlineSince: null };
     await this.db
       .insert(agentPresence)
-      .values({ userId: auth.userId, countryCode: auth.countryCode, online: body.online, ...place, updatedAt: now })
+      .values({
+        userId: auth.userId,
+        countryCode: auth.countryCode,
+        online: body.online,
+        ...place,
+        ...(body.online ? { onlineSince: now } : {}),
+        updatedAt: now,
+      })
       .onConflictDoUpdate({
         target: agentPresence.userId,
-        set: { countryCode: auth.countryCode, online: body.online, ...place, updatedAt: now },
+        set: { countryCode: auth.countryCode, online: body.online, ...place, ...since, updatedAt: now },
       });
     this.keepLive(
       auth.userId,

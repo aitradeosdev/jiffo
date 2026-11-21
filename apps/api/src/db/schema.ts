@@ -576,6 +576,8 @@ export const agentPresence = pgTable(
     locatedAt: timestamp('located_at', { withTimezone: true }),
     /** The phone said the position was mocked (MB4): it can't place the agent at a drop-off. */
     mocked: boolean('mocked').notNull().default(false),
+    /** When they last went online; null while offline. How long they've waited counts from it (matching, M4). */
+    onlineSince: timestamp('online_since', { withTimezone: true }),
     updatedAt: updatedAt(),
   },
   (t) => [index('agent_presence_location_gix').using('gist', t.location)],

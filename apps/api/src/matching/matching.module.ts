@@ -7,6 +7,6 @@ import { TravelTimesService } from './travel-times';
 @Global()
 @Module({
   providers: [MatchingRedis, AgentLocations, TravelTimesService],
-  exports: [AgentLocations, TravelTimesService],
+  exports: [MatchingRedis, AgentLocations, TravelTimesService],
 })
 export class MatchingModule {}

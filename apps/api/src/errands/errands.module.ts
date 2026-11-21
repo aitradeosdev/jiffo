@@ -8,6 +8,7 @@ import { EligibilityService } from '../matching/eligibility.service';
 import { MatchBlocksController } from '../matching/match-blocks.controller';
 import { MatchBlocksService } from '../matching/match-blocks.service';
 import { CandidatesService } from '../matching/candidates.service';
+import { RankingService } from '../matching/ranking.service';
 import { ERRANDS } from './errands.token';
 
 @Module({
@@ -20,8 +21,9 @@ import { ERRANDS } from './errands.token';
     EligibilityService,
     MatchBlocksService,
     CandidatesService,
+    RankingService,
     { provide: ERRANDS, useExisting: ErrandsService },
   ],
-  exports: [ErrandsService, EvidenceService, CandidatesService],
+  exports: [ErrandsService, EvidenceService, CandidatesService, RankingService],
 })
 export class ErrandsModule {}
