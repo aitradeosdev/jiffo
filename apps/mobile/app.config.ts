@@ -1,4 +1,5 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
+import EAS_PROJECTS from './eas-projects.json';
 
 /**
  * One codebase, two store apps. APP_VARIANT picks which one is built:
@@ -26,11 +27,50 @@ const VARIANTS = {
   },
 } as const;
 
+/**
+ * The API's address, from EXPO_PUBLIC_API_URL, or the computer running the bundler for development. A preview
+ * or store build talks to the API over HTTPS only, so one built on Expo's servers without an HTTPS address stops
+ * there, rather than ship an app that calls the phone itself (docs/mobile-builds.md).
+ */
+export const apiUrlFor = (env: Record<string, string | undefined>) => {
+  const url = env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+  const profile = env.EAS_BUILD_PROFILE ?? '';
+  if (env.EAS_BUILD === 'true' && /^(preview|production)/.test(profile) && !url.startsWith('https://')) {
+    throw new Error(
+      `The ${profile} build needs EXPO_PUBLIC_API_URL set to the API's https:// address in its EAS environment (docs/mobile-builds.md)`,
+    );
+  }
+  return url;
+};
+
+/**
+ * The Expo project of the app being built, for EAS builds: each store app is its own project, named in
+ * eas-projects.json once `eas init` has made it (docs/mobile-builds.md). Not a secret.
+ */
+export const easProject = (projects: Record<Variant, string>, which: Variant) =>
+  projects[which] ? { eas: { projectId: projects[which] } } : {};
+
 /** Smile ID's face detectors' build settings: ML Kit on Android, Apple's Vision on iOS. KSP as their samples use. */
 const SMILE_ID_PLUGINS: NonNullable<ExpoConfig['plugins']> = [
   ['@smileid/usesmileid_mlkit_face', { kspVersion: '2.3.6' }],
   '@smileid/usesmileid_vision_face',
 ];
+
+/**
+ * Release builds of both Android apps are shrunk and obfuscated with R8 (docs/security-plan.md, MB7). Each
+ * native library ships its own keep rules for what it reaches by name (docs/security/sdks.md lists them), and
+ * our two modules need none beyond Expo's. These keep the file and line numbers, so a crash report can be read
+ * back with the build's mapping file, with every file named the same, and Room's databases, which its own rules
+ * left unmade.
+ */
+const ANDROID_KEEP_RULES = `
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
+
+# Room makes each database's generated class through its no-argument constructor, by reflection: WorkManager's
+# WorkDatabase_Impl, as Android starts the app. R8 took the constructor for unused and the app closed at once.
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
+`;
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const v = VARIANTS[variant];
@@ -38,6 +78,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: v.name,
     slug: v.slug,
+    // The Expo account the projects belong to (eas-projects.json): development's now, the production account's
+    // before the store builds.
+    ...(EAS_PROJECTS.owner ? { owner: EAS_PROJECTS.owner } : {}),
     scheme: v.scheme,
     version: '0.1.0',
     orientation: 'portrait',
@@ -107,14 +150,27 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // Smile ID's selfie checks (docs/security-plan.md, I2, I8). Only the agent app uses them, but native
       // modules are linked into both builds, which compile only with these settings.
       ...SMILE_ID_PLUGINS,
+      // Lets Smile ID's plugin pin its Kotlin version in Expo 58's template; listed after it so it runs first.
+      './plugins/with-plain-kotlin-classpath.cjs',
+      [
+        'expo-build-properties',
+        {
+          android: {
+            enableMinifyInReleaseBuilds: true,
+            enableShrinkResourcesInReleaseBuilds: true,
+            extraProguardRules: ANDROID_KEEP_RULES,
+          },
+        },
+      ],
     ],
     experiments: { typedRoutes: false },
     extra: {
       variant,
-      apiUrl: process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000',
+      apiUrl: apiUrlFor(process.env),
       country: process.env.EXPO_PUBLIC_COUNTRY ?? 'NG',
       // The Google Cloud project linked to the apps in Play Console, for Play Integrity (MB3). Not a secret.
       playCloudProjectNumber: process.env.PLAY_CLOUD_PROJECT_NUMBER ?? '',
+      ...easProject(EAS_PROJECTS, variant),
     },
   };
 };

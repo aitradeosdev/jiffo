@@ -11,6 +11,7 @@
     "@smileid/usesmileid_vision_face": "12.3.0",
     "expo": "~58.0.25",
     "expo-brightness": "~58.0.3",
+    "expo-build-properties": "~58.0.12",
     "expo-clipboard": "~58.0.4",
     "expo-constants": "~58.0.16",
     "expo-crypto": "~58.0.8",
@@ -55,6 +56,7 @@
   "scripts": {
     "start": "expo start --clear",
     "start:agent": "APP_VARIANT=agent expo start --clear",
+    "eas-build-post-install": "pnpm --filter @jiffo/shared build",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

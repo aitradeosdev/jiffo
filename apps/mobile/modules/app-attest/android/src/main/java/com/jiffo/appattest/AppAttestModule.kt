@@ -102,10 +102,14 @@ class AppAttestModule : Module() {
       }
     }
 
-    AsyncFunction("newAppleKey") { -> throw AppAttestException("App Attest is for iPhones") }
-    AsyncFunction("attestAppleKey") { _: String, _: String -> throw AppAttestException("App Attest is for iPhones") }
-    AsyncFunction("appleAssertion") { _: String, _: String -> throw AppAttestException("App Attest is for iPhones") }
+    // Apple's App Attest, which the app asks only on an iPhone. Typed as the iPhone's answers are (a string),
+    // since Expo can't name a function's result after one that only throws.
+    AsyncFunction("newAppleKey") { -> iPhoneOnly<String>() }
+    AsyncFunction("attestAppleKey") { _: String, _: String -> iPhoneOnly<String>() }
+    AsyncFunction("appleAssertion") { _: String, _: String -> iPhoneOnly<String>() }
   }
+
+  private fun <T> iPhoneOnly(): T = throw AppAttestException("App Attest is for iPhones")
 
   /** The provider, or the one being prepared; one prepare at a time, whichever thread asks. */
   private fun providerTask(number: Long): Task<StandardIntegrityTokenProvider>? = synchronized(lock) {

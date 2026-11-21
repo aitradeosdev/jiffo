@@ -269,7 +269,7 @@ The owner asked for anything in the plan that contradicts what was built to be c
 | MB4 | missing | | Root, emulator, hooking-tool and mock-location signals. | implement (fix 10) |
 | MB5 | partly | `apps/mobile/app/(app)/_layout.tsx` | Screens need sign-in. Link parameters aren't validated. | implement (fix 10) |
 | MB6 | done | Expo modules, maps, socket.io client | A written list of the SDKs used. | implement (fix 8) |
-| MB7 | after launch | | | after launch |
+| MB7 | partly | `apps/mobile/app.config.ts` (R8 through `expo-build-properties`), keep rules listed in `docs/security/sdks.md`; test: `release-build` | Android release builds are shrunk and obfuscated with R8, with unused resources dropped; each native library's own keep rules apply. Certificate pinning is still to come. | obfuscation done (after launch, built early); pinning to come, shipped off |
 | MB8 | owner | | Mapping against MASVS and the OWASP Top 10s, checked by the penetration test. | owner |
 
 ## Changes to features already built (X)
@@ -442,7 +442,7 @@ One area per pull request, abuse tests first. Every one that touches login, mone
 
     Covers X1–X3, E5, E6, E8, E9, C1, C3, G1, G4, I3, F3.
 
-**After launch:** F4, MB7 (A10, C7 and D8 are done), and referrals and promos (F1, F2, X5) when they are built.
+**After launch:** F4, MB7's certificate pinning (A10, C7, D8 and MB7's obfuscation are done), and referrals and promos (F1, F2, X5) when they are built.
 
 ## Owner's tasks
 

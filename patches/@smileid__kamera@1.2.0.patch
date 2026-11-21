@@ -1,0 +1,15 @@
+diff --git a/android/build.gradle b/android/build.gradle
+index 61188b2f3b8e91fb98e4c81ad0837a984793937a..f3d055c9428008514c8904042757e84bf481459e 100644
+--- a/android/build.gradle
++++ b/android/build.gradle
+@@ -14,7 +14,9 @@ apply plugin: "com.android.library"
+ // AGP 9+ ships built-in Kotlin support; the standalone plugin is required
+ // below 9 and rejected at 9+. Hosts pin their own AGP, so branch on it.
+ def kameraAgpMajor = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION.tokenize(".")[0].toInteger()
+-if (kameraAgpMajor < 9) {
++// An app can turn AGP 9's built-in Kotlin off (Expo 58's template does), and then needs the standalone plugin.
++def kameraBuiltInKotlin = (findProperty("android.builtInKotlin") ?: "true").toString() != "false"
++if (kameraAgpMajor < 9 || !kameraBuiltInKotlin) {
+     apply plugin: "kotlin-android"
+ }
+ 
