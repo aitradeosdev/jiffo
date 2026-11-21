@@ -69,6 +69,12 @@ describe('ranking', () => {
     expect(unlucky.rating).toBeCloseTo(0.75);
   });
 
+  it('still takes 0.1 off a new agent for each errand they left this week', () => {
+    const leaving = rankScore(inputs({ completedErrands: 3, cancellations7d: 2 }), rules, average);
+    expect(leaving.reliability).toBeCloseTo(0.7);
+    expect(rankScore(inputs({ completedErrands: 3, cancellations7d: 12 }), rules, average).reliability).toBe(0);
+  });
+
   it('adds a tier boost on top, so a boosted score can pass 1', () => {
     const boosted = { ...rules, tierBoosts: { ...rules.tierBoosts, gold: 20 } };
     const gold = rankScore(inputs({ tier: 'gold' }), boosted, average);
@@ -108,10 +114,15 @@ describe('ranking', () => {
       expect(rules.newAgentErrands).toBe(10);
     });
 
-    it('refuse weights that don’t add up to 100%', () => {
+    it('refuse weights that don’t add up to 100%, saying so beside the first of them', () => {
       const bad = structuredClone(NIGERIA_DEFAULT_SETTINGS);
       bad.matching.weights = { travel: 60, reliability: 20, rating: 10, waiting: 20 };
-      expect(CountrySettingsSchema.safeParse(bad).success).toBe(false);
+      const parsed = CountrySettingsSchema.safeParse(bad);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error!.issues[0]).toMatchObject({
+        path: ['matching', 'weights', 'travel'],
+        message: 'The ranking weights must add up to 100%',
+      });
     });
 
     it('take tier boosts from 0 to 20 points', () => {

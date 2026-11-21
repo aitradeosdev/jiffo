@@ -399,6 +399,8 @@ const CountrySettingsObject = z.object({
         .object({ travel: percent, reliability: percent, rating: percent, waiting: percent })
         .refine((w) => w.travel + w.reliability + w.rating + w.waiting === 100, {
           message: 'The ranking weights must add up to 100%',
+          // Beside the first of them, so the panel shows it there.
+          path: ['travel'],
         })
         .default(() => ({ ...DEFAULT_MATCHING_SETTINGS.weights })),
       /** Points added to the score for each tier, on top of it: 0 to 20 (0.2). */

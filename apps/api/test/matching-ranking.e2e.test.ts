@@ -115,6 +115,20 @@ describe('ranking candidates', () => {
     expect(ranked.map((r) => r.score)).toEqual([...ranked.map((r) => r.score)].sort((a, b) => b - a));
   });
 
+  it('counts the wait from going online for an agent whose only errand is a scheduled one not started', async () => {
+    const planner = await signIn(t, 'agent');
+    const later = await createErrand(t, customer, { scheduledFor: new Date(Date.now() + 3 * 3_600_000).toISOString() });
+    await act(t, planner, later.id, 'accept');
+    await online(planner);
+    await t.db
+      .update(agentPresence)
+      .set({ onlineSince: new Date(Date.now() - 2 * 3_600_000) })
+      .where(eq(agentPresence.userId, planner.userId));
+    const errand = await errandAtOjo();
+    const mine = (await ranking.ranked(errand.id)).find((r) => r.agentId === planner.userId)!;
+    expect(mine.parts.waiting).toBe(1);
+  });
+
   it('favours the agent who has waited longest when the settings weigh only that', async () => {
     await t.db
       .update(agentPresence)

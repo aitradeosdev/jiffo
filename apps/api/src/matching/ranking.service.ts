@@ -97,8 +97,7 @@ export class RankingService {
           and w.created_at > now() - interval '7 days') as "leftThisWeek",
         (select avg(r.stars)::float from (select stars from errand_ratings
           where ratee_id = a.id and rater_role = 'customer' order by created_at desc limit ${RECENT}) r) as rating,
-        (select max(greatest(coalesce(e.completed_at, '-infinity'), coalesce(e.cancelled_at, '-infinity')))
-          from errands e where e.agent_id = a.id) as "lastEnded",
+        (select max(greatest(e.completed_at, e.cancelled_at)) from errands e where e.agent_id = a.id) as "lastEnded",
         p.online_since as "onlineSince",
         exists (select 1 from errands e where e.agent_id = a.id and e.status in (${out})
           and not (e.status = 'accepted' and e.scheduled_for > now())) as busy,
@@ -114,7 +113,10 @@ export class RankingService {
           order by ev.id desc limit ${RECENT}) acc
       ) recent on true`);
     const now = Date.now();
-    const time = (d: Date | string | null) => (d ? new Date(d).getTime() : null);
+    const time = (d: Date | string | null) => {
+      const ms = d ? new Date(d).getTime() : NaN;
+      return Number.isFinite(ms) ? ms : null;
+    };
     return new Map(
       rows.map((r) => {
         // Waiting since the last errand ended, or since going online if later; none while they hold one.

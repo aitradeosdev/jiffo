@@ -684,7 +684,11 @@ export const errandEvents = pgTable(
     data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
   },
-  (t) => [index('errand_events_errand_idx').on(t.errandId, t.id)],
+  (t) => [
+    index('errand_events_errand_idx').on(t.errandId, t.id),
+    // Each agent's accepts and withdrawals, for ranking (docs/matching.md, M4).
+    index('errand_events_actor_idx').on(t.actorId, t.event, t.id),
+  ],
 );
 
 /* ---------- Chat ---------- */

@@ -1,0 +1,1 @@
+CREATE INDEX "errand_events_actor_idx" ON "errand_events" USING btree ("actor_id","event","id");

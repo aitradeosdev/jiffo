@@ -65,6 +65,11 @@ describe('agent presence and live location', () => {
     expect((await presenceOf(agent))!.onlineSince).toBeNull();
     await put(agent, { online: true, lat: 6.448, lng: 3.47 });
     expect((await presenceOf(agent))!.onlineSince!.getTime()).toBeGreaterThan(went.getTime());
+    // Online with none, as a background report racing a tap on Go offline could leave it: the next report
+    // while online sets it.
+    await t.db.update(agentPresence).set({ onlineSince: null }).where(eq(agentPresence.userId, agent.userId));
+    await put(agent, { lat: 6.4483, lng: 3.4703 });
+    expect((await presenceOf(agent))!.onlineSince).toBeInstanceOf(Date);
   });
 
   it('keeps the agent online or offline as they were when only a position is sent from the background', async () => {

@@ -126,16 +126,16 @@ const ratingPart = (stars: number) => clamp01((stars - 3) / 2);
  * - Rating: the average stars less 3, over 2, between 0 and 1.
  * - Waiting: minutes since the last errand ended or since going online, over 60, capped at 1.
  * Weighted as Settings, Matching say; then the tier's boost is added on top. A new agent, with fewer completed
- * errands than the settings ask, has the state's average reliability and rating, so is never starved.
+ * errands than the settings ask, has the state's average reliability (less their own cancellations this week)
+ * and rating, so is never starved.
  */
 export function rankScore(inputs: RankInputs, rules: RankRules, average: StateAverages): RankParts {
   const travel = clamp01(1 - inputs.travelSeconds / 60 / 30);
   const newcomer = inputs.completedErrands < rules.newAgentErrands;
   const rates = [inputs.acceptanceRate, inputs.completionRate].filter((r): r is number => r !== null);
-  const reliability =
-    newcomer || !rates.length
-      ? clamp01(average.reliability)
-      : clamp01(rates.reduce((a, b) => a + b, 0) / rates.length - 0.1 * inputs.cancellations7d);
+  // Leaving errands after accepting them costs a new agent too, from the state's average.
+  const base = newcomer || !rates.length ? average.reliability : rates.reduce((a, b) => a + b, 0) / rates.length;
+  const reliability = clamp01(base - 0.1 * inputs.cancellations7d);
   const rating = ratingPart(newcomer || inputs.ratingStars === null ? average.ratingStars : inputs.ratingStars);
   const waiting = clamp01(inputs.waitingMinutes / 60);
   const w = rules.weights;

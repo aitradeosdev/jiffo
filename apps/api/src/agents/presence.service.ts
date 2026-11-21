@@ -168,8 +168,9 @@ export class PresenceService {
         ? {}
         : { lat: null, lng: null, location: null, locatedAt: null, accuracy: null, fixedAt: null };
     // When they went online, which how long they've waited counts from (matching, M4): set going online, kept
-    // while they stay so, cleared going offline.
-    const since = body.online ? (current?.online ? {} : { onlineSince: now }) : { onlineSince: null };
+    // while they stay so, cleared going offline. Decided in the write itself, so a report racing another can't
+    // leave an online agent without one.
+    const since = { onlineSince: body.online ? sql`coalesce(${agentPresence.onlineSince}, ${now})` : null };
     await this.db
       .insert(agentPresence)
       .values({
