@@ -1,0 +1,110 @@
+# The test server (docs/deploy.md): Postgres with PostGIS, Redis, the API, the admin panel, and Caddy in front for
+# HTTPS. Only Caddy's ports are published: the database, Redis, the API and the admin API are reachable only on
+# this private network. Settings come from deploy/.env, which deploy/setup.sh writes.
+name: jiffo
+
+x-server: &server
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  image: jiffo-server:local
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jiffo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run deploy/setup.sh first}
+      POSTGRES_DB: jiffo
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U jiffo']
+      interval: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--requirepass', '${REDIS_PASSWORD:?run deploy/setup.sh first}', '--appendonly', 'yes']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD}', '--no-auth-warning', 'ping']
+      interval: 5s
+      retries: 20
+
+  api:
+    <<: *server
+    working_dir: /repo/apps/api
+    command: ['node', 'dist/main.js']
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      # Admin routes answer only here, which only the panel reaches (docs/security-plan.md, D1).
+      ADMIN_API_PORT: '3100'
+      RUN_MIGRATIONS: 'true'
+      # Caddy, in front.
+      TRUST_PROXY_HOPS: '1'
+      DATABASE_URL: postgres://jiffo:${POSTGRES_PASSWORD}@postgres:5432/jiffo
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      PUBLIC_API_URL: https://${API_HOST:?run deploy/setup.sh first}
+      ADMIN_URL: https://${ADMIN_HOST:?run deploy/setup.sh first}
+      CORS_ORIGINS: https://${ADMIN_HOST}
+      SECURITY_CONTACT: mailto:${CONTACT_EMAIL:?run deploy/setup.sh first}
+      # A test server nobody real uses: sign-in codes can be shown in the app instead of texted, once Settings,
+      # Security puts the country in Test mode. Never on a server real people use.
+      ALLOW_TEST_SIGN_IN_CODES: ${ALLOW_TEST_SIGN_IN_CODES:-true}
+      # Each key has one job, and all differ (docs/security-plan.md, I5). Generated once, on this server.
+      JWT_SECRET: ${JWT_SECRET:?run deploy/setup.sh first}
+      OTP_SECRET: ${OTP_SECRET:?run deploy/setup.sh first}
+      PIN_KEY: ${PIN_KEY:?run deploy/setup.sh first}
+      SECRETS_KEY: ${SECRETS_KEY:?run deploy/setup.sh first}
+      ID_FINGERPRINT_KEY: ${ID_FINGERPRINT_KEY:?run deploy/setup.sh first}
+      ADMIN_TOTP_KEY: ${ADMIN_TOTP_KEY:?run deploy/setup.sh first}
+      FIELD_KEY: ${FIELD_KEY:?run deploy/setup.sh first}
+      ADMIN_TOKEN_SECRET: ${ADMIN_TOKEN_SECRET:?run deploy/setup.sh first}
+      ADMIN_PANEL_SECRET: ${ADMIN_PANEL_SECRET:?run deploy/setup.sh first}
+      # Every provider (maps, storage, payments, push, SMS) is set up in the panel: Settings, Providers.
+
+  admin:
+    <<: *server
+    working_dir: /repo/apps/admin
+    command: ['node', 'node_modules/next/dist/bin/next', 'start', '--port', '3001', '--hostname', '0.0.0.0']
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: production
+      API_URL: http://api:3100
+      ADMIN_PANEL_SECRET: ${ADMIN_PANEL_SECRET}
+      TRUST_PROXY_HOPS: '1'
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      API_HOST: ${API_HOST}
+      ADMIN_HOST: ${ADMIN_HOST}
+      ACME_EMAIL: ${CONTACT_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+      - admin
+
+volumes:
+  postgres-data:
+  redis-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# The test server's everyday commands, run from the repository as root (docs/deploy.md):
+#
+#   deploy/jiffo admin <command>   the admin command line: the first owner's invite, resets (admin --help)
+#   deploy/jiffo logs [service]    follow the logs: api, admin, caddy, postgres or redis
+#   deploy/jiffo status            what is running
+#   deploy/jiffo update            pull the latest code, rebuild and restart
+#   deploy/jiffo backup            save the database to deploy/backups/
+#   deploy/jiffo <anything else>   passed to docker compose, such as restart api
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+compose() { docker compose -f deploy/compose.yml "$@"; }
+
+case "${1:-}" in
+  admin)
+    shift
+    compose exec api node dist/admin/admin-cli.js "$@"
+    ;;
+  logs)
+    shift
+    compose logs --follow --tail 200 "$@"
+    ;;
+  status)
+    compose ps
+    ;;
+  update)
+    git pull --ff-only
+    compose up -d --build
+    ;;
+  backup)
+    mkdir -p deploy/backups
+    file="deploy/backups/jiffo-$(date +%Y%m%d-%H%M%S).dump"
+    (umask 077 && compose exec -T postgres pg_dump -U jiffo --format=custom jiffo >"$file")
+    echo "Saved $file. Copy it off the server: it holds everyone's data."
+    ;;
+  "" | -h | --help)
+    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+  *)
+    compose "$@"
+    ;;
+esac
