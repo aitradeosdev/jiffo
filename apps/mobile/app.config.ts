@@ -44,6 +44,25 @@ export const apiUrlFor = (env: Record<string, string | undefined>) => {
 };
 
 /**
+ * Firebase's google-services.json, for push on Android (FCM): the app asks Firebase for its token, which can't work
+ * without it. One file covers both apps, from one Firebase project with both package names. It comes from a private
+ * file setting in Expo (GOOGLE_SERVICES_JSON), never the repository. An Android store build stops without it, as offers
+ * could never ring; others build without push (docs/mobile-builds.md).
+ */
+export const googleServicesFor = (env: Record<string, string | undefined>) => {
+  const file = env.GOOGLE_SERVICES_JSON || undefined;
+  // Android's store build only: an iPhone's push goes through Apple (APNs).
+  const androidStore =
+    env.EAS_BUILD === 'true' && env.EAS_BUILD_PLATFORM === 'android' && /^production/.test(env.EAS_BUILD_PROFILE ?? '');
+  if (!file && androidStore) {
+    throw new Error(
+      `The ${env.EAS_BUILD_PROFILE} build for Android needs GOOGLE_SERVICES_JSON, Firebase's google-services.json, as a file setting in its EAS environment (docs/mobile-builds.md)`,
+    );
+  }
+  return file;
+};
+
+/**
  * The Google Maps keys for Google's map in the apps (Maps SDK for Android, Maps SDK for iOS), drawn while Google is
  * the maps provider (src/ui/map/engine.ts). An iPhone build without its key draws Apple's map, and an Android one a
  * blank map, so a store build made on Expo's servers stops without its phone's key, even while Mapbox is the
@@ -195,6 +214,7 @@ const ANDROID_KEEP_RULES = `
 export default ({ config }: ConfigContext): ExpoConfig => {
   const v = VARIANTS[variant];
   const googleMaps = googleMapsFor(process.env);
+  const googleServices = googleServicesFor(process.env);
   return {
     ...config,
     name: v.name,
@@ -219,6 +239,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     android: {
       package: v.bundleId,
+      // Push (FCM): Firebase's file, when the build has it.
+      ...(googleServices ? { googleServicesFile: googleServices } : {}),
       adaptiveIcon: { foregroundImage: `./assets/${variant}/icon.png`, backgroundColor: v.background },
       predictiveBackGestureEnabled: false,
       // The app is left out of Android's cloud backups (docs/security-plan.md, MB2). A cable or Wi-Fi transfer

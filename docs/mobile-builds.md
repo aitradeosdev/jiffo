@@ -4,10 +4,10 @@ Expo Go and the web version can't run the apps' native parts: the money-signing 
 
 There are two kinds of build. Each exists for both apps: put `-customer` or `-agent` after the profile name.
 
-| Profile | What it is | Use it to |
-| --- | --- | --- |
-| `development-agent`, `development-customer` | A debug build with Expo's launcher. It loads the JavaScript from your computer, so changes show without a new build | Try the native parts while working on the app |
-| `preview-agent`, `preview-customer` | A release build, as the store app is built: R8 obfuscation on (MB7), JavaScript inside the app. It talks to the API only over HTTPS | Check a release build on a real phone before it ships |
+| Profile                                     | What it is                                                                                                                          | Use it to                                             |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `development-agent`, `development-customer` | A debug build with Expo's launcher. It loads the JavaScript from your computer, so changes show without a new build                 | Try the native parts while working on the app         |
+| `preview-agent`, `preview-customer`         | A release build, as the store app is built: R8 obfuscation on (MB7), JavaScript inside the app. It talks to the API only over HTTPS | Check a release build on a real phone before it ships |
 
 All the commands below run in a terminal in the repository's `apps/mobile` folder (`cd apps/mobile` from the repository's top folder, once).
 
@@ -35,7 +35,7 @@ All the commands below run in a terminal in the repository's `apps/mobile` folde
    APP_VARIANT=agent eas init
    ```
 
-   Put the two ids in `apps/mobile/eas-projects.json` as `customer` and `agent`, and commit the file. The ids aren't secret. The build settings below (`eas env:set`) are kept per account, so set them again in the new one.
+   Put the two ids in `apps/mobile/eas-projects.json` as `customer` and `agent`, and commit the file. The ids aren't secret. The build settings below (`eas env:create`) are kept per account, so set them again in the new one.
 
 5. The map in the apps. The apps draw the maps provider's own map, as Settings, Providers, Maps has it: Google's while Google finds places, Mapbox's while Mapbox does, as each one's terms keep its places on its own map. Both engines are in every build, so switching the provider needs no new release.
    - **Mapbox:** nothing to set for the build. Its token comes from the API as the app starts: "Map token for the apps" on the Mapbox provider, a public token (`pk.`). Mapbox no longer asks for a token to download its engine.
@@ -48,14 +48,26 @@ All the commands below run in a terminal in the repository's `apps/mobile` folde
    The keys go inside the apps, so anyone could read them from an installed app. The restrictions make them useless anywhere else. Save each for every build, both apps:
 
    ```bash
-   eas env:set --scope account --name GOOGLE_MAPS_ANDROID_API_KEY --value <your Android key> --environment development --environment preview --environment production --visibility sensitive
+   eas env:create --force --scope account --name GOOGLE_MAPS_ANDROID_API_KEY --value <your Android key> --environment development --environment preview --environment production --visibility sensitive
    ```
 
    ```bash
-   eas env:set --scope account --name GOOGLE_MAPS_IOS_API_KEY --value <your iPhone key> --environment development --environment preview --environment production --visibility sensitive
+   eas env:create --force --scope account --name GOOGLE_MAPS_IOS_API_KEY --value <your iPhone key> --environment development --environment preview --environment production --visibility sensitive
    ```
 
    Without them, development and preview builds still work: Android's map is blank, and the iPhone draws Apple's map instead. A store build (`production-agent`, `production-customer`) on Expo's servers stops with an error naming the missing key, so neither ships.
+
+6. Push notifications on Android (Firebase Cloud Messaging). Without them, an agent's offers ring only while the app is open.
+   - In the [Firebase console](https://console.firebase.google.com), make one project and add two **Android** apps to it: `com.jiffoapp.customer` and `com.jiffoapp.agent`. Skip the SHA-1 and SDK steps.
+   - **After adding both**, download `google-services.json` (Project settings, General): one file then covers both apps. Don't commit it. Save it in Expo as a private file, for every build:
+
+     ```bash
+     eas env:create --force --scope account --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --environment development --environment preview --environment production --visibility secret
+     ```
+
+   - For the server, make a private key (Project settings, Service accounts, Generate new private key) and enter that file in the admin panel: Settings, Providers, Push.
+
+   Saved as secret, it reaches Expo's build servers only, not your computer. A development or preview build without the file still builds, without push. An Android store build stops with an error naming `GOOGLE_SERVICES_JSON`. A build made before the file was saved has no push: build again.
 
 ## The API the app talks to
 
@@ -71,7 +83,7 @@ Start the backend as the README says. With the console providers, sign-in codes 
   It prints an address ending in `trycloudflare.com`. Save it for preview builds, then build. A new tunnel has a new address, which needs a new build:
 
   ```bash
-  eas env:set --scope account --name EXPO_PUBLIC_API_URL --value https://<the address> --environment preview --visibility plaintext
+  eas env:create --force --scope account --name EXPO_PUBLIC_API_URL --value https://<the address> --environment preview --visibility plaintext
   ```
 
   Running it again with a new address changes it. With the test server running ([deploy.md](deploy.md)), set it to that server's API address once instead: it keeps its address.
@@ -89,6 +101,7 @@ Start the backend as the README says. With the console providers, sign-in codes 
    ```
 
    For the release check, use `--profile preview-agent`. The first time, EAS asks to make the app's signing key: say yes, and EAS keeps it. A build takes 10 to 30 minutes.
+
 2. When it's done, EAS shows a link and a QR code, also on [expo.dev](https://expo.dev) under the project's builds. Open it on the phone (scan the QR code with the camera) and tap **Install** to download the APK.
 3. Open the file. The first time, Android asks to allow installs from your browser: tap **Settings**, turn on **Allow from this source**, go back and tap **Install**. If Play Protect warns about an unknown app, tap **Install anyway**.
 4. **Development build:** on your computer, start the bundler for that app with the address from above:
@@ -112,6 +125,7 @@ An app can be installed on an iPhone outside the App Store only with a paid Appl
    ```
 
    Choose **Website**, open the link it shows on the iPhone in Safari, and allow the profile download. Then on the iPhone open **Settings**, tap **Profile Downloaded** near the top and install it. This tells Apple the phone may run your builds.
+
 3. Turn on Developer Mode, once (iOS 16 and later): **Settings**, **Privacy & Security**, **Developer Mode**, turn it on and let the phone restart. If **Developer Mode** isn't listed yet, install the build first (steps 4 and 5): the option appears once the phone has an app from a build like this.
 4. Build. For the agent app:
 
@@ -120,6 +134,7 @@ An app can be installed on an iPhone outside the App Store only with a paid Appl
    ```
 
    The first time, EAS asks you to sign in to your Apple account and offers to make the certificates and the provisioning profile, with your registered phones: say yes to each. It also sets up the app id with App Attest. A phone registered after a build needs a new build.
+
 5. When it's done, open the link or QR code on the iPhone and tap **Install**. The app appears on the home screen.
 6. **Development build:** start the bundler as in step 4 for Android, with `GOOGLE_MAPS_IOS_API_KEY` set to the same key the build had (or without it, if the build had none):
 

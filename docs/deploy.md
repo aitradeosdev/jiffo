@@ -69,7 +69,7 @@ Open the invite link, choose a password and set up your authenticator app. As th
 Build them for this server ([mobile-builds.md](mobile-builds.md)), with the API's address as the preview builds' setting:
 
 ```bash
-eas env:set --scope account --name EXPO_PUBLIC_API_URL --value https://api.203-0-113-5.sslip.io --environment preview --visibility plaintext
+eas env:create --force --scope account --name EXPO_PUBLIC_API_URL --value https://api.203-0-113-5.sslip.io --environment preview --visibility plaintext
 ```
 
 Then, from `apps/mobile` on your computer:
@@ -82,7 +82,7 @@ eas build --profile preview-customer --platform android
 eas build --profile preview-agent --platform android
 ```
 
-Each gives an APK to install on an Android phone. iPhones need an Apple Developer account, with the test phones registered.
+For push notifications, save Firebase's `google-services.json` for the builds first ([mobile-builds.md](mobile-builds.md), step 6). Each build gives an APK to install on an Android phone. iPhones need an Apple Developer account, with the test phones registered.
 
 An agent signs up in the agent app, and you approve them in the panel (Applications).
 

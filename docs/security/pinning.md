@@ -83,7 +83,7 @@ Do each step for staging first (the `preview` builds), and only for production (
    For example:
 
    ```bash
-   cd apps/mobile && eas env:set --scope account --environment preview --name PINNING_PINS --value "letsencrypt-isrg-root-x1:<pin>,google-gts-root-r1:<pin>" --visibility plaintext
+   cd apps/mobile && eas env:create --force --scope account --environment preview --name PINNING_PINS --value "letsencrypt-isrg-root-x1:<pin>,google-gts-root-r1:<pin>" --visibility plaintext
    ```
 
 7. **Build and test on staging with real phones**, an Android phone and an iPhone, with `preview` builds (not development builds: Expo's development launcher on iPhone gets in the way of pinning). The tests are in the next section.
