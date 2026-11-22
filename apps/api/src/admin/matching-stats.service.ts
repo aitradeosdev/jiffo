@@ -21,9 +21,9 @@ export interface Figures {
   acceptSeconds: number | null;
   /** Offers made per urgent errand. */
   offersPerErrand: number | null;
-  /** The share of urgent errands whose search reached its last step: open to everyone (M8). */
+  /** The share of urgent errands whose search reached its last step, opening to everyone (M8), even if raised after. */
   everyoneShare: number | null;
-  /** The share that expired with no agent. */
+  /** The share of urgent errands that expired with no agent. */
   expiredShare: number | null;
   /** Errands taken from an offer whose agent then reached the pickup: those the pickup times are from. */
   pickups: number;
@@ -75,8 +75,8 @@ export class MatchingStatsService {
     const inState = stateCode ? sql`and e.state_code = ${stateCode}` : sql``;
     const { rows } = await this.db.execute<Row>(sql`
       with e as (
-        select e.id, e.state_code, e.category_key, e.urgent, e.status, e.created_at, e.broadcast_fee_kobo,
-          e.reached_pickup_at, e.agent_id
+        select e.id, e.state_code, e.category_key, e.urgent, e.status, e.created_at, e.opened_to_everyone_at,
+          e.reached_pickup_at, e.agent_id, e.accepted_at as held_since
         from errands e
         where e.country_code = ${countryCode} and e.created_at >= ${since} ${inState}
       ),
@@ -99,10 +99,12 @@ export class MatchingStatsService {
       ),
       each as (
         select e.*, f.first_at, coalesce(f.n, 0) as offers, a.at as accepted_at,
-          -- The pickup times, only where the agent who reached it is the one the offer was ranked for.
-          case when t.agent_id = e.agent_id and e.reached_pickup_at is not null then t.travel_seconds end as predicted,
-          case when t.agent_id = e.agent_id and e.reached_pickup_at is not null
-            then extract(epoch from e.reached_pickup_at - t.answered_at) end as actual
+          -- The pickup times, only where the agent holding it took it from that offer: their acceptance is the
+          -- offer's answer (one moment for both), and the time to the pickup is from then.
+          case when t.agent_id = e.agent_id and t.answered_at = e.held_since and e.reached_pickup_at is not null
+            then t.travel_seconds end as predicted,
+          case when t.agent_id = e.agent_id and t.answered_at = e.held_since and e.reached_pickup_at is not null
+            then extract(epoch from e.reached_pickup_at - e.held_since) end as actual
         from e
         left join offered f on f.errand_id = e.id
         left join accepted a on a.errand_id = e.id
@@ -115,9 +117,9 @@ export class MatchingStatsService {
           order by case when urgent then extract(epoch from first_at - created_at) end) as first_offer_s,
         percentile_cont(0.5) within group (order by extract(epoch from accepted_at - created_at)) as accept_s,
         (avg(offers) filter (where urgent))::float8 as offers_per_errand,
-        (avg(case when broadcast_fee_kobo is not null then 1 else 0 end) filter (where urgent))::float8
+        (avg(case when opened_to_everyone_at is not null then 1 else 0 end) filter (where urgent))::float8
           as everyone_share,
-        (avg(case when status = 'expired' then 1 else 0 end))::float8 as expired_share,
+        (avg(case when status = 'expired' then 1 else 0 end) filter (where urgent))::float8 as expired_share,
         count(predicted)::int as pickups,
         percentile_cont(0.5) within group (order by predicted) as predicted_s,
         percentile_cont(0.5) within group (order by actual) as actual_s

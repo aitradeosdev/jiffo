@@ -531,7 +531,12 @@ export class OffersService {
     if (errand.broadcastFeeKobo !== errand.feeKobo) {
       const [marked] = await this.db
         .update(errands)
-        .set({ broadcastFeeKobo: errand.feeKobo, broadcastReachMeters: reach })
+        .set({
+          broadcastFeeKobo: errand.feeKobo,
+          broadcastReachMeters: reach,
+          // The first time only: kept when a raised fee starts the search again (M15).
+          openedToEveryoneAt: sql`coalesce(${errands.openedToEveryoneAt}, now())`,
+        })
         .where(and(eq(errands.id, errand.id), eq(errands.status, 'requested'), eq(errands.feeKobo, errand.feeKobo)))
         .returning({ id: errands.id });
       if (!marked) return;

@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { DEFAULT_SECURITY_SETTINGS } from '@jiffo/shared';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { countries, errandStops, errandTrail, errands } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
@@ -36,26 +36,31 @@ export class TrailService {
   async record(agentId: string, errandIds: string[], position: TrailPosition) {
     if (!errandIds.length) return;
     await this.db.insert(errandTrail).values(errandIds.map((errandId) => ({ errandId, agentId, ...position })));
-    // Never a mocked position (MB4), nor one the phone says is far off: neither says where the agent is.
-    if (!position.mocked && (position.accuracy === null || position.accuracy <= AT_PICKUP_METERS)) {
-      await this.reachedPickup(agentId, errandIds, position);
-    }
   }
 
   /**
    * The first time the agent holding an errand reports a position at its pickup (docs/matching.md, M15): for the
-   * dashboard's predicted against actual pickup time. Kept on the errand, as the trail itself goes after a while.
+   * dashboard's predicted against actual pickup time. Any errand they hold, also one waiting while they carry out
+   * another, which gets no trail yet. Kept on the errand, as the trail itself goes after a while.
    */
-  private async reachedPickup(agentId: string, errandIds: string[], position: TrailPosition) {
+  async reachedPickup(agentId: string, heldIds: string[], position: TrailPosition) {
+    // Never a mocked position (MB4), nor one the phone says is far off: neither says where the agent is.
+    if (!heldIds.length || position.mocked || (position.accuracy !== null && position.accuracy > AT_PICKUP_METERS)) {
+      return;
+    }
+    // When the phone took the fix, where it said: a report can arrive a while after.
+    const at = position.fixedAt ?? position.at;
     const here = sql`ST_SetSRID(ST_MakePoint(${position.lng}, ${position.lat}), 4326)::geography`;
     await this.db
       .update(errands)
-      .set({ reachedPickupAt: position.at })
+      .set({ reachedPickupAt: at })
       .where(
         and(
-          inArray(errands.id, errandIds),
+          inArray(errands.id, heldIds),
           eq(errands.agentId, agentId),
           isNull(errands.reachedPickupAt),
+          // Not a fix from before they took it.
+          lte(errands.acceptedAt, at),
           sql`exists (select 1 from ${errandStops} s where s.errand_id = ${errands.id} and s.seq = 0
             and ST_DWithin(s.location, ${here}, ${AT_PICKUP_METERS}))`,
         ),

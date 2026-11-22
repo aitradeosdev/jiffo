@@ -9,8 +9,9 @@ export function duration(seconds: number | null): string {
     const rest = s % 60;
     return `${Math.floor(s / 60)} min${rest ? ` ${rest} s` : ''}`;
   }
-  const minutes = Math.round((s % 3_600) / 60);
-  return `${Math.floor(s / 3_600)} h${minutes ? ` ${minutes} min` : ''}`;
+  // Whole minutes first, so 1 h 59.5 min is 2 h, never "1 h 60 min".
+  const m = Math.round(s / 60);
+  return `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`;
 }
 
 /** A share or rate from 0 to 1, as a whole percentage; a dash with none to go by. */
@@ -25,6 +26,18 @@ export function partsText(parts: Record<string, number>): string {
 }
 
 export type OfferStatus = 'open' | 'accepted' | 'declined' | 'expired' | 'withdrawn';
+
+/**
+ * How long the agent took to answer an offer. A withdrawn offer was ended by the errand (cancelled, or taken
+ * another way), never by the agent, and one that ran out had no answer.
+ */
+export function answerText(status: OfferStatus, offeredAt: string, answeredAt: string | null): string {
+  const after = answeredAt ? duration((Date.parse(answeredAt) - Date.parse(offeredAt)) / 1000) : null;
+  if (status === 'accepted' || status === 'declined') return after ? `answered after ${after}` : '';
+  if (status === 'withdrawn') return after ? `withdrawn after ${after}, unanswered` : 'withdrawn, unanswered';
+  if (status === 'expired') return 'not answered';
+  return '';
+}
 
 /** What became of an offer. */
 export const OFFER_STATUS: Record<OfferStatus, { label: string; tone: 'neutral' | 'brand' | 'warn' | 'danger' }> = {

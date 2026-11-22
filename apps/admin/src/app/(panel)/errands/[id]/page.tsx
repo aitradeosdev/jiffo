@@ -8,7 +8,7 @@ import { Badge, Card, Notice } from '@/components/ui';
 import { api, ApiError, getCountry, getMe } from '@/lib/api';
 import { ACCOUNT, EVENT, getCategories, JOURNAL, nameOf, STATUS, type PersonRef } from '@/lib/errands';
 import { dateTime, money } from '@/lib/format';
-import { duration, OFFER_STATUS, partsText, type OfferStatus } from '@/lib/matching';
+import { answerText, duration, OFFER_STATUS, partsText, type OfferStatus } from '@/lib/matching';
 import { ActionsForm } from './actions-form';
 import { EvidenceForm } from './evidence-form';
 import { TrailMap } from './trail-map';
@@ -93,7 +93,8 @@ interface Detail {
     offeredAt: string;
     answeredAt: string | null;
   }>;
-  /** Who was told once it was open to everyone (M8). */
+  /** Who was told once it was open to everyone (M8): each agent once, as last told, up to 500. */
+  toldAgents: number;
   broadcasts: Array<{
     agent: { id: string; firstName: string | null; lastName: string | null };
     feeKobo: number;
@@ -277,8 +278,8 @@ export default async function ErrandPage({
                         </p>
                         <p className="text-[13px] text-ink-3">
                           Offered {time(o.offeredAt)}
-                          {o.answeredAt
-                            ? ` · answered after ${duration((Date.parse(o.answeredAt) - Date.parse(o.offeredAt)) / 1000)}`
+                          {answerText(o.status, o.offeredAt, o.answeredAt)
+                            ? ` · ${answerText(o.status, o.offeredAt, o.answeredAt)}`
                             : ''}
                         </p>
                       </li>
@@ -289,7 +290,8 @@ export default async function ErrandPage({
               {d.broadcasts.length ? (
                 <div className="mt-4 border-t border-line pt-3">
                   <p className="text-sm font-semibold">
-                    Open to everyone: {d.broadcasts.length} {d.broadcasts.length === 1 ? 'agent' : 'agents'} told
+                    Open to everyone: {d.toldAgents} {d.toldAgents === 1 ? 'agent' : 'agents'} told
+                    {d.toldAgents > d.broadcasts.length ? `, the first ${d.broadcasts.length} listed` : ''}
                   </p>
                   <ul className="mt-1.5 space-y-1 text-[13px] text-ink-2">
                     {d.broadcasts.map((b) => (

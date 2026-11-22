@@ -656,6 +656,11 @@ export const errands = pgTable(
      * can differ from the country's. Null for errands opened before places set their own.
      */
     broadcastReachMeters: integer('broadcast_reach_m'),
+    /**
+     * When its search first reached its last step and it opened to everyone (M8): kept when a raised fee starts the
+     * search again, for the dashboard's share opened to everyone (M15).
+     */
+    openedToEveryoneAt: timestamp('opened_to_everyone_at', { withTimezone: true }),
     itemAmountKobo: kobo('item_amount_kobo'),
     scheduledFor: timestamp('scheduled_for', { withTimezone: true }),
     settingsVersion: integer('settings_version').notNull(),

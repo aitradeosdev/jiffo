@@ -19,10 +19,10 @@ const box = (west: number, south: number, east: number, north: number) => ({
   ],
 });
 
-// Ibadan, away from the places the other test files send errands, so Oyo's figures are this file's alone.
-const IBADAN = box(3.8, 7.3, 4.05, 7.55);
-const BODIJA = box(3.9, 7.42, 3.96, 7.46);
-const PICKUP = { lat: 7.44, lng: 3.92 };
+// Enugu, away from the places the other test files draw and send errands, so Enugu's figures are this file's alone.
+const ENUGU = box(7.4, 6.35, 7.6, 6.55);
+const INDEPENDENCE_LAYOUT = box(7.48, 6.43, 7.54, 6.47);
+const PICKUP = { lat: 6.45, lng: 7.51 };
 /** A km east of the pickup, about, this far from the equator. */
 const east = (km: number) => ({ lat: PICKUP.lat, lng: PICKUP.lng + km / 110 });
 
@@ -55,15 +55,15 @@ type Figures = {
 
 /**
  * The matching dashboard and offer log (docs/matching.md, M15): every offer of an errand, in order, with its score
- * and answer, in the admin errand view; figures per state and category; and per agent. Oyo's search is 1 km, then
- * 2, one offer each, set for the state (M14).
+ * and answer, in the admin errand view; figures per state and category; and per agent. Enugu's search is 1 km,
+ * then 2, one offer each, set for the state (M14).
  */
 describe('the matching dashboard', () => {
   let t: TestApp;
   let owner: Awaited<ReturnType<typeof adminAs>>;
   let original: { settings: { matching: Record<string, unknown> } };
   let customer: Person;
-  let oyo: string;
+  let enugu: string;
   const agents = new Map<string, Person>();
 
   const admin = (path: string) => request(t.http).get(`/v1/admin${path}`).set(owner.headers);
@@ -79,14 +79,14 @@ describe('the matching dashboard', () => {
     );
     expect(res.status).toBe(200);
   }
-  async function oyoMatching(matching: Record<string, unknown>) {
+  async function enuguMatching(matching: Record<string, unknown>) {
     const listed = (await admin('/service-areas?country=NG').expect(200)).body;
-    const { version } = listed.states.find((s: { code: string }) => s.code === 'OY').matching;
+    const { version } = listed.states.find((s: { code: string }) => s.code === 'EN').matching;
     const res = await approved(t, 'owner', (h) =>
       request(t.http)
         .post('/v1/admin/matching')
         .set(h)
-        .send({ scope: 'state', id: oyo, basedOn: version, matching, note: 'Oyo for a test' }),
+        .send({ scope: 'state', id: enugu, basedOn: version, matching, note: 'Enugu for a test' }),
     );
     expect(res.status, JSON.stringify(res.body)).toBe(200);
   }
@@ -100,16 +100,17 @@ describe('the matching dashboard', () => {
     customer = await signIn(t, 'customer');
     await fund(t, customer, 100_000_000);
     const states = (await admin('/states?country=NG').expect(200)).body as Array<{ id: string; code: string }>;
-    oyo = states.find((s) => s.code === 'OY')!.id;
+    enugu = states.find((s) => s.code === 'EN')!.id;
     const post = (path: string, body: object) =>
       request(t.http).post(`/v1/admin${path}`).set(owner.headers).send(body).expect(201);
     const patch = (path: string) =>
       request(t.http).patch(`/v1/admin${path}`).set(owner.headers).send({ enabled: true }).expect(200);
-    const city = (await post('/cities', { stateId: oyo, name: 'Ibadan', boundary: IBADAN })).body.id;
-    const area = (await post('/areas', { cityId: city, name: 'Bodija', boundary: BODIJA })).body.id;
+    const city = (await post('/cities', { stateId: enugu, name: 'Enugu', boundary: ENUGU })).body.id;
+    const area = (await post('/areas', { cityId: city, name: 'Independence Layout', boundary: INDEPENDENCE_LAYOUT }))
+      .body.id;
     await patch(`/cities/${city}`);
     await patch(`/areas/${area}`);
-    await oyoMatching({ searchStepsKm: [1, 2], offersPerStep: 1 });
+    await enuguMatching({ searchStepsKm: [1, 2], offersPerStep: 1 });
   });
   afterEach(async () => {
     await t.db.update(errandOffers).set({ status: 'withdrawn' }).where(eq(errandOffers.status, 'open'));
@@ -125,7 +126,7 @@ describe('the matching dashboard', () => {
     for (const o of off) await t.app.get(AgentLocations).remove(o.userId, 'NG');
   });
   afterAll(async () => {
-    await oyoMatching({});
+    await enuguMatching({});
     await country(original.settings.matching);
     await t.close();
   });
@@ -145,8 +146,8 @@ describe('the matching dashboard', () => {
       urgent,
       categoryKey,
       stops: [
-        { kind: 'pickup', label: 'Shop', address: 'Bodija Market, Ibadan', ...PICKUP },
-        { kind: 'dropoff', label: 'Home', address: 'Bodija, Ibadan', lat: PICKUP.lat + 0.01, lng: PICKUP.lng },
+        { kind: 'pickup', label: 'Shop', address: 'Independence Layout, Enugu', ...PICKUP },
+        { kind: 'dropoff', label: 'Home', address: 'Ogui Road, Enugu', lat: PICKUP.lat + 0.01, lng: PICKUP.lng },
       ],
     });
   /** The agent holding the errand's open offer. */
@@ -172,7 +173,7 @@ describe('the matching dashboard', () => {
     return agent;
   };
   const detail = async (errandId: string) => (await admin(`/errands/${errandId}`).expect(200)).body;
-  const dashboard = async () => (await admin('/matching?country=NG&state=OY&days=7').expect(200)).body;
+  const dashboard = async () => (await admin('/matching?country=NG&state=EN&days=7').expect(200)).body;
 
   it('logs every offer of an errand, in order, with its score and what the agent did, in its admin view', async () => {
     const near = await agentAt(east(0.3));
@@ -205,9 +206,13 @@ describe('the matching dashboard', () => {
     await agentAt(east(1.8));
     const errand = await send('parcel');
     const asked = [await decline(errand.id), await decline(errand.id)];
-    const { broadcasts } = (await detail(errand.id)) as {
+    const { broadcasts, toldAgents } = (await detail(errand.id)) as {
       broadcasts: Array<{ agent: { id: string }; straightMeters: number; feeKobo: number; toldAt: string }>;
+      toldAgents: number;
     };
+    // Each agent once, however many times they were told.
+    expect(new Set(broadcasts.map((b) => b.agent.id)).size).toBe(broadcasts.length);
+    expect(toldAgents).toBe(broadcasts.length);
     const left = [...agents.keys()].filter((id) => !asked.some((a) => a.userId === id));
     expect(broadcasts.map((b) => b.agent.id)).toEqual(expect.arrayContaining([left.at(-1)]));
     expect(broadcasts.some((b) => asked.some((a) => a.userId === b.agent.id))).toBe(false);
@@ -220,11 +225,26 @@ describe('the matching dashboard', () => {
     const near = await agentAt(east(0.4));
     const taken = await send('laundry');
     expect((await accept(taken.id)).userId).toBe(near.userId);
-    // Still 500 m off: not at the pickup yet. Then there.
+    const reached = async () => (await t.db.select().from(errands).where(eq(errands.id, taken.id)))[0]!.reachedPickupAt;
+    const acceptedAt = (await t.db.select().from(errands).where(eq(errands.id, taken.id)))[0]!.acceptedAt;
+    // Still 500 m off: not at the pickup yet.
     await request(t.http).put('/v1/agent/presence').set(near.headers).send(east(0.5)).expect(200);
-    expect((await t.db.select().from(errands).where(eq(errands.id, taken.id)))[0]!.reachedPickupAt).toBeNull();
-    await request(t.http).put('/v1/agent/presence').set(near.headers).send(PICKUP).expect(200);
-    expect((await t.db.select().from(errands).where(eq(errands.id, taken.id)))[0]!.reachedPickupAt).not.toBeNull();
+    expect(await reached()).toBeNull();
+    // At the pickup, but by a fix the phone took before they accepted: not arriving.
+    await request(t.http)
+      .put('/v1/agent/presence')
+      .set(near.headers)
+      .send({ ...PICKUP, fixedAt: acceptedAt!.getTime() - 60_000 })
+      .expect(200);
+    expect(await reached()).toBeNull();
+    // There, as the phone took the fix: arrival is when the fix was taken, not when it reached us.
+    const fixedAt = Date.now();
+    await request(t.http)
+      .put('/v1/agent/presence')
+      .set(near.headers)
+      .send({ ...PICKUP, fixedAt })
+      .expect(200);
+    expect((await reached())!.getTime()).toBe(fixedAt);
     // No one free: it opens to everyone, and expires.
     await t.db.update(agentPresence).set({ online: false }).where(eq(agentPresence.userId, near.userId));
     await t.app.get(AgentLocations).remove(near.userId, 'NG');
@@ -241,17 +261,61 @@ describe('the matching dashboard', () => {
 
     const body = await dashboard();
     const row = (body.places as Array<Figures & { stateCode: string; categoryKey: string; stateName: string }>).find(
-      (p) => p.stateCode === 'OY' && p.categoryKey === 'laundry',
+      (p) => p.stateCode === 'EN' && p.categoryKey === 'laundry',
     )!;
-    expect(row).toMatchObject({ stateName: 'Oyo', errands: 3, urgent: 2, pickups: 1, expiredShare: 1 / 3 });
+    // The expired share is of urgent errands, as the other offer figures are.
+    expect(row).toMatchObject({ stateName: 'Enugu', errands: 3, urgent: 2, pickups: 1, expiredShare: 0.5 });
     expect(row.offersPerErrand).toBe(0.5);
     expect(row.firstOfferSeconds).toBeGreaterThanOrEqual(0);
     expect(row.acceptSeconds).toBeGreaterThanOrEqual(0);
     const [offer] = await t.db.select().from(errandOffers).where(eq(errandOffers.errandId, taken.id));
     expect(row.predictedPickupSeconds).toBe(offer!.travelSeconds);
     expect(row.actualPickupSeconds).toBeGreaterThanOrEqual(0);
-    // Oyo in all, this file's errands alone.
+    // Enugu in all, this file's errands alone.
     expect(body.total.errands).toBeGreaterThanOrEqual(row.errands);
+  });
+
+  it('counts an errand as open to everyone even once its fee is raised and offers start again', async () => {
+    // Shopping, sent here only by this test.
+    await agentAt(east(0.5));
+    await agentAt(east(1.5));
+    const errand = await send('shopping');
+    await decline(errand.id);
+    await decline(errand.id);
+    const [opened] = await t.db.select().from(errands).where(eq(errands.id, errand.id));
+    expect(opened!.broadcastFeeKobo).toBe(250_000);
+    await request(t.http)
+      .post(`/v1/errands/${errand.id}/events`)
+      .set(customer.headers)
+      .send({ event: 'raise_fee', version: opened!.version, data: { amountKobo: 300_000 } })
+      .expect(200);
+    const row = ((await dashboard()).places as Array<Figures & { categoryKey: string }>).find(
+      (p) => p.categoryKey === 'shopping',
+    )!;
+    expect(row.everyoneShare).toBe(1);
+  });
+
+  it('sees an agent reach the pickup of an errand they hold while out on another', async () => {
+    // Anything else, sent here only by this test: two board errands, the first under way.
+    const agent = await agentAt(east(1));
+    const stopsAt = (at: { lat: number; lng: number }) => [
+      { kind: 'pickup', label: 'Shop', address: 'Independence Layout, Enugu', ...at },
+      { kind: 'dropoff', label: 'Home', address: 'Ogui Road, Enugu', lat: at.lat + 0.01, lng: at.lng },
+    ];
+    const first = await createErrand(t, customer, { categoryKey: 'other', stops: stopsAt(east(1)) });
+    const second = await createErrand(t, customer, { categoryKey: 'other', stops: stopsAt(PICKUP) });
+    for (const e of [first, second]) {
+      await request(t.http).post(`/v1/errands/${e.id}/events`).set(agent.headers).send({ event: 'accept' }).expect(200);
+    }
+    const { version } = (await t.db.select().from(errands).where(eq(errands.id, first.id)))[0]!;
+    await request(t.http)
+      .post(`/v1/errands/${first.id}/events`)
+      .set(agent.headers)
+      .send({ event: 'start', version })
+      .expect(200);
+    await request(t.http).put('/v1/agent/presence').set(agent.headers).send(PICKUP).expect(200);
+    const [held] = await t.db.select().from(errands).where(eq(errands.id, second.id));
+    expect(held!.reachedPickupAt).not.toBeNull();
   });
 
   it('shows each agent their offers and how they answered, and the same on their own page', async () => {

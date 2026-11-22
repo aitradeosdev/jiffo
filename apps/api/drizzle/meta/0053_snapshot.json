@@ -1,5 +1,5 @@
 {
-  "id": "3f55f849-4eb4-4fe9-ae3b-e2417d40c2a2",
+  "id": "4a4d02e1-b618-48ac-9cb7-b9fe963c721f",
   "prevId": "d06400f0-82e9-4c68-84ad-fd93079575ee",
   "version": "7",
   "dialect": "postgresql",
@@ -4809,6 +4809,12 @@
         "broadcast_reach_m": {
           "name": "broadcast_reach_m",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "opened_to_everyone_at": {
+          "name": "opened_to_everyone_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },

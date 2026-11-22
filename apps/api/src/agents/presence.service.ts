@@ -233,6 +233,14 @@ export class PresenceService {
           position,
         )
         .catch((error: Error) => this.logger.warn(`Keeping a trail point failed: ${error.message}`));
+      // Whether they reached the pickup of any errand they hold (M15), as the trail does, never failing the report.
+      await this.trail
+        .reachedPickup(
+          auth.userId,
+          running.map((e) => e.id),
+          position,
+        )
+        .catch((error: Error) => this.logger.warn(`Noting arrival at a pickup failed: ${error.message}`));
       // Checked against the last position (G1): by when the phone took each fix when both say, else by
       // when each reached us.
       const byPhone = !!(current?.fixedAt && fixedAt);
