@@ -21,13 +21,20 @@ export interface OfferFeatures {
 
 /** A fitted model: the scaling each input was given, and the weights over them. */
 export interface AcceptanceModel {
+  /** Which inputs it reads ({@link MODEL_VERSION}): a model kept from before they changed gives no chance. */
+  version: number;
   means: number[];
   scales: number[];
   weights: number[];
   bias: number;
+  /** The rate taken for an agent whose own doesn't count yet: the history's average, so it neither helps nor hurts. */
+  unknownRate: number;
   /** The answered offers it learnt from. */
   offers: number;
 }
+
+/** Bumped whenever {@link inputs} changes, so models kept from before are no longer used. */
+export const MODEL_VERSION = 1;
 
 /** What the model reads from an offer: distances and the fee on a log scale, the hour round the clock. */
 function inputs(f: OfferFeatures, acceptanceWhenUnknown: number): number[] {
@@ -47,8 +54,7 @@ function inputs(f: OfferFeatures, acceptanceWhenUnknown: number): number[] {
 
 const sigmoid = (z: number) => 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z))));
 
-/** The rate taken for an agent whose own rate doesn't count yet: the middle, so it neither helps nor hurts. */
-const UNKNOWN_RATE = 0.5;
+const WIDTH = inputs({ pickupKm: 0, tripKm: 0, feeKobo: 0, acceptanceRate: null, hour: 0, buy: false }, 0).length;
 
 /**
  * Fits the model to answered offers: each input scaled to the history's spread, then weights by gradient descent
@@ -59,39 +65,65 @@ export function fitAcceptance(
   options: { iterations?: number; learningRate?: number; l2?: number } = {},
 ): AcceptanceModel {
   const { iterations = 400, learningRate = 0.5, l2 = 0.01 } = options;
-  const raw = rows.map((r) => inputs(r.features, UNKNOWN_RATE));
-  const width =
-    raw[0]?.length ??
-    inputs({ pickupKm: 0, tripKm: 0, feeKobo: 0, acceptanceRate: null, hour: 0, buy: false }, 0).length;
-  const n = Math.max(1, raw.length);
-  const means = Array.from({ length: width }, (_, j) => raw.reduce((s, x) => s + x[j]!, 0) / n);
-  const scales = Array.from({ length: width }, (_, j) => {
-    const variance = raw.reduce((s, x) => s + (x[j]! - means[j]!) ** 2, 0) / n;
-    return variance > 1e-12 ? Math.sqrt(variance) : 1;
-  });
-  const xs = raw.map((x) => x.map((v, j) => (v - means[j]!) / scales[j]!));
-  const ys = rows.map((r) => (r.accepted ? 1 : 0));
-  const weights = new Array<number>(width).fill(0);
-  let bias = 0;
-  for (let step = 0; step < iterations; step++) {
-    const grad = new Array<number>(width).fill(0);
-    let gradBias = 0;
-    xs.forEach((x, i) => {
-      const error = sigmoid(bias + x.reduce((s, v, j) => s + v * weights[j]!, 0)) - ys[i]!;
-      gradBias += error;
-      for (let j = 0; j < width; j++) grad[j]! += error * x[j]!;
-    });
-    for (let j = 0; j < width; j++) weights[j]! -= learningRate * (grad[j]! / n + l2 * weights[j]!);
-    bias -= learningRate * (gradBias / n);
+  const known = rows.filter((r) => r.features.acceptanceRate !== null);
+  const unknownRate = known.length ? known.reduce((s, r) => s + r.features.acceptanceRate!, 0) / known.length : 0.5;
+  const n = rows.length;
+  const width = WIDTH;
+  // One flat array, row after row: the fit loops over it hundreds of times.
+  const xs = new Float64Array(n * width);
+  rows.forEach((r, i) => xs.set(inputs(r.features, unknownRate), i * width));
+  const means = new Array<number>(width).fill(0);
+  const scales = new Array<number>(width).fill(1);
+  for (let j = 0; j < width; j++) {
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += xs[i * width + j]!;
+    const mean = n ? sum / n : 0;
+    let squares = 0;
+    for (let i = 0; i < n; i++) squares += (xs[i * width + j]! - mean) ** 2;
+    const variance = n ? squares / n : 0;
+    means[j] = mean;
+    scales[j] = variance > 1e-12 ? Math.sqrt(variance) : 1;
+    for (let i = 0; i < n; i++) xs[i * width + j] = (xs[i * width + j]! - mean) / scales[j]!;
   }
-  return { means, scales, weights, bias, offers: rows.length };
+  const ys = Float64Array.from(rows, (r) => (r.accepted ? 1 : 0));
+  const weights = new Float64Array(width);
+  const grad = new Float64Array(width);
+  let bias = 0;
+  const m = Math.max(1, n);
+  for (let step = 0; step < iterations; step++) {
+    grad.fill(0);
+    let gradBias = 0;
+    for (let i = 0; i < n; i++) {
+      const at = i * width;
+      let z = bias;
+      for (let j = 0; j < width; j++) z += xs[at + j]! * weights[j]!;
+      const error = sigmoid(z) - ys[i]!;
+      gradBias += error;
+      for (let j = 0; j < width; j++) grad[j]! += error * xs[at + j]!;
+    }
+    for (let j = 0; j < width; j++) weights[j]! -= learningRate * (grad[j]! / m + l2 * weights[j]!);
+    bias -= learningRate * (gradBias / m);
+  }
+  return { version: MODEL_VERSION, means, scales, weights: Array.from(weights), bias, unknownRate, offers: n };
 }
 
-/** The chance the agent takes this offer, by the model. */
-export function predictAcceptance(model: AcceptanceModel, features: OfferFeatures): number {
-  const x = inputs(features, UNKNOWN_RATE);
-  const z = x.reduce((s, v, j) => s + ((v - model.means[j]!) / model.scales[j]!) * model.weights[j]!, model.bias);
-  return sigmoid(z);
+/**
+ * The chance the agent takes this offer, by the model; none from a model kept for other inputs, or one gone wrong,
+ * so ranking goes on as without it.
+ */
+export function predictAcceptance(model: AcceptanceModel, features: OfferFeatures): number | null {
+  if (
+    model.version !== MODEL_VERSION ||
+    model.means?.length !== WIDTH ||
+    model.scales?.length !== WIDTH ||
+    model.weights?.length !== WIDTH
+  ) {
+    return null;
+  }
+  const x = inputs(features, Number.isFinite(model.unknownRate) ? model.unknownRate : 0.5);
+  let z = model.bias;
+  for (let j = 0; j < WIDTH; j++) z += ((x[j]! - model.means[j]!) / model.scales[j]!) * model.weights[j]!;
+  return Number.isFinite(z) ? sigmoid(z) : null;
 }
 
 /** How well the model explains these answers: lower is better; always guessing the share taken is the bar. */
@@ -100,7 +132,7 @@ export function logLoss(model: AcceptanceModel, rows: Array<{ features: OfferFea
   const eps = 1e-9;
   return (
     -rows.reduce((s, r) => {
-      const p = Math.min(1 - eps, Math.max(eps, predictAcceptance(model, r.features)));
+      const p = Math.min(1 - eps, Math.max(eps, predictAcceptance(model, r.features) ?? 0.5));
       return s + (r.accepted ? Math.log(p) : Math.log(1 - p));
     }, 0) / rows.length
   );

@@ -203,7 +203,11 @@ export default async function MatchingPage({
                     {states.find((s) => s.code === p.stateCode)?.name ?? p.stateCode}
                   </span>{' '}
                   · learnt from {p.offers.toLocaleString('en-NG')} offers on {dateTime(p.trainedAt, country.timezone)}
-                  {p.inUse ? '' : ' · not refitted for a week, so not in use'}
+                  {p.inUse
+                    ? ''
+                    : Date.now() - new Date(p.trainedAt).getTime() > 7 * 86_400_000
+                      ? ' · not refitted for a week, so not in use'
+                      : ' · not in use: its share in Settings, Matching is 0'}
                 </li>
               ))}
             </ul>

@@ -32,8 +32,8 @@ describe('acceptance prediction', () => {
   it('learns from answered offers which ones agents take', () => {
     const model = fitAcceptance(history(600));
     expect(model.offers).toBe(600);
-    const near = predictAcceptance(model, offer({ pickupKm: 1, feeKobo: 450_000 }));
-    const far = predictAcceptance(model, offer({ pickupKm: 9, feeKobo: 150_000 }));
+    const near = predictAcceptance(model, offer({ pickupKm: 1, feeKobo: 450_000 }))!;
+    const far = predictAcceptance(model, offer({ pickupKm: 9, feeKobo: 150_000 }))!;
     expect(near).toBeGreaterThan(0.6);
     expect(far).toBeLessThan(0.4);
     // Better than knowing nothing: the log loss of always guessing the share taken.
@@ -47,7 +47,7 @@ describe('acceptance prediction', () => {
     expect(fitAcceptance(history(200))).toEqual(fitAcceptance(history(200)));
     const model = fitAcceptance(history(200));
     for (const o of [offer({ pickupKm: 0 }), offer({ pickupKm: 500, feeKobo: 0 }), offer({ acceptanceRate: null })]) {
-      const p = predictAcceptance(model, o);
+      const p = predictAcceptance(model, o)!;
       expect(p).toBeGreaterThan(0);
       expect(p).toBeLessThan(1);
     }
@@ -62,5 +62,27 @@ describe('acceptance prediction', () => {
 
   it('starts with a fifth of the score, once a state has 500 answered offers', () => {
     expect(NIGERIA_DEFAULT_SETTINGS.matching).toMatchObject({ predictionShareBps: 2_000, predictionMinOffers: 500 });
+  });
+
+  it("treats an agent whose rate doesn't count yet as an average one, neither helped nor hurt", () => {
+    // Most of the history from agents at about 85%, the rate counting for something.
+    const rows = history(400).map((r, i) => ({
+      ...r,
+      features: { ...r.features, acceptanceRate: r.accepted ? 0.9 : i % 3 === 0 ? 0.6 : 0.85 },
+    }));
+    const model = fitAcceptance(rows);
+    const average = rows.reduce((s, r) => s + r.features.acceptanceRate!, 0) / rows.length;
+    expect(model.unknownRate).toBeCloseTo(average, 6);
+    expect(predictAcceptance(model, offer({ acceptanceRate: null }))).toBeCloseTo(
+      predictAcceptance(model, offer({ acceptanceRate: average }))!,
+      9,
+    );
+  });
+
+  it('gives no chance from a model made for other inputs, rather than a broken one', () => {
+    const model = fitAcceptance(history(100));
+    expect(predictAcceptance({ ...model, weights: model.weights.slice(0, 5) }, offer())).toBeNull();
+    expect(predictAcceptance({ ...model, version: 0 }, offer())).toBeNull();
+    expect(predictAcceptance({ ...model, bias: Number.NaN }, offer())).toBeNull();
   });
 });

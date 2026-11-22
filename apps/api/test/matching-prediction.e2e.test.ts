@@ -179,4 +179,36 @@ describe('acceptance prediction', () => {
     const errand = await urgent();
     expect((await offerOf(errand.id))!.parts.prediction).toBeUndefined();
   });
+
+  it('shows a model as not in use while the share is 0, and lets go of models a month old', async () => {
+    const kept = (await latestModel())!;
+    const [old] = await t.db
+      .insert(acceptanceModels)
+      .values({
+        countryCode: 'NG',
+        stateCode: 'LA',
+        model: kept.model,
+        offers: kept.offers,
+        logLoss: kept.logLoss,
+        trainedAt: new Date(Date.now() - 31 * 24 * 3_600_000),
+      })
+      .returning();
+    await t.jobs.run('acceptance.fit');
+    const left = await t.db.select({ id: acceptanceModels.id }).from(acceptanceModels);
+    expect(left.map((m) => m.id)).not.toContain(old!.id);
+    // Last week's is kept: only those over a month old go.
+    expect(left.map((m) => m.id)).toContain(kept.id);
+    const lagos = async () =>
+      (
+        (await request(t.http).get('/v1/admin/matching?country=NG&state=LA').set(owner.headers).expect(200)).body
+          .predictions as Array<{ inUse: boolean }>
+      )[0];
+    expect((await lagos())?.inUse).toBe(true);
+    await matching({ predictionShareBps: 0 });
+    try {
+      expect((await lagos())?.inUse).toBe(false);
+    } finally {
+      await matching({ predictionShareBps: DEFAULT_MATCHING_SETTINGS.predictionShareBps });
+    }
+  });
 });
