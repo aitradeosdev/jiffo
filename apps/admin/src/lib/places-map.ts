@@ -41,18 +41,20 @@ export interface MapFocus {
   box: MapBox;
 }
 
-/** Named as what it is, so "Lagos" is found as the state and not the city. */
-const namedAsState = (name: string) => /\b(state|territory)$/i.test(name.trim());
+/** Countries whose first-level regions are named "… State", which finds them as the region and not a city. */
+const STATE_NAMED = new Set(['NG']);
+/** Named as what it is already. */
+const namedAsState = (name: string) => /\b(state|territory)$/i.test(name);
 
 /** The words a state is looked up by. */
-export function stateQuery(name: string) {
+export function stateQuery(name: string, countryCode: string) {
   const trimmed = name.trim();
-  return namedAsState(trimmed) ? trimmed : `${trimmed} State`;
+  return STATE_NAMED.has(countryCode.toUpperCase()) && !namedAsState(trimmed) ? `${trimmed} State` : trimmed;
 }
 
 /** The words a city is looked up by: in its state, as many towns share a name. */
-export function cityQuery(name: string, stateName: string) {
-  return `${name.trim()}, ${stateQuery(stateName)}`;
+export function cityQuery(name: string, stateName: string, countryCode: string) {
+  return `${name.trim()}, ${stateQuery(stateName, countryCode)}`;
 }
 
 /** About how far each reaches from its middle, in degrees, when the provider gave no box: a state, or a city. */

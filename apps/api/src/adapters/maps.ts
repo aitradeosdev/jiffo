@@ -121,6 +121,21 @@ export function estimateRoute(points: LatLng[]): RouteEstimate {
   return { distanceMeters, durationSeconds: Math.round(distanceMeters / (20_000 / 3600)) };
 }
 
+/** Google's types for each kind the panel finds: a state, or a town or part of one. */
+const GOOGLE_LOCATE_TYPES = {
+  state: new Set(['administrative_area_level_1']),
+  city: new Set([
+    'locality',
+    'postal_town',
+    'sublocality',
+    'sublocality_level_1',
+    'neighborhood',
+    'administrative_area_level_2',
+    'administrative_area_level_3',
+    'colloquial_area',
+  ]),
+} as const;
+
 /** Google Places API (New) for search and details, Routes API for distance. */
 export class GoogleMapsAdapter implements MapsAdapter {
   readonly name = 'google';
@@ -148,10 +163,13 @@ export class GoogleMapsAdapter implements MapsAdapter {
     return 'Connected. Place search works.';
   }
 
-  /** Returns null when Google says the thing doesn't exist (an unknown or stale place id). */
+  /**
+   * Returns null when Google says the thing doesn't exist (an unknown or stale place id), unless `missing` is false:
+   * Google also answers 400 for a key it refuses, which a search that found nothing never is.
+   */
   private async call<T>(
     url: string,
-    init: { method: 'GET' | 'POST'; fieldMask: string; body?: unknown },
+    init: { method: 'GET' | 'POST'; fieldMask: string; body?: unknown; missing?: boolean },
   ): Promise<T | null> {
     let res: Response;
     try {
@@ -167,7 +185,7 @@ export class GoogleMapsAdapter implements MapsAdapter {
     } catch {
       throw unavailable('maps_unavailable', 'Address search is not available right now');
     }
-    if (res.status === 404 || res.status === 400) return null;
+    if (init.missing !== false && (res.status === 404 || res.status === 400)) return null;
     if (!res.ok) throw unavailable('maps_unavailable', 'Address search is not available right now');
     try {
       return (await res.json()) as T;
@@ -236,30 +254,40 @@ export class GoogleMapsAdapter implements MapsAdapter {
   }
 
   async locate(input: { query: string; countryCode: string; kind: 'state' | 'city' }) {
-    // The words name what is looked for ("Lagos State", "Ikeja, Lagos State"); the region only leans the search.
+    // Google can't keep the search to a country (the region only leans it), and its type filter skips place names:
+    // a few answers, and the first that is the kind of place asked, in the country.
     const body = await this.call<{
       places?: Array<{
         displayName?: { text?: string };
+        types?: string[];
         location?: { latitude?: number; longitude?: number };
         viewport?: {
           low?: { latitude?: number; longitude?: number };
           high?: { latitude?: number; longitude?: number };
         };
+        addressComponents?: Array<{ shortText?: string; types?: string[] }>;
       }>;
     }>('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
-      fieldMask: 'places.displayName,places.location,places.viewport',
-      body: { textQuery: input.query, regionCode: input.countryCode.toLowerCase(), languageCode: 'en', pageSize: 1 },
+      fieldMask: 'places.displayName,places.types,places.location,places.viewport,places.addressComponents',
+      body: { textQuery: input.query, regionCode: input.countryCode.toLowerCase(), languageCode: 'en', pageSize: 5 },
+      missing: false,
     });
-    const p = body?.places?.[0];
-    const lat = p?.location?.latitude;
-    const lng = p?.location?.longitude;
-    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
-    const { low, high } = p?.viewport ?? {};
+    const wanted = GOOGLE_LOCATE_TYPES[input.kind];
+    const country = input.countryCode.toUpperCase();
+    const p = (body?.places ?? []).find(
+      (place) =>
+        typeof place.location?.latitude === 'number' &&
+        typeof place.location?.longitude === 'number' &&
+        (place.types ?? []).some((t) => wanted.has(t)) &&
+        (place.addressComponents ?? []).every((c) => !c.types?.includes('country') || c.shortText === country),
+    );
+    if (!p) return null;
+    const { low, high } = p.viewport ?? {};
     return {
-      name: p?.displayName?.text ?? input.query,
-      lat,
-      lng,
+      name: p.displayName?.text ?? input.query,
+      lat: p.location!.latitude!,
+      lng: p.location!.longitude!,
       bounds: boxOrNull(low?.longitude, low?.latitude, high?.longitude, high?.latitude),
     };
   }

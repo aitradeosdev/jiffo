@@ -108,6 +108,7 @@ export function Places({
   countryMatching,
   canEdit,
   map,
+  countryCode,
 }: {
   states: PlaceState[];
   countryPrices: Prices | null;
@@ -115,6 +116,8 @@ export function Places({
   canEdit: boolean;
   /** The maps provider's own map, and its public key for the panel. */
   map: PlacesMapInfo;
+  /** The country shown, whose states and cities are looked up on the map. */
+  countryCode: string;
 }) {
   const notice = mapNotice(map);
   const hasMap = !notice && !!map.key;
@@ -127,12 +130,23 @@ export function Places({
   const [drawn, setDrawn] = useState<Boundary | null>(null);
   // Whether the shape was changed since this task began: a rename alone keeps the shape.
   const [changed, setChanged] = useState(false);
+  // Where the map goes before anything is drawn there.
+  const [focus, setFocus] = useState<MapFocus | null>(null);
+  const [stateNote, setStateNote] = useState<string | null>(null);
+  // What the maps provider found for each state and city asked about (null: nothing), so each is asked about once.
+  const found = useRef(new Map<string, MapBox | null>());
+  // Each move is counted, and so is another state picked or a task ended: an answer that comes after is let go.
+  const moves = useRef(0);
+  const moveTo = (box: MapBox) => setFocus({ key: String(++moves.current), box });
+
   // A new task starts the panel and the drawing afresh; a pasted shape starts only the drawing again, keeping the
   // name already typed.
   const [round, setRound] = useState(0);
   const [drawing, setDrawing] = useState(0);
 
   const start = (next: Task | null) => {
+    // Done or cancelled: a city still being looked up no longer moves the map.
+    if (!next) moves.current += 1;
     setTask(next);
     setDrawn(next?.kind === 'reshape' ? next.boundary : null);
     setChanged(false);
@@ -145,45 +159,40 @@ export function Places({
     setDrawing((d) => d + 1);
   };
 
-  // Where the map goes before anything is drawn there.
-  const [focus, setFocus] = useState<MapFocus | null>(null);
-  const [stateNote, setStateNote] = useState<string | null>(null);
-  // What the maps provider found for each state and city asked about, so each is asked about once.
-  const found = useRef(new Map<string, MapBox>());
-  // Each move is counted, so an answer that comes after a later move is let go.
-  const moves = useRef(0);
-  const moveTo = (box: MapBox) => setFocus({ key: String(++moves.current), box });
-
   /** Moves the map to a state or city as the maps provider finds it by name: null, or why it couldn't. */
   const goTo = async (kind: 'state' | 'city', query: string): Promise<string | null> => {
     const move = ++moves.current;
     const key = `${kind}:${query.toLowerCase()}`;
-    let box = found.current.get(key);
-    if (!box) {
+    if (!found.current.has(key)) {
       let answer: Awaited<ReturnType<typeof locatePlace>>;
       try {
         answer = await locatePlace(kind, query);
       } catch {
         answer = { error: "The panel couldn't reach the server." };
       }
+      if (answer.found || answer.missing) found.current.set(key, answer.found ? focusBox(answer.found, kind) : null);
       if (move !== moves.current) return null;
-      if (!answer.found) {
-        return answer.missing
-          ? `${query} wasn't found on the map: move the map there yourself.`
-          : `${answer.error ?? 'Something went wrong.'} Move the map there yourself.`;
-      }
-      box = focusBox(answer.found, kind);
-      found.current.set(key, box);
+      // A failure isn't remembered: the next try asks again.
+      if (answer.error) return `${answer.error} Move the map there yourself.`;
     }
+    const box = found.current.get(key);
+    if (!box) return `${query} wasn't found on the map: move the map there yourself.`;
     if (move === moves.current) moveTo(box);
     return null;
   };
 
   // A state with nothing drawn yet: the map goes to it, as the maps provider finds it. One with cities shows them.
   useEffect(() => {
+    let current = true;
     setStateNote(null);
     if (!hasMap || !state || state.cities.length) return;
-    void goTo('state', stateQuery(state.name)).then(setStateNote);
+    void goTo('state', stateQuery(state.name, countryCode)).then((why) => {
+      // Another state picked since: its own note stands.
+      if (current) setStateNote(why);
+    });
+    return () => {
+      current = false;
+    };
     // Only when another state is picked: drawing in it doesn't move the map.
   }, [stateId, hasMap]);
 
@@ -321,7 +330,7 @@ export function Places({
             hasMap={!notice}
             onFind={
               task.kind === 'new-city' && hasMap && state
-                ? (name) => goTo('city', cityQuery(name, state.name))
+                ? (name) => goTo('city', cityQuery(name, state.name, countryCode))
                 : undefined
             }
             onPasted={pasted}
@@ -539,10 +548,15 @@ function DrawPanel({
   // The name last looked up, and the one being looked up now: leaving the field doesn't look it up again.
   const lastFound = useRef('');
   const looking = useRef('');
-  /** Moves the map to the name typed: when asked (`again`), or on leaving the field with a new name. */
-  const find = async (again: boolean) => {
+  // Asked for with the button or the keyboard's Go, rather than by leaving the field: the map is brought into view.
+  const show = useRef(false);
+  /** Moves the map to the name typed: when asked (`asked`), or on leaving the field with a new name. */
+  const find = async (asked: boolean) => {
     const name = nameField.current?.value.trim() ?? '';
-    if (!onFind || name.length < 2 || looking.current === name || (!again && name === lastFound.current)) return;
+    if (!onFind || name.length < 2) return;
+    // Tapping the button leaves the field first, which starts the look-up: the tap then only asks to see the map.
+    if (asked) show.current = true;
+    if (looking.current === name || (!asked && name === lastFound.current)) return;
     lastFound.current = name;
     looking.current = name;
     setFinding(true);
@@ -551,7 +565,9 @@ function DrawPanel({
     setFinding(false);
     setFindNote(why);
     // On a phone the map is further down: bring it into view, to draw on.
-    if (!why && again) document.getElementById('places-map')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (!why && show.current)
+      document.getElementById('places-map')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    show.current = false;
   };
 
   const title =
@@ -616,7 +632,8 @@ function DrawPanel({
               <button
                 type="button"
                 className={buttonClass('secondary', true)}
-                disabled={finding}
+                // Never disabled: a tap while the name is being looked up still brings the map into view.
+                aria-busy={finding}
                 onClick={() => void find(true)}
               >
                 {finding ? 'Finding…' : 'Find on map'}

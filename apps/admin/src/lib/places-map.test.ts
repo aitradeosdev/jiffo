@@ -18,13 +18,18 @@ describe('the Places map', () => {
   });
 
   it('looks a state up as a state, and a city in its state, so the map goes to the right one', () => {
-    expect(stateQuery('Lagos')).toBe('Lagos State');
-    expect(stateQuery('Cross River')).toBe('Cross River State');
+    expect(stateQuery('Lagos', 'NG')).toBe('Lagos State');
+    expect(stateQuery('Cross River', 'NG')).toBe('Cross River State');
     // Already named as what it is.
-    expect(stateQuery('Federal Capital Territory')).toBe('Federal Capital Territory');
-    expect(stateQuery('Kano State')).toBe('Kano State');
-    expect(cityQuery('  Ikeja ', 'Lagos')).toBe('Ikeja, Lagos State');
-    expect(cityQuery('Abuja', 'Federal Capital Territory')).toBe('Abuja, Federal Capital Territory');
+    expect(stateQuery('Federal Capital Territory', 'NG')).toBe('Federal Capital Territory');
+    expect(stateQuery('Kano State', 'NG')).toBe('Kano State');
+    expect(cityQuery('  Ikeja ', 'Lagos', 'NG')).toBe('Ikeja, Lagos State');
+    expect(cityQuery('Abuja', 'Federal Capital Territory', 'NG')).toBe('Abuja, Federal Capital Territory');
+  });
+
+  it("calls a state a state only where that's its name: elsewhere, by its name alone", () => {
+    expect(stateQuery('Greater Accra', 'GH')).toBe('Greater Accra');
+    expect(cityQuery('Osu', 'Greater Accra', 'GH')).toBe('Osu, Greater Accra');
   });
 
   it('shows the box the maps provider gave, or a box around the point it found, wider for a state', () => {

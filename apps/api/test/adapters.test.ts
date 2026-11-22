@@ -542,13 +542,22 @@ describe('Google maps', () => {
     expect(JSON.parse(String(calls[0]!.init.body)).intermediates).toHaveLength(1);
   });
 
+  /** A place in Text Search's answer: Nigeria's, of the given types, unless said otherwise. */
+  const found = (name: string, types: string[], at: [number, number], country = 'NG') => ({
+    displayName: { text: name },
+    types,
+    location: { latitude: at[0], longitude: at[1] },
+    addressComponents: [
+      { longText: country === 'NG' ? 'Nigeria' : 'Elsewhere', shortText: country, types: ['country'] },
+    ],
+  });
+
   it("finds a state or city by name for the panel's map, with the box Google shows it in", async () => {
     const { impl, calls } = fakeFetch(() =>
       Response.json({
         places: [
           {
-            displayName: { text: 'Lagos' },
-            location: { latitude: 6.52, longitude: 3.58 },
+            ...found('Lagos', ['administrative_area_level_1', 'political'], [6.52, 3.58]),
             viewport: { low: { latitude: 6.37, longitude: 2.7 }, high: { latitude: 6.7, longitude: 4.35 } },
           },
         ],
@@ -565,17 +574,44 @@ describe('Google maps', () => {
     expect(call!.url).toBe('https://places.googleapis.com/v1/places:searchText');
     expect(call!.init.headers).toMatchObject({
       'x-goog-api-key': 'key-1',
-      'x-goog-fieldmask': 'places.displayName,places.location,places.viewport',
+      'x-goog-fieldmask': 'places.displayName,places.types,places.location,places.viewport,places.addressComponents',
     });
     expect(JSON.parse(String(call!.init.body))).toEqual({
       textQuery: 'Lagos State',
       regionCode: 'ng',
       languageCode: 'en',
-      pageSize: 1,
+      pageSize: 5,
     });
   });
 
-  it('finds nothing as null, and shows a place without a usable box at its point', async () => {
+  it("takes the first answer that is a place of the kind asked, in the country: Google's type filter skips place names", async () => {
+    const places = [
+      found('Lagos State Secretariat', ['local_government_office', 'point_of_interest'], [6.6, 3.36]),
+      found('Lagos', ['locality', 'political'], [6.45, 3.39]),
+      found('Lagos', ['administrative_area_level_1', 'political'], [6.52, 3.58]),
+    ];
+    const maps = new GoogleMapsAdapter('key-1', fakeFetch(() => Response.json({ places })).impl);
+    expect(await maps.locate({ query: 'Lagos State', countryCode: 'NG', kind: 'state' })).toMatchObject({
+      lat: 6.52,
+      lng: 3.58,
+    });
+    expect(await maps.locate({ query: 'Lagos', countryCode: 'NG', kind: 'city' })).toMatchObject({
+      lat: 6.45,
+      lng: 3.39,
+    });
+    // The same name in another country, or only a building of that name, is no answer.
+    const abroad = [found('Niger', ['country', 'political'], [17.6, 8.08], 'NE')];
+    const away = new GoogleMapsAdapter('key-1', fakeFetch(() => Response.json({ places: abroad })).impl);
+    expect(await away.locate({ query: 'Niger State', countryCode: 'NG', kind: 'state' })).toBeNull();
+    const state = [found('Niger', ['administrative_area_level_1', 'political'], [9.6, 6.55], 'NE')];
+    const wrongCountry = new GoogleMapsAdapter('key-1', fakeFetch(() => Response.json({ places: state })).impl);
+    expect(await wrongCountry.locate({ query: 'Niger State', countryCode: 'NG', kind: 'state' })).toBeNull();
+    const shop = [found('Ikeja City Mall', ['shopping_mall', 'point_of_interest'], [6.61, 3.36])];
+    const mall = new GoogleMapsAdapter('key-1', fakeFetch(() => Response.json({ places: shop })).impl);
+    expect(await mall.locate({ query: 'Ikeja, Lagos State', countryCode: 'NG', kind: 'city' })).toBeNull();
+  });
+
+  it('finds nothing as null, shows a place without a usable box at its point, and a refused key as unavailable', async () => {
     let body: unknown = { places: [] };
     const maps = new GoogleMapsAdapter('key-1', fakeFetch(() => Response.json(body)).impl);
     expect(await maps.locate({ query: 'Nowhere', countryCode: 'NG', kind: 'city' })).toBeNull();
@@ -584,8 +620,7 @@ describe('Google maps', () => {
     body = {
       places: [
         {
-          displayName: { text: 'Ikeja' },
-          location: { latitude: 6.6, longitude: 3.35 },
+          ...found('Ikeja', ['locality', 'political'], [6.6, 3.35]),
           // Upside down: not a box to show.
           viewport: { low: { latitude: 6.7, longitude: 3.4 }, high: { latitude: 6.5, longitude: 3.3 } },
         },
@@ -597,10 +632,13 @@ describe('Google maps', () => {
       lng: 3.35,
       bounds: null,
     });
-    const down = new GoogleMapsAdapter('key-1', fakeFetch(() => new Response('', { status: 500 })).impl);
-    await expect(down.locate({ query: 'Ikeja', countryCode: 'NG', kind: 'city' })).rejects.toMatchObject({
-      status: 503,
-    });
+    // Google answers 400 for a key it refuses: that is no "not found", which would send the admin looking by hand.
+    for (const status of [400, 403, 500]) {
+      const down = new GoogleMapsAdapter('key-1', fakeFetch(() => new Response('{}', { status })).impl);
+      await expect(down.locate({ query: 'Ikeja', countryCode: 'NG', kind: 'city' })).rejects.toMatchObject({
+        status: 503,
+      });
+    }
   });
 });
 
