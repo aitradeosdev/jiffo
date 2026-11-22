@@ -1,5 +1,6 @@
 import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode, type GeoJSONStoreFeatures } from 'terra-draw';
 import { boundaryFrom, editableOnMap, polygonsOf, type Boundary } from '@/lib/shapes';
+import type { MapFocus } from '@/lib/places-map';
 
 /** A city or area drawn on the map. */
 export interface MapShape {
@@ -28,6 +29,11 @@ export interface PlacesMapProps {
   onShape: (boundary: Boundary | null) => void;
   /** Changes when the map should fit what it shows again, such as another state being picked. */
   fitKey: string;
+  /**
+   * Where to go before anything is drawn there: the state picked or the city named, as the maps provider found them,
+   * or a new area's city.
+   */
+  focus: MapFocus | null;
 }
 
 /** Nigeria, before any city is drawn in the state shown. */

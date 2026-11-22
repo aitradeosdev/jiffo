@@ -18,3 +18,49 @@ export function mapNotice(map: PlacesMapInfo): string | null {
   }
   return 'The map is drawn by the maps provider in use: switch on Google Maps or Mapbox under Settings, Providers. Until then, shapes can be pasted as GeoJSON.';
 }
+
+/** A box on the map: its west and east longitudes, and its south and north latitudes. */
+export interface MapBox {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+/** A state or city the maps provider found by name: its middle and, where the provider gave one, its box. */
+export interface Located {
+  name: string;
+  lat: number;
+  lng: number;
+  bounds: MapBox | null;
+}
+
+/** Where the map goes: `key` changes each time it should go there, even to the same box again. */
+export interface MapFocus {
+  key: string;
+  box: MapBox;
+}
+
+/** Named as what it is, so "Lagos" is found as the state and not the city. */
+const namedAsState = (name: string) => /\b(state|territory)$/i.test(name.trim());
+
+/** The words a state is looked up by. */
+export function stateQuery(name: string) {
+  const trimmed = name.trim();
+  return namedAsState(trimmed) ? trimmed : `${trimmed} State`;
+}
+
+/** The words a city is looked up by: in its state, as many towns share a name. */
+export function cityQuery(name: string, stateName: string) {
+  return `${name.trim()}, ${stateQuery(stateName)}`;
+}
+
+/** About how far each reaches from its middle, in degrees, when the provider gave no box: a state, or a city. */
+const REACH = { state: 1, city: 0.12 } as const;
+
+/** The box to show: the provider's own, or one around the point it found. */
+export function focusBox(found: Located, kind: 'state' | 'city'): MapBox {
+  if (found.bounds) return found.bounds;
+  const r = REACH[kind];
+  return { west: found.lng - r, south: found.lat - r, east: found.lng + r, north: found.lat + r };
+}

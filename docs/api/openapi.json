@@ -4073,6 +4073,65 @@
         ]
       }
     },
+    "/v1/admin/places/locate": {
+      "get": {
+        "operationId": "AdminController.locatePlace",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "admin": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "country",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "state",
+                "city"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default",
+        "x-permission": [
+          "read"
+        ]
+      }
+    },
     "/v1/admin/prices": {
       "post": {
         "operationId": "AdminController.priceChange",

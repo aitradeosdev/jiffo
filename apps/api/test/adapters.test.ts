@@ -541,6 +541,67 @@ describe('Google maps', () => {
     expect(route).toEqual({ distanceMeters: 9_120, durationSeconds: 1_260 });
     expect(JSON.parse(String(calls[0]!.init.body)).intermediates).toHaveLength(1);
   });
+
+  it("finds a state or city by name for the panel's map, with the box Google shows it in", async () => {
+    const { impl, calls } = fakeFetch(() =>
+      Response.json({
+        places: [
+          {
+            displayName: { text: 'Lagos' },
+            location: { latitude: 6.52, longitude: 3.58 },
+            viewport: { low: { latitude: 6.37, longitude: 2.7 }, high: { latitude: 6.7, longitude: 4.35 } },
+          },
+        ],
+      }),
+    );
+    const maps = new GoogleMapsAdapter('key-1', impl);
+    expect(await maps.locate({ query: 'Lagos State', countryCode: 'NG', kind: 'state' })).toEqual({
+      name: 'Lagos',
+      lat: 6.52,
+      lng: 3.58,
+      bounds: { west: 2.7, south: 6.37, east: 4.35, north: 6.7 },
+    });
+    const [call] = calls;
+    expect(call!.url).toBe('https://places.googleapis.com/v1/places:searchText');
+    expect(call!.init.headers).toMatchObject({
+      'x-goog-api-key': 'key-1',
+      'x-goog-fieldmask': 'places.displayName,places.location,places.viewport',
+    });
+    expect(JSON.parse(String(call!.init.body))).toEqual({
+      textQuery: 'Lagos State',
+      regionCode: 'ng',
+      languageCode: 'en',
+      pageSize: 1,
+    });
+  });
+
+  it('finds nothing as null, and shows a place without a usable box at its point', async () => {
+    let body: unknown = { places: [] };
+    const maps = new GoogleMapsAdapter('key-1', fakeFetch(() => Response.json(body)).impl);
+    expect(await maps.locate({ query: 'Nowhere', countryCode: 'NG', kind: 'city' })).toBeNull();
+    body = {};
+    expect(await maps.locate({ query: 'Nowhere', countryCode: 'NG', kind: 'city' })).toBeNull();
+    body = {
+      places: [
+        {
+          displayName: { text: 'Ikeja' },
+          location: { latitude: 6.6, longitude: 3.35 },
+          // Upside down: not a box to show.
+          viewport: { low: { latitude: 6.7, longitude: 3.4 }, high: { latitude: 6.5, longitude: 3.3 } },
+        },
+      ],
+    };
+    expect(await maps.locate({ query: 'Ikeja', countryCode: 'NG', kind: 'city' })).toEqual({
+      name: 'Ikeja',
+      lat: 6.6,
+      lng: 3.35,
+      bounds: null,
+    });
+    const down = new GoogleMapsAdapter('key-1', fakeFetch(() => new Response('', { status: 500 })).impl);
+    await expect(down.locate({ query: 'Ikeja', countryCode: 'NG', kind: 'city' })).rejects.toMatchObject({
+      status: 503,
+    });
+  });
 });
 
 describe('Mapbox maps', () => {
@@ -748,6 +809,53 @@ describe('Mapbox maps', () => {
       throw new Error(`fetch failed for https://api.mapbox.com/?access_token=${TOKEN}`);
     }) as typeof fetch);
     await expect(down.check()).rejects.toThrow(/^Mapbox couldn't be reached$/);
+  });
+
+  it("finds a state or city by name for the panel's map, with its box, from Mapbox's geocoding in the country", async () => {
+    const { impl, calls } = fakeFetch(() =>
+      Response.json({
+        features: [
+          {
+            geometry: { coordinates: [3.58, 6.52] },
+            properties: { name: 'Lagos', feature_type: 'region', bbox: [2.7, 6.37, 4.35, 6.7] },
+          },
+        ],
+      }),
+    );
+    const maps = new MapboxMapsAdapter(TOKEN, impl);
+    expect(await maps.locate({ query: 'Lagos State', countryCode: 'NG', kind: 'state' })).toEqual({
+      name: 'Lagos',
+      lat: 6.52,
+      lng: 3.58,
+      bounds: { west: 2.7, south: 6.37, east: 4.35, north: 6.7 },
+    });
+    const url = calls[0]!.url;
+    expect(url.startsWith('https://api.mapbox.com/search/geocode/v6/forward?')).toBe(true);
+    expect(query(url).get('q')).toBe('Lagos State');
+    expect(query(url).get('country')).toBe('ng');
+    expect(query(url).get('types')).toBe('region');
+    expect(query(url).get('limit')).toBe('1');
+    expect(query(url).get('access_token')).toBe(TOKEN);
+    // A city is a town, or a part of one: Lekki is a neighbourhood to Mapbox.
+    await maps.locate({ query: 'Lekki, Lagos State', countryCode: 'NG', kind: 'city' });
+    expect(query(calls[1]!.url).get('types')).toBe('place,locality,district,neighborhood');
+  });
+
+  it('finds nothing as null, shows a place without a box at its point, and never shows the token', async () => {
+    let body: unknown = { features: [] };
+    const maps = new MapboxMapsAdapter(TOKEN, fakeFetch(() => Response.json(body)).impl);
+    expect(await maps.locate({ query: 'Nowhere', countryCode: 'NG', kind: 'city' })).toBeNull();
+    body = { features: [{ geometry: { coordinates: [3.35, 6.6] }, properties: { name: 'Ikeja' } }] };
+    expect(await maps.locate({ query: 'Ikeja', countryCode: 'NG', kind: 'city' })).toEqual({
+      name: 'Ikeja',
+      lat: 6.6,
+      lng: 3.35,
+      bounds: null,
+    });
+    const down = new MapboxMapsAdapter(TOKEN, fakeFetch(() => new Response('{}', { status: 401 })).impl);
+    const failed = await down.locate({ query: 'Ikeja', countryCode: 'NG', kind: 'city' }).catch((e: unknown) => e);
+    expect(failed).toMatchObject({ status: 503 });
+    expect(JSON.stringify(failed)).not.toContain(TOKEN);
   });
 });
 

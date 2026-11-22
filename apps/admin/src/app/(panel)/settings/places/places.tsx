@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useMemo, useState } from 'react';
+import { useActionState, useEffect, useMemo, useRef, useState } from 'react';
 import { ReasonInput } from '@/components/reason';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, Card, Notice, buttonClass, inputClass } from '@/components/ui';
@@ -16,11 +16,19 @@ import {
 import { matchingInputs, matchingText } from '@/lib/matching-places';
 import { PRICE_LABELS, priceInput } from '@/lib/prices';
 import { FIELD_UNIT } from '@/lib/settings-fields';
-import { boundaryField, editableOnMap, parseBoundary, type Boundary } from '@/lib/shapes';
-import { createArea, createCity, saveMatching, savePrices, updatePlace } from '../actions';
+import { boundaryField, boundsOf, editableOnMap, parseBoundary, type Boundary } from '@/lib/shapes';
+import { createArea, createCity, locatePlace, saveMatching, savePrices, updatePlace } from '../actions';
 import { PlacesMap, type MapShape } from './map';
 import { PlacesMapbox } from './mapbox-map';
-import { mapNotice, type PlacesMapInfo } from '@/lib/places-map';
+import {
+  cityQuery,
+  focusBox,
+  mapNotice,
+  stateQuery,
+  type MapBox,
+  type MapFocus,
+  type PlacesMapInfo,
+} from '@/lib/places-map';
 
 /** The prices a place sets now, and their version: 0, with nothing set, before the first. */
 export interface SavedPrices {
@@ -109,6 +117,7 @@ export function Places({
   map: PlacesMapInfo;
 }) {
   const notice = mapNotice(map);
+  const hasMap = !notice && !!map.key;
   const MapOfProvider = map.engine === 'mapbox' ? PlacesMapbox : PlacesMap;
   const [stateId, setStateId] = useState(
     () => (states.find((s) => s.cities.length) ?? states.find((s) => s.code === 'LA') ?? states[0])?.id ?? '',
@@ -135,6 +144,48 @@ export function Places({
     setChanged(true);
     setDrawing((d) => d + 1);
   };
+
+  // Where the map goes before anything is drawn there.
+  const [focus, setFocus] = useState<MapFocus | null>(null);
+  const [stateNote, setStateNote] = useState<string | null>(null);
+  // What the maps provider found for each state and city asked about, so each is asked about once.
+  const found = useRef(new Map<string, MapBox>());
+  // Each move is counted, so an answer that comes after a later move is let go.
+  const moves = useRef(0);
+  const moveTo = (box: MapBox) => setFocus({ key: String(++moves.current), box });
+
+  /** Moves the map to a state or city as the maps provider finds it by name: null, or why it couldn't. */
+  const goTo = async (kind: 'state' | 'city', query: string): Promise<string | null> => {
+    const move = ++moves.current;
+    const key = `${kind}:${query.toLowerCase()}`;
+    let box = found.current.get(key);
+    if (!box) {
+      let answer: Awaited<ReturnType<typeof locatePlace>>;
+      try {
+        answer = await locatePlace(kind, query);
+      } catch {
+        answer = { error: "The panel couldn't reach the server." };
+      }
+      if (move !== moves.current) return null;
+      if (!answer.found) {
+        return answer.missing
+          ? `${query} wasn't found on the map: move the map there yourself.`
+          : `${answer.error ?? 'Something went wrong.'} Move the map there yourself.`;
+      }
+      box = focusBox(answer.found, kind);
+      found.current.set(key, box);
+    }
+    if (move === moves.current) moveTo(box);
+    return null;
+  };
+
+  // A state with nothing drawn yet: the map goes to it, as the maps provider finds it. One with cities shows them.
+  useEffect(() => {
+    setStateNote(null);
+    if (!hasMap || !state || state.cities.length) return;
+    void goTo('state', stateQuery(state.name)).then(setStateNote);
+    // Only when another state is picked: drawing in it doesn't move the map.
+  }, [stateId, hasMap]);
 
   /** Opens a place's prices or Matching values, with what each level above it sets. */
   const openOwn = (kind: 'prices' | 'matching', scope: Scope, place: Own, above: Own[]) =>
@@ -200,6 +251,7 @@ export function Places({
             value={stateId}
             onChange={(e) => {
               setStateId(e.target.value);
+              setFocus(null);
               start(null);
             }}
             className={`${inputClass} mt-1.5`}
@@ -267,6 +319,11 @@ export function Places({
             drawn={drawn}
             changed={changed}
             hasMap={!notice}
+            onFind={
+              task.kind === 'new-city' && hasMap && state
+                ? (name) => goTo('city', cityQuery(name, state.name))
+                : undefined
+            }
             onPasted={pasted}
             onDone={() => start(null)}
           />
@@ -332,7 +389,12 @@ export function Places({
                         <button
                           type="button"
                           className="text-sm font-semibold text-brand-ink underline"
-                          onClick={() => start({ kind: 'new-area', cityId: city.id, cityName: city.name })}
+                          onClick={() => {
+                            start({ kind: 'new-area', cityId: city.id, cityName: city.name });
+                            // The area is drawn inside its city: the map shows the city.
+                            const box = boundsOf([city.boundary]);
+                            if (box) moveTo(box);
+                          }}
                         >
                           Add an area to {city.name}
                         </button>
@@ -351,8 +413,8 @@ export function Places({
         </Card>
       </div>
 
-      <div className="space-y-2 lg:sticky lg:top-6 lg:self-start">
-        {!notice && map.key ? (
+      <div id="places-map" className="space-y-2 lg:sticky lg:top-6 lg:self-start">
+        {hasMap && map.key ? (
           <MapOfProvider
             apiKey={map.key}
             shapes={shapes}
@@ -362,10 +424,12 @@ export function Places({
               setChanged(true);
             }}
             fitKey={stateId}
+            focus={focus}
           />
         ) : (
           <Notice tone="warn">{notice}</Notice>
         )}
+        {stateNote ? <p className="text-sm text-ink-2">{stateNote}</p> : null}
         <p className="text-[13px] text-ink-3">
           Cities are outlined; areas are green when on and grey when off. An area stays inside its city, and areas and
           cities don&apos;t overlap, though they can share an edge.
@@ -446,6 +510,7 @@ function DrawPanel({
   drawn,
   changed,
   hasMap,
+  onFind,
   onPasted,
   onDone,
 }: {
@@ -454,6 +519,8 @@ function DrawPanel({
   drawn: Boundary | null;
   changed: boolean;
   hasMap: boolean;
+  /** For a new city: moves the map to the name typed, as the maps provider finds it. Null, or why it couldn't. */
+  onFind?: (name: string) => Promise<string | null>;
   onPasted: (b: Boundary) => void;
   onDone: () => void;
 }) {
@@ -465,6 +532,27 @@ function DrawPanel({
   useEffect(() => {
     if (result.ok) onDone();
   }, [result, onDone]);
+
+  const nameField = useRef<HTMLInputElement>(null);
+  const [finding, setFinding] = useState(false);
+  const [findNote, setFindNote] = useState<string | null>(null);
+  // The name last looked up, and the one being looked up now: leaving the field doesn't look it up again.
+  const lastFound = useRef('');
+  const looking = useRef('');
+  /** Moves the map to the name typed: when asked (`again`), or on leaving the field with a new name. */
+  const find = async (again: boolean) => {
+    const name = nameField.current?.value.trim() ?? '';
+    if (!onFind || name.length < 2 || looking.current === name || (!again && name === lastFound.current)) return;
+    lastFound.current = name;
+    looking.current = name;
+    setFinding(true);
+    const why = await onFind(name);
+    looking.current = '';
+    setFinding(false);
+    setFindNote(why);
+    // On a phone the map is further down: bring it into view, to draw on.
+    if (!why && again) document.getElementById('places-map')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  };
 
   const title =
     task.kind === 'new-city'
@@ -479,7 +567,7 @@ function DrawPanel({
           ? "Paste the shape's GeoJSON below."
           : task.kind === 'reshape'
             ? 'Drag a corner to move it, or the dot between two corners to add one.'
-            : 'Click on the map for each corner, and click the first corner again to finish. Then drag corners to adjust.'}
+            : `${onFind ? 'Type its name and tap Find on map to go there. ' : ''}Click on the map for each corner, and click the first corner again to finish. Then drag corners to adjust.`}
       </p>
       <form action={action} className="space-y-3">
         <ReasonInput after={result} />
@@ -500,16 +588,42 @@ function DrawPanel({
           <label className="block text-sm font-semibold" htmlFor="place-name">
             Name
           </label>
-          <input
-            id="place-name"
-            name="name"
-            required
-            minLength={2}
-            maxLength={60}
-            defaultValue={task.kind === 'reshape' ? task.name : ''}
-            placeholder={task.kind === 'new-city' ? 'For example: Lagos' : 'For example: Lekki Phase 1'}
-            className={`${inputClass} mt-1.5`}
-          />
+          <div className="mt-1.5 flex gap-2">
+            <input
+              id="place-name"
+              ref={nameField}
+              name="name"
+              required
+              minLength={2}
+              maxLength={60}
+              defaultValue={task.kind === 'reshape' ? task.name : ''}
+              placeholder={task.kind === 'new-city' ? 'For example: Lagos' : 'For example: Lekki Phase 1'}
+              className={`${inputClass} min-w-0 flex-1`}
+              // A new city: the keyboard's Go finds it on the map, as its shape is drawn there before saving.
+              enterKeyHint={onFind ? 'search' : undefined}
+              onBlur={onFind ? () => void find(false) : undefined}
+              onKeyDown={
+                onFind
+                  ? (e) => {
+                      if (e.key !== 'Enter') return;
+                      e.preventDefault();
+                      void find(true);
+                    }
+                  : undefined
+              }
+            />
+            {onFind ? (
+              <button
+                type="button"
+                className={buttonClass('secondary', true)}
+                disabled={finding}
+                onClick={() => void find(true)}
+              >
+                {finding ? 'Finding…' : 'Find on map'}
+              </button>
+            ) : null}
+          </div>
+          {findNote ? <p className="mt-1.5 text-sm text-ink-2">{findNote}</p> : null}
         </div>
         <details open={!hasMap} className="text-sm">
           <summary className="cursor-pointer font-semibold text-ink-2">Paste a shape instead</summary>

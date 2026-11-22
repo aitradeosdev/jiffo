@@ -24,6 +24,33 @@ export interface LatLng {
   lng: number;
 }
 
+/** A box on the map: its west and east longitudes, and its south and north latitudes. */
+export interface MapBox {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+/**
+ * A state or city found by name, for the panel's map to go to (Settings, Places): its middle and, where the provider
+ * gives one, the box it fills.
+ */
+export interface Located {
+  name: string;
+  lat: number;
+  lng: number;
+  bounds: MapBox | null;
+}
+
+/** A box only when it is one: four numbers, west of east and south of north. */
+function boxOrNull(west: unknown, south: unknown, east: unknown, north: unknown): MapBox | null {
+  const all = [west, south, east, north];
+  if (!all.every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
+  const [w, s, e, n] = all as number[];
+  return w! < e! && s! < n! ? { west: w!, south: s!, east: e!, north: n! } : null;
+}
+
 export interface RouteEstimate {
   distanceMeters: number;
   durationSeconds: number;
@@ -62,6 +89,11 @@ export interface MapsAdapter {
     sessionToken?: string;
   }): Promise<PlaceSuggestion[]>;
   place(placeId: string, sessionToken?: string): Promise<Place | null>;
+  /**
+   * A state or city by its name, in the country, for the panel's map to go to: the provider's first answer, or null
+   * when it finds none. The panel shows it on the provider's own map, as its terms ask.
+   */
+  locate(input: { query: string; countryCode: string; kind: 'state' | 'city' }): Promise<Located | null>;
   /** Driving distance through the points in order. */
   route(points: LatLng[]): Promise<RouteEstimate>;
   /**
@@ -203,6 +235,35 @@ export class GoogleMapsAdapter implements MapsAdapter {
     };
   }
 
+  async locate(input: { query: string; countryCode: string; kind: 'state' | 'city' }) {
+    // The words name what is looked for ("Lagos State", "Ikeja, Lagos State"); the region only leans the search.
+    const body = await this.call<{
+      places?: Array<{
+        displayName?: { text?: string };
+        location?: { latitude?: number; longitude?: number };
+        viewport?: {
+          low?: { latitude?: number; longitude?: number };
+          high?: { latitude?: number; longitude?: number };
+        };
+      }>;
+    }>('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      fieldMask: 'places.displayName,places.location,places.viewport',
+      body: { textQuery: input.query, regionCode: input.countryCode.toLowerCase(), languageCode: 'en', pageSize: 1 },
+    });
+    const p = body?.places?.[0];
+    const lat = p?.location?.latitude;
+    const lng = p?.location?.longitude;
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+    const { low, high } = p?.viewport ?? {};
+    return {
+      name: p?.displayName?.text ?? input.query,
+      lat,
+      lng,
+      bounds: boxOrNull(low?.longitude, low?.latitude, high?.longitude, high?.latitude),
+    };
+  }
+
   async route(points: LatLng[]) {
     if (points.length < 2) return { distanceMeters: 0, durationSeconds: 0 };
     const waypoint = (p: LatLng) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
@@ -301,6 +362,8 @@ const MAPBOX_TRAFFIC_MATRIX_POINTS = 10;
  * state, country or postcode, which is no errand stop.
  */
 const MAPBOX_TYPES = 'poi,address,street,block,neighborhood,locality,district,place,city';
+/** What Mapbox's geocoding looks for, for each kind the panel finds: a state, or a town or part of one. */
+const MAPBOX_LOCATE_TYPES = { state: 'region', city: 'place,locality,district,neighborhood' } as const;
 /** Suggestions that are searches of their own rather than places, which retrieve gives no position for. */
 const MAPBOX_NOT_PLACES = new Set(['category', 'brand', 'query']);
 /** providerFetch's own words for a redirect, which say where it pointed and never quote the address called. */
@@ -442,6 +505,34 @@ export class MapboxMapsAdapter implements MapsAdapter {
       lng,
       // A state picked as itself names itself; anything in one names it in its context.
       region: (p.feature_type === 'region' ? p.name : p.context?.region?.name) ?? null,
+    };
+  }
+
+  async locate(input: { query: string; countryCode: string; kind: 'state' | 'city' }) {
+    // Geocoding rather than the Search Box: it finds whole states too, and gives the box each fills.
+    const body = await this.call<{
+      features?: Array<{
+        geometry?: { coordinates?: [number, number] };
+        properties?: { name?: string; bbox?: [number, number, number, number] };
+      }>;
+    }>(
+      this.url('/search/geocode/v6/forward', {
+        q: input.query.slice(0, 256),
+        country: input.countryCode.toLowerCase(),
+        types: MAPBOX_LOCATE_TYPES[input.kind],
+        limit: '1',
+        language: 'en',
+      }),
+    );
+    const feature = body?.features?.[0];
+    const [lng, lat] = feature?.geometry?.coordinates ?? [];
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+    const [west, south, east, north] = feature?.properties?.bbox ?? [];
+    return {
+      name: feature?.properties?.name ?? input.query,
+      lat,
+      lng,
+      bounds: boxOrNull(west, south, east, north),
     };
   }
 
@@ -587,6 +678,18 @@ export class FakeMapsAdapter implements MapsAdapter {
 
   async place(placeId: string) {
     return FAKE_PLACES.find((p) => p.placeId === placeId) ?? null;
+  }
+
+  /** The first place whose name, address and state hold every word asked, "State" aside. */
+  async locate(input: { query: string }) {
+    const words = input.query
+      .toLowerCase()
+      .split(/[\s,]+/)
+      .filter((w) => w.length > 1 && w !== 'state');
+    const found = FAKE_PLACES.find(
+      (p) => words.length && words.every((w) => `${p.name} ${p.address} ${p.region}`.toLowerCase().includes(w)),
+    );
+    return found ? { name: found.name, lat: found.lat, lng: found.lng, bounds: null } : null;
   }
 
   async route(points: LatLng[]) {
