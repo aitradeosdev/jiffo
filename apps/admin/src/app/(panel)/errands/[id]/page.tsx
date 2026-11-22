@@ -92,6 +92,8 @@ interface Detail {
     counts: boolean;
     /** Offered back to back, to wait behind the errand the agent was on (M10). */
     backToBack: boolean;
+    /** Offered to carry with another errand the agent held (M13). */
+    paired: boolean;
     offeredAt: string;
     answeredAt: string | null;
   }>;
@@ -272,6 +274,7 @@ export default async function ErrandPage({
                           </Link>
                           <Badge tone={status.tone}>{status.label}</Badge>
                           {o.backToBack ? <Badge tone="neutral">Back to back</Badge> : null}
+                          {o.paired ? <Badge tone="neutral">Two at once</Badge> : null}
                           {o.counts ? null : <Badge tone="neutral">Free to decline</Badge>}
                         </p>
                         <p className="mt-0.5 text-[13px] text-ink-2">

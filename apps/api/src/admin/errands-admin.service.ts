@@ -318,6 +318,8 @@ export class ErrandsAdminService {
           straightMeters: errandOffers.straightMeters,
           counts: errandOffers.counts,
           backToBack: errandOffers.backToBack,
+          // Offered to carry with another errand the agent held (M13).
+          paired: sql<boolean>`${errandOffers.pairedWith} is not null`,
           offeredAt: errandOffers.offeredAt,
           expiresAt: errandOffers.expiresAt,
           answeredAt: errandOffers.answeredAt,

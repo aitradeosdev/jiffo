@@ -47,8 +47,9 @@ export class PredictionService {
 
   /**
    * Nightly: a new model for each state whose answered offers of late reach the Matching settings' number. Offers
-   * made back to back are left out, as the agent was busy when they rang; so are offers from before features were
-   * kept. A country whose prediction share is 0 is left alone. Models over a month old are let go.
+   * made back to back or beside another errand are left out, as the agent was busy when they rang; so are offers from
+   * before features were kept. A country whose prediction share is 0 is left alone. Models over a month old are let
+   * go.
    */
   async fitAll() {
     await this.db
@@ -73,7 +74,7 @@ export class PredictionService {
     const { rows: states } = await this.db.execute<{ state_code: string; n: number }>(sql`
       select e.state_code, count(*)::int as n
       from errand_offers o join errands e on e.id = o.errand_id
-      where o.country_code = ${code} and o.features is not null and not o.back_to_back
+      where o.country_code = ${code} and o.features is not null and not o.back_to_back and o.paired_with is null
         and o.status in ('accepted', 'declined', 'expired') and o.offered_at > ${since}
       group by e.state_code
       having count(*) >= ${min}`);
@@ -84,7 +85,7 @@ export class PredictionService {
           select o.features, o.status
           from errand_offers o join errands e on e.id = o.errand_id
           where o.country_code = ${code} and e.state_code = ${state.state_code} and o.features is not null
-            and not o.back_to_back and o.status in ('accepted', 'declined', 'expired') and o.offered_at > ${since}
+            and not o.back_to_back and o.paired_with is null and o.status in ('accepted', 'declined', 'expired') and o.offered_at > ${since}
           order by o.offered_at desc
           limit ${MAX_OFFERS}`);
         const history = rows.map((r) => ({ features: r.features, accepted: r.status === 'accepted' }));

@@ -86,6 +86,9 @@ export const DEFAULT_MATCHING_SETTINGS = {
   destinationCloserBps: 2_000,
   predictionShareBps: 2_000,
   predictionMinOffers: 500,
+  twoAtOnce: false,
+  twoAtOncePickupKm: 1,
+  twoAtOnceDelayMinutes: 10,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -252,6 +255,14 @@ export const MatchingSettingsSchema = z
      */
     predictionShareBps: z.number().int().min(0).max(5_000).default(2_000),
     predictionMinOffers: z.number().int().min(20).max(100_000).default(500),
+    /**
+     * Two errands at once (M13), as DoorDash stacks orders: an agent on the way to an urgent errand's pickup can be
+     * offered a second urgent errand whose pickup is within this many km of the first's, when carrying both makes
+     * the first customer's delivery at most the second number of minutes later. Off to start.
+     */
+    twoAtOnce: z.boolean().default(false),
+    twoAtOncePickupKm: z.number().min(0.2).max(5).default(1),
+    twoAtOnceDelayMinutes: z.number().int().min(1).max(30).default(10),
   })
   .refine((m) => (m.searchStepsKm.at(-1) ?? 0) <= m.boardRadiusKm, {
     message: "The last search step can't reach past how far the board reaches",

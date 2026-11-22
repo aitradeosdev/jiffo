@@ -20,6 +20,7 @@ const offer: Offer = {
   agentEarnsKobo: 212_500,
   counts: true,
   backToBack: false,
+  paired: false,
   errand: {
     id: 'errand-1',
     categoryKey: 'parcel',
@@ -62,6 +63,8 @@ describe('an offer', () => {
     expect(offerFacts(offer)).toEqual(['Now', '2 stops']);
     // Back to back (M10): after the errand they are on, not now.
     expect(offerFacts({ ...offer, backToBack: true })).toEqual(['After the errand you are on', '2 stops']);
+    // Two at once (M13): carried with it, now.
+    expect(offerFacts({ ...offer, paired: true })).toEqual(['With the errand you are on', '2 stops']);
     expect(offerFacts({ ...offer, errand: { ...offer.errand, buy: true, stopCount: 3 } })).toEqual([
       'Now',
       '3 stops',
@@ -127,5 +130,7 @@ describe('the countdown bar', () => {
     expect(afterAccepting(offer)).toBe('/errand/errand-1');
     // Back to back (M10): they stay on the errand they are carrying out; the next one starts after it.
     expect(afterAccepting({ ...offer, backToBack: true })).toBeNull();
+    // Two at once (M13): carried now, so it opens like any other.
+    expect(afterAccepting({ ...offer, paired: true })).toBe('/errand/errand-1');
   });
 });

@@ -1,14 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { DEFAULT_SECURITY_SETTINGS } from '@jiffo/shared';
+import { AT_PICKUP_METERS, DEFAULT_SECURITY_SETTINGS } from '@jiffo/shared';
 import { and, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { countries, errandStops, errandTrail, errands } from '../db/schema';
 import { CountriesService } from '../countries/countries.service';
 
 const PRUNE_BATCH = 10_000;
-/** Within this many metres of the pickup, the agent is there. */
-const AT_PICKUP_METERS = 150;
-
 export interface TrailPosition {
   lat: number;
   lng: number;

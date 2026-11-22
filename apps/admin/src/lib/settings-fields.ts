@@ -559,6 +559,24 @@ export const SECTIONS: Section[] = [
         help: 'Its travel time counts the rest of the errand they are on, then the drive. 0.5 to 10 km.',
       },
       {
+        path: 'matching.twoAtOnce',
+        label: 'Two urgent errands at once',
+        kind: 'bool',
+        help: "An agent on the way to an urgent errand's pickup can be offered a second whose pickup is near it, and carry both. Both customers follow the agent, and the agent is shown the order of the stops. Declining it is free. Off to start.",
+      },
+      {
+        path: 'matching.twoAtOncePickupKm',
+        label: "Two at once: the second pickup within this far of the first's",
+        kind: 'km',
+        help: 'In a straight line. 0.2 to 5 km.',
+      },
+      {
+        path: 'matching.twoAtOnceDelayMinutes',
+        label: 'Two at once: each customer waits at most this much longer',
+        kind: 'minutes',
+        help: 'Than their errand would take on its own, along the quickest way through both. 1 to 30 minutes.',
+      },
+      {
         path: 'matching.scheduledMinCompletionBps',
         label: 'Scheduled errands: completion rate needed to take one',
         kind: 'percent',

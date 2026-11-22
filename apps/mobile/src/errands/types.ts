@@ -1,3 +1,4 @@
+import type { Alongside } from './alongside';
 import type { Release } from './release';
 import type { ErrandEvent, ErrandState } from '@jiffo/shared';
 
@@ -69,6 +70,10 @@ export interface ErrandView {
   agentEarnsKobo?: number | null;
   /** Customer, while the errand runs: where their agent was a moment ago. */
   agentLocation?: { lat: number; lng: number; at: string } | null;
+  /** Two at once (M13), for the agent: the errand this one is carried with, and the stops through both in order. */
+  alongside?: Alongside | null;
+  /** Two at once (M13), for the customer: their agent carries another errand on the way. */
+  sharedTrip?: boolean;
   /** Customer, while matching: how many agents are online near the pickup. */
   nearbyAgents?: { count: number; radiusKm: number } | null;
   /** Customer, while an urgent errand waits: how far its search reaches, and whether it's open to everyone (M8). */

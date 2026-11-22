@@ -32,4 +32,10 @@ describe('settings fields', () => {
     expect(FIELD_BY_PATH.get('matching.offersPerStep')?.kind).toBe('count');
     expect(FIELD_BY_PATH.has('timers.urgentWidenMinutes')).toBe(false);
   });
+
+  it('has two errands at once, off to start (docs/matching.md, M13)', () => {
+    expect(FIELD_BY_PATH.get('matching.twoAtOnce')?.kind).toBe('bool');
+    expect(shown(FIELD_BY_PATH.get('matching.twoAtOncePickupKm'), 1)).toBe('1 km');
+    expect(shown(FIELD_BY_PATH.get('matching.twoAtOnceDelayMinutes'), 10)).toBe('10 min');
+  });
 });

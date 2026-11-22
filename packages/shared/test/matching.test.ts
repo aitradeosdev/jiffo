@@ -42,6 +42,8 @@ const errand = (over: Partial<MatchErrand> = {}): MatchErrand => ({
 });
 
 const held = (over: Partial<HeldErrand> = {}): HeldErrand => ({
+  id: 'held',
+  reachedPickup: false,
   urgent: false,
   startsLater: false,
   status: 'accepted',
@@ -153,6 +155,9 @@ describe('the Matching settings', () => {
       destinationCloserBps: 2_000,
       predictionShareBps: 2_000,
       predictionMinOffers: 500,
+      twoAtOnce: false,
+      twoAtOncePickupKm: 1,
+      twoAtOnceDelayMinutes: 10,
       offers: true,
       offerSeconds: 20,
       missedOffersOffline: 3,
