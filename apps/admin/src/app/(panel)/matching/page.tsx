@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Card, Empty, PageHeader, inputClass, buttonClass, tableClass, tdClass, thClass } from '@/components/ui';
 import { api, getCountry } from '@/lib/api';
+import { dateTime } from '@/lib/format';
 import { duration, share } from '@/lib/matching';
 
 export const metadata: Metadata = { title: 'Matching' };
@@ -35,6 +36,8 @@ interface Dashboard {
     completionRate: number | null;
     cancellations7d: number;
   }>;
+  /** Acceptance prediction (M13): each state's newest model. */
+  predictions: Array<{ stateCode: string; offers: number; logLoss: number; trainedAt: string; inUse: boolean }>;
 }
 
 const PERIODS = [
@@ -185,6 +188,31 @@ export default async function MatchingPage({
           pickup times are for errands taken from an offer whose agent then reached the pickup: the travel time the
           offer was ranked with, against how long they took from accepting.
         </p>
+
+        <Card title="Acceptance prediction">
+          {d.predictions.length === 0 ? (
+            <p className="text-sm text-ink-3">
+              No state has enough answered offers yet. Each is learnt from nightly once it has the number in Settings,
+              Matching; until then, ranking is as without it.
+            </p>
+          ) : (
+            <ul className="space-y-1.5 text-sm">
+              {d.predictions.map((p) => (
+                <li key={p.stateCode}>
+                  <span className="font-semibold">
+                    {states.find((s) => s.code === p.stateCode)?.name ?? p.stateCode}
+                  </span>{' '}
+                  · learnt from {p.offers.toLocaleString('en-NG')} offers on {dateTime(p.trainedAt, country.timezone)}
+                  {p.inUse
+                    ? ''
+                    : Date.now() - new Date(p.trainedAt).getTime() > 7 * 86_400_000
+                      ? ' · not refitted for a week, so not in use'
+                      : ' · not in use: its share in Settings, Matching is 0'}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
 
         <Card title="Agents with the most offers" padded={false}>
           {d.agents.length === 0 ? (

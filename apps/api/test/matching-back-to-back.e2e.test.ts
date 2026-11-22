@@ -1,8 +1,8 @@
 import { and, eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_MATCHING_SETTINGS, haversineMeters } from '@jiffo/shared';
-import { agentPresence, errandOffers, errands } from '../src/db/schema';
+import { DEFAULT_MATCHING_SETTINGS, fitAcceptance, haversineMeters } from '@jiffo/shared';
+import { acceptanceModels, agentPresence, errandOffers, errands } from '../src/db/schema';
 import { AgentLocations } from '../src/matching/agent-locations';
 import { TravelTimesService } from '../src/matching/travel-times';
 import {
@@ -175,6 +175,42 @@ describe('back-to-back offers', () => {
     await act(t, agent, first.id, 'mark_delivered');
     await act(t, agent, first.id, 'confirm_pin', { pin: await pinOf(first.id) });
     await act(t, agent, second.id, 'start');
+  });
+
+  it('ranks a back-to-back offer without a predicted chance: the history learnt from was of free agents', async () => {
+    const history = Array.from({ length: 60 }, (_, i) => ({
+      features: {
+        pickupKm: (i % 6) + 0.5,
+        tripKm: 2,
+        feeKobo: 300_000,
+        acceptanceRate: null,
+        hour: i % 24,
+        buy: false,
+      },
+      accepted: i % 6 < 3,
+    }));
+    const model = fitAcceptance(history);
+    const [rivers] = await t.db
+      .insert(acceptanceModels)
+      .values({ countryCode: 'NG', stateCode: 'RI', model, offers: history.length, logLoss: 0.5 })
+      .returning();
+    try {
+      const dropoff = east(2);
+      const agent = await agentAt(ORIGIN);
+      const first = await underWay(agent, ORIGIN, dropoff);
+      const [taken] = await t.db.select().from(errandOffers).where(eq(errandOffers.errandId, first.id));
+      expect(taken!.parts.prediction).toBeGreaterThan(0);
+      await report(agent, east(1.4));
+      const next = north(dropoff, 2);
+      await urgent(next, north(next, 1));
+      const offer = await current(agent);
+      expect(offer?.backToBack).toBe(true);
+      const [row] = await t.db.select().from(errandOffers).where(eq(errandOffers.id, offer!.id));
+      expect(row!.parts.prediction).toBeUndefined();
+      expect(row!.parts.beforePrediction).toBeUndefined();
+    } finally {
+      await t.db.delete(acceptanceModels).where(eq(acceptanceModels.id, rivers!.id));
+    }
   });
 
   it('waits until the agent is within a km of the drop-off, or has marked it delivered', async () => {

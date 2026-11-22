@@ -151,6 +151,8 @@ describe('the Matching settings', () => {
       destinationMode: true,
       destinationUsesPerDay: 2,
       destinationCloserBps: 2_000,
+      predictionShareBps: 2_000,
+      predictionMinOffers: 500,
       offers: true,
       offerSeconds: 20,
       missedOffersOffline: 3,

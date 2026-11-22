@@ -32,7 +32,9 @@ import {
   type AdminRole,
   type CountrySettings,
   type ErrandState,
+  type AcceptanceModel,
   type MatchingOverride,
+  type OfferFeatures,
   type PriceOverride,
   type Prices,
 } from '@jiffo/shared';
@@ -625,6 +627,25 @@ export const agentPresence = pgTable(
   (t) => [index('agent_presence_location_gix').using('gist', t.location)],
 );
 
+/**
+ * Acceptance prediction's models (docs/matching.md, M13): fitted nightly for each state with enough answered offers
+ * lately, the newest used for ranking while a week old or less.
+ */
+export const acceptanceModels = pgTable(
+  'acceptance_models',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    countryCode: char('country_code', { length: 2 }).notNull(),
+    stateCode: text('state_code').notNull(),
+    model: jsonb('model').$type<AcceptanceModel>().notNull(),
+    /** The answered offers it learnt from, and how well it explains them (lower is better). */
+    offers: integer('offers').notNull(),
+    logLoss: doublePrecision('log_loss').notNull(),
+    trainedAt: timestamp('trained_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('acceptance_models_state_idx').on(t.countryCode, t.stateCode, t.trainedAt)],
+);
+
 /** Every destination an agent set (M13), and how it ended: the uses a day are counted from these. */
 export const agentDestinations = pgTable(
   'agent_destinations',
@@ -814,6 +835,8 @@ export const errandOffers = pgTable(
      * their acceptance rate, and lets them accept it while holding that one.
      */
     backToBack: boolean('back_to_back').notNull().default(false),
+    /** What the offer looked like to the agent (M13): what acceptance prediction learns from. None before it. */
+    features: jsonb('features').$type<OfferFeatures>(),
     offeredAt: timestamp('offered_at', { withTimezone: true }).notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     answeredAt: timestamp('answered_at', { withTimezone: true }),

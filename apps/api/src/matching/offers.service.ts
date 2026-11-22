@@ -242,6 +242,7 @@ export class OffersService {
             !r.backToBack &&
             offerCounts({ straightMeters: r.straightMeters, offeredAt: now, onlineSince: r.onlineSince }, rules),
           backToBack: r.backToBack,
+          features: r.features,
           offeredAt: now,
           expiresAt: new Date(now.getTime() + rules.offerSeconds * 1000),
         })

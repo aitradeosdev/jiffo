@@ -393,6 +393,13 @@
       "when": 1795331773516,
       "tag": "0055_destination_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1795333211633,
+      "tag": "0056_acceptance_prediction",
+      "breakpoints": true
     }
   ]
 }

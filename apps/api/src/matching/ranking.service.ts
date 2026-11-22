@@ -3,20 +3,25 @@ import {
   AGENT_OUT_STATES,
   averageReliability,
   byRank,
+  haversineMeters,
+  predictAcceptance,
   rankScore,
+  withPrediction,
   type AgentTier,
   type CountrySettings,
+  type OfferFeatures,
   type RankInputs,
   type RankParts,
   type StateAverages,
 } from '@jiffo/shared';
-import { eq, sql } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import { CountriesService } from '../countries/countries.service';
 import { MatchingPlacesService } from '../countries/matching-places.service';
 import { DB, type Db } from '../db/database.module';
-import { agentPresence, errands } from '../db/schema';
+import { agentPresence, errandStops, errands } from '../db/schema';
 import { completionRate, LEFT_EVENTS, RECENT, recentAccepts } from './completion';
 import { CandidatesService, type Candidate } from './candidates.service';
+import { PredictionService } from './prediction.service';
 import { MatchingRedis } from './matching-redis';
 
 /** A candidate with their score for the errand, and its parts (kept with each offer, M15). */
@@ -25,6 +30,8 @@ export interface Ranked extends Candidate {
   parts: RankParts;
   /** When they went online: an offer in their first minutes doesn't count toward their acceptance rate (M9). */
   onlineSince: Date | null;
+  /** What the offer looks like to them, kept with it for acceptance prediction to learn from (M13). */
+  features: OfferFeatures;
 }
 
 /** Errands of their own that count: their last 100 accepted, and their last 100 ratings (M4). */
@@ -46,6 +53,7 @@ export class RankingService {
     private readonly countries: CountriesService,
     private readonly places: MatchingPlacesService,
     private readonly candidates: CandidatesService,
+    private readonly prediction: PredictionService,
     private readonly redis: MatchingRedis,
   ) {}
 
@@ -60,25 +68,63 @@ export class RankingService {
     known?: CountrySettings['matching'],
   ): Promise<Ranked[]> {
     const [errand] = await this.db
-      .select({ countryCode: errands.countryCode, stateCode: errands.stateCode, areaId: errands.areaId })
+      .select({
+        countryCode: errands.countryCode,
+        stateCode: errands.stateCode,
+        areaId: errands.areaId,
+        feeKobo: errands.feeKobo,
+        buy: errands.buy,
+      })
       .from(errands)
       .where(eq(errands.id, errandId));
     if (!errand) return [];
     const rules = known ?? (await this.places.rulesFor(errand));
     const found = await this.candidates.forErrand(errandId, skip, radiusKm, rules);
     if (!found.length) return [];
-    const [history, average] = await Promise.all([
+    const [history, average, model, route, { timezone }] = await Promise.all([
       this.history(
         found.map((c) => c.agentId),
         rules,
       ),
       this.stateAverages(errand.countryCode, errand.stateCode),
+      // Acceptance prediction (M13), where the state has a model and its share isn't 0.
+      rules.predictionShareBps > 0 ? this.prediction.modelFor(errand.countryCode, errand.stateCode) : null,
+      this.db
+        .select({ lat: errandStops.lat, lng: errandStops.lng })
+        .from(errandStops)
+        .where(eq(errandStops.errandId, errandId))
+        .orderBy(asc(errandStops.seq)),
+      this.countries.basics(errand.countryCode),
     ]);
+    let tripMeters = 0;
+    for (let i = 1; i < route.length; i++) tripMeters += haversineMeters(route[i - 1]!, route[i]!);
+    const hour = Number(
+      new Intl.DateTimeFormat('en', { timeZone: timezone, hour: 'numeric', hourCycle: 'h23' }).format(new Date()),
+    );
     return found
       .map((c) => {
         const { countedOffers: _, onlineSince, ...mine } = history.get(c.agentId)!;
-        const parts = rankScore({ travelSeconds: c.travel.durationSeconds, ...mine }, rules, average);
-        return { ...c, score: parts.total, parts, onlineSince, travelSeconds: c.travel.durationSeconds };
+        const scored = rankScore({ travelSeconds: c.travel.durationSeconds, ...mine }, rules, average);
+        const features: OfferFeatures = {
+          pickupKm: c.straightMeters / 1000,
+          tripKm: tripMeters / 1000,
+          feeKobo: errand.feeKobo,
+          acceptanceRate: mine.acceptanceRate,
+          hour: hour % 24,
+          buy: errand.buy,
+        };
+        // Not for a back-to-back offer: the history it learnt from left those out, as the agent was busy then.
+        const chance = model && !c.backToBack ? predictAcceptance(model, features) : null;
+        const parts =
+          chance === null
+            ? scored
+            : {
+                ...scored,
+                prediction: chance,
+                beforePrediction: scored.total,
+                total: withPrediction(scored.total, chance, rules.predictionShareBps),
+              };
+        return { ...c, score: parts.total, parts, onlineSince, features, travelSeconds: c.travel.durationSeconds };
       })
       .sort(byRank)
       .map(({ travelSeconds: _, ...r }) => r);
