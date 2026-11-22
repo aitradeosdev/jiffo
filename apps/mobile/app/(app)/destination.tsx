@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { goBack } from '@/nav';
 import { useSession } from '@/auth/session';
@@ -17,13 +17,16 @@ export default function DestinationScreen() {
   const [status, setStatus] = useState<DestinationStatus | null>(null);
   const { query, setQuery, results, busy, error, setError, place } = usePlaceSearch();
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoadError(null);
     api
       .get<DestinationStatus>('/v1/agent/destination')
       .then(setStatus)
-      .catch((e) => setError(errorMessage(e)));
-  }, [api, setError]);
+      .catch((e) => setLoadError(errorMessage(e)));
+  }, [api]);
+  useEffect(load, [load]);
 
   const choose = async (s: Suggestion) => {
     // A double tap must not set it twice, using two of the day's.
@@ -43,6 +46,7 @@ export default function DestinationScreen() {
     }
   };
   const clear = async () => {
+    if (saving) return;
     setSaving(true);
     try {
       setStatus(await api.delete<DestinationStatus>('/v1/agent/destination'));
@@ -57,7 +61,16 @@ export default function DestinationScreen() {
   return (
     <Screen>
       <Text variant="heading">Heading somewhere?</Text>
-      {status ? <Text tone="ink2">{destinationNote(status)}</Text> : <ActivityIndicator />}
+      {status ? (
+        <Text tone="ink2">{destinationNote(status)}</Text>
+      ) : loadError ? (
+        <View style={{ gap: 8 }}>
+          <Text tone="danger">{loadError}</Text>
+          <Button kind="secondary" label="Try again" onPress={load} />
+        </View>
+      ) : (
+        <ActivityIndicator />
+      )}
       {status?.destination ? (
         <View style={{ gap: 8 }}>
           <Row icon="flag" title={status.destination.label} subtitle="Where you're heading" />

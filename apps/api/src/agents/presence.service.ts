@@ -122,6 +122,7 @@ export class PresenceService {
           offlineReason: agentPresence.offlineReason,
           destinationLat: agentPresence.destinationLat,
           destinationLng: agentPresence.destinationLng,
+          destinationSetAt: agentPresence.destinationSetAt,
         })
         .from(agentPresence)
         .where(eq(agentPresence.userId, auth.userId)),
@@ -243,7 +244,7 @@ export class PresenceService {
           .arrivedIfThere(
             auth.userId,
             { lat: body.lat!, lng: body.lng! },
-            { lat: current.destinationLat, lng: current.destinationLng },
+            { lat: current.destinationLat, lng: current.destinationLng, setAt: current.destinationSetAt },
           )
           .catch((error: Error) => this.logger.warn(`Ending a destination failed: ${error.message}`));
       }

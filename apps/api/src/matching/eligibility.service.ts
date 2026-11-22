@@ -187,6 +187,11 @@ export class EligibilityService {
         mocked: agentPresence.mocked,
         destinationLat: agentPresence.destinationLat,
         destinationLng: agentPresence.destinationLng,
+        // A destination lasts the day it was set, by the country's own clock (M13). The outer table by name, as a
+        // column alone in a select renders unqualified.
+        destinationToday: sql<boolean>`"agent_presence"."destination_set_at" >= (select
+          date_trunc('day', now() at time zone c.timezone) at time zone c.timezone
+          from countries c where c.code = "agent_presence"."country_code")`,
       })
       .from(agentPresence)
       .where(eq(agentPresence.userId, agentId));
@@ -248,7 +253,7 @@ export class EligibilityService {
       completionRate: recent ? completionRate(recent) : null,
       // Heading somewhere (M13), while destination mode is on.
       destination:
-        rules.destinationMode && here.destinationLat != null && here.destinationLng != null
+        rules.destinationMode && here.destinationToday && here.destinationLat != null && here.destinationLng != null
           ? { lat: here.destinationLat, lng: here.destinationLng }
           : null,
       lat: here.lat,

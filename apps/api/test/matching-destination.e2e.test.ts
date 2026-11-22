@@ -2,7 +2,8 @@ import { and, eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_MATCHING_SETTINGS } from '@jiffo/shared';
-import { agentPresence, errandOffers, errands } from '../src/db/schema';
+import { agentDestinations, agentPresence, errandOffers, errands } from '../src/db/schema';
+import { DestinationService } from '../src/agents/destination.service';
 import { AgentLocations } from '../src/matching/agent-locations';
 import {
   act,
@@ -175,5 +176,43 @@ describe('destination mode', () => {
 
   it('is for agents alone', async () => {
     await request(t.http).get('/v1/agent/destination').set(customer.headers).expect(403);
+  });
+
+  it("holds to the day's limit when two are set at once, leaving one open", async () => {
+    const agent = await agentAt(HERE);
+    expect((await setDestination(agent, east(8))).status).toBe(200);
+    const both = await Promise.all([setDestination(agent, east(9), 'A'), setDestination(agent, east(7), 'B')]);
+    expect(both.map((r) => r.status).sort()).toEqual([200, 409]);
+    const open = (
+      await t.db.select().from(agentDestinations).where(eq(agentDestinations.agentId, agent.userId))
+    ).filter((d) => !d.endedAt);
+    expect(open).toHaveLength(1);
+  });
+
+  it('keeps a destination just set when a report about the one before arrives late', async () => {
+    const agent = await agentAt(HERE);
+    expect((await setDestination(agent, east(8))).status).toBe(200);
+    const [before] = await t.db.select().from(agentPresence).where(eq(agentPresence.userId, agent.userId));
+    expect((await setDestination(agent, east(12), 'Work')).status).toBe(200);
+    // The report read the first, at it, before the second was set.
+    await t.app.get(DestinationService).arrivedIfThere(agent.userId, east(8), {
+      lat: before!.destinationLat!,
+      lng: before!.destinationLng!,
+      setAt: before!.destinationSetAt!,
+    });
+    expect((await destination(agent)).body).toMatchObject({ destination: { label: 'Work' } });
+  });
+
+  it("lasts the day it was set: yesterday's keeps no one from an errand today", async () => {
+    const agent = await agentAt(HERE);
+    expect((await setDestination(agent, east(10))).status).toBe(200);
+    const away = await errandTo(north(HERE, -3));
+    expect(await board(agent)).not.toContain(away.id);
+    await t.db
+      .update(agentPresence)
+      .set({ destinationSetAt: new Date(Date.now() - 2 * 24 * 3_600_000) })
+      .where(eq(agentPresence.userId, agent.userId));
+    expect(await board(agent)).toContain(away.id);
+    expect((await destination(agent)).body).toMatchObject({ destination: null });
   });
 });
