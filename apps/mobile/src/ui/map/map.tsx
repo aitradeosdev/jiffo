@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import Constants from 'expo-constants';
-import { Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Polyline } from 'react-native-maps';
 import { useScheme } from '../../theme/theme';
 import { useCountryConfig } from '../../api/useCountryConfig';
@@ -29,14 +29,17 @@ const GOOGLE_MAPS_ON_IOS =
   ((Constants.expoConfig?.extra ?? {}) as { googleMapsOnIos?: boolean }).googleMapsOnIos === true;
 /**
  * The map behind the home, review and tracking screens: the maps provider's own, as the API says (engine.ts),
- * Google's or Mapbox's, each styled like the prototype. Fits its pins inside the space the controls and sheet leave
- * free.
+ * Google's styled like the prototype, or Mapbox's in its own streets style with the prototype's route colours. Fits
+ * its pins inside the space the controls and sheet leave free. Until the API has said which, the map's place is
+ * left empty.
  */
 export function JiffoMap(props: MapProps & { ref?: Ref<MapHandle> }) {
   const { config } = useCountryConfig();
-  const live = config?.map ?? null;
+  // Before this version of the API, the config said nothing of the map: drawn as built, as it was then.
+  const live = config ? (config.map ?? { engine: null, key: null }) : null;
   const engine = mapEngine(Platform.OS, GOOGLE_MAPS_ON_IOS, live, MAPBOX_IN_BUILD);
-  if (engine === 'mapbox' && live?.key) return <MapboxMap {...props} token={live.key} />;
+  if (engine === 'none') return <View style={[StyleSheet.absoluteFill, props.style]} />;
+  if (engine === 'mapbox') return <MapboxMap {...props} token={live!.key!} />;
   return <NativeMap {...props} google={engine === 'google'} />;
 }
 

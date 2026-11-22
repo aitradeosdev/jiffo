@@ -204,6 +204,8 @@ const EnvSchema = z
     }
     if (env.MAPS_PROVIDER === 'mapbox') {
       need(!!env.MAPBOX_ACCESS_TOKEN, 'MAPBOX_ACCESS_TOKEN', 'required when MAPS_PROVIDER is mapbox');
+      // The apps put Mapbox's places on Mapbox's map, with this public token.
+      need(!!env.MAPBOX_PUBLIC_TOKEN, 'MAPBOX_PUBLIC_TOKEN', 'required when MAPS_PROVIDER is mapbox');
     }
     if (env.PAYMENTS_PROVIDER === 'paystack') {
       need(!!env.PAYSTACK_SECRET_KEY, 'PAYSTACK_SECRET_KEY', 'required when PAYMENTS_PROVIDER is paystack');

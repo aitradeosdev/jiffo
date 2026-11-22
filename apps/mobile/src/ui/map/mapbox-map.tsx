@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { NativeModules, Pressable, StyleSheet, View } from 'react-native';
 import { useScheme } from '../../theme/theme';
 import { boxOf, fitPadding } from './camera';
 import { MAP_COLORS } from './palette';
@@ -10,18 +10,23 @@ type MapboxLib = typeof import('@rnmapbox/maps');
 type CameraRef = import('@rnmapbox/maps').Camera;
 
 /**
- * Mapbox's map engine, if this build has it. Every build since it was added does; an older one given new code over
- * the air doesn't, and loading the library there throws, so the app draws Google's map instead (engine.ts).
+ * Whether this build has Mapbox's map engine. Every build since it was added does; an older one given new code over
+ * the air doesn't, and loading the library there throws, so that build draws its own map instead (engine.ts).
  */
-const lib: MapboxLib | null = (() => {
-  try {
-    return require('@rnmapbox/maps') as MapboxLib;
-  } catch {
-    return null;
-  }
-})();
+export const MAPBOX_IN_BUILD = NativeModules.RNMBXModule != null;
 
-export const MAPBOX_IN_BUILD = lib !== null;
+let lib: MapboxLib | null | undefined;
+/** Mapbox's library, loaded the first time its map is drawn: never while Google is the maps provider. */
+function mapbox(): MapboxLib | null {
+  if (lib === undefined) {
+    try {
+      lib = require('@rnmapbox/maps') as MapboxLib;
+    } catch {
+      lib = null;
+    }
+  }
+  return lib;
+}
 
 const PIN_LABEL: Partial<Record<MapPin['kind'], string>> = {
   agent: 'Your agent',
@@ -35,6 +40,10 @@ const EDGE = 56;
 /** About a city's width across the screen, and a street's, as Google's map starts and shows one pin. */
 const CITY_ZOOM = 13;
 const PIN_ZOOM = 15;
+/** No closer than a few streets: pins at one spot (the agent at the pickup) would otherwise zoom all the way in. */
+const MAX_ZOOM = 17;
+/** Tries at handing Mapbox its token before giving up for this start of the app. */
+const TOKEN_TRIES = 3;
 
 /** The token Mapbox was last given: set once per token, before a map is drawn with it. */
 let tokenSet: string | null = null;
@@ -65,19 +74,32 @@ export function MapboxMap({
   // Refit when pins come or go, not when one moves (the agent, a live position), so the camera stays put.
   const key = pins.map((p) => `${p.kind}:${p.key}`).join('|');
   const focus = center ?? DEFAULT_CENTER;
+  // Kept as first given: a new object each render would move the camera back to it.
+  const [start] = useState(() => ({ centerCoordinate: [focus.lng, focus.lat], zoomLevel: CITY_ZOOM }));
 
   useEffect(() => {
-    if (!lib || tokenSet === token) return;
+    const maps = mapbox();
+    if (!maps || tokenSet === token) return;
     let stopped = false;
-    // Mapbox's own usage telemetry stays off, as Smile ID's crash reporting does (docs/security/sdks.md).
-    lib.default.setTelemetryEnabled(false);
-    lib.default
-      .setAccessToken(token)
-      .then(() => {
-        tokenSet = token;
-        if (!stopped) setReady(true);
-      })
-      .catch(() => {});
+    (async () => {
+      for (let attempt = 1; attempt <= TOKEN_TRIES && !stopped; attempt += 1) {
+        try {
+          await maps.default.setAccessToken(token);
+          // Once it has its token: on Android, switching telemetry builds a map, which needs one. Mapbox's own
+          // usage telemetry stays off, as Smile ID's crash reporting does (docs/security/sdks.md).
+          maps.default.setTelemetryEnabled(false);
+          tokenSet = token;
+          if (!stopped) setReady(true);
+          return;
+        } catch (error) {
+          if (attempt === TOKEN_TRIES) {
+            console.warn(`Mapbox's map couldn't be set up: ${String(error)}`);
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1_000 * attempt));
+        }
+      }
+    })();
     return () => {
       stopped = true;
     };
@@ -94,7 +116,7 @@ export function MapboxMap({
       const at = pins[0] ?? focus;
       view.setCamera({
         centerCoordinate: [at.lng, at.lat],
-        zoomLevel: PIN_ZOOM,
+        zoomLevel: Math.min(PIN_ZOOM, MAX_ZOOM),
         padding: { paddingTop: insets.top, paddingBottom: insets.bottom, paddingLeft: 0, paddingRight: 0 },
         animationDuration: duration,
       });
@@ -112,8 +134,9 @@ export function MapboxMap({
     if (loaded.current && !userMoved.current) fit(true);
   }, [key, insets.top, insets.bottom, focus.lat, focus.lng]);
 
-  if (!lib || !ready) return <View style={[StyleSheet.absoluteFill, style]} />;
-  const { MapView, Camera, MarkerView, ShapeSource, LineLayer, LocationPuck, StyleURL } = lib;
+  const maps = mapbox();
+  if (!maps || !ready) return <View style={[StyleSheet.absoluteFill, style]} />;
+  const { MapView, Camera, MarkerView, ShapeSource, LineLayer, LocationPuck, StyleURL } = maps;
   const ornament = { bottom: insets.bottom + 8, left: 8 };
   return (
     <MapView
@@ -135,11 +158,8 @@ export function MapboxMap({
         fit(false);
       }}
     >
-      <Camera
-        ref={camera}
-        defaultSettings={{ centerCoordinate: [focus.lng, focus.lat], zoomLevel: CITY_ZOOM }}
-        padding={{ paddingTop: insets.top, paddingBottom: insets.bottom, paddingLeft: 0, paddingRight: 0 }}
-      />
+      {/* Where it starts, once; fitting and recentring then set the camera and its padding themselves. */}
+      <Camera ref={camera} defaultSettings={start} maxZoomLevel={MAX_ZOOM} />
       {showsUser ? <LocationPuck /> : null}
       {route.length > 1 ? (
         <ShapeSource

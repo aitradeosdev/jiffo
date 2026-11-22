@@ -121,6 +121,15 @@ describe('admin: providers', () => {
     await api('put', '/maps/mapbox')
       .send({ secrets: { accessToken: 'pk.mapbox-token-0123456789wxyz' } })
       .expect(200);
+    // Not switched on without a token for the apps' map: they would have no map to put its places on.
+    expect(
+      (await api('get', '').expect(200)).body.categories
+        .find((c: { category: string }) => c.category === 'maps')
+        .providers.find((p: { key: string }) => p.key === 'mapbox'),
+    ).toMatchObject({ complete: false });
+    await api('put', '/maps/mapbox')
+      .send({ config: { publicToken: 'pk.app-token-0123456789' } })
+      .expect(200);
     const [row] = await t.db.select().from(providerSettings).where(eq(providerSettings.provider, 'mapbox'));
     expect(row!.secrets).not.toContain('pk.mapbox-token');
     vi.spyOn(MapboxMapsAdapter.prototype, 'check').mockResolvedValue('Connected. Place search works.');

@@ -29,7 +29,7 @@ uses it.
 | `expo-device` | The phone's model, for the list of signed-in devices, and whether it's a real phone before asking for push | Device model |
 | `expo-location`, `expo-task-manager` | An agent's live location while on a job, and the customer's own location when they choose it | Location, with the person's permission |
 | `react-native-maps` | Maps for errands and live tracking while Google is the maps provider: Google's map on both phones (Apple's on an iPhone built without its Google key) | Google Maps (Maps SDK for Android and for iOS) |
-| `@rnmapbox/maps` 10.3.17, with Mapbox's Maps SDK | The same maps while Mapbox is the maps provider: its token, a public one, comes from the API. Loaded only then, and an older build without it draws Google's map | Mapbox, for map tiles and styles. Its usage telemetry is turned off |
+| `@rnmapbox/maps` 10.3.17, with Mapbox's Maps SDK | The same maps while Mapbox is the maps provider: its token, a public one, comes from the API. Its engine is in every build; its code is loaded and given the token only while Mapbox is the provider. An older build without it draws its own map | Mapbox, for map tiles and styles. Its usage telemetry is turned off |
 | `expo-image-picker` | Photos in chat, receipts, proof of delivery and selfies | Camera and photos, with permission |
 | `expo-image-manipulator` | Saving each photo as a JPEG no larger than the server keeps, before it is sent (C1). Smile ID's SDK needs it too | The photo being sent |
 | `expo-notifications` | Push notifications | The platform's push service |
