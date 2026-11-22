@@ -4,15 +4,15 @@
 name: jiffo
 
 x-server: &server
-  build:
-    context: ..
-    dockerfile: deploy/Dockerfile
   image: jiffo-server:local
   restart: unless-stopped
 
 services:
   postgres:
-    image: postgis/postgis:16-3.4
+    build:
+      context: .
+      dockerfile: postgres.Dockerfile
+    image: jiffo-postgres:local
     restart: unless-stopped
     environment:
       POSTGRES_USER: jiffo
@@ -21,7 +21,8 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U jiffo']
+      # Over TCP, as the API connects: on first start, Postgres sets itself up on a local socket alone first.
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U jiffo -d jiffo']
       interval: 5s
       retries: 20
 
@@ -38,6 +39,10 @@ services:
 
   api:
     <<: *server
+    # Built once, here: the panel runs the same image.
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
     working_dir: /repo/apps/api
     command: ['node', 'dist/main.js']
     depends_on:
@@ -57,9 +62,9 @@ services:
       ADMIN_URL: https://${ADMIN_HOST:?run deploy/setup.sh first}
       CORS_ORIGINS: https://${ADMIN_HOST}
       SECURITY_CONTACT: mailto:${CONTACT_EMAIL:?run deploy/setup.sh first}
-      # A test server nobody real uses: sign-in codes can be shown in the app instead of texted, once Settings,
-      # Security puts the country in Test mode. Never on a server real people use.
-      ALLOW_TEST_SIGN_IN_CODES: ${ALLOW_TEST_SIGN_IN_CODES:-true}
+      # A test server nobody real uses: providers take test and sandbox keys, never live ones, and sign-in codes
+      # can be shown in the app instead of texted (Settings, Security). Never on a server real people use.
+      TEST_SERVER: 'true'
       # Each key has one job, and all differ (docs/security-plan.md, I5). Generated once, on this server.
       JWT_SECRET: ${JWT_SECRET:?run deploy/setup.sh first}
       OTP_SECRET: ${OTP_SECRET:?run deploy/setup.sh first}
@@ -74,6 +79,8 @@ services:
 
   admin:
     <<: *server
+    # The API's image: never pulled, never built twice.
+    pull_policy: never
     working_dir: /repo/apps/admin
     command: ['node', 'node_modules/next/dist/bin/next', 'start', '--port', '3001', '--hostname', '0.0.0.0']
     depends_on:

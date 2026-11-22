@@ -7,7 +7,8 @@ import { FlutterwavePaymentsAdapter, parseFlutterwaveDate, PaystackPaymentsAdapt
 import { GoogleMapsAdapter, MapboxMapsAdapter } from '../src/adapters/maps';
 import { createHmac } from 'node:crypto';
 import { decrypt, encrypt } from '../src/common/crypto';
-import { loadConfig } from '../src/config/app-config';
+import { liveKeysOnly, loadConfig, testSignInCodesAllowed } from '../src/config/app-config';
+import { isPaystackTestKey, moneyKey } from '../src/providers/builders';
 import { BullMqErrandTimers, type ErrandTimerJob } from '../src/timers/errand-timers';
 
 type Call = { url: string; init: RequestInit };
@@ -817,6 +818,44 @@ describe('config', () => {
     expect(() => loadConfig({ ...ready, FIELD_KEY: undefined })).toThrow(/FIELD_KEY/);
     expect(() => loadConfig({ ...ready, FIELD_KEY: base.PIN_KEY })).toThrow(/all be different/);
     expect(() => loadConfig({ ...ready, ADMIN_PANEL_SECRET: 'too short' })).toThrow(/ADMIN_PANEL_SECRET/);
+  });
+
+  it('lets a production-mode test server take test and sandbox keys and show sign-in codes, and only that', () => {
+    const production = {
+      ...base,
+      NODE_ENV: 'production',
+      SECRETS_KEY: 'b'.repeat(64),
+      TRUST_PROXY_HOPS: '1',
+      ADMIN_PANEL_SECRET: 'z'.repeat(32),
+      ADMIN_URL: 'https://admin.example.org',
+      CORS_ORIGINS: 'https://admin.example.org',
+      ID_FINGERPRINT_KEY: 'c'.repeat(64),
+      ADMIN_TOTP_KEY: 'd'.repeat(64),
+      FIELD_KEY: 'e'.repeat(64),
+      ADMIN_TOKEN_SECRET: 'w'.repeat(32),
+      SECURITY_CONTACT: 'mailto:security@example.org',
+      PUBLIC_API_URL: 'https://api.example.org',
+      ADMIN_API_PORT: '3002',
+    };
+    const real = loadConfig(production);
+    expect(liveKeysOnly(real)).toBe(true);
+    expect(testSignInCodesAllowed(real)).toBe(false);
+    expect(() => moneyKey('sk_test_abc', { production: liveKeysOnly(real) }, isPaystackTestKey, 'Paystack')).toThrow(
+      /test key/,
+    );
+    // A test server: production mode, so no stand-in runs, but nobody real uses it.
+    const test = loadConfig({ ...production, TEST_SERVER: 'true' });
+    expect(liveKeysOnly(test)).toBe(false);
+    expect(testSignInCodesAllowed(test)).toBe(true);
+    expect(moneyKey('sk_test_abc', { production: liveKeysOnly(test) }, isPaystackTestKey, 'Paystack')).toBe(
+      'sk_test_abc',
+    );
+    // And never real money there.
+    expect(() => moneyKey('sk_live_abc', { production: liveKeysOnly(test) }, isPaystackTestKey, 'Paystack')).toThrow(
+      /live key/,
+    );
+    // Outside production, test keys as ever.
+    expect(liveKeysOnly(loadConfig(base))).toBe(false);
   });
 });
 

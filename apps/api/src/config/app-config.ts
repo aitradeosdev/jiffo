@@ -186,6 +186,15 @@ const EnvSchema = z
       .enum(['true', 'false'])
       .default('false')
       .transform((v) => v === 'true'),
+    /**
+     * A test server (docs/deploy.md): production mode, so no stand-in runs and every check is as in production,
+     * but nobody real uses it. Its providers take test and sandbox keys, never live ones, so no real money moves
+     * and no real ID is checked, and Test sign-in codes are allowed. Never on a server real people use.
+     */
+    TEST_SERVER: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
   })
   .superRefine((env, ctx) => {
     const need = (ok: boolean, path: string, message: string) => {
@@ -266,8 +275,16 @@ export type AppConfig = z.infer<typeof EnvSchema>;
 export const APP_CONFIG = Symbol('APP_CONFIG');
 
 /** Whether Test sign-in codes may be used: always outside production, there only where the server allows. */
-export const testSignInCodesAllowed = (config: Pick<AppConfig, 'NODE_ENV' | 'ALLOW_TEST_SIGN_IN_CODES'>) =>
-  config.NODE_ENV !== 'production' || config.ALLOW_TEST_SIGN_IN_CODES;
+export const testSignInCodesAllowed = (
+  config: Pick<AppConfig, 'NODE_ENV' | 'ALLOW_TEST_SIGN_IN_CODES' | 'TEST_SERVER'>,
+) => config.NODE_ENV !== 'production' || config.ALLOW_TEST_SIGN_IN_CODES || config.TEST_SERVER;
+
+/**
+ * Whether providers take live keys only (real money, real ID checks): in production, unless it is a test server.
+ * Everywhere else they take test and sandbox keys only.
+ */
+export const liveKeysOnly = (config: Pick<AppConfig, 'NODE_ENV' | 'TEST_SERVER'>) =>
+  config.NODE_ENV === 'production' && !config.TEST_SERVER;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = EnvSchema.safeParse(env);

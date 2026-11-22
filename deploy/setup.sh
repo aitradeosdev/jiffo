@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Sets up, or updates the settings of, Jiffo's test server on an Ubuntu or Debian VPS (docs/deploy.md).
 #
-#   sudo deploy/setup.sh --email you@example.com [--domain example.com]
+#   sudo deploy/setup.sh --email you@example.com [--domain example.com] [--ip 203.0.113.5]
 #
 # Without --domain, the server is reached at names made from its own IP address (api.203-0-113-5.sslip.io), so
 # nothing has to be bought. Running it again keeps the secrets it made the first time: new ones would make the
@@ -9,14 +9,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-usage() { sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; }
 
 EMAIL=""
 DOMAIN=""
+IP=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --email) EMAIL="${2:-}"; shift 2 ;;
     --domain) DOMAIN="${2:-}"; shift 2 ;;
+    --ip) IP="${2:-}"; shift 2 ;;
     -h | --help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -33,6 +35,14 @@ if [ -n "$DOMAIN" ] && ! [[ "$DOMAIN" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])
 fi
 
 step() { printf '\n== %s\n' "$1"; }
+
+step "Tools"
+# A minimal image can lack these: curl for Docker and the IP address, openssl for the secrets.
+if ! command -v curl >/dev/null 2>&1 || ! command -v openssl >/dev/null 2>&1; then
+  apt-get update -qq
+  apt-get install -y -qq curl openssl ca-certificates >/dev/null
+fi
+echo "curl and openssl are here."
 
 step "Docker"
 if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
@@ -79,8 +89,13 @@ if [ -n "$DOMAIN" ]; then
   ADMIN_HOST="admin.$DOMAIN"
   echo "Point both at this server with DNS A records: $API_HOST and $ADMIN_HOST."
 else
-  IP=$(curl -4 -fsS https://api.ipify.org)
-  [[ "$IP" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || { echo "Couldn't find this server's public IP address." >&2; exit 1; }
+  # The address the internet reaches this server at. Where it differs from the one the server sends from (a
+  # floating IP, say), give it with --ip.
+  if [ -z "$IP" ]; then
+    IP=$(curl -4 -fsS https://api.ipify.org)
+    echo "This server's public IP address looks like $IP. If phones reach it at another, run again with --ip."
+  fi
+  [[ "$IP" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || { echo "Not an IP address: $IP" >&2; exit 1; }
   API_HOST="api.${IP//./-}.sslip.io"
   ADMIN_HOST="admin.${IP//./-}.sslip.io"
 fi

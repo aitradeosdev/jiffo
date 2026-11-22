@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import type { ProviderContext } from '../adapters/identity-providers';
 import { PROVIDER_CATEGORIES, type ProviderCategory } from '@jiffo/shared';
-import { APP_CONFIG, type AppConfig } from '../config/app-config';
+import { APP_CONFIG, liveKeysOnly, type AppConfig } from '../config/app-config';
 import { DB, type Db } from '../db/database.module';
 import { providerSettings } from '../db/schema';
 import { BUILDERS, hasBuilder } from './builders';
@@ -39,7 +39,8 @@ export class ProvidersService implements OnModuleInit, OnModuleDestroy {
     this.box = new SecretBox(secretsKeyFrom(config));
     this.context = {
       publicApiUrl: config.PUBLIC_API_URL.replace(/\/$/, ''),
-      production: config.NODE_ENV === 'production',
+      // Live keys only, or test and sandbox ones (a test server, or outside production).
+      production: liveKeysOnly(config),
     };
   }
 
