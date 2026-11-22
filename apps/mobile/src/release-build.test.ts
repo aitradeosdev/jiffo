@@ -51,18 +51,69 @@ const pluginOptions = (name: string) => {
 const mapsWith = (env: Record<string, string>) => {
   const saved = { ...process.env };
   for (const key of Object.keys(process.env)) {
-    if (/^(GOOGLE_MAPS_|EAS_BUILD|EXPO_PUBLIC_API_URL$)/.test(key)) delete process.env[key];
+    if (/^(GOOGLE_MAPS_|GOOGLE_SERVICES_JSON|EAS_BUILD|EXPO_PUBLIC_API_URL$)/.test(key)) delete process.env[key];
   }
-  Object.assign(process.env, env);
+  // Firebase's file, which store builds need too (see below).
+  Object.assign(process.env, { GOOGLE_SERVICES_JSON: '/tmp/eas/google-services.json' }, env);
   try {
     const config = appConfig({ config: {} } as Parameters<typeof appConfig>[0]);
     const entry = config.plugins?.find((p) => Array.isArray(p) && p[0] === 'react-native-maps');
     return { plugin: (entry as [string, Record<string, unknown>])[1], extra: config.extra! };
   } finally {
+    for (const key of [...Object.keys(env), 'GOOGLE_SERVICES_JSON']) delete process.env[key];
+    Object.assign(process.env, saved);
+  }
+};
+
+/** The Android app's settings as a build with these settings, and no others of their kind, reads them. */
+const androidWith = (env: Record<string, string>) => {
+  const saved = { ...process.env };
+  for (const key of Object.keys(process.env)) {
+    if (/^(GOOGLE_SERVICES_JSON|GOOGLE_MAPS_|EAS_BUILD|EXPO_PUBLIC_API_URL$)/.test(key)) delete process.env[key];
+  }
+  Object.assign(process.env, env);
+  try {
+    return appConfig({ config: {} } as Parameters<typeof appConfig>[0]).android!;
+  } finally {
     for (const key of Object.keys(env)) delete process.env[key];
     Object.assign(process.env, saved);
   }
 };
+
+/**
+ * Push on Android (FCM): the app asks Firebase for its token, which needs Firebase's google-services.json built in.
+ * It comes from a private file setting in Expo, never the repository.
+ */
+describe('Firebase in the Android apps', () => {
+  it("builds in Firebase's file when it is set, and leaves it out when not", () => {
+    expect(androidWith({ GOOGLE_SERVICES_JSON: '/tmp/eas/google-services.json' }).googleServicesFile).toBe(
+      '/tmp/eas/google-services.json',
+    );
+    expect(androidWith({}).googleServicesFile).toBeUndefined();
+  });
+
+  it('stops a store build without it, as offers could never ring', () => {
+    const store = {
+      EAS_BUILD: 'true',
+      EAS_BUILD_PROFILE: 'production-agent',
+      EXPO_PUBLIC_API_URL: 'https://api.example.org',
+      GOOGLE_MAPS_ANDROID_API_KEY: 'a',
+      GOOGLE_MAPS_IOS_API_KEY: 'i',
+    };
+    expect(() => androidWith(store)).toThrow(/GOOGLE_SERVICES_JSON/);
+    expect(androidWith({ ...store, GOOGLE_SERVICES_JSON: '/tmp/eas/google-services.json' }).googleServicesFile).toBe(
+      '/tmp/eas/google-services.json',
+    );
+    // A preview build without it still builds: push just doesn't work there.
+    expect(
+      androidWith({
+        EAS_BUILD: 'true',
+        EAS_BUILD_PROFILE: 'preview-agent',
+        EXPO_PUBLIC_API_URL: 'https://api.example.org',
+      }).googleServicesFile,
+    ).toBeUndefined();
+  });
+});
 
 /**
  * Mapbox's map engine goes in every build, beside Google's, so the apps draw whichever company's map finds the

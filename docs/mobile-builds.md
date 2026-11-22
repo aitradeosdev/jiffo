@@ -35,7 +35,7 @@ All the commands below run in a terminal in the repository's `apps/mobile` folde
    APP_VARIANT=agent eas init
    ```
 
-   Put the two ids in `apps/mobile/eas-projects.json` as `customer` and `agent`, and commit the file. The ids aren't secret. The build settings below (`eas env:set`) are kept per account, so set them again in the new one.
+   Put the two ids in `apps/mobile/eas-projects.json` as `customer` and `agent`, and commit the file. The ids aren't secret. The build settings below (`eas env:create`) are kept per account, so set them again in the new one.
 
 5. The map in the apps. The apps draw the maps provider's own map, as Settings, Providers, Maps has it: Google's while Google finds places, Mapbox's while Mapbox does, as each one's terms keep its places on its own map. Both engines are in every build, so switching the provider needs no new release.
    - **Mapbox:** nothing to set for the build. Its token comes from the API as the app starts: "Map token for the apps" on the Mapbox provider, a public token (`pk.`). Mapbox no longer asks for a token to download its engine.
@@ -48,14 +48,26 @@ All the commands below run in a terminal in the repository's `apps/mobile` folde
    The keys go inside the apps, so anyone could read them from an installed app. The restrictions make them useless anywhere else. Save each for every build, both apps:
 
    ```bash
-   eas env:set --scope account --name GOOGLE_MAPS_ANDROID_API_KEY --value <your Android key> --environment development --environment preview --environment production --visibility sensitive
+   eas env:create --force --scope account --name GOOGLE_MAPS_ANDROID_API_KEY --value <your Android key> --environment development --environment preview --environment production --visibility sensitive
    ```
 
    ```bash
-   eas env:set --scope account --name GOOGLE_MAPS_IOS_API_KEY --value <your iPhone key> --environment development --environment preview --environment production --visibility sensitive
+   eas env:create --force --scope account --name GOOGLE_MAPS_IOS_API_KEY --value <your iPhone key> --environment development --environment preview --environment production --visibility sensitive
    ```
 
    Without them, development and preview builds still work: Android's map is blank, and the iPhone draws Apple's map instead. A store build (`production-agent`, `production-customer`) on Expo's servers stops with an error naming the missing key, so neither ships.
+
+6. Push notifications on Android (Firebase Cloud Messaging). Without them, an agent's offers ring only while the app is open.
+   - In the [Firebase console](https://console.firebase.google.com), make one project and add two **Android** apps to it: `com.jiffoapp.customer` and `com.jiffoapp.agent`. Skip the SHA-1 and SDK steps.
+   - **After adding both**, download `google-services.json` (Project settings, General): one file then covers both apps. Don't commit it. Save it in Expo as a private file, for every build:
+
+     ```bash
+     eas env:create --force --scope account --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --environment development --environment preview --environment production --visibility secret
+     ```
+
+   - For the server, make a private key (Project settings, Service accounts, Generate new private key) and enter that file in the admin panel: Settings, Providers, Push.
+
+   A development or preview build without the file still builds, without push. A store build stops with an error naming `GOOGLE_SERVICES_JSON`. A build made before the file was saved has no push: build again.
 
 ## The API the app talks to
 
@@ -71,7 +83,7 @@ Start the backend as the README says. With the console providers, sign-in codes 
   It prints an address ending in `trycloudflare.com`. Save it for preview builds, then build. A new tunnel has a new address, which needs a new build:
 
   ```bash
-  eas env:set --scope account --name EXPO_PUBLIC_API_URL --value https://<the address> --environment preview --visibility plaintext
+  eas env:create --force --scope account --name EXPO_PUBLIC_API_URL --value https://<the address> --environment preview --visibility plaintext
   ```
 
   Running it again with a new address changes it. With the test server running ([deploy.md](deploy.md)), set it to that server's API address once instead: it keeps its address.

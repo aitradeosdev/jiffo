@@ -14,3 +14,7 @@ next-env.d.ts
 # The test server kit's generated secrets and settings (deploy/setup.sh)
 deploy/secrets.env
 deploy/backups/
+
+# Firebase's config for the Android builds: kept in Expo as a private file (docs/mobile-builds.md)
+google-services.json
+GoogleService-Info.plist
