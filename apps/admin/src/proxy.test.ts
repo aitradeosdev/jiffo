@@ -48,6 +48,17 @@ describe('panel proxy', () => {
     }
   });
 
+  it("lets Mapbox's map load there too, for when Mapbox is the maps provider, and nowhere else", () => {
+    const policy = (path: string) => open(path, `${SESSION_COOKIE}=x`).headers.get('content-security-policy') ?? '';
+    const places = policy('/settings/places');
+    expect(places).toMatch(/connect-src [^;]*https:\/\/api\.mapbox\.com/);
+    expect(places).toMatch(/connect-src [^;]*https:\/\/events\.mapbox\.com/);
+    expect(places).toMatch(/connect-src [^;]*https:\/\/\*\.tiles\.mapbox\.com/);
+    for (const path of ['/settings', '/errands', '/matching']) {
+      expect(policy(path)).not.toContain('mapbox');
+    }
+  });
+
   it('allows eval only in development', () => {
     expect(contentPolicy('n', false)).not.toContain('unsafe-eval');
     expect(contentPolicy('n', false)).not.toMatch(/http:|ws:/);

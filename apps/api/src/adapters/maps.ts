@@ -33,8 +33,28 @@ export interface RouteEstimate {
  * Address search, place details and route distance: Google Maps or Mapbox, chosen in the panel (Settings,
  * Providers). Keys stay on the server: the apps only ever talk to Jiffo.
  */
+/**
+ * The map the panel and the apps draw while this provider finds places: its own, as Google's and Mapbox's terms each
+ * keep their places on their own map, and the public keys for it. `engine` null: no map of its own (the development
+ * stand-in, or none set up), so the panel offers pasting shapes and the apps draw the map they were built with.
+ */
+export interface DrawnMap {
+  engine: 'google' | 'mapbox' | null;
+  /** For the panel's map in the browser: Google's browser key, or Mapbox's token for the panel. */
+  panelKey: string | null;
+  /** For the apps: Mapbox's public token. Google's keys for the apps are built into them. */
+  appKey: string | null;
+}
+
+export const NO_DRAWN_MAP: DrawnMap = { engine: null, panelKey: null, appKey: null };
+
+/** A key left empty in the settings is no key. */
+const keyOrNull = (key: string | undefined | null) => (key?.trim() ? key.trim() : null);
+
 export interface MapsAdapter {
   readonly name: string;
+  /** The map to draw beside this provider's places, and its public keys: never the server's own. */
+  readonly drawn: DrawnMap;
   autocomplete(input: {
     query: string;
     near?: LatLng;
@@ -72,11 +92,15 @@ export function estimateRoute(points: LatLng[]): RouteEstimate {
 /** Google Places API (New) for search and details, Routes API for distance. */
 export class GoogleMapsAdapter implements MapsAdapter {
   readonly name = 'google';
+  readonly drawn: DrawnMap;
 
   constructor(
     private readonly apiKey: string,
     private readonly fetchImpl: typeof fetch = providerFetch,
-  ) {}
+    keys: { browserKey?: string | null } = {},
+  ) {
+    this.drawn = { engine: 'google', panelKey: keyOrNull(keys.browserKey), appKey: null };
+  }
 
   /** For the panel's Test button: one place search, with Google's own words if it is refused. */
   async check() {
@@ -289,11 +313,26 @@ const REDIRECT = 'The provider answered with a redirect';
  */
 export class MapboxMapsAdapter implements MapsAdapter {
   readonly name = 'mapbox';
+  readonly drawn: DrawnMap;
 
   constructor(
     private readonly accessToken: string,
     private readonly fetchImpl: typeof fetch = providerFetch,
-  ) {}
+    keys: { publicToken?: string | null; panelToken?: string | null } = {},
+  ) {
+    const app = keyOrNull(keys.publicToken);
+    const panel = keyOrNull(keys.panelToken);
+    // Phones and browsers see these: a secret token (sk.) pasted here would be published with all its scopes.
+    for (const [label, token] of [
+      ['map token for the apps', app],
+      ['map token for the panel', panel],
+    ] as const) {
+      if (token && !token.startsWith('pk.')) {
+        throw new Error(`the ${label} must be a public token, starting pk.: phones and browsers see it`);
+      }
+    }
+    this.drawn = { engine: 'mapbox', panelKey: panel ?? app, appKey: app };
+  }
 
   private url(path: string, params: Record<string, string | undefined>) {
     const query = new URLSearchParams();
@@ -535,6 +574,7 @@ export const FAKE_PLACES: Place[] = [
 
 export class FakeMapsAdapter implements MapsAdapter {
   readonly name = 'fake';
+  readonly drawn = NO_DRAWN_MAP;
 
   async autocomplete(input: { query: string }) {
     const q = input.query.trim().toLowerCase();

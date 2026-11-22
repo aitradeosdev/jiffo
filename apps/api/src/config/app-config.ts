@@ -98,6 +98,10 @@ const EnvSchema = z
      */
     PUBLIC_API_URL: z.string().url().default('http://localhost:3000'),
     GOOGLE_MAPS_API_KEY: z.string().optional(),
+    /** Public map keys for the map the panel and apps draw (Settings, Providers has the same fields). */
+    GOOGLE_MAPS_BROWSER_KEY: z.string().optional(),
+    MAPBOX_PUBLIC_TOKEN: z.string().optional(),
+    MAPBOX_PANEL_TOKEN: z.string().optional(),
     MAPBOX_ACCESS_TOKEN: z.string().optional(),
     PAYMENTS_PROVIDER: z.enum(['paystack', 'fake']).default('fake'),
     /**

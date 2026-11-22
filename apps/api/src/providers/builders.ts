@@ -144,8 +144,9 @@ export const BUILDERS: {
     fcm: (v) => new FcmPushAdapter(v.serviceAccountJson!),
   },
   maps: {
-    google: (v) => new GoogleMapsAdapter(v.apiKey!),
-    mapbox: (v) => new MapboxMapsAdapter(v.accessToken!),
+    google: (v) => new GoogleMapsAdapter(v.apiKey!, undefined, { browserKey: v.browserKey }),
+    mapbox: (v) =>
+      new MapboxMapsAdapter(v.accessToken!, undefined, { publicToken: v.publicToken, panelToken: v.panelToken }),
   },
   storage: {
     s3: (v, ctx) =>

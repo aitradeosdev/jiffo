@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { MapboxMapsAdapter } from '../src/adapters/maps';
+import { GoogleMapsAdapter, MapboxMapsAdapter } from '../src/adapters/maps';
 import { TermiiMessagingAdapter } from '../src/adapters/messaging';
 import { FlutterwavePaymentsAdapter, PaystackPaymentsAdapter } from '../src/adapters/payments';
 import { adminAudit, deposits, payoutAccounts, payouts, providerSettings } from '../src/db/schema';
@@ -160,6 +160,64 @@ describe('admin: providers', () => {
         .set(customer.headers)
         .expect(200);
       expect(MapboxMapsAdapter.prototype.place).toHaveBeenLastCalledWith(odd, 's-1');
+    } finally {
+      await switchProvider(t, 'maps', null);
+    }
+  });
+
+  it('has the panel and the apps draw the map of the maps provider in use, with its public keys only', async () => {
+    const places = async () =>
+      (await request(t.http).get('/v1/admin/service-areas?country=NG').set(owner.headers).expect(200)).body.map;
+    const config = async () => (await request(t.http).get('/v1/config/NG').expect(200)).body.map;
+    // The tests' maps provider is the stand-in: there is no map of its own to draw.
+    expect(await places()).toEqual({ engine: null, key: null });
+    expect(await config()).toEqual({ engine: null, key: null });
+    // A secret token in a field phones and browsers see is refused, without saying it back.
+    for (const field of ['publicToken', 'panelToken']) {
+      const refused = await api('put', '/maps/mapbox')
+        .send({ config: { [field]: 'sk.secret-token-0123456789' }, secrets: { accessToken: 'pk.server-0123456789' } })
+        .expect(400);
+      expect(refused.body.error.code).toBe('invalid_provider_settings');
+      expect(JSON.stringify(refused.body)).not.toContain('sk.secret');
+    }
+    await api('put', '/maps/mapbox')
+      .send({
+        config: { publicToken: 'pk.app-token-for-the-phones', panelToken: 'pk.panel-token-for-the-browser' },
+        secrets: { accessToken: 'pk.mapbox-server-token-0123456789' },
+      })
+      .expect(200);
+    await api('put', '/maps/google')
+      .send({
+        config: { browserKey: 'AIza-browser-key-for-the-panel' },
+        secrets: { apiKey: 'AIza-server-key-0123456789' },
+      })
+      .expect(200);
+    vi.spyOn(MapboxMapsAdapter.prototype, 'check').mockResolvedValue('Connected. Place search works.');
+    vi.spyOn(GoogleMapsAdapter.prototype, 'check').mockResolvedValue('Connected. Place search works.');
+    expect((await api('post', '/maps/mapbox/test')).body.ok).toBe(true);
+    expect((await api('post', '/maps/google/test')).body.ok).toBe(true);
+    await switchProvider(t, 'maps', 'mapbox');
+    try {
+      // Mapbox's search results go on Mapbox's map, and Google's on Google's: each provider's terms ask it.
+      expect(await places()).toEqual({ engine: 'mapbox', key: 'pk.panel-token-for-the-browser' });
+      expect(await config()).toEqual({ engine: 'mapbox', key: 'pk.app-token-for-the-phones' });
+      // With no token of its own for the panel, the apps' one. Changing the live provider waits for a second admin.
+      const cleared = await approved(t, 'owner', (h) =>
+        request(t.http)
+          .put('/v1/admin/providers/maps/mapbox')
+          .set(h)
+          .send({ config: { publicToken: 'pk.app-token-for-the-phones', panelToken: '' } }),
+      );
+      expect(cleared.status).toBe(200);
+      expect(await places()).toEqual({ engine: 'mapbox', key: 'pk.app-token-for-the-phones' });
+
+      await switchProvider(t, 'maps', 'google');
+      expect(await places()).toEqual({ engine: 'google', key: 'AIza-browser-key-for-the-panel' });
+      // The apps' Google keys are built into them, so none is sent.
+      expect(await config()).toEqual({ engine: 'google', key: null });
+      // The server's own keys reach neither.
+      const both = JSON.stringify([await places(), await config()]);
+      expect(both).not.toContain('server');
     } finally {
       await switchProvider(t, 'maps', null);
     }

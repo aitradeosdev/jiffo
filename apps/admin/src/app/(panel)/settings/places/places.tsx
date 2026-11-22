@@ -19,6 +19,8 @@ import { FIELD_UNIT } from '@/lib/settings-fields';
 import { boundaryField, editableOnMap, parseBoundary, type Boundary } from '@/lib/shapes';
 import { createArea, createCity, saveMatching, savePrices, updatePlace } from '../actions';
 import { PlacesMap, type MapShape } from './map';
+import { PlacesMapbox } from './mapbox-map';
+import { mapNotice, type PlacesMapInfo } from '@/lib/places-map';
 
 /** The prices a place sets now, and their version: 0, with nothing set, before the first. */
 export interface SavedPrices {
@@ -97,14 +99,17 @@ export function Places({
   countryPrices,
   countryMatching,
   canEdit,
-  mapsKey,
+  map,
 }: {
   states: PlaceState[];
   countryPrices: Prices | null;
   countryMatching: CountrySettings['matching'] | null;
   canEdit: boolean;
-  mapsKey: string;
+  /** The maps provider's own map, and its public key for the panel. */
+  map: PlacesMapInfo;
 }) {
+  const notice = mapNotice(map);
+  const MapOfProvider = map.engine === 'mapbox' ? PlacesMapbox : PlacesMap;
   const [stateId, setStateId] = useState(
     () => (states.find((s) => s.cities.length) ?? states.find((s) => s.code === 'LA') ?? states[0])?.id ?? '',
   );
@@ -261,7 +266,7 @@ export function Places({
             stateId={stateId}
             drawn={drawn}
             changed={changed}
-            hasMap={!!mapsKey}
+            hasMap={!notice}
             onPasted={pasted}
             onDone={() => start(null)}
           />
@@ -347,9 +352,9 @@ export function Places({
       </div>
 
       <div className="space-y-2 lg:sticky lg:top-6 lg:self-start">
-        {mapsKey ? (
-          <PlacesMap
-            apiKey={mapsKey}
+        {!notice && map.key ? (
+          <MapOfProvider
+            apiKey={map.key}
             shapes={shapes}
             edit={task && (task.kind !== 'reshape' || inTool) ? { key: String(drawing), boundary: drawn } : null}
             onShape={(b) => {
@@ -359,10 +364,7 @@ export function Places({
             fitKey={stateId}
           />
         ) : (
-          <Notice tone="warn">
-            The map needs a Google Maps key for the browser: set GOOGLE_MAPS_BROWSER_KEY for the panel
-            (docs/admin-panel.md, Places). Until then, shapes can be pasted as GeoJSON.
-          </Notice>
+          <Notice tone="warn">{notice}</Notice>
         )}
         <p className="text-[13px] text-ink-3">
           Cities are outlined; areas are green when on and grey when off. An area stays inside its city, and areas and
