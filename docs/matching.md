@@ -126,6 +126,11 @@ This follows Uber's back-to-back trips.
 - The next pickup must be within 3 km of that drop-off. Travel time counts the rest of the current errand plus the drive.
 - At most one errand can wait behind the current one. It starts only after the current errand completes.
 
+Built as above (Settings, Matching: on, 1 km and 3 km to start). A back-to-back offer never counts toward the
+agent's acceptance rate, and its travel time is estimated: the rest of the way to the drop-off, none once delivered,
+then the drive. Only one-at-a-time offers go back to back; an errand open to everyone still goes to agents holding
+nothing urgent.
+
 ## Open board (M11)
 
 - The board lists non-urgent and scheduled errands that pass eligibility (M1), first to accept wins, using the same atomic accept (M7).

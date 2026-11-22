@@ -237,7 +237,11 @@ export class OffersService {
           travelSeconds: r.travel.durationSeconds,
           travelEstimated: r.travel.estimated,
           straightMeters: r.straightMeters,
-          counts: offerCounts({ straightMeters: r.straightMeters, offeredAt: now, onlineSince: r.onlineSince }, rules),
+          // Back to back (M10), never: the agent can't take it until they finish the one they hold.
+          counts:
+            !r.backToBack &&
+            offerCounts({ straightMeters: r.straightMeters, offeredAt: now, onlineSince: r.onlineSince }, rules),
+          backToBack: r.backToBack,
           offeredAt: now,
           expiresAt: new Date(now.getTime() + rules.offerSeconds * 1000),
         })
@@ -655,8 +659,8 @@ export class OffersService {
     const category = await this.countries.activeCategory(errand.countryCode, errand.categoryKey);
     const minutes = Math.max(1, Math.round(ranked.travel.durationSeconds / 60));
     await this.push.notifyUser(offer.agentId, 'agent', {
-      title: 'New errand for you',
-      body: `${category?.name ?? 'Errand'} · ${formatNaira(errand.feeKobo)} · ${minutes} min away. Answer within ${Math.round((offer.expiresAt.getTime() - offer.offeredAt.getTime()) / 1000)} seconds.`,
+      title: offer.backToBack ? 'Your next errand' : 'New errand for you',
+      body: `${category?.name ?? 'Errand'} · ${formatNaira(errand.feeKobo)} · ${minutes} min away${offer.backToBack ? ', after the one you are on' : ''}. Answer within ${Math.round((offer.expiresAt.getTime() - offer.offeredAt.getTime()) / 1000)} seconds.`,
       data: {
         type: 'errand.offer',
         errandId: errand.id,
@@ -850,6 +854,8 @@ export class OffersService {
       expiresAt: offer.offer.expiresAt,
       // Whether declining it lowers their acceptance rate (M9): the offer screen marks the ones that don't.
       counts: offer.offer.counts,
+      // Back to back (M10): it waits behind the errand they hold, and starts once that one is done.
+      backToBack: offer.offer.backToBack,
       secondsLeft: Math.max(0, Math.ceil((offer.offer.expiresAt.getTime() - Date.now()) / 1000)),
       windowSeconds: Math.round((offer.offer.expiresAt.getTime() - offer.offer.offeredAt.getTime()) / 1000),
       agentEarnsKobo: earns,

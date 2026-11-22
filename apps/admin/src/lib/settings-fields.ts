@@ -541,6 +541,24 @@ export const SECTIONS: Section[] = [
         help: 'With no one left to ask nearer, the search moves out at once.',
       },
       {
+        path: 'matching.backToBack',
+        label: 'Offer the next urgent errand near the end of one',
+        kind: 'bool',
+        help: "Back to back: an agent near an errand's drop-off, or who has marked it delivered, can be offered the next urgent errand nearby. It waits behind the one they're on, declining it is free, and no more than one waits.",
+      },
+      {
+        path: 'matching.backToBackDropoffKm',
+        label: 'Back to back: within this far of the drop-off',
+        kind: 'km',
+        help: 'Or anywhere once they have marked it delivered. 0.2 to 5 km.',
+      },
+      {
+        path: 'matching.backToBackPickupKm',
+        label: 'Back to back: the next pickup within this far of that drop-off',
+        kind: 'km',
+        help: 'Its travel time counts the rest of the errand they are on, then the drive. 0.5 to 10 km.',
+      },
+      {
         path: 'matching.fakeGpsHoldHours',
         label: 'A fake-GPS flag keeps the agent from errands for',
         kind: 'hours',

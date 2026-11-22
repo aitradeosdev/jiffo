@@ -18,6 +18,7 @@ const offer: Offer = {
   windowSeconds: 20,
   agentEarnsKobo: 212_500,
   counts: true,
+  backToBack: false,
   errand: {
     id: 'errand-1',
     categoryKey: 'parcel',
@@ -58,6 +59,8 @@ describe('an offer', () => {
 
   it('lists what the errand involves', () => {
     expect(offerFacts(offer)).toEqual(['Now', '2 stops']);
+    // Back to back (M10): after the errand they are on, not now.
+    expect(offerFacts({ ...offer, backToBack: true })).toEqual(['After the errand you are on', '2 stops']);
     expect(offerFacts({ ...offer, errand: { ...offer.errand, buy: true, stopCount: 3 } })).toEqual([
       'Now',
       '3 stops',

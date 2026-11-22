@@ -75,6 +75,9 @@ export const DEFAULT_MATCHING_SETTINGS = {
   pauseBelowBps: null,
   pauseMinutes: 30,
   boardTravelTimes: false,
+  backToBack: true,
+  backToBackDropoffKm: 1,
+  backToBackPickupKm: 3,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -212,6 +215,14 @@ export const MatchingSettingsSchema = z
      * distance at the fallback speed.
      */
     boardTravelTimes: z.boolean().default(false),
+    /**
+     * Back-to-back offers (M10): an agent within this many km of an errand's final drop-off, or who has marked it
+     * delivered, can be offered the next urgent errand whose pickup is within the second distance of that drop-off,
+     * held behind the current one.
+     */
+    backToBack: z.boolean().default(true),
+    backToBackDropoffKm: z.number().min(0.2).max(5).default(1),
+    backToBackPickupKm: z.number().min(0.5).max(10).default(3),
   })
   .refine((m) => (m.searchStepsKm.at(-1) ?? 0) <= m.boardRadiusKm, {
     message: "The last search step can't reach past how far the board reaches",

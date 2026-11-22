@@ -317,6 +317,7 @@ export class ErrandsAdminService {
           travelEstimated: errandOffers.travelEstimated,
           straightMeters: errandOffers.straightMeters,
           counts: errandOffers.counts,
+          backToBack: errandOffers.backToBack,
           offeredAt: errandOffers.offeredAt,
           expiresAt: errandOffers.expiresAt,
           answeredAt: errandOffers.answeredAt,

@@ -12,3 +12,4 @@ export * from './matching';
 export * from './assignment';
 export * from './board';
 export * from './matching-places';
+export * from './geo';

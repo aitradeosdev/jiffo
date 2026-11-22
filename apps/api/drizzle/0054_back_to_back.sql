@@ -1,0 +1,1 @@
+ALTER TABLE "errand_offers" ADD COLUMN "back_to_back" boolean DEFAULT false NOT NULL;

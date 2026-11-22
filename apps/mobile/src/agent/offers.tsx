@@ -99,7 +99,7 @@ function OfferScreen({ showing, onClose }: { showing: Showing; onClose: () => vo
   useEffect(() => {
     Vibration.vibrate([0, 500, 250, 500]);
     AccessibilityInfo.announceForAccessibility(
-      `New errand offer. You earn ${naira(offer.agentEarnsKobo)}. ${secondsToGo(endsAt, Date.now())} seconds to answer.`,
+      `${offer.backToBack ? 'Next errand offer, after the one you are on' : 'New errand offer'}. You earn ${naira(offer.agentEarnsKobo)}. ${secondsToGo(endsAt, Date.now())} seconds to answer.`,
     );
     return () => Vibration.cancel();
   }, [offer, endsAt]);
@@ -218,6 +218,12 @@ function OfferScreen({ showing, onClose }: { showing: Showing; onClose: () => vo
           <Text variant="note" tone="ink3">
             The full addresses show once you accept.
           </Text>
+          {offer.backToBack ? (
+            <Text variant="small" tone="ink2">
+              Your next errand: it starts once you finish the one you are on. The time to the pickup counts the rest of
+              that one.
+            </Text>
+          ) : null}
           {offer.counts === false ? (
             <View style={[styles.free, { borderColor: c.urgent }]}>
               <Text variant="small">Declining this one is free: it doesn't count toward your acceptance rate.</Text>
