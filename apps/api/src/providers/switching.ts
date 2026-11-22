@@ -77,6 +77,9 @@ export class SwitchingMaps implements MapsAdapter {
   get name() {
     return this.providers.current('maps').name;
   }
+  get drawn() {
+    return this.providers.current('maps').drawn;
+  }
   autocomplete(...a: Parameters<MapsAdapter['autocomplete']>) {
     return this.providers.current('maps').autocomplete(...a);
   }

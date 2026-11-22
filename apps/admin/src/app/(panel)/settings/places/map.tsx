@@ -2,31 +2,12 @@
 
 import { importLibrary, setOptions } from '@googlemaps/js-api-loader';
 import { useEffect, useRef, useState } from 'react';
-import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode, type GeoJSONStoreFeatures } from 'terra-draw';
+import type { TerraDraw } from 'terra-draw';
 import { TerraDrawGoogleMapsAdapter } from 'terra-draw-google-maps-adapter';
-import { boundaryFrom, boundsOf, editableOnMap, polygonsOf, type Boundary } from '@/lib/shapes';
+import { boundsOf } from '@/lib/shapes';
+import { COLORS, NIGERIA, showEdit, startDrawing, type PlacesMapProps } from './drawing';
 
-/** A city or area drawn on the map. */
-export interface MapShape {
-  id: string;
-  kind: 'city' | 'area';
-  name: string;
-  enabled: boolean;
-  boundary: Boundary;
-  /** The one being looked at or changed: drawn more strongly. */
-  selected: boolean;
-}
-
-/** Drawing a new shape (no boundary yet) or reshaping one. */
-export interface MapEdit {
-  /** Changes when a different shape starts being drawn, so the drawing starts afresh. */
-  key: string;
-  boundary: Boundary | null;
-}
-
-/** Nigeria, before any city is drawn in the state shown. */
-const NIGERIA = { lat: 9.08, lng: 8.68 };
-const COLORS = { city: '#0B0B0B', on: '#0A7A4A', off: '#8A9097' };
+export type { MapEdit, MapShape } from './drawing';
 
 let loaded: Promise<typeof google.maps> | null = null;
 /** Google's map script, loaded once per page with the panel's browser key. */
@@ -40,24 +21,11 @@ function loadMaps(key: string) {
 }
 
 /**
- * The map on Settings, Places: the state's cities as outlines and their areas filled (green when on, grey when
- * off), and, while one is being drawn or reshaped, Terra Draw on top. Each change to the drawing is passed up as a
- * boundary.
+ * Google's map on Settings, Places, while Google is the maps provider: the state's cities as outlines and their areas
+ * filled (green when on, grey when off), and, while one is being drawn or reshaped, Terra Draw on top. Each change
+ * to the drawing is passed up as a boundary.
  */
-export function PlacesMap({
-  apiKey,
-  shapes,
-  edit,
-  onShape,
-  fitKey,
-}: {
-  apiKey: string;
-  shapes: MapShape[];
-  edit: MapEdit | null;
-  onShape: (boundary: Boundary | null) => void;
-  /** Changes when the map should fit what it shows again, such as another state being picked. */
-  fitKey: string;
-}) {
+export function PlacesMap({ apiKey, shapes, edit, onShape, fitKey }: PlacesMapProps) {
   const element = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map | null>(null);
   const draw = useRef<TerraDraw | null>(null);
@@ -75,7 +43,9 @@ export function PlacesMap({
     let terra: TerraDraw | null = null;
     // Google calls this when it refuses the key.
     (window as unknown as { gm_authFailure?: () => void }).gm_authFailure = () =>
-      setProblem("Google refused the map's key. Check GOOGLE_MAPS_BROWSER_KEY and its restrictions.");
+      setProblem(
+        "Google refused the map's key. Check the panel map key under Settings, Providers, Maps, and its restrictions.",
+      );
     loadMaps(apiKey)
       .then((maps) => {
         if (stopped || !element.current) return;
@@ -93,48 +63,16 @@ export function PlacesMap({
           listener?.remove();
           // Left the page while the map was getting ready.
           if (stopped) return;
-          terra = new TerraDraw({
-            adapter: new TerraDrawGoogleMapsAdapter({ lib: maps, map: m, coordinatePrecision: 6 }),
-            modes: [
-              new TerraDrawPolygonMode({
-                styles: { fillColor: '#0A7A4A', outlineColor: '#0A7A4A', fillOpacity: 0.25 },
-              }),
-              new TerraDrawSelectMode({
-                flags: {
-                  polygon: {
-                    feature: {
-                      draggable: true,
-                      coordinates: { midpoints: true, draggable: true, deletable: true },
-                    },
-                  },
-                },
-              }),
-            ],
-          });
-          const t = terra;
-          t.start();
-          // The finished polygons only: one still being drawn isn't a shape yet.
-          const send = () => {
-            if (quiet.current) return;
-            const polygons = t
-              .getSnapshot()
-              .filter((f) => f.geometry.type === 'Polygon' && !f.properties.currentlyDrawing)
-              .map((f) => f.geometry.coordinates as number[][][]);
-            report.current(boundaryFrom(polygons));
-          };
-          t.on('finish', () => {
-            send();
-            // Done drawing: its corners can now be dragged, and another click doesn't start a second shape.
-            t.setMode('select');
-          });
-          t.on('change', (_ids, type) => {
-            if (type !== 'styling') send();
-          });
-          t.on('ready', () => {
-            if (stopped) return;
-            draw.current = t;
-            setReady(true);
-          });
+          terra = startDrawing(
+            new TerraDrawGoogleMapsAdapter({ lib: maps, map: m, coordinatePrecision: 6 }),
+            report,
+            quiet,
+            (t) => {
+              if (stopped) return;
+              draw.current = t;
+              setReady(true);
+            },
+          );
         });
       })
       .catch(() => setProblem("Google's map couldn't be loaded. Check the connection, then reload the page."));
@@ -186,32 +124,8 @@ export function PlacesMap({
   useEffect(() => {
     const terra = draw.current;
     if (!terra || !ready) return;
-    quiet.current = true;
-    terra.clear();
-    quiet.current = false;
-    // A shape with holes isn't loaded: the tool would drop it (Places offers pasting instead).
-    if (!edit || (edit.boundary && !editableOnMap(edit.boundary))) {
-      terra.setMode('static');
-      return;
-    }
-    if (!edit.boundary) {
-      terra.setMode('polygon');
-      return;
-    }
-    const features = polygonsOf(edit.boundary).map(
-      (coordinates) =>
-        ({
-          id: crypto.randomUUID(),
-          type: 'Feature',
-          geometry: { type: 'Polygon', coordinates },
-          properties: { mode: 'polygon' },
-        }) as GeoJSONStoreFeatures,
-    );
-    quiet.current = true;
-    terra.addFeatures(features);
-    quiet.current = false;
-    terra.setMode('select');
-    const box = boundsOf([edit.boundary]);
+    const shown = showEdit(terra, edit, quiet);
+    const box = shown ? boundsOf([shown]) : null;
     if (box) map.current?.fitBounds(box, 48);
     // Only when another shape starts being edited: its own changes come back through onShape.
   }, [edit?.key, ready]);

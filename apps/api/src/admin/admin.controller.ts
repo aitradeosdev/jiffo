@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  Inject,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -24,6 +25,7 @@ import { MAX_ADJUSTMENT_KOBO, MoneyAdminService } from './money-admin.service';
 import { SettingsAdminService } from './settings-admin.service';
 import { ServiceAreasAdminService } from './service-areas-admin.service';
 import { BoundaryInput } from '../countries/service-areas';
+import { MAPS, type MapsAdapter } from '../adapters/maps';
 import { ProvidersAdminService } from './providers-admin.service';
 import { APPLICATION_STATUSES, ApplicationsAdminService } from './applications-admin.service';
 import { ID_CHECK_STATUSES, IdChecksAdminService } from './id-checks-admin.service';
@@ -276,6 +278,7 @@ export class AdminController {
     private readonly approvals: ApprovalsService,
     private readonly gated: ApprovalRequests,
     private readonly adminAuth: AdminAuthService,
+    @Inject(MAPS) private readonly maps: MapsAdapter,
   ) {}
 
   /* ---------- Approvals: changes waiting for a second admin ---------- */
@@ -463,8 +466,12 @@ export class AdminController {
   /** Where Jiffo works: each state's cities and their areas, as drawn (docs/admin-panel.md, Places). */
   @Get('service-areas')
   @Needs('read')
-  serviceAreaList(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
-    return this.serviceAreas.list(query.country);
+  async serviceAreaList(@Query(new ZodBody(CountryQuery)) query: z.infer<typeof CountryQuery>) {
+    // With the map to draw them on: the maps provider's own (its terms ask it), and its public key for the panel.
+    return {
+      ...(await this.serviceAreas.list(query.country)),
+      map: { engine: this.maps.drawn.engine, key: this.maps.drawn.panelKey },
+    };
   }
 
   @Post('cities')

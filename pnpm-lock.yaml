@@ -49,6 +49,9 @@ importers:
       '@simplewebauthn/browser':
         specifier: 14.0.0
         version: 14.0.0
+      mapbox-gl:
+        specifier: 3.34.2
+        version: 3.34.2
       next:
         specifier: 16.4.6
         version: 16.4.6(@types/node@22.20.5)(babel-plugin-react-compiler@1.0.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -70,6 +73,9 @@ importers:
       terra-draw-google-maps-adapter:
         specifier: 1.7.0
         version: 1.7.0(@googlemaps/js-api-loader@2.1.3)(terra-draw@1.38.0)
+      terra-draw-mapbox-gl-adapter:
+        specifier: 1.5.0
+        version: 1.5.0(mapbox-gl@3.34.2)(terra-draw@1.38.0)
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4.3.5
@@ -5193,6 +5199,9 @@ packages:
   makeerror@1.0.12:
     resolution: {integrity: sha512-JmqCvUhmt43madlpFzG4BQzG2Z3m6tvQDNKdClZnO3VbIudJYmxsT0FNJMeiB2+JTSlTQTSbU8QdesVmwJcmLg==}
 
+  mapbox-gl@3.34.2:
+    resolution: {integrity: sha512-SfuzpqjokSjv4C9/JEjxAfqVHY37B7Kky/AOFpc+9D0Sx0KuIoV3keSlvvuHuM/jxw84iQ/Nh7yIK1VxuDBBHA==}
+
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
@@ -6373,6 +6382,12 @@ packages:
     resolution: {integrity: sha512-XB9X2k4r+j07MN8REDc0cHTsvu1exf+x+m3qXeYV2Ke/T0x5fQpplaWAGxbe5vn2ezP+fdH8CO7vcXiP+cdifw==}
     peerDependencies:
       '@googlemaps/js-api-loader': ^1.14.3 || ^2.0.0
+      terra-draw: ^1.0.0
+
+  terra-draw-mapbox-gl-adapter@1.5.0:
+    resolution: {integrity: sha512-2muROYEfeGJH7s15l3xOz1Z4067KZBJGMHBbhGbQE8gLxtQnu6WqvHCfWGBemZRGuMbUtpQxljhP3Pqv6uUx+g==}
+    peerDependencies:
+      mapbox-gl: ^3.9.2
       terra-draw: ^1.0.0
 
   terra-draw@1.38.0:
@@ -11941,6 +11956,8 @@ snapshots:
     dependencies:
       tmpl: 1.0.5
 
+  mapbox-gl@3.34.2: {}
+
   math-intrinsics@1.1.0: {}
 
   mdn-data@2.0.14: {}
@@ -13441,6 +13458,11 @@ snapshots:
   terra-draw-google-maps-adapter@1.7.0(@googlemaps/js-api-loader@2.1.3)(terra-draw@1.38.0):
     dependencies:
       '@googlemaps/js-api-loader': 2.1.3
+      terra-draw: 1.38.0
+
+  terra-draw-mapbox-gl-adapter@1.5.0(mapbox-gl@3.34.2)(terra-draw@1.38.0):
+    dependencies:
+      mapbox-gl: 3.34.2
       terra-draw: 1.38.0
 
   terra-draw@1.38.0: {}

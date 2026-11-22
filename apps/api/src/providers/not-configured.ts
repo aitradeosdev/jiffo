@@ -1,5 +1,5 @@
 import type { EmailAdapter } from '../adapters/email';
-import type { MapsAdapter } from '../adapters/maps';
+import { NO_DRAWN_MAP, type MapsAdapter } from '../adapters/maps';
 import type { MessagingAdapter } from '../adapters/messaging';
 import type { PaymentsAdapter } from '../adapters/payments';
 import type { PushAdapter } from '../adapters/push';
@@ -29,6 +29,7 @@ export class NotConfiguredPush implements PushAdapter {
 
 export class NotConfiguredMaps implements MapsAdapter {
   readonly name = 'none';
+  readonly drawn = NO_DRAWN_MAP;
   autocomplete = refuse('maps');
   place = refuse('maps');
   route = refuse('maps');

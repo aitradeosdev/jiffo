@@ -3,7 +3,7 @@ import { SESSION_COOKIE } from './lib/cookies';
 
 /** Pages anyone may open without a session: sign-in and invites. */
 const OPEN = /^\/(sign-in|invite)(\/|$)/;
-/** The one page that loads Google's map: Settings, Places, where cities and areas are drawn. */
+/** The one page that loads a map: Settings, Places, where cities and areas are drawn. */
 const MAP_PAGE = /^\/settings\/places(\/|$)/;
 
 /**
@@ -16,13 +16,16 @@ export function contentPolicy(
   dev = process.env.NODE_ENV !== 'production',
   { maps = false }: { maps?: boolean } = {},
 ) {
-  // Google's map, on the one page that draws it: its data and fonts, and the workers it starts. Its scripts load
-  // through the panel's own ('strict-dynamic'), so no host is added for them (Google's guide to strict policies).
+  // The map, on the one page that draws it: Google's or Mapbox's, whichever is the maps provider in use (its
+  // terms keep its places on its own map). Their data and fonts, and the workers they start. Google's scripts load
+  // through the panel's own ('strict-dynamic'), so no host is added for them (Google's guide to strict policies);
+  // Mapbox's are bundled with the panel.
   const google = maps
     ? {
         style: ' https://fonts.googleapis.com',
         font: ' https://fonts.gstatic.com',
-        connect: ' https://*.googleapis.com https://*.gstatic.com data: blob:',
+        connect:
+          ' https://*.googleapis.com https://*.gstatic.com https://api.mapbox.com https://events.mapbox.com data: blob:',
       }
     : { style: '', font: '', connect: '' };
   return [

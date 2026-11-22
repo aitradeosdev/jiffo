@@ -47,11 +47,11 @@ Jiffo works in areas, drawn in cities, in states, in a country.
   - **Where:** in Places, "Matching" on a state, city or area, with the value from above in grey for each field left empty. The ranking weights, and the tier boosts, are set all four together or not at all.
   - **Approval:** a change waits for a second admin's approval, and is refused if it would leave this place, or any city or area below it, with search steps reaching past the board. A country change that would do that to a place is refused too, naming the place.
   - **Errands:** an urgent errand follows the values where its pickup is, as they stand at each step. One open to everyone keeps how far it was opened, for the board, accepting and its customer. A change to its place's steps while it waits applies at its next look, a few seconds later, and the customer and agents watching the board are told.
-- **The map's key:** `GOOGLE_MAPS_BROWSER_KEY` in the panel's settings.
-  - **Which key:** a Google key with the Maps JavaScript API turned on, restricted to the panel's own address (HTTP referrers), as it is sent to the browser. It can be in the same Google Cloud project as the apps' keys.
-  - **Cost:** loading the map is free up to 10,000 times a month, far more than staff use.
-  - **Without it:** shapes can only be pasted.
-  - **Security rules:** only this page lets Google's map load (its data, fonts and workers). Every other page keeps the panel's strict rules.
+- **The map:** the maps provider's own, as chosen in Settings, Providers, Maps: Google's map while Google Maps Platform finds places, Mapbox's while Mapbox does, as each one's terms keep its places on its own map. Switching the provider switches the map; the apps follow the same setting.
+  - **Its key:** a public key for the browser, saved with the provider: for Google, "Panel map key", a key with the Maps JavaScript API turned on, restricted to the panel's own address (websites); for Mapbox, "Map token for the panel", a public token restricted to the panel's address, or else "Map token for the apps". Each is sent to the browser, so it isn't secret and must be restricted. The server's own keys never leave it. In the environment, the same are `GOOGLE_MAPS_BROWSER_KEY`, `MAPBOX_PANEL_TOKEN` and `MAPBOX_PUBLIC_TOKEN`, on the API.
+  - **Cost:** Google's map is free up to 10,000 loads a month and Mapbox's up to 50,000, far more than staff use.
+  - **Without one:** shapes can only be pasted, and the page says which key to add.
+  - **Security rules:** only this page lets a map load (Google's and Mapbox's data, fonts and workers). Every other page keeps the panel's strict rules.
 
 ## Roles
 

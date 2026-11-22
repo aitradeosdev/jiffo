@@ -31,7 +31,7 @@ export const PROVIDER_CATEGORY_INFO: Record<ProviderCategory, { label: string; a
   maps: {
     label: 'Maps',
     about:
-      "Place search and driving distances for prices, from Google Maps or Mapbox. It doesn't change the map the apps draw.",
+      'Place search and driving distances for prices, from Google Maps or Mapbox, and the map the panel and the apps draw: each keeps its places on its own map.',
   },
   storage: {
     label: 'File storage',
@@ -308,7 +308,8 @@ export const PROVIDERS: ProviderInfo[] = [
     key: 'google',
     category: 'maps',
     name: 'Google Maps Platform',
-    about: 'Places search and the Routes API for driving distances.',
+    about:
+      "Places search and the Routes API for driving distances, and Google's map in the panel and the apps, as Google's terms keep its places on its own map.",
     fields: [
       {
         key: 'apiKey',
@@ -317,13 +318,22 @@ export const PROVIDERS: ProviderInfo[] = [
         required: true,
         hint: 'With the Places API (New) and Routes API enabled, and restricted to the API server.',
       },
+      {
+        key: 'browserKey',
+        label: 'Panel map key',
+        secret: false,
+        required: false,
+        hint: "For drawing cities and areas in Settings, Places. A key with the Maps JavaScript API enabled, restricted to the panel's address (websites). Browsers see it, so it isn't secret. The apps' Google keys are built into them.",
+        placeholder: 'AIza…',
+      },
     ],
   },
   {
     key: 'mapbox',
     category: 'maps',
     name: 'Mapbox',
-    about: 'The Search Box API for place search, and the Directions API for driving distances.',
+    about:
+      "The Search Box API for place search and the Directions API for driving distances, and Mapbox's map in the panel and the apps, as Mapbox's terms keep its places on its own map.",
     fields: [
       {
         key: 'accessToken',
@@ -331,6 +341,22 @@ export const PROVIDERS: ProviderInfo[] = [
         secret: true,
         required: true,
         hint: 'A token made for the API server on the Tokens page of your Mapbox account, with no URL restriction: the server calls Mapbox, not a web page.',
+        placeholder: 'pk.…',
+      },
+      {
+        key: 'publicToken',
+        label: 'Map token for the apps',
+        secret: false,
+        required: false,
+        hint: "A public token (pk.) with only public scopes, for the map the apps draw. Phones see it, so it isn't secret; it can't carry a URL restriction, which phones don't send.",
+        placeholder: 'pk.…',
+      },
+      {
+        key: 'panelToken',
+        label: 'Map token for the panel',
+        secret: false,
+        required: false,
+        hint: "A public token restricted to the panel's address, for drawing cities and areas in Settings, Places. Left empty, the apps' token is used.",
         placeholder: 'pk.…',
       },
     ],

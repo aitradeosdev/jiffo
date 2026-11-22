@@ -78,9 +78,12 @@ export function envAdapters(c: AppConfig): Adapters {
             : new ConsolePushAdapter(),
     maps:
       c.MAPS_PROVIDER === 'google'
-        ? new GoogleMapsAdapter(c.GOOGLE_MAPS_API_KEY!)
+        ? new GoogleMapsAdapter(c.GOOGLE_MAPS_API_KEY!, undefined, { browserKey: c.GOOGLE_MAPS_BROWSER_KEY })
         : c.MAPS_PROVIDER === 'mapbox'
-          ? new MapboxMapsAdapter(c.MAPBOX_ACCESS_TOKEN!)
+          ? new MapboxMapsAdapter(c.MAPBOX_ACCESS_TOKEN!, undefined, {
+              publicToken: c.MAPBOX_PUBLIC_TOKEN,
+              panelToken: c.MAPBOX_PANEL_TOKEN,
+            })
           : live
             ? new NotConfiguredMaps()
             : new FakeMapsAdapter(),
