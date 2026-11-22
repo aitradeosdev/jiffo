@@ -172,6 +172,14 @@ describe('admin: providers', () => {
     // The tests' maps provider is the stand-in: there is no map of its own to draw.
     expect(await places()).toEqual({ engine: null, key: null });
     expect(await config()).toEqual({ engine: null, key: null });
+    // A secret token in a field phones and browsers see is refused, without saying it back.
+    for (const field of ['publicToken', 'panelToken']) {
+      const refused = await api('put', '/maps/mapbox')
+        .send({ config: { [field]: 'sk.secret-token-0123456789' }, secrets: { accessToken: 'pk.server-0123456789' } })
+        .expect(400);
+      expect(refused.body.error.code).toBe('invalid_provider_settings');
+      expect(JSON.stringify(refused.body)).not.toContain('sk.secret');
+    }
     await api('put', '/maps/mapbox')
       .send({
         config: { publicToken: 'pk.app-token-for-the-phones', panelToken: 'pk.panel-token-for-the-browser' },

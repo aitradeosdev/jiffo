@@ -17,25 +17,26 @@ export function contentPolicy(
   { maps = false }: { maps?: boolean } = {},
 ) {
   // The map, on the one page that draws it: Google's or Mapbox's, whichever is the maps provider in use (its
-  // terms keep its places on its own map). Their data and fonts, and the workers they start. Google's scripts load
-  // through the panel's own ('strict-dynamic'), so no host is added for them (Google's guide to strict policies);
-  // Mapbox's are bundled with the panel.
-  const google = maps
+  // terms keep its places on its own map). Their data, tiles and fonts, and the workers both start from blob URLs
+  // (worker-src). Google's scripts load through the panel's own ('strict-dynamic'), so no host is added for them
+  // (Google's guide to strict policies); Mapbox's are bundled with the panel. Mapbox's hosts are as its guide to
+  // content security policies lists them.
+  const map = maps
     ? {
         style: ' https://fonts.googleapis.com',
         font: ' https://fonts.gstatic.com',
         connect:
-          ' https://*.googleapis.com https://*.gstatic.com https://api.mapbox.com https://events.mapbox.com data: blob:',
+          ' https://*.googleapis.com https://*.gstatic.com https://api.mapbox.com https://*.tiles.mapbox.com https://events.mapbox.com data: blob:',
       }
     : { style: '', font: '', connect: '' };
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ''}`,
-    `style-src 'self' 'unsafe-inline'${google.style}`,
+    `style-src 'self' 'unsafe-inline'${map.style}`,
     // Photos come from the API's storage; the sign-in QR code is a data URL; the map's tiles are https.
     `img-src 'self' data: blob: https:${dev ? ' http:' : ''}`,
-    `font-src 'self' data:${google.font}`,
-    `connect-src 'self'${dev ? ' ws: http:' : ''}${google.connect}`,
+    `font-src 'self' data:${map.font}`,
+    `connect-src 'self'${dev ? ' ws: http:' : ''}${map.connect}`,
     ...(maps ? ['worker-src blob:'] : []),
     "object-src 'none'",
     "base-uri 'none'",

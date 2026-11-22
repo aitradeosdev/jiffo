@@ -53,6 +53,7 @@ describe('panel proxy', () => {
     const places = policy('/settings/places');
     expect(places).toMatch(/connect-src [^;]*https:\/\/api\.mapbox\.com/);
     expect(places).toMatch(/connect-src [^;]*https:\/\/events\.mapbox\.com/);
+    expect(places).toMatch(/connect-src [^;]*https:\/\/\*\.tiles\.mapbox\.com/);
     for (const path of ['/settings', '/errands', '/matching']) {
       expect(policy(path)).not.toContain('mapbox');
     }

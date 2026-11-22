@@ -66,7 +66,6 @@ export function startDrawing(
       }),
     ],
   });
-  terra.start();
   // The finished polygons only: one still being drawn isn't a shape yet.
   const send = () => {
     if (quiet.current) return;
@@ -85,6 +84,8 @@ export function startDrawing(
     if (type !== 'styling') send();
   });
   terra.on('ready', () => onReady(terra));
+  // Started once listened to: Mapbox's map says it is ready while Terra Draw starts, not after.
+  terra.start();
   return terra;
 }
 

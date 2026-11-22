@@ -81,6 +81,8 @@ export function PlacesMap({ apiKey, shapes, edit, onShape, fitKey }: PlacesMapPr
       listener?.remove();
       terra?.stop();
       draw.current = null;
+      // A map built again (another key) draws its shapes afresh once its own drawing tool is ready.
+      setReady(false);
     };
   }, [apiKey]);
 

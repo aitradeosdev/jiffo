@@ -321,7 +321,17 @@ export class MapboxMapsAdapter implements MapsAdapter {
     keys: { publicToken?: string | null; panelToken?: string | null } = {},
   ) {
     const app = keyOrNull(keys.publicToken);
-    this.drawn = { engine: 'mapbox', panelKey: keyOrNull(keys.panelToken) ?? app, appKey: app };
+    const panel = keyOrNull(keys.panelToken);
+    // Phones and browsers see these: a secret token (sk.) pasted here would be published with all its scopes.
+    for (const [label, token] of [
+      ['map token for the apps', app],
+      ['map token for the panel', panel],
+    ] as const) {
+      if (token && !token.startsWith('pk.')) {
+        throw new Error(`the ${label} must be a public token, starting pk.: phones and browsers see it`);
+      }
+    }
+    this.drawn = { engine: 'mapbox', panelKey: panel ?? app, appKey: app };
   }
 
   private url(path: string, params: Record<string, string | undefined>) {

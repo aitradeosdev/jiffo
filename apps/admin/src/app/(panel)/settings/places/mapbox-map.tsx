@@ -100,6 +100,8 @@ export function PlacesMapbox({ apiKey, shapes, edit, onShape, fitKey }: PlacesMa
       terra?.stop();
       m?.remove();
       draw.current = null;
+      // A map built again (another key) draws its shapes afresh once its own drawing tool is ready.
+      setReady(false);
       map.current = null;
     };
   }, [apiKey]);
