@@ -74,7 +74,7 @@ Start the backend as the README says. With the console providers, sign-in codes 
   eas env:set --scope account --name EXPO_PUBLIC_API_URL --value https://<the address> --environment preview --visibility plaintext
   ```
 
-  Running it again with a new address changes it. Once staging exists, set it to the staging API's address once.
+  Running it again with a new address changes it. With the test server running ([deploy.md](deploy.md)), set it to that server's API address once instead: it keeps its address.
 
 - **Store builds:** before the first `production-agent` or `production-customer` build, set `EXPO_PUBLIC_API_URL` to the live API's `https://` address the same way, with `--environment production`.
 

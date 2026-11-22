@@ -10,3 +10,7 @@ coverage/
 *.tsbuildinfo
 .next/
 next-env.d.ts
+
+# The test server kit's generated secrets and settings (deploy/setup.sh)
+deploy/secrets.env
+deploy/backups/

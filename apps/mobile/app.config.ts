@@ -44,10 +44,10 @@ export const apiUrlFor = (env: Record<string, string | undefined>) => {
 };
 
 /**
- * The Google Maps keys for the map drawn in the apps (Maps SDK for Android, Maps SDK for iOS). Both phones draw
- * Google's map: places are found with Google, whose terms keep its results off other companies' maps. An iPhone
- * build without its key draws Apple's map, and an Android one a blank map, so a store build made on Expo's
- * servers stops without its phone's key (docs/mobile-builds.md).
+ * The Google Maps keys for Google's map in the apps (Maps SDK for Android, Maps SDK for iOS), drawn while Google is
+ * the maps provider (src/ui/map/engine.ts). An iPhone build without its key draws Apple's map, and an Android one a
+ * blank map, so a store build made on Expo's servers stops without its phone's key, even while Mapbox is the
+ * provider: switching to Google later then needs no new release (docs/mobile-builds.md).
  */
 export const googleMapsFor = (env: Record<string, string | undefined>) => {
   const android = env.GOOGLE_MAPS_ANDROID_API_KEY || undefined;

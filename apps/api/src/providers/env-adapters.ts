@@ -12,7 +12,7 @@ import { FakePaymentsAdapter, PaystackPaymentsAdapter, type PaymentsAdapter } fr
 import { isPaystackHost, isPaystackTestKey, isTermiiHost, moneyKey, providerUrl, storageEndpoint } from './builders';
 import { ConsolePushAdapter, FcmPushAdapter, MemoryPushAdapter, type PushAdapter } from '../adapters/push';
 import { MemoryStorageAdapter, S3StorageAdapter, type StorageAdapter } from '../adapters/storage';
-import type { AppConfig } from '../config/app-config';
+import { liveKeysOnly, type AppConfig } from '../config/app-config';
 import {
   NotConfiguredEmail,
   NotConfiguredMaps,
@@ -41,13 +41,15 @@ export const ENV_ADAPTERS = Symbol('ENV_ADAPTERS');
  * a stand-in is never used: a category with nothing set answers that it isn't set up yet.
  */
 export function envAdapters(c: AppConfig): Adapters {
+  // In production no stand-in runs, a test server included; only a real one takes live keys alone.
   const live = c.NODE_ENV === 'production';
+  const keys = { production: liveKeysOnly(c) };
   return {
     payments:
       c.PAYMENTS_PROVIDER === 'paystack'
         ? // The same checks as keys entered in the panel (see builders.ts).
           new PaystackPaymentsAdapter(
-            moneyKey(c.PAYSTACK_SECRET_KEY!, { production: live }, isPaystackTestKey, 'Paystack'),
+            moneyKey(c.PAYSTACK_SECRET_KEY!, keys, isPaystackTestKey, 'Paystack'),
             providerUrl(c.PAYSTACK_BASE_URL, isPaystackHost, 'Paystack'),
           )
         : live

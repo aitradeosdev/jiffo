@@ -1,0 +1,15 @@
+# Only what the API and the admin panel need goes into the server image (deploy/Dockerfile).
+**/node_modules
+**/dist
+**/.next
+**/coverage
+**/*.tsbuildinfo
+.git
+apps/mobile
+brand
+docs
+dump.rdb
+**/.env
+**/.env.*
+deploy/*.env
+deploy/backups
