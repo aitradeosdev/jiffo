@@ -347,7 +347,8 @@ export const PROVIDERS: ProviderInfo[] = [
         key: 'publicToken',
         label: 'Map token for the apps',
         secret: false,
-        required: false,
+        // The apps put Mapbox's places on Mapbox's map: without a token for it, they would have none.
+        required: true,
         hint: "A public token (pk.) with only public scopes, for the map the apps draw. Phones see it, so it isn't secret; it can't carry a URL restriction, which phones don't send.",
         placeholder: 'pk.…',
       },

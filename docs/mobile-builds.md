@@ -37,7 +37,9 @@ All the commands below run in a terminal in the repository's `apps/mobile` folde
 
    Put the two ids in `apps/mobile/eas-projects.json` as `customer` and `agent`, and commit the file. The ids aren't secret. The build settings below (`eas env:set`) are kept per account, so set them again in the new one.
 
-5. Google's map in the apps. Both phones draw Google's map: places are found with Google, whose terms keep its results off other companies' maps. Each phone needs its own key, from the same Google Cloud project as the API's key or another:
+5. The map in the apps. The apps draw the maps provider's own map, as Settings, Providers, Maps has it: Google's while Google finds places, Mapbox's while Mapbox does, as each one's terms keep its places on its own map. Both engines are in every build, so switching the provider needs no new release.
+   - **Mapbox:** nothing to set for the build. Its token comes from the API as the app starts: "Map token for the apps" on the Mapbox provider, a public token (`pk.`). Mapbox no longer asks for a token to download its engine.
+   - **Google:** each phone needs its own key, built in, from the same Google Cloud project as the API's key or another. Store builds need them even while Mapbox is the provider, so switching to Google later works without a new release:
    - **Android:** a key with the Maps SDK for Android turned on, restricted to Android apps: the two package names, `com.jiffoapp.customer` and `com.jiffoapp.agent`, each with two SHA-1 fingerprints:
      - the EAS signing key's, which `eas credentials` shows, for the builds you install yourself;
      - the app signing key's, from Play Console (Test and release, App integrity, App signing), for copies installed from Google Play, which Google signs with its own key. Without it, the map is blank in the store apps.

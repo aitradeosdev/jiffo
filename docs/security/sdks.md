@@ -28,7 +28,8 @@ uses it.
 | `expo-dev-client` | Development builds only, to try the native key before a store build; the store builds don't include its launcher | Nothing beyond the app |
 | `expo-device` | The phone's model, for the list of signed-in devices, and whether it's a real phone before asking for push | Device model |
 | `expo-location`, `expo-task-manager` | An agent's live location while on a job, and the customer's own location when they choose it | Location, with the person's permission |
-| `react-native-maps` | Maps for errands and live tracking: Google's map on both phones (Apple's on an iPhone built without its Google key) | Google Maps (Maps SDK for Android and for iOS) |
+| `react-native-maps` | Maps for errands and live tracking while Google is the maps provider: Google's map on both phones (Apple's on an iPhone built without its Google key) | Google Maps (Maps SDK for Android and for iOS) |
+| `@rnmapbox/maps` 10.3.17, with Mapbox's Maps SDK | The same maps while Mapbox is the maps provider: its token, a public one, comes from the API. Its engine is in every build; its code is loaded and given the token only while Mapbox is the provider. An older build without it draws its own map | Mapbox, for map tiles and styles. Its usage telemetry is turned off |
 | `expo-image-picker` | Photos in chat, receipts, proof of delivery and selfies | Camera and photos, with permission |
 | `expo-image-manipulator` | Saving each photo as a JPEG no larger than the server keeps, before it is sent (C1). Smile ID's SDK needs it too | The photo being sent |
 | `expo-notifications` | Push notifications | The platform's push service |
@@ -57,7 +58,7 @@ Android release builds are shrunk and obfuscated with R8 (`expo-build-properties
 | React Native, `react-native-screens`, `react-native-svg`, `react-native-safe-area-context` | Their own consumer rules, and React Native's `@DoNotStrip` |
 | `react-native-nitro-modules`, `react-native-quick-crypto` | Nitro marks the classes its C++ reaches with `@Keep` and `@DoNotStrip`; quick-crypto's are in C++ |
 | Smile ID (`usesmileid_bridge`, `usesmileid_mlkit_face`, kamera) and Google's ML Kit | Smile ID's own consumer rules, which keep their module and analyser classes, and ML Kit's in its library |
-| Play Integrity, Google Maps, Lottie | Their own consumer rules, in their libraries |
+| Play Integrity, Google Maps, Mapbox's Maps SDK, Lottie | Their own consumer rules, in their libraries |
 | `expo-notifications`, `expo-location`, `expo-task-manager` | Their own consumer rules |
 | Room, through WorkManager (which `react-native-maps` uses for map tiles) | Ours: Room makes each database's generated class through its no-argument constructor, by reflection, as the app starts, and its own rules left R8 free to remove it. The first release build closed at once on a real phone until `ANDROID_KEEP_RULES` kept it |
 
@@ -70,6 +71,8 @@ A library added later is checked the same way: its rules, or one added to `ANDRO
 | `next`, `react`, `react-dom`, `server-only` | The panel itself. Pages are drawn on the panel's server; the browser gets no API keys. |
 | `qrcode` | The QR code shown when an admin sets up their authenticator app. Drawn on the server. |
 | `@simplewebauthn/browser` | Asking the browser to make or use a passkey, for roles that sign in with one |
+| `@googlemaps/js-api-loader`, `terra-draw`, `terra-draw-google-maps-adapter` | Drawing cities and areas on Google's map in Settings, Places, while Google is the maps provider. Loaded on that page only, with the provider's public panel key |
+| `mapbox-gl` 3.34.2, `terra-draw-mapbox-gl-adapter` 1.5.0 | The same on Mapbox's map, while Mapbox is the maps provider. Loaded on that page only, with its public panel token. Mapbox's own licence |
 | `@fontsource-variable/figtree` | The font, served from the panel itself |
 | `@jiffo/shared` | Jiffo's own shared rules and types |
 

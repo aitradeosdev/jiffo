@@ -65,6 +65,19 @@ const mapsWith = (env: Record<string, string>) => {
 };
 
 /**
+ * Mapbox's map engine goes in every build, beside Google's, so the apps draw whichever company's map finds the
+ * places (the API's maps provider) without a new release. Its token comes from the API at start, not the build.
+ */
+describe("Mapbox's map in the apps", () => {
+  it('goes in both builds, with no token or secret in the build settings', () => {
+    const config = appConfig({ config: {} } as Parameters<typeof appConfig>[0]);
+    const entry = config.plugins?.find((p) => (Array.isArray(p) ? p[0] : p) === '@rnmapbox/maps');
+    expect(entry).toBeDefined();
+    expect(JSON.stringify(entry)).not.toMatch(/token|pk\.|sk\./i);
+  });
+});
+
+/**
  * Both phones draw Google's map, as places are found with Google, whose terms keep its results off other
  * companies' maps. The keys go in at build time.
  */

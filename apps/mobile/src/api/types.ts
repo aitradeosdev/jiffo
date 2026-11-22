@@ -1,3 +1,4 @@
+import type { LiveMap } from '../ui/map/engine';
 import type { PublicSettings } from '@jiffo/shared';
 
 export interface User {
@@ -18,6 +19,8 @@ export interface CountryConfig {
   categories: Array<{ key: string; name: string; icon: string; description: string; buyDefault: boolean }>;
   /** What the server has set up; missing on an older server. */
   features?: { calls: boolean };
+  /** The map to draw: the maps provider's own, and its public key for the apps (Mapbox's; Google's is built in). */
+  map?: LiveMap;
 }
 
 export interface CodeSent {

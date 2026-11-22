@@ -1,9 +1,11 @@
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import Constants from 'expo-constants';
-import { Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Polyline } from 'react-native-maps';
 import { useScheme } from '../../theme/theme';
+import { useCountryConfig } from '../../api/useCountryConfig';
 import { mapEngine } from './engine';
+import { MAPBOX_IN_BUILD, MapboxMap } from './mapbox-map';
 import { MAP_COLORS, googleStyle } from './palette';
 import { MapPinView } from './pins';
 import { DEFAULT_CENTER, pointsDown, routeOf, type MapHandle, type MapPin, type MapProps } from './types';
@@ -25,14 +27,24 @@ const CITY_DELTA = 0.035;
  */
 const GOOGLE_MAPS_ON_IOS =
   ((Constants.expoConfig?.extra ?? {}) as { googleMapsOnIos?: boolean }).googleMapsOnIos === true;
-/** Google's map on both phones, styled like the prototype; Apple's on an iPhone built without its Google key. */
-const GOOGLE = mapEngine(Platform.OS, GOOGLE_MAPS_ON_IOS) === 'google';
-
 /**
- * The map behind the home, review and tracking screens: Google's on both phones (src/ui/map/engine.ts), styled
- * like the prototype. Fits its pins inside the space the controls and sheet leave free.
+ * The map behind the home, review and tracking screens: the maps provider's own, as the API says (engine.ts),
+ * Google's styled like the prototype, or Mapbox's in its own streets style with the prototype's route colours. Fits
+ * its pins inside the space the controls and sheet leave free. Until the API has said which, the map's place is
+ * left empty.
  */
-export function JiffoMap({
+export function JiffoMap(props: MapProps & { ref?: Ref<MapHandle> }) {
+  const { config } = useCountryConfig();
+  // Before this version of the API, the config said nothing of the map: drawn as built, as it was then.
+  const live = config ? (config.map ?? { engine: null, key: null }) : null;
+  const engine = mapEngine(Platform.OS, GOOGLE_MAPS_ON_IOS, live, MAPBOX_IN_BUILD);
+  if (engine === 'none') return <View style={[StyleSheet.absoluteFill, props.style]} />;
+  if (engine === 'mapbox') return <MapboxMap {...props} token={live!.key!} />;
+  return <NativeMap {...props} google={engine === 'google'} />;
+}
+
+/** Google's map, styled like the prototype; Apple's on an iPhone built without its Google key. */
+function NativeMap({
   pins,
   showRoute,
   insets,
@@ -41,7 +53,8 @@ export function JiffoMap({
   interactive = true,
   style,
   ref,
-}: MapProps & { ref?: Ref<MapHandle> }) {
+  google,
+}: MapProps & { ref?: Ref<MapHandle>; google: boolean }) {
   const scheme = useScheme();
   const colors = MAP_COLORS[scheme];
   const map = useRef<MapView>(null);
@@ -87,8 +100,8 @@ export function JiffoMap({
     <MapView
       ref={map}
       style={[StyleSheet.absoluteFill, style]}
-      provider={GOOGLE ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
-      customMapStyle={GOOGLE ? customMapStyle : undefined}
+      provider={google ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
+      customMapStyle={google ? customMapStyle : undefined}
       userInterfaceStyle={scheme}
       initialRegion={{
         latitude: focus.lat,

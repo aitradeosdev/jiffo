@@ -266,8 +266,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
                 "Jiffo uses your location to show where you are on the map, and to tell Jiffo's safety team where you are if you press Emergency.",
             },
       ],
-      // Both phones draw Google's map, each with its own key at build time; an iPhone build without one draws
-      // Apple's (googleMapsFor).
+      // Google's map, while Google is the maps provider: each phone's key goes in at build time; an iPhone build
+      // without one draws Apple's (googleMapsFor).
       [
         'react-native-maps',
         {
@@ -275,6 +275,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           ...(googleMaps.ios ? { iosGoogleMapsApiKey: googleMaps.ios } : {}),
         },
       ],
+      // Mapbox's map engine too, for when Mapbox is the maps provider (src/ui/map/engine.ts). Its token comes from
+      // the API at start; Mapbox no longer asks for one to download the engine.
+      '@rnmapbox/maps',
       // Smile ID's selfie checks (docs/security-plan.md, I2, I8). Only the agent app uses them, but native
       // modules are linked into both builds, which compile only with these settings.
       ...SMILE_ID_PLUGINS,
