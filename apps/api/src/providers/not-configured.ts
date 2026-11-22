@@ -32,6 +32,7 @@ export class NotConfiguredMaps implements MapsAdapter {
   readonly drawn = NO_DRAWN_MAP;
   autocomplete = refuse('maps');
   place = refuse('maps');
+  locate = refuse('maps');
   route = refuse('maps');
   travelTimes = refuse('maps');
 }

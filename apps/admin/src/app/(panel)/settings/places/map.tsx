@@ -25,7 +25,7 @@ function loadMaps(key: string) {
  * filled (green when on, grey when off), and, while one is being drawn or reshaped, Terra Draw on top. Each change
  * to the drawing is passed up as a boundary.
  */
-export function PlacesMap({ apiKey, shapes, edit, onShape, fitKey }: PlacesMapProps) {
+export function PlacesMap({ apiKey, shapes, edit, onShape, fitKey, focus }: PlacesMapProps) {
   const element = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map | null>(null);
   const draw = useRef<TerraDraw | null>(null);
@@ -122,6 +122,14 @@ export function PlacesMap({ apiKey, shapes, edit, onShape, fitKey }: PlacesMapPr
     // Only when fitKey changes: shapes changing as one is drawn must not move the map.
   }, [fitKey, ready]);
 
+  // Go where asked: the state picked, the city named, or a new area's city.
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready || !focus) return;
+    m.fitBounds(focus.box, 32);
+    // Only when asked again: the same box can be asked for twice, with a new key.
+  }, [focus?.key, ready]);
+
   // Terra Draw: drawing a new shape, reshaping one, or idle.
   useEffect(() => {
     const terra = draw.current;
@@ -134,7 +142,11 @@ export function PlacesMap({ apiKey, shapes, edit, onShape, fitKey }: PlacesMapPr
 
   return (
     <div className="relative h-[60vh] min-h-80 overflow-hidden rounded-2xl bg-surface-2">
-      <div ref={element} className="absolute inset-0" />
+      {/* Google's map makes its container position: relative, as Mapbox's does, which undoes absolute positioning:
+          the container fills a box of its own instead, or it would be 0 pixels tall and the map unseen. */}
+      <div className="absolute inset-0">
+        <div ref={element} className="h-full w-full" />
+      </div>
       {problem ? (
         <p role="alert" className="absolute inset-x-4 top-4 rounded-xl bg-surface px-3.5 py-2.5 text-sm font-medium">
           {problem}

@@ -2,7 +2,8 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { api, reasonOf, ASKED, isPending, messageOf } from '@/lib/api';
+import { api, ApiError, getCountry, reasonOf, ASKED, isPending, messageOf } from '@/lib/api';
+import type { Located } from '@/lib/places-map';
 import { matchingFromForm } from '@/lib/matching-places';
 import { pricesFromForm } from '@/lib/prices';
 import { shapeMissing } from '@/lib/shapes';
@@ -113,6 +114,25 @@ const boundaryOf = (form: FormData) => {
   const text = String(form.get('boundary') ?? '').trim();
   return text ? (JSON.parse(text) as unknown) : undefined;
 };
+
+/**
+ * A state or city found by name through the maps provider in use (Places), for the map to go to before one is drawn
+ * there. In the country the panel is showing.
+ */
+export async function locatePlace(
+  kind: 'state' | 'city',
+  q: string,
+): Promise<{ found?: Located; missing?: true; error?: string }> {
+  if ((kind !== 'state' && kind !== 'city') || typeof q !== 'string') return { missing: true };
+  const country = await getCountry();
+  const query = new URLSearchParams({ country: country.code, kind, q: q.trim().slice(0, 120) });
+  try {
+    return { found: await api<Located>(`/admin/places/locate?${query}`) };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return { missing: true };
+    return { error: messageOf(error) };
+  }
+}
 
 /** Adds a city to a state, with the shape drawn (Places). It starts off. */
 export async function createCity(_: Result, form: FormData): Promise<Result> {

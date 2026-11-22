@@ -52,6 +52,7 @@ export default async function PlacesPage() {
       countryMatching={countryMatching}
       canEdit={me.permissions.includes('settings')}
       map={map}
+      countryCode={country.code}
     />
   );
 }

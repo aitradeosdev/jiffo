@@ -86,6 +86,9 @@ export class SwitchingMaps implements MapsAdapter {
   place(...a: Parameters<MapsAdapter['place']>) {
     return this.providers.current('maps').place(...a);
   }
+  locate(...a: Parameters<MapsAdapter['locate']>) {
+    return this.providers.current('maps').locate(...a);
+  }
   route(...a: Parameters<MapsAdapter['route']>) {
     return this.providers.current('maps').route(...a);
   }

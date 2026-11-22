@@ -24,6 +24,33 @@ export interface LatLng {
   lng: number;
 }
 
+/** A box on the map: its west and east longitudes, and its south and north latitudes. */
+export interface MapBox {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+/**
+ * A state or city found by name, for the panel's map to go to (Settings, Places): its middle and, where the provider
+ * gives one, the box it fills.
+ */
+export interface Located {
+  name: string;
+  lat: number;
+  lng: number;
+  bounds: MapBox | null;
+}
+
+/** A box only when it is one: four numbers, west of east and south of north. */
+function boxOrNull(west: unknown, south: unknown, east: unknown, north: unknown): MapBox | null {
+  const all = [west, south, east, north];
+  if (!all.every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
+  const [w, s, e, n] = all as number[];
+  return w! < e! && s! < n! ? { west: w!, south: s!, east: e!, north: n! } : null;
+}
+
 export interface RouteEstimate {
   distanceMeters: number;
   durationSeconds: number;
@@ -62,6 +89,11 @@ export interface MapsAdapter {
     sessionToken?: string;
   }): Promise<PlaceSuggestion[]>;
   place(placeId: string, sessionToken?: string): Promise<Place | null>;
+  /**
+   * A state or city by its name, in the country, for the panel's map to go to: the provider's first answer, or null
+   * when it finds none. The panel shows it on the provider's own map, as its terms ask.
+   */
+  locate(input: { query: string; countryCode: string; kind: 'state' | 'city' }): Promise<Located | null>;
   /** Driving distance through the points in order. */
   route(points: LatLng[]): Promise<RouteEstimate>;
   /**
@@ -88,6 +120,21 @@ export function estimateRoute(points: LatLng[]): RouteEstimate {
   const distanceMeters = Math.round(straight * 1.3);
   return { distanceMeters, durationSeconds: Math.round(distanceMeters / (20_000 / 3600)) };
 }
+
+/** Google's types for each kind the panel finds: a state, or a town or part of one. */
+const GOOGLE_LOCATE_TYPES = {
+  state: new Set(['administrative_area_level_1']),
+  city: new Set([
+    'locality',
+    'postal_town',
+    'sublocality',
+    'sublocality_level_1',
+    'neighborhood',
+    'administrative_area_level_2',
+    'administrative_area_level_3',
+    'colloquial_area',
+  ]),
+} as const;
 
 /** Google Places API (New) for search and details, Routes API for distance. */
 export class GoogleMapsAdapter implements MapsAdapter {
@@ -116,10 +163,13 @@ export class GoogleMapsAdapter implements MapsAdapter {
     return 'Connected. Place search works.';
   }
 
-  /** Returns null when Google says the thing doesn't exist (an unknown or stale place id). */
+  /**
+   * Returns null when Google says the thing doesn't exist (an unknown or stale place id), unless `missing` is false:
+   * Google also answers 400 for a key it refuses, which a search that found nothing never is.
+   */
   private async call<T>(
     url: string,
-    init: { method: 'GET' | 'POST'; fieldMask: string; body?: unknown },
+    init: { method: 'GET' | 'POST'; fieldMask: string; body?: unknown; missing?: boolean },
   ): Promise<T | null> {
     let res: Response;
     try {
@@ -135,7 +185,7 @@ export class GoogleMapsAdapter implements MapsAdapter {
     } catch {
       throw unavailable('maps_unavailable', 'Address search is not available right now');
     }
-    if (res.status === 404 || res.status === 400) return null;
+    if (init.missing !== false && (res.status === 404 || res.status === 400)) return null;
     if (!res.ok) throw unavailable('maps_unavailable', 'Address search is not available right now');
     try {
       return (await res.json()) as T;
@@ -200,6 +250,45 @@ export class GoogleMapsAdapter implements MapsAdapter {
       lat: p.location.latitude,
       lng: p.location.longitude,
       region: p.addressComponents?.find((c) => c.types?.includes('administrative_area_level_1'))?.longText ?? null,
+    };
+  }
+
+  async locate(input: { query: string; countryCode: string; kind: 'state' | 'city' }) {
+    // Google can't keep the search to a country (the region only leans it), and its type filter skips place names:
+    // a few answers, and the first that is the kind of place asked, in the country.
+    const body = await this.call<{
+      places?: Array<{
+        displayName?: { text?: string };
+        types?: string[];
+        location?: { latitude?: number; longitude?: number };
+        viewport?: {
+          low?: { latitude?: number; longitude?: number };
+          high?: { latitude?: number; longitude?: number };
+        };
+        addressComponents?: Array<{ shortText?: string; types?: string[] }>;
+      }>;
+    }>('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      fieldMask: 'places.displayName,places.types,places.location,places.viewport,places.addressComponents',
+      body: { textQuery: input.query, regionCode: input.countryCode.toLowerCase(), languageCode: 'en', pageSize: 5 },
+      missing: false,
+    });
+    const wanted = GOOGLE_LOCATE_TYPES[input.kind];
+    const country = input.countryCode.toUpperCase();
+    const p = (body?.places ?? []).find(
+      (place) =>
+        typeof place.location?.latitude === 'number' &&
+        typeof place.location?.longitude === 'number' &&
+        (place.types ?? []).some((t) => wanted.has(t)) &&
+        (place.addressComponents ?? []).every((c) => !c.types?.includes('country') || c.shortText === country),
+    );
+    if (!p) return null;
+    const { low, high } = p.viewport ?? {};
+    return {
+      name: p.displayName?.text ?? input.query,
+      lat: p.location!.latitude!,
+      lng: p.location!.longitude!,
+      bounds: boxOrNull(low?.longitude, low?.latitude, high?.longitude, high?.latitude),
     };
   }
 
@@ -301,6 +390,8 @@ const MAPBOX_TRAFFIC_MATRIX_POINTS = 10;
  * state, country or postcode, which is no errand stop.
  */
 const MAPBOX_TYPES = 'poi,address,street,block,neighborhood,locality,district,place,city';
+/** What Mapbox's geocoding looks for, for each kind the panel finds: a state, or a town or part of one. */
+const MAPBOX_LOCATE_TYPES = { state: 'region', city: 'place,locality,district,neighborhood' } as const;
 /** Suggestions that are searches of their own rather than places, which retrieve gives no position for. */
 const MAPBOX_NOT_PLACES = new Set(['category', 'brand', 'query']);
 /** providerFetch's own words for a redirect, which say where it pointed and never quote the address called. */
@@ -442,6 +533,34 @@ export class MapboxMapsAdapter implements MapsAdapter {
       lng,
       // A state picked as itself names itself; anything in one names it in its context.
       region: (p.feature_type === 'region' ? p.name : p.context?.region?.name) ?? null,
+    };
+  }
+
+  async locate(input: { query: string; countryCode: string; kind: 'state' | 'city' }) {
+    // Geocoding rather than the Search Box: it finds whole states too, and gives the box each fills.
+    const body = await this.call<{
+      features?: Array<{
+        geometry?: { coordinates?: [number, number] };
+        properties?: { name?: string; bbox?: [number, number, number, number] };
+      }>;
+    }>(
+      this.url('/search/geocode/v6/forward', {
+        q: input.query.slice(0, 256),
+        country: input.countryCode.toLowerCase(),
+        types: MAPBOX_LOCATE_TYPES[input.kind],
+        limit: '1',
+        language: 'en',
+      }),
+    );
+    const feature = body?.features?.[0];
+    const [lng, lat] = feature?.geometry?.coordinates ?? [];
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+    const [west, south, east, north] = feature?.properties?.bbox ?? [];
+    return {
+      name: feature?.properties?.name ?? input.query,
+      lat,
+      lng,
+      bounds: boxOrNull(west, south, east, north),
     };
   }
 
@@ -587,6 +706,18 @@ export class FakeMapsAdapter implements MapsAdapter {
 
   async place(placeId: string) {
     return FAKE_PLACES.find((p) => p.placeId === placeId) ?? null;
+  }
+
+  /** The first place whose name, address and state hold every word asked, "State" aside. */
+  async locate(input: { query: string }) {
+    const words = input.query
+      .toLowerCase()
+      .split(/[\s,]+/)
+      .filter((w) => w.length > 1 && w !== 'state');
+    const found = FAKE_PLACES.find(
+      (p) => words.length && words.every((w) => `${p.name} ${p.address} ${p.region}`.toLowerCase().includes(w)),
+    );
+    return found ? { name: found.name, lat: found.lat, lng: found.lng, bounds: null } : null;
   }
 
   async route(points: LatLng[]) {

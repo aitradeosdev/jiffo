@@ -30,7 +30,8 @@ Jiffo works in areas, drawn in cities, in states, in a country.
   - **The errand's area and state:** the server works out the pickup's area, and its state, from the map. Whatever the app says is never used: before areas, the app named the state, and nothing checked it against the stops.
 - **Who can change them:** anyone who may change settings. Every change is in the audit log: a new boundary by its size, not its points.
 - **In the panel (Settings, Places):**
-  - **Seeing them:** pick a state to see its cities and areas on Google's map. Cities are outlined; areas are green when on and grey when off.
+  - **Seeing them:** pick a state to see its cities and areas on the maps provider's own map (Google's or Mapbox's). Cities are outlined; areas are green when on and grey when off.
+  - **Finding where to draw:** a state with nothing drawn yet is shown as the maps provider finds it by name. For a new city, type its name and tap **Find on map** (or the keyboard's Go): the map goes to it, in the state picked. A new area starts with the map on its city. Each name is looked up once per visit to the page; when the provider can't find one, move the map there by hand.
   - **Drawing:** "Add a city", or "Add an area" under a city, then click the map at each corner and click the first corner again to finish. Drag corners to adjust, then name it and save.
   - **Reshaping and switching:** "Reshape" moves the corners of one already drawn, and can rename it; its switch turns it on or off.
   - **Pasting:** a shape drawn in another tool can be pasted as GeoJSON instead.

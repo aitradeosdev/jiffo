@@ -541,6 +541,105 @@ describe('Google maps', () => {
     expect(route).toEqual({ distanceMeters: 9_120, durationSeconds: 1_260 });
     expect(JSON.parse(String(calls[0]!.init.body)).intermediates).toHaveLength(1);
   });
+
+  /** A place in Text Search's answer: Nigeria's, of the given types, unless said otherwise. */
+  const found = (name: string, types: string[], at: [number, number], country = 'NG') => ({
+    displayName: { text: name },
+    types,
+    location: { latitude: at[0], longitude: at[1] },
+    addressComponents: [
+      { longText: country === 'NG' ? 'Nigeria' : 'Elsewhere', shortText: country, types: ['country'] },
+    ],
+  });
+
+  it("finds a state or city by name for the panel's map, with the box Google shows it in", async () => {
+    const { impl, calls } = fakeFetch(() =>
+      Response.json({
+        places: [
+          {
+            ...found('Lagos', ['administrative_area_level_1', 'political'], [6.52, 3.58]),
+            viewport: { low: { latitude: 6.37, longitude: 2.7 }, high: { latitude: 6.7, longitude: 4.35 } },
+          },
+        ],
+      }),
+    );
+    const maps = new GoogleMapsAdapter('key-1', impl);
+    expect(await maps.locate({ query: 'Lagos State', countryCode: 'NG', kind: 'state' })).toEqual({
+      name: 'Lagos',
+      lat: 6.52,
+      lng: 3.58,
+      bounds: { west: 2.7, south: 6.37, east: 4.35, north: 6.7 },
+    });
+    const [call] = calls;
+    expect(call!.url).toBe('https://places.googleapis.com/v1/places:searchText');
+    expect(call!.init.headers).toMatchObject({
+      'x-goog-api-key': 'key-1',
+      'x-goog-fieldmask': 'places.displayName,places.types,places.location,places.viewport,places.addressComponents',
+    });
+    expect(JSON.parse(String(call!.init.body))).toEqual({
+      textQuery: 'Lagos State',
+      regionCode: 'ng',
+      languageCode: 'en',
+      pageSize: 5,
+    });
+  });
+
+  it("takes the first answer that is a place of the kind asked, in the country: Google's type filter skips place names", async () => {
+    const places = [
+      found('Lagos State Secretariat', ['local_government_office', 'point_of_interest'], [6.6, 3.36]),
+      found('Lagos', ['locality', 'political'], [6.45, 3.39]),
+      found('Lagos', ['administrative_area_level_1', 'political'], [6.52, 3.58]),
+    ];
+    const maps = new GoogleMapsAdapter('key-1', fakeFetch(() => Response.json({ places })).impl);
+    expect(await maps.locate({ query: 'Lagos State', countryCode: 'NG', kind: 'state' })).toMatchObject({
+      lat: 6.52,
+      lng: 3.58,
+    });
+    expect(await maps.locate({ query: 'Lagos', countryCode: 'NG', kind: 'city' })).toMatchObject({
+      lat: 6.45,
+      lng: 3.39,
+    });
+    // The same name in another country, or only a building of that name, is no answer.
+    const abroad = [found('Niger', ['country', 'political'], [17.6, 8.08], 'NE')];
+    const away = new GoogleMapsAdapter('key-1', fakeFetch(() => Response.json({ places: abroad })).impl);
+    expect(await away.locate({ query: 'Niger State', countryCode: 'NG', kind: 'state' })).toBeNull();
+    const state = [found('Niger', ['administrative_area_level_1', 'political'], [9.6, 6.55], 'NE')];
+    const wrongCountry = new GoogleMapsAdapter('key-1', fakeFetch(() => Response.json({ places: state })).impl);
+    expect(await wrongCountry.locate({ query: 'Niger State', countryCode: 'NG', kind: 'state' })).toBeNull();
+    const shop = [found('Ikeja City Mall', ['shopping_mall', 'point_of_interest'], [6.61, 3.36])];
+    const mall = new GoogleMapsAdapter('key-1', fakeFetch(() => Response.json({ places: shop })).impl);
+    expect(await mall.locate({ query: 'Ikeja, Lagos State', countryCode: 'NG', kind: 'city' })).toBeNull();
+  });
+
+  it('finds nothing as null, shows a place without a usable box at its point, and a refused key as unavailable', async () => {
+    let body: unknown = { places: [] };
+    const maps = new GoogleMapsAdapter('key-1', fakeFetch(() => Response.json(body)).impl);
+    expect(await maps.locate({ query: 'Nowhere', countryCode: 'NG', kind: 'city' })).toBeNull();
+    body = {};
+    expect(await maps.locate({ query: 'Nowhere', countryCode: 'NG', kind: 'city' })).toBeNull();
+    body = {
+      places: [
+        {
+          ...found('Ikeja', ['locality', 'political'], [6.6, 3.35]),
+          // Upside down: not a box to show.
+          viewport: { low: { latitude: 6.7, longitude: 3.4 }, high: { latitude: 6.5, longitude: 3.3 } },
+        },
+      ],
+    };
+    expect(await maps.locate({ query: 'Ikeja', countryCode: 'NG', kind: 'city' })).toEqual({
+      name: 'Ikeja',
+      lat: 6.6,
+      lng: 3.35,
+      bounds: null,
+    });
+    // Google answers 400 for a key it refuses: that is no "not found", which would send the admin looking by hand.
+    for (const status of [400, 403, 500]) {
+      const down = new GoogleMapsAdapter('key-1', fakeFetch(() => new Response('{}', { status })).impl);
+      await expect(down.locate({ query: 'Ikeja', countryCode: 'NG', kind: 'city' })).rejects.toMatchObject({
+        status: 503,
+      });
+    }
+  });
 });
 
 describe('Mapbox maps', () => {
@@ -748,6 +847,53 @@ describe('Mapbox maps', () => {
       throw new Error(`fetch failed for https://api.mapbox.com/?access_token=${TOKEN}`);
     }) as typeof fetch);
     await expect(down.check()).rejects.toThrow(/^Mapbox couldn't be reached$/);
+  });
+
+  it("finds a state or city by name for the panel's map, with its box, from Mapbox's geocoding in the country", async () => {
+    const { impl, calls } = fakeFetch(() =>
+      Response.json({
+        features: [
+          {
+            geometry: { coordinates: [3.58, 6.52] },
+            properties: { name: 'Lagos', feature_type: 'region', bbox: [2.7, 6.37, 4.35, 6.7] },
+          },
+        ],
+      }),
+    );
+    const maps = new MapboxMapsAdapter(TOKEN, impl);
+    expect(await maps.locate({ query: 'Lagos State', countryCode: 'NG', kind: 'state' })).toEqual({
+      name: 'Lagos',
+      lat: 6.52,
+      lng: 3.58,
+      bounds: { west: 2.7, south: 6.37, east: 4.35, north: 6.7 },
+    });
+    const url = calls[0]!.url;
+    expect(url.startsWith('https://api.mapbox.com/search/geocode/v6/forward?')).toBe(true);
+    expect(query(url).get('q')).toBe('Lagos State');
+    expect(query(url).get('country')).toBe('ng');
+    expect(query(url).get('types')).toBe('region');
+    expect(query(url).get('limit')).toBe('1');
+    expect(query(url).get('access_token')).toBe(TOKEN);
+    // A city is a town, or a part of one: Lekki is a neighbourhood to Mapbox.
+    await maps.locate({ query: 'Lekki, Lagos State', countryCode: 'NG', kind: 'city' });
+    expect(query(calls[1]!.url).get('types')).toBe('place,locality,district,neighborhood');
+  });
+
+  it('finds nothing as null, shows a place without a box at its point, and never shows the token', async () => {
+    let body: unknown = { features: [] };
+    const maps = new MapboxMapsAdapter(TOKEN, fakeFetch(() => Response.json(body)).impl);
+    expect(await maps.locate({ query: 'Nowhere', countryCode: 'NG', kind: 'city' })).toBeNull();
+    body = { features: [{ geometry: { coordinates: [3.35, 6.6] }, properties: { name: 'Ikeja' } }] };
+    expect(await maps.locate({ query: 'Ikeja', countryCode: 'NG', kind: 'city' })).toEqual({
+      name: 'Ikeja',
+      lat: 6.6,
+      lng: 3.35,
+      bounds: null,
+    });
+    const down = new MapboxMapsAdapter(TOKEN, fakeFetch(() => new Response('{}', { status: 401 })).impl);
+    const failed = await down.locate({ query: 'Ikeja', countryCode: 'NG', kind: 'city' }).catch((e: unknown) => e);
+    expect(failed).toMatchObject({ status: 503 });
+    expect(JSON.stringify(failed)).not.toContain(TOKEN);
   });
 });
 

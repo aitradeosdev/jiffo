@@ -21,7 +21,7 @@ const corners = (box: { west: number; south: number; east: number; north: number
  * cities as outlines and their areas filled (green when on, grey when off), with Terra Draw on top while one is
  * being drawn or reshaped. Mapbox's library is loaded only here, when the page needs it.
  */
-export function PlacesMapbox({ apiKey, shapes, edit, onShape, fitKey }: PlacesMapProps) {
+export function PlacesMapbox({ apiKey, shapes, edit, onShape, fitKey, focus }: PlacesMapProps) {
   const element = useRef<HTMLDivElement>(null);
   const map = useRef<MapboxMap | null>(null);
   const draw = useRef<TerraDraw | null>(null);
@@ -129,6 +129,14 @@ export function PlacesMapbox({ apiKey, shapes, edit, onShape, fitKey }: PlacesMa
     if (box) m.fitBounds(corners(box), { padding: 32, duration: 0 });
     // Only when fitKey changes: shapes changing as one is drawn must not move the map.
   }, [fitKey, ready]);
+
+  // Go where asked: the state picked, the city named, or a new area's city.
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready || !focus) return;
+    m.fitBounds(corners(focus.box), { padding: 32, duration: 0 });
+    // Only when asked again: the same box can be asked for twice, with a new key.
+  }, [focus?.key, ready]);
 
   // Terra Draw: drawing a new shape, reshaping one, or idle.
   useEffect(() => {

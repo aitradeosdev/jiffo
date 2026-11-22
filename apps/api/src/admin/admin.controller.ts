@@ -26,6 +26,7 @@ import { SettingsAdminService } from './settings-admin.service';
 import { ServiceAreasAdminService } from './service-areas-admin.service';
 import { BoundaryInput } from '../countries/service-areas';
 import { MAPS, type MapsAdapter } from '../adapters/maps';
+import { RateLimit } from '../common/rate-limit';
 import { ProvidersAdminService } from './providers-admin.service';
 import { APPLICATION_STATUSES, ApplicationsAdminService } from './applications-admin.service';
 import { ID_CHECK_STATUSES, IdChecksAdminService } from './id-checks-admin.service';
@@ -178,6 +179,11 @@ const ActBody = z.object({
   split: z.object({ agentKobo: kobo, jiffoKobo: kobo, itemsToAgentKobo: kobo, chargeCustomerKobo: kobo }).optional(),
 });
 const CountryQuery = z.object({ country: z.string().length(2).toUpperCase() });
+/** A state or city to find on the map by name (Settings, Places). */
+const LocateQuery = CountryQuery.extend({
+  kind: z.enum(['state', 'city']),
+  q: z.string().trim().min(2).max(120),
+});
 const ApprovalsQuery = z.object({
   done: z
     .enum(['true', 'false'])
@@ -472,6 +478,20 @@ export class AdminController {
       ...(await this.serviceAreas.list(query.country)),
       map: { engine: this.maps.drawn.engine, key: this.maps.drawn.panelKey },
     };
+  }
+
+  /**
+   * A state or city found by name through the maps provider in use, for the panel's map to go to before one is drawn
+   * there. Each search asks the provider once: the panel remembers what it found.
+   */
+  @Get('places/locate')
+  @Needs('read')
+  // Each is a paid call to the maps provider, as the apps' address search is.
+  @RateLimit('paid')
+  async locatePlace(@Query(new ZodBody(LocateQuery)) query: z.infer<typeof LocateQuery>) {
+    const found = await this.maps.locate({ query: query.q, countryCode: query.country, kind: query.kind });
+    if (!found) throw notFound('place_not_found', 'Not found on the map');
+    return found;
   }
 
   @Post('cities')
