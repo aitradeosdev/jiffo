@@ -595,6 +595,18 @@ export const SECTIONS: Section[] = [
         help: 'Of the way to where they are heading, in a straight line. 5% to 90%.',
       },
       {
+        path: 'matching.predictionShareBps',
+        label: "Ranking: an agent's chance of taking the offer counts for",
+        kind: 'percent',
+        help: "Acceptance prediction: a share of the ranking score goes by each agent's chance of taking it, learnt nightly from each state's answered offers. Until a state has enough, ranking is as without it. 0 to 50%; 0 turns it off.",
+      },
+      {
+        path: 'matching.predictionMinOffers',
+        label: 'Answered offers a state needs before it is learnt from',
+        kind: 'count',
+        help: 'Over the last 60 days. A model not refitted for a week stops counting. At least 20.',
+      },
+      {
         path: 'matching.fakeGpsHoldHours',
         label: 'A fake-GPS flag keeps the agent from errands for',
         kind: 'hours',

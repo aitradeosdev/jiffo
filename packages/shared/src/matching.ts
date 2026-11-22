@@ -215,6 +215,12 @@ export interface RankParts {
   rating: number;
   waiting: number;
   boost: number;
+  /**
+   * Where the state has a model (M13): the agent's chance of taking the offer, and the score before it was taken in.
+   * The total then has it in.
+   */
+  prediction?: number;
+  beforePrediction?: number;
   total: number;
 }
 

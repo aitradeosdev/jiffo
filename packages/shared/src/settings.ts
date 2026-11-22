@@ -84,6 +84,8 @@ export const DEFAULT_MATCHING_SETTINGS = {
   destinationMode: true,
   destinationUsesPerDay: 2,
   destinationCloserBps: 2_000,
+  predictionShareBps: 2_000,
+  predictionMinOffers: 500,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -244,6 +246,12 @@ export const MatchingSettingsSchema = z
     destinationMode: z.boolean().default(true),
     destinationUsesPerDay: z.number().int().min(1).max(10).default(2),
     destinationCloserBps: z.number().int().min(500).max(9_000).default(2_000),
+    /**
+     * Acceptance prediction (M13): once a state has this many answered offers lately, each agent's chance of
+     * taking an offer counts for this share of their ranking score, in basis points. 0: never.
+     */
+    predictionShareBps: z.number().int().min(0).max(5_000).default(2_000),
+    predictionMinOffers: z.number().int().min(20).max(100_000).default(500),
   })
   .refine((m) => (m.searchStepsKm.at(-1) ?? 0) <= m.boardRadiusKm, {
     message: "The last search step can't reach past how far the board reaches",

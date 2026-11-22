@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { DB, type Db } from '../db/database.module';
 import { categories, states, users } from '../db/schema';
+import { PredictionService } from '../matching/prediction.service';
 import { RankingService } from '../matching/ranking.service';
 
 /** The periods the dashboard looks back over, in days. */
@@ -60,15 +61,25 @@ export class MatchingStatsService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly ranking: RankingService,
+    private readonly prediction: PredictionService,
   ) {}
 
   async dashboard(countryCode: string, days: DashboardDays, stateCode?: string) {
     const since = new Date(Date.now() - days * 86_400_000);
-    const [{ places, total }, agents] = await Promise.all([
+    const [{ places, total }, agents, predictions] = await Promise.all([
       this.places(countryCode, since, stateCode),
       this.agents(countryCode, since, stateCode),
+      // Acceptance prediction (M13): each state's newest model, whether in use, and how it learnt.
+      this.prediction.latest(countryCode),
     ]);
-    return { days, since, places, total, agents };
+    return {
+      days,
+      since,
+      places,
+      total,
+      agents,
+      predictions: stateCode ? predictions.filter((p) => p.stateCode === stateCode) : predictions,
+    };
   }
 
   private async places(countryCode: string, since: Date, stateCode?: string) {
