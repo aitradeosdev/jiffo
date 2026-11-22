@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  shapeMissing,
   boundaryField,
   boundaryFrom,
   boundsOf,
@@ -112,5 +113,14 @@ describe('shapes', () => {
     expect(boundaryField({ reshaping: true, changed: false, drawn: shape })).toBe('');
     expect(boundaryField({ reshaping: true, changed: true, drawn: shape })).toBe(JSON.stringify(shape));
     expect(boundaryField({ reshaping: false, changed: true, drawn: null })).toBe('');
+  });
+});
+
+/** A new city or area is a name and a shape: sent without one, the panel says what's missing (Places). */
+describe('a new place without a shape', () => {
+  it('is asked for its shape, drawn or pasted, before going to the server', () => {
+    expect(shapeMissing('')).toMatch(/Draw the outline on the map, or paste one/);
+    expect(shapeMissing('   ')).toMatch(/paste one/);
+    expect(shapeMissing('{"type":"Polygon","coordinates":[]}')).toBeNull();
   });
 });
