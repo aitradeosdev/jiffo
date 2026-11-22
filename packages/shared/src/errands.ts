@@ -94,6 +94,11 @@ export const ERRAND_EVENTS = {
   },
   /** "Get new agent": the session ends and the errand goes back to matching, with no cancellation fee. */
   release_agent: { from: ['accepted'], to: 'requested', actors: ['customer'] },
+  /**
+   * A scheduled errand's agent isn't online a few minutes before its start (docs/matching.md, M12): it is taken back
+   * and sent as urgent, and counts against them as leaving it.
+   */
+  take_back: { from: ['accepted'], to: 'requested', actors: ['system'] },
 
   start: {
     from: ['accepted'],

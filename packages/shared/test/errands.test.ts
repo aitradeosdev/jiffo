@@ -92,6 +92,9 @@ describe('new prices before Start service', () => {
 
   it('sends the errand back to matching when the customer gets a new agent', () => {
     expect(nextState('accepted', 'release_agent', ctx('customer'))).toBe('requested');
+    // A scheduled errand taken back from an agent not online in time (docs/matching.md, M12): the system's alone.
+    expect(nextState('accepted', 'take_back', ctx('system'))).toBe('requested');
+    expect(() => nextState('accepted', 'take_back', ctx('agent'))).toThrow();
   });
 });
 

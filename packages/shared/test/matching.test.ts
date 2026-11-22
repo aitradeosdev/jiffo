@@ -4,6 +4,7 @@ import { CountrySettingsSchema, NIGERIA_DEFAULT_SETTINGS } from '../src/settings
 import {
   averageReliability,
   backToBackFrom,
+  lateForScheduled,
   matchRefusal,
   offerCounts,
   pausesOffers,
@@ -22,6 +23,7 @@ const agent = (over: Partial<MatchAgent> = {}): MatchAgent => ({
   takesPurchases: true,
   workRadiusKm: null,
   held: [],
+  completionRate: null,
   ...over,
 });
 
@@ -33,6 +35,7 @@ const errand = (over: Partial<MatchErrand> = {}): MatchErrand => ({
   pickupMeters: 1_500,
   keptApart: false,
   gaveUp: false,
+  scheduled: false,
   ...over,
 });
 
@@ -41,6 +44,8 @@ const held = (over: Partial<HeldErrand> = {}): HeldErrand => ({
   startsLater: false,
   status: 'accepted',
   dropoff: null,
+  startsAt: null,
+  pickup: null,
   ...over,
 });
 
@@ -138,6 +143,9 @@ describe('the Matching settings', () => {
       backToBack: true,
       backToBackDropoffKm: 1,
       backToBackPickupKm: 3,
+      scheduledMinCompletionBps: 5_000,
+      scheduledOnlineMinutes: 15,
+      scheduledTakeBackMinutes: 10,
       offers: true,
       offerSeconds: 20,
       missedOffersOffline: 3,
@@ -331,5 +339,47 @@ describe('back-to-back offers', () => {
     expect(Math.round(haversineMeters(dropoff, east(1)))).toBeGreaterThan(990);
     expect(Math.round(haversineMeters(dropoff, east(1)))).toBeLessThan(1_010);
     expect(haversineMeters(dropoff, dropoff)).toBe(0);
+  });
+});
+
+/**
+ * Scheduled errands (docs/matching.md, M12), as Bolt's scheduled rides: taken ahead from the board only by agents who
+ * finish what they accept, and never left with one who isn't ready.
+ */
+describe('scheduled errands', () => {
+  it('go only to agents with a completion rate of 50% or more, and to new agents with none yet', () => {
+    const scheduled = errand({ scheduled: true });
+    expect(matchRefusal(agent({ completionRate: 0.4 }), scheduled, rules)).toBe('completion_low');
+    expect(matchRefusal(agent({ completionRate: 0.5 }), scheduled, rules)).toBeNull();
+    expect(matchRefusal(agent({ completionRate: null }), scheduled, rules)).toBeNull();
+    // Errands now go to anyone, as before.
+    expect(matchRefusal(agent({ completionRate: 0.4 }), errand(), rules)).toBeNull();
+    // As admin sets the bar.
+    expect(
+      matchRefusal(agent({ completionRate: 0.4 }), scheduled, { ...rules, scheduledMinCompletionBps: 3_000 }),
+    ).toBeNull();
+  });
+
+  it('start with the agreed values, the errand taken back before the agent must be online', () => {
+    expect(rules).toMatchObject({
+      scheduledMinCompletionBps: 5_000,
+      scheduledOnlineMinutes: 15,
+      scheduledTakeBackMinutes: 10,
+    });
+    const bad = { ...NIGERIA_DEFAULT_SETTINGS, matching: { ...rules, scheduledTakeBackMinutes: 20 } };
+    expect(CountrySettingsSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('keep an agent from an urgent errand that would make them late for one they hold', () => {
+    const start = Date.parse('2026-11-22T12:00:00Z');
+    const ahead = held({ startsLater: true, startsAt: new Date(start), pickup: { lat: 6.5, lng: 3.4 } });
+    // Ten minutes to drive between, at most.
+    const tenMinutes = () => 600;
+    const dropoff = { lat: 6.51, lng: 3.4 };
+    expect(lateForScheduled([ahead], { at: start - 15 * 60_000, dropoff }, tenMinutes)).toBe(false);
+    expect(lateForScheduled([ahead], { at: start - 5 * 60_000, dropoff }, tenMinutes)).toBe(true);
+    // An errand not taken ahead, or one with nothing scheduled, never.
+    expect(lateForScheduled([held()], { at: start, dropoff }, tenMinutes)).toBe(false);
+    expect(lateForScheduled([], { at: start, dropoff }, tenMinutes)).toBe(false);
   });
 });

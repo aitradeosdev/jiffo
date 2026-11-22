@@ -253,6 +253,16 @@ export class CandidatesService {
     } else if (refused) {
       return null;
     }
+    // Holding a scheduled errand taken ahead (M12): not one that would make them late for it, counting the rest of
+    // an errand they finish first.
+    const from =
+      following && !following.atTheEnd
+        ? {
+            at: following.dropoff,
+            afterSeconds: TravelTimesService.estimate(haversineMeters(me, following.dropoff), rules).durationSeconds,
+          }
+        : undefined;
+    if (errand.urgent && (await this.eligibility.makesLate(me, errand.id, rules, this.db, from))) return null;
     return { agentId: near.agentId, straightMeters: Math.round(pickupMeters), lat: me.lat, lng: me.lng, following };
   }
 }

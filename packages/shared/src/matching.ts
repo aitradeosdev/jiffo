@@ -11,6 +11,9 @@ export interface HeldErrand {
   startsLater: boolean;
   status: ErrandState;
   dropoff: LatLng | null;
+  /** A scheduled errand's start, and its pickup: what an agent holding it ahead must not be late for (M12). */
+  startsAt: Date | null;
+  pickup: LatLng | null;
 }
 
 /** What matching knows about the agent asking. */
@@ -22,6 +25,8 @@ export interface MatchAgent {
   /** How far they said they'd travel to a pickup; null for as far as Jiffo allows. */
   workRadiusKm: number | null;
   held: HeldErrand[];
+  /** Of the errands they accepted lately, the share they didn't leave (M4); null with none to count. */
+  completionRate: number | null;
 }
 
 /** What matching knows about an errand, as seen by that agent. */
@@ -39,6 +44,8 @@ export interface MatchErrand {
   keptApart: boolean;
   /** This agent left it, or its customer replaced them on it. */
   gaveUp: boolean;
+  /** Scheduled for later (M12): taken ahead only by agents who finish what they accept. */
+  scheduled: boolean;
 }
 
 /** Why an agent may not get an errand. */
@@ -51,9 +58,12 @@ export type MatchRefusal =
   | 'no_purchases'
   | 'too_far'
   | 'unavailable'
-  | 'gave_up';
+  | 'gave_up'
+  | 'completion_low'
+  /** It would make them late for a scheduled errand they hold (M12). */
+  | 'late_for_scheduled';
 
-type Rules = Pick<CountrySettings['matching'], 'boardRadiusKm' | 'maxBoardErrands'>;
+type Rules = Pick<CountrySettings['matching'], 'boardRadiusKm' | 'maxBoardErrands' | 'scheduledMinCompletionBps'>;
 
 /** How far from the agent a pickup may be, in km: their own work radius, within what admin allows. */
 export const agentReachKm = (agent: Pick<MatchAgent, 'workRadiusKm'>, rules: Pick<Rules, 'boardRadiusKm'>) =>
@@ -95,7 +105,34 @@ export function matchRefusal(
   if (errand.pickupMeters > agentReachKm(agent, rules) * 1000) return 'too_far';
   if (errand.keptApart) return 'unavailable';
   if (errand.gaveUp) return 'gave_up';
+  // Scheduled errands go to agents who finish what they accept (M12), as Bolt's do; a new agent has no rate yet.
+  if (
+    errand.scheduled &&
+    agent.completionRate !== null &&
+    agent.completionRate * 10_000 < rules.scheduledMinCompletionBps
+  ) {
+    return 'completion_low';
+  }
   return null;
+}
+
+/**
+ * Whether an urgent errand would make the agent late for a scheduled one they hold, taken ahead (M12): finished at
+ * `finish.at` at its last drop-off, they must still reach that one's pickup by its start. `secondsBetween` is how
+ * long the drive between two places takes.
+ */
+export function lateForScheduled(
+  held: HeldErrand[],
+  finish: { at: number; dropoff: LatLng },
+  secondsBetween: (a: LatLng, b: LatLng) => number,
+): boolean {
+  return held.some(
+    (e) =>
+      e.startsLater &&
+      !!e.startsAt &&
+      !!e.pickup &&
+      finish.at + secondsBetween(finish.dropoff, e.pickup) * 1000 > e.startsAt.getTime(),
+  );
 }
 
 type BackToBackRules = Pick<CountrySettings['matching'], 'backToBack' | 'backToBackDropoffKm' | 'backToBackPickupKm'>;

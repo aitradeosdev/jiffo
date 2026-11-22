@@ -78,6 +78,9 @@ export const DEFAULT_MATCHING_SETTINGS = {
   backToBack: true,
   backToBackDropoffKm: 1,
   backToBackPickupKm: 3,
+  scheduledMinCompletionBps: 5_000,
+  scheduledOnlineMinutes: 15,
+  scheduledTakeBackMinutes: 10,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -223,10 +226,22 @@ export const MatchingSettingsSchema = z
     backToBack: z.boolean().default(true),
     backToBackDropoffKm: z.number().min(0.2).max(5).default(1),
     backToBackPickupKm: z.number().min(0.5).max(10).default(3),
+    /**
+     * Scheduled errands (M12): taken ahead only by agents whose completion rate is at least this, in basis points
+     * (Bolt's bar is 50%). The agent is reminded to be online this many minutes before the start, and if they
+     * aren't online the second number of minutes before, the errand is taken back and sent as urgent.
+     */
+    scheduledMinCompletionBps: z.number().int().min(0).max(10_000).default(5_000),
+    scheduledOnlineMinutes: z.number().int().min(5).max(120).default(15),
+    scheduledTakeBackMinutes: z.number().int().min(1).max(60).default(10),
   })
   .refine((m) => (m.searchStepsKm.at(-1) ?? 0) <= m.boardRadiusKm, {
     message: "The last search step can't reach past how far the board reaches",
     path: ['searchStepsKm'],
+  })
+  .refine((m) => m.scheduledTakeBackMinutes < m.scheduledOnlineMinutes, {
+    message: 'A scheduled errand is taken back after the agent was due online, so nearer its start',
+    path: ['scheduledTakeBackMinutes'],
   })
   .refine((m) => m.acceptanceMinOffers <= m.acceptanceOffers, {
     message: "The acceptance rate can't need more offers than the rate is over",
