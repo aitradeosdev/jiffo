@@ -142,7 +142,11 @@ export function PlacesMapbox({ apiKey, shapes, edit, onShape, fitKey }: PlacesMa
 
   return (
     <div className="relative h-[60vh] min-h-80 overflow-hidden rounded-2xl bg-surface-2">
-      <div ref={element} className="absolute inset-0" />
+      {/* Mapbox's stylesheet makes its container position: relative, which undoes absolute positioning: the
+          container fills a box of its own instead, or it would be 0 pixels tall and the map unseen. */}
+      <div className="absolute inset-0">
+        <div ref={element} className="h-full w-full" />
+      </div>
       {problem ? (
         <p role="alert" className="absolute inset-x-4 top-4 rounded-xl bg-surface px-3.5 py-2.5 text-sm font-medium">
           {problem}
