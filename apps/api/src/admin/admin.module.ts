@@ -10,6 +10,7 @@ import { SettingsAdminService } from './settings-admin.service';
 import { ServiceAreasAdminService } from './service-areas-admin.service';
 import { PricesAdminService } from './prices-admin.service';
 import { MatchingPlacesAdminService } from './matching-places-admin.service';
+import { MatchingStatsService } from './matching-stats.service';
 import { PushModule } from '../push/push.module';
 import { AdminAuthController } from './admin-auth.controller';
 import { AdminAuthService } from './admin-auth.service';
@@ -48,6 +49,7 @@ import { StaffAlertsAdminService } from './staff-alerts-admin.service';
     ServiceAreasAdminService,
     PricesAdminService,
     MatchingPlacesAdminService,
+    MatchingStatsService,
     TeamService,
     StaffMail,
     PasskeysService,

@@ -656,6 +656,11 @@ export const errands = pgTable(
      * can differ from the country's. Null for errands opened before places set their own.
      */
     broadcastReachMeters: integer('broadcast_reach_m'),
+    /**
+     * When its search first reached its last step and it opened to everyone (M8): kept when a raised fee starts the
+     * search again, for the dashboard's share opened to everyone (M15).
+     */
+    openedToEveryoneAt: timestamp('opened_to_everyone_at', { withTimezone: true }),
     itemAmountKobo: kobo('item_amount_kobo'),
     scheduledFor: timestamp('scheduled_for', { withTimezone: true }),
     settingsVersion: integer('settings_version').notNull(),
@@ -668,6 +673,11 @@ export const errands = pgTable(
     pinAttempts: smallint('pin_attempts').notNull().default(0),
     version: integer('version').notNull().default(0),
     acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    /**
+     * When the agent holding it first reported a position at the pickup (docs/matching.md, M15), for predicted
+     * against actual pickup time. Cleared when the agent leaves it.
+     */
+    reachedPickupAt: timestamp('reached_pickup_at', { withTimezone: true }),
     startedAt: timestamp('started_at', { withTimezone: true }),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
     /**

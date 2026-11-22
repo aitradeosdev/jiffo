@@ -14,7 +14,9 @@ import {
   admins,
   agentProfiles,
   conversations,
+  errandBroadcasts,
   errandEvents,
+  errandOffers,
   errandRatings,
   errandStops,
   errands,
@@ -67,6 +69,9 @@ const agentFields = { id: agent.id, firstName: agent.firstName, lastName: agent.
 /** Errands as support sees them: every errand, its whole history, and support's own actions. */
 /** The most drop-off photos the queue lists at once; it says how many more there are. */
 const DROPOFFS_SHOWN = 200;
+
+/** Agents told of an errand open to everyone listed at most on its page; the total is given beside. */
+const BROADCASTS_LISTED = 500;
 
 @Injectable()
 export class ErrandsAdminService {
@@ -292,6 +297,69 @@ export class ErrandsAdminService {
     };
   }
 
+  /**
+   * Who was offered the errand, in the order they were, ranked how and with what answer, and who was told once it
+   * was open to everyone (docs/matching.md, M15): for disputes and fairness complaints.
+   */
+  private async offerLog(errandId: string) {
+    const agent = { id: users.id, firstName: users.firstName, lastName: users.lastName };
+    const [offers, told, [toldCount]] = await Promise.all([
+      this.db
+        .select({
+          id: errandOffers.id,
+          agent,
+          rank: errandOffers.rank,
+          status: errandOffers.status,
+          feeKobo: errandOffers.feeKobo,
+          score: errandOffers.score,
+          parts: errandOffers.parts,
+          travelSeconds: errandOffers.travelSeconds,
+          travelEstimated: errandOffers.travelEstimated,
+          straightMeters: errandOffers.straightMeters,
+          counts: errandOffers.counts,
+          offeredAt: errandOffers.offeredAt,
+          expiresAt: errandOffers.expiresAt,
+          answeredAt: errandOffers.answeredAt,
+        })
+        .from(errandOffers)
+        .innerJoin(users, eq(users.id, errandOffers.agentId))
+        .where(eq(errandOffers.errandId, errandId))
+        .orderBy(asc(errandOffers.offeredAt), asc(errandOffers.id)),
+      // Each agent once, as last told: an agent told again at a raised fee is one agent.
+      this.db.execute<{
+        agent_id: string;
+        first_name: string | null;
+        last_name: string | null;
+        fee_kobo: number;
+        straight_meters: number;
+        told_at: Date;
+      }>(sql`
+        select * from (
+          select distinct on (b.agent_id) b.agent_id, u.first_name, u.last_name, b.fee_kobo, b.straight_meters,
+            b.told_at
+          from ${errandBroadcasts} b join ${users} u on u.id = b.agent_id
+          where b.errand_id = ${errandId}
+          order by b.agent_id, b.told_at desc
+        ) last order by told_at, straight_meters
+        limit ${BROADCASTS_LISTED}`),
+      this.db
+        .select({ n: sql<number>`count(distinct ${errandBroadcasts.agentId})::int` })
+        .from(errandBroadcasts)
+        .where(eq(errandBroadcasts.errandId, errandId)),
+    ]);
+    return {
+      offers,
+      broadcasts: told.rows.map((r) => ({
+        agent: { id: r.agent_id, firstName: r.first_name, lastName: r.last_name },
+        feeKobo: Number(r.fee_kobo),
+        straightMeters: r.straight_meters,
+        toldAt: r.told_at,
+      })),
+      /** How many agents were told in all: the list stops at BROADCASTS_LISTED. */
+      toldAgents: toldCount?.n ?? 0,
+    };
+  }
+
   /** One errand in full, as evidence: people, route, timeline, chat, photos and every money movement. */
   async detail(id: string) {
     const [errand] = await this.db.select().from(errands).where(eq(errands.id, id));
@@ -429,6 +497,7 @@ export class ErrandsAdminService {
       calls: await this.evidence.calls(errand.id),
       /** The GPS trail as kept now (G1, G4). */
       trail: await this.evidence.trailShown(errand.id),
+      ...(await this.offerLog(errand.id)),
       /** Its dispute evidence packs, newest first (E8). */
       evidence: await this.evidence.list(errand.id),
       customer: byId.get(errand.customerId) ?? null,

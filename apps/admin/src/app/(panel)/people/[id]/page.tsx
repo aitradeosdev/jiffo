@@ -21,6 +21,7 @@ import { OUTCOME, statusOf, type Check } from '@/lib/applications';
 import { idCheckStatus } from '@/lib/id-checks';
 import { AdjustForm } from './adjust';
 import { AccessForm, DecisionForm, IdDecisionForm, TierForm, type TierTerms } from './forms';
+import { share } from '@/lib/matching';
 
 export const metadata: Metadata = { title: 'Person' };
 
@@ -45,6 +46,15 @@ interface Detail {
     createdAt: string;
   };
   apps: string[];
+  /** An agent's matching figures (docs/matching.md, M15); null for a customer. */
+  matching: {
+    acceptanceRate: number | null;
+    countedOffers: number;
+    completionRate: number | null;
+    cancellations7d: number;
+    offersPausedUntil: string | null;
+    offers30d: { received: number; accepted: number; declined: number; expired: number };
+  } | null;
   devices: Array<{
     app: string;
     platform: string;
@@ -283,6 +293,26 @@ export default async function PersonPage({
                   value={d.agent.lastLocatedAt ? ago(d.agent.lastLocatedAt, country.timezone) : '—'}
                 />
               </div>
+            </Card>
+          ) : null}
+          {d.matching ? (
+            <Card title="Matching">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <Stat
+                  label={`Acceptance (last ${d.matching.countedOffers} counted)`}
+                  value={share(d.matching.acceptanceRate)}
+                />
+                <Stat label="Completion" value={share(d.matching.completionRate)} />
+                <Stat label="Left this week" value={String(d.matching.cancellations7d)} />
+                <Stat
+                  label="Offers paused until"
+                  value={d.matching.offersPausedUntil ? time(d.matching.offersPausedUntil) : 'Not paused'}
+                />
+              </div>
+              <p className="mt-3 text-sm text-ink-2">
+                Last 30 days: {d.matching.offers30d.received} offers, {d.matching.offers30d.accepted} accepted,{' '}
+                {d.matching.offers30d.declined} declined, {d.matching.offers30d.expired} ran out.
+              </p>
             </Card>
           ) : null}
           {d.apps.includes('customer') ? (

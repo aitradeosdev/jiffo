@@ -1174,6 +1174,7 @@ export class ErrandsService implements OnModuleInit {
       pinAttempts: 0,
       pendingOfferKobo: null,
       acceptedAt: null,
+      reachedPickupAt: null,
     };
 
     switch (event) {

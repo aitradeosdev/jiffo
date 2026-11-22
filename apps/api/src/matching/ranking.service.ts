@@ -111,6 +111,34 @@ export class RankingService {
   }
 
   /**
+   * How several agents stand, for the matching dashboard (M15): their acceptance rate over their last counted
+   * offers, completion rate and errands left this week, in one query.
+   */
+  async standings(agentIds: string[], countryCode: string) {
+    if (!agentIds.length)
+      return new Map<
+        string,
+        Pick<History, 'acceptanceRate' | 'countedOffers' | 'completionRate' | 'cancellations7d'>
+      >();
+    const rules = (await this.countries.currentSettings(countryCode)).settings.matching;
+    const all = await this.history(agentIds, rules);
+    return new Map(
+      agentIds.map((id) => {
+        const h = all.get(id)!;
+        return [
+          id,
+          {
+            acceptanceRate: h.acceptanceRate,
+            countedOffers: h.countedOffers,
+            completionRate: h.completionRate,
+            cancellations7d: h.cancellations7d,
+          },
+        ];
+      }),
+    );
+  }
+
+  /**
    * Each agent's own history, in one query. Their acceptance rate (M9) is over their last counted offers, and only
    * once they've had enough of them to go by.
    */

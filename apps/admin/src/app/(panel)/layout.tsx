@@ -10,6 +10,7 @@ import {
   DropoffsIcon,
   ErrandsIcon,
   FlagsIcon,
+  MatchingIcon,
   SafetyIcon,
   MoneyIcon,
   OverviewIcon,
@@ -27,6 +28,7 @@ import { CountrySelect, Nav, type NavItem } from './nav';
 const SECTIONS: Array<NavItem & { needs: Permission }> = [
   { href: '/', label: 'Overview', icon: <OverviewIcon />, needs: 'read' },
   { href: '/errands', label: 'Errands', icon: <ErrandsIcon />, needs: 'read' },
+  { href: '/matching', label: 'Matching', icon: <MatchingIcon />, needs: 'read' },
   { href: '/disputes', label: 'Disputes', icon: <DisputesIcon />, needs: 'read' },
   { href: '/dropoffs', label: 'Drop-offs', icon: <DropoffsIcon />, needs: 'read' },
   { href: '/people', label: 'People', icon: <PeopleIcon />, needs: 'read' },

@@ -131,6 +131,15 @@ export const DropoffsIcon = () => (
   </Icon>
 );
 
+/** Matching: a target, rings round a point. */
+export const MatchingIcon = () => (
+  <Icon>
+    <circle cx="12" cy="12" r="8" />
+    <circle cx="12" cy="12" r="4" />
+    <circle cx="12" cy="12" r="0.5" />
+  </Icon>
+);
+
 export const FlagsIcon = () => (
   <Icon>
     <path d="M5 21V4" />
