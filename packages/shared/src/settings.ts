@@ -81,6 +81,9 @@ export const DEFAULT_MATCHING_SETTINGS = {
   scheduledMinCompletionBps: 5_000,
   scheduledOnlineMinutes: 15,
   scheduledTakeBackMinutes: 10,
+  destinationMode: true,
+  destinationUsesPerDay: 2,
+  destinationCloserBps: 2_000,
 };
 
 /** The Risk group's starting values, also used for versions saved before the group existed (E5, E6). */
@@ -234,6 +237,13 @@ export const MatchingSettingsSchema = z
     scheduledMinCompletionBps: z.number().int().min(0).max(10_000).default(5_000),
     scheduledOnlineMinutes: z.number().int().min(5).max(120).default(15),
     scheduledTakeBackMinutes: z.number().int().min(1).max(60).default(10),
+    /**
+     * Destination mode (M13): an agent sets where they are heading, this many times a day, and gets only errands
+     * whose drop-off brings them nearer it by at least this share of the way, in basis points.
+     */
+    destinationMode: z.boolean().default(true),
+    destinationUsesPerDay: z.number().int().min(1).max(10).default(2),
+    destinationCloserBps: z.number().int().min(500).max(9_000).default(2_000),
   })
   .refine((m) => (m.searchStepsKm.at(-1) ?? 0) <= m.boardRadiusKm, {
     message: "The last search step can't reach past how far the board reaches",

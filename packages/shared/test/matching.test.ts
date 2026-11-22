@@ -4,6 +4,7 @@ import { CountrySettingsSchema, NIGERIA_DEFAULT_SETTINGS } from '../src/settings
 import {
   averageReliability,
   backToBackFrom,
+  bringsCloser,
   lateForScheduled,
   matchRefusal,
   offerCounts,
@@ -36,6 +37,7 @@ const errand = (over: Partial<MatchErrand> = {}): MatchErrand => ({
   keptApart: false,
   gaveUp: false,
   scheduled: false,
+  offRoute: false,
   ...over,
 });
 
@@ -146,6 +148,9 @@ describe('the Matching settings', () => {
       scheduledMinCompletionBps: 5_000,
       scheduledOnlineMinutes: 15,
       scheduledTakeBackMinutes: 10,
+      destinationMode: true,
+      destinationUsesPerDay: 2,
+      destinationCloserBps: 2_000,
       offers: true,
       offerSeconds: 20,
       missedOffersOffline: 3,
@@ -381,5 +386,35 @@ describe('scheduled errands', () => {
     // An errand not taken ahead, or one with nothing scheduled, never.
     expect(lateForScheduled([held()], { at: start, dropoff }, tenMinutes)).toBe(false);
     expect(lateForScheduled([], { at: start, dropoff }, tenMinutes)).toBe(false);
+  });
+});
+
+/**
+ * Destination mode (docs/matching.md, M13), as Uber's and Bolt's: an agent heading somewhere, such as home, gets
+ * only errands whose drop-off brings them closer.
+ */
+describe('destination mode', () => {
+  const home = { lat: 6.5, lng: 3.5 };
+  const west = (km: number) => ({ lat: home.lat, lng: home.lng - km / 111 });
+
+  it('takes an errand whose drop-off is a fifth nearer the destination, at least, than the agent is now', () => {
+    // 10 km off: a drop-off 8 km off or nearer brings them closer.
+    expect(bringsCloser(west(10), west(5), home, rules)).toBe(true);
+    expect(bringsCloser(west(10), west(7.9), home, rules)).toBe(true);
+    expect(bringsCloser(west(10), west(9), home, rules)).toBe(false);
+    // Further away, or past it on the far side.
+    expect(bringsCloser(west(10), west(12), home, rules)).toBe(false);
+    expect(bringsCloser(west(10), { lat: home.lat, lng: home.lng + 12 / 111 }, home, rules)).toBe(false);
+    // As admin sets it.
+    expect(bringsCloser(west(10), west(9), home, { ...rules, destinationCloserBps: 500 })).toBe(true);
+  });
+
+  it('refuses an errand that takes the agent away from where they are heading', () => {
+    expect(matchRefusal(agent(), errand({ offRoute: true }), rules)).toBe('off_route');
+    expect(matchRefusal(agent(), errand({ offRoute: false }), rules)).toBeNull();
+  });
+
+  it('starts on, twice a day, a fifth nearer', () => {
+    expect(rules).toMatchObject({ destinationMode: true, destinationUsesPerDay: 2, destinationCloserBps: 2_000 });
   });
 });

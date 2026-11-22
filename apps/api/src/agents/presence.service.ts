@@ -9,6 +9,7 @@ import { AgentSelfieService } from './agent-selfie.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { RiskFlagsService } from '../risk/risk-flags.service';
 import { TrailService } from './trail.service';
+import { DestinationService } from './destination.service';
 import { AgentLocations } from '../matching/agent-locations';
 import type { LatLng } from '../adapters/maps';
 import type { AuthContext } from '../auth/auth.types';
@@ -66,6 +67,7 @@ export class PresenceService {
     private readonly selfie: AgentSelfieService,
     private readonly attestation: AttestationService,
     private readonly trail: TrailService,
+    private readonly destinations: DestinationService,
     private readonly risk: RiskFlagsService,
     private readonly locations: AgentLocations,
   ) {}
@@ -118,6 +120,9 @@ export class PresenceService {
           accuracy: agentPresence.accuracy,
           fixedAt: agentPresence.fixedAt,
           offlineReason: agentPresence.offlineReason,
+          destinationLat: agentPresence.destinationLat,
+          destinationLng: agentPresence.destinationLng,
+          destinationSetAt: agentPresence.destinationSetAt,
         })
         .from(agentPresence)
         .where(eq(agentPresence.userId, auth.userId)),
@@ -233,6 +238,16 @@ export class PresenceService {
           position,
         )
         .catch((error: Error) => this.logger.warn(`Keeping a trail point failed: ${error.message}`));
+      // There, where they were heading (M13): the destination ends. Never a mocked position, nor failing the report.
+      if (!body.mocked && current?.destinationLat != null && current.destinationLng != null) {
+        await this.destinations
+          .arrivedIfThere(
+            auth.userId,
+            { lat: body.lat!, lng: body.lng! },
+            { lat: current.destinationLat, lng: current.destinationLng, setAt: current.destinationSetAt },
+          )
+          .catch((error: Error) => this.logger.warn(`Ending a destination failed: ${error.message}`));
+      }
       // Whether they reached the pickup of any errand they hold (M15), as the trail does, never failing the report.
       await this.trail
         .reachedPickup(

@@ -611,9 +611,37 @@ export const agentPresence = pgTable(
     offlineReason: text('offline_reason', { enum: OFFLINE_REASONS }),
     /** No one-at-a-time offers until then, for a low acceptance rate (M9); the board and everyone-at-once still work. */
     offersPausedUntil: timestamp('offers_paused_until', { withTimezone: true }),
+    /**
+     * Where the agent is heading now, such as home (destination mode, docs/matching.md, M13): they get only errands
+     * whose drop-off brings them closer. Cleared when they get there or clear it; each one set is in
+     * agent_destinations, which the uses a day are counted from.
+     */
+    destinationLat: doublePrecision('destination_lat'),
+    destinationLng: doublePrecision('destination_lng'),
+    destinationLabel: text('destination_label'),
+    destinationSetAt: timestamp('destination_set_at', { withTimezone: true }),
     updatedAt: updatedAt(),
   },
   (t) => [index('agent_presence_location_gix').using('gist', t.location)],
+);
+
+/** Every destination an agent set (M13), and how it ended: the uses a day are counted from these. */
+export const agentDestinations = pgTable(
+  'agent_destinations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => users.id),
+    countryCode: char('country_code', { length: 2 }).notNull(),
+    lat: doublePrecision('lat').notNull(),
+    lng: doublePrecision('lng').notNull(),
+    label: text('label').notNull(),
+    setAt: timestamp('set_at', { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    endedReason: text('ended_reason', { enum: ['arrived', 'cleared', 'replaced'] }),
+  },
+  (t) => [index('agent_destinations_agent_idx').on(t.agentId, t.setAt)],
 );
 
 /* ---------- Errands ---------- */

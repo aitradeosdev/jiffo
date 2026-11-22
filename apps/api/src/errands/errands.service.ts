@@ -20,6 +20,7 @@ import {
   agentReachKm,
   heldRefusal,
   matchRefusal,
+  atTheEnd,
   backToBackFrom,
 } from '@jiffo/shared';
 import type { z } from 'zod';
@@ -337,10 +338,22 @@ export class ErrandsService implements OnModuleInit {
       me.completionRate !== null && me.completionRate * 10_000 < rules.scheduledMinCompletionBps
         ? or(isNull(errands.scheduledFor), lte(errands.scheduledFor, new Date()))
         : undefined;
+    // Heading somewhere (M13): only errands whose drop-off is far enough nearer their destination, also before the
+    // limit.
+    // Measured on a sphere, as the app's check is, with a metre to spare; an errand with no drop-off located is left
+    // to that check too.
+    const lastStop = sql`(select s.location from ${errandStops} s where s.errand_id = ${errands.id}
+      order by s.seq desc limit 1)`;
+    const towards = me.destination
+      ? sql`(${lastStop} is null or ST_DWithin(${lastStop},
+          ST_SetSRID(ST_MakePoint(${me.destination.lng}, ${me.destination.lat}), 4326)::geography,
+          ${haversineMeters(me, me.destination) * (1 - rules.destinationCloserBps / 10_000) + 1}, false))`
+      : undefined;
     const allowed = and(
       boardFull ? eq(errands.urgent, true) : urgentRoom ? undefined : eq(errands.urgent, false),
       this.eligibility.boardExclusions(auth.userId),
       scheduledOff,
+      towards,
     );
     const pickupOf = and(eq(errandStops.errandId, errands.id), eq(errandStops.seq, 0));
     const [found, counts] = await Promise.all([
@@ -367,9 +380,20 @@ export class ErrandsService implements OnModuleInit {
       auth.userId,
       found.map((r) => ({ id: r.errand.id, customerId: r.errand.customerId })),
     );
+    const dropoffs = me.destination ? await this.eligibility.dropoffs(found.map((r) => r.errand.id)) : null;
     const allowedRows = found.filter(
       (r) =>
-        !matchRefusal(me, this.eligibility.matchErrand(r.errand, Number(r.distanceMeters), auth.userId, facts), rules),
+        !matchRefusal(
+          me,
+          this.eligibility.matchErrand(
+            r.errand,
+            Number(r.distanceMeters),
+            auth.userId,
+            facts,
+            this.eligibility.offRoute(me, dropoffs?.get(r.errand.id), rules),
+          ),
+          rules,
+        ),
     );
     // Holding a scheduled errand taken ahead (M12): no urgent errand that would make them late for it.
     const late = await Promise.all(
@@ -1241,11 +1265,21 @@ export class ErrandsService implements OnModuleInit {
               .from(errandStops)
               .where(and(eq(errandStops.errandId, errand.id), eq(errandStops.seq, 0)))
           : [];
+        const current = pickup ? backToBackFrom(me, pickup, live.matching) : null;
+        // Heading somewhere (M13): only an errand whose drop-off brings them closer, from where they start it.
+        const dropoff = me.destination ? (await this.eligibility.dropoffs([errand.id], tx)).get(errand.id) : null;
+        const origin = current?.dropoff && !atTheEnd(current) ? current.dropoff : me;
         const refused = matchRefusal(
           me,
-          this.eligibility.matchErrand(errand, pickupMeters, auth.userId, facts),
+          this.eligibility.matchErrand(
+            errand,
+            pickupMeters,
+            auth.userId,
+            facts,
+            this.eligibility.offRoute({ ...origin, destination: me.destination }, dropoff, live.matching),
+          ),
           live.matching,
-          { backToBack: !!pickup && !!backToBackFrom(me, pickup, live.matching) },
+          { backToBack: !!current },
         );
         if (refused) throw this.eligibility.refusal(refused);
         // Holding a scheduled errand taken ahead (M12): never an urgent errand that would make them late for it,

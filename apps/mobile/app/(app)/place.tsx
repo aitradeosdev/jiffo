@@ -1,21 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { oneOf } from '@/links';
 import { goBack } from '@/nav';
-import * as Crypto from 'expo-crypto';
-import { useSession } from '@/auth/session';
 import { errorMessage } from '@/api/client';
 import { STOP_FIELDS, useDraft, type StopField } from '@/errands/draft';
-import type { PlacePick } from '@/errands/types';
+import { usePlaceSearch, type Suggestion } from '@/places/use-place-search';
 import { Field, Screen, Text } from '@/ui/kit';
 import { Row } from '@/ui/parts';
-
-interface Suggestion {
-  placeId: string;
-  title: string;
-  subtitle: string;
-}
 
 const TITLES: Record<StopField, string> = {
   pickup: 'Pickup location',
@@ -26,42 +18,8 @@ const TITLES: Record<StopField, string> = {
 /** Address search for one stop. A search session token groups the typing and the pick for billing. */
 export default function PlaceSearch() {
   const field = oneOf(useLocalSearchParams<{ field?: string }>().field, STOP_FIELDS, 'pickup');
-  const { api } = useSession();
   const { update } = useDraft();
-  const session = useMemo(() => Crypto.randomUUID(), []);
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<Suggestion[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const latest = useRef('');
-
-  useEffect(() => {
-    const q = query.trim();
-    latest.current = q;
-    if (q.length < 2) {
-      setResults([]);
-      setBusy(false);
-      return;
-    }
-    const timer = setTimeout(async () => {
-      setBusy(true);
-      try {
-        const found = await api.get<Suggestion[]>(
-          `/v1/places/autocomplete?q=${encodeURIComponent(q)}&session=${session}`,
-        );
-        if (latest.current === q) {
-          setResults(found);
-          setError(null);
-        }
-      } catch (e) {
-        if (latest.current === q) setError(errorMessage(e));
-      } finally {
-        // Only the latest search clears the spinner; a newer one (or a short query) manages its own.
-        if (latest.current === q) setBusy(false);
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [query, api, session]);
+  const { query, setQuery, results, busy, error, setError, place: placeOf } = usePlaceSearch();
 
   const [choosing, setChoosing] = useState(false);
   const choose = async (s: Suggestion) => {
@@ -69,7 +27,7 @@ export default function PlaceSearch() {
     if (choosing) return;
     setChoosing(true);
     try {
-      const place = await api.get<PlacePick>(`/v1/places/${encodeURIComponent(s.placeId)}?session=${session}`);
+      const place = await placeOf(s);
       // Outside the areas where Jiffo works: said here, rather than when the errand is sent.
       if (!place.stateCode) {
         setError(`Jiffo doesn't work at ${place.name} yet. Pick a place where Jiffo works.`);

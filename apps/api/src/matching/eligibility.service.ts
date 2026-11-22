@@ -4,6 +4,7 @@ import {
   CONFIRMED_PAIR_FLAG_KINDS,
   FAKE_GPS_FLAG_KINDS,
   PAIR_FLAG_KINDS,
+  bringsCloser,
   haversineMeters,
   lateForScheduled,
   type CountrySettings,
@@ -12,7 +13,7 @@ import {
   type MatchErrand,
   type MatchRefusal,
 } from '@jiffo/shared';
-import { and, asc, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { TravelTimesService } from './travel-times';
 import { completionRate, recentAccepts } from './completion';
 import { AgentsService } from '../agents/agents.service';
@@ -26,6 +27,8 @@ const MINUTE_MS = 60_000;
 export interface AgentNow extends MatchAgent {
   lat: number;
   lng: number;
+  /** Where they are heading, if they set a destination and destination mode is on (M13). */
+  destination: LatLng | null;
 }
 
 /** What the agent is told when they may not get an errand. A flag is for staff, so it is never named. */
@@ -43,6 +46,11 @@ const REFUSALS: Record<MatchRefusal, () => ApiError> = {
     conflict(
       'completion_low',
       'Scheduled errands go to agents who finish enough of the errands they accept. Finish more to take them.',
+    ),
+  off_route: () =>
+    conflict(
+      'off_route',
+      "This errand doesn't take you towards your destination. Clear your destination to take any errand.",
     ),
   late_for_scheduled: () => conflict('late_for_scheduled', 'This errand would make you late for your scheduled errand'),
 };
@@ -88,6 +96,8 @@ export class EligibilityService {
     pickupMeters: number,
     agentId: string,
     facts: { apart: Set<string>; gaveUp: Set<string> },
+    /** Its drop-off doesn't bring the agent towards their destination (offRoute()). */
+    offRoute = false,
   ): MatchErrand {
     return {
       customerId: errand.customerId,
@@ -99,7 +109,35 @@ export class EligibilityService {
       gaveUp: facts.gaveUp.has(errand.id),
       // Scheduled for later (M12): taken ahead. Once its time has come, it is an errand like any other.
       scheduled: !!errand.scheduledFor && errand.scheduledFor.getTime() > Date.now(),
+      offRoute,
     };
+  }
+
+  /**
+   * Whether an errand's drop-off takes the agent away from where they are heading (M13): never for one with no
+   * destination set, or with destination mode off.
+   */
+  offRoute(
+    me: Pick<AgentNow, 'lat' | 'lng' | 'destination'>,
+    dropoff: LatLng | null | undefined,
+    rules: CountrySettings['matching'],
+  ) {
+    return !!me.destination && !!dropoff && !bringsCloser(me, dropoff, me.destination, rules);
+  }
+
+  /** The final drop-off of each errand, keyed by errand. */
+  async dropoffs(errandIds: string[], db: Db | Tx = this.db) {
+    if (!errandIds.length) return new Map<string, LatLng>();
+    const rows = await db
+      .selectDistinctOn([errandStops.errandId], {
+        errandId: errandStops.errandId,
+        lat: errandStops.lat,
+        lng: errandStops.lng,
+      })
+      .from(errandStops)
+      .where(inArray(errandStops.errandId, errandIds))
+      .orderBy(errandStops.errandId, desc(errandStops.seq));
+    return new Map(rows.map((r) => [r.errandId, { lat: r.lat, lng: r.lng }]));
   }
 
   /**
@@ -147,6 +185,13 @@ export class EligibilityService {
         lng: agentPresence.lng,
         at: agentPresence.locatedAt,
         mocked: agentPresence.mocked,
+        destinationLat: agentPresence.destinationLat,
+        destinationLng: agentPresence.destinationLng,
+        // A destination lasts the day it was set, by the country's own clock (M13). The outer table by name, as a
+        // column alone in a select renders unqualified.
+        destinationToday: sql<boolean>`"agent_presence"."destination_set_at" >= (select
+          date_trunc('day', now() at time zone c.timezone) at time zone c.timezone
+          from countries c where c.code = "agent_presence"."country_code")`,
       })
       .from(agentPresence)
       .where(eq(agentPresence.userId, agentId));
@@ -206,6 +251,11 @@ export class EligibilityService {
     return {
       userId: agentId,
       completionRate: recent ? completionRate(recent) : null,
+      // Heading somewhere (M13), while destination mode is on.
+      destination:
+        rules.destinationMode && here.destinationToday && here.destinationLat != null && here.destinationLng != null
+          ? { lat: here.destinationLat, lng: here.destinationLng }
+          : null,
       lat: here.lat,
       lng: here.lng,
       categoryKeys: prefs.categoryKeys,
