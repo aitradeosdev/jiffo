@@ -505,7 +505,11 @@ export class OffersService {
     const rules = await this.places.rulesFor(errand);
     if (!rules.offers) return null;
     const last = rules.searchStepsKm.at(-1)!;
-    if (errand.broadcastFeeKobo === errand.feeKobo) return { radiusKm: last, everyone: true };
+    // Open to everyone: as far as it was opened, as the board and accepting go by, until its next look follows a
+    // change to its place's steps.
+    if (errand.broadcastFeeKobo === errand.feeKobo) {
+      return { radiusKm: errand.broadcastReachMeters ? errand.broadcastReachMeters / 1000 : last, everyone: true };
+    }
     const made = await this.offersMade(errand);
     return { radiusKm: searchRadiusKm(made.n, made.farthest, rules), everyone: false };
   }
@@ -534,11 +538,17 @@ export class OffersService {
       this.searchChanged(errand);
       this.realtime.boardChanged(errand.id, 'added');
     } else if (errand.broadcastReachMeters !== reach) {
-      // Its place's steps changed since it was opened: the board and accepting follow from now.
-      await this.db
+      // Its place's steps changed since it was opened: the board and accepting follow from now, and the customer and
+      // agents watching the board are told.
+      const [moved] = await this.db
         .update(errands)
         .set({ broadcastReachMeters: reach })
-        .where(and(eq(errands.id, errand.id), eq(errands.status, 'requested')));
+        .where(and(eq(errands.id, errand.id), eq(errands.status, 'requested')))
+        .returning({ id: errands.id });
+      if (moved) {
+        this.searchChanged(errand);
+        this.realtime.boardChanged(errand.id, 'changed');
+      }
     }
     const [passed, told, holding] = await Promise.all([
       this.passed(errand),

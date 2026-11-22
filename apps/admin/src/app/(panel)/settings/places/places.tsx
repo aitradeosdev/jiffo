@@ -678,7 +678,9 @@ function MatchingPanel({
     <Card title={`Matching for ${task.name}`}>
       <p className="-mt-1 mb-3 text-sm text-ink-3">
         How urgent errands here are offered and ranked. Leave a field empty to use {from}&apos;s, shown in grey. Who may
-        get an errand, and an agent&apos;s acceptance rate, stay the country&apos;s
+        get an errand stays the country&apos;s, as do the offers over which an agent&apos;s acceptance rate is worked
+        out and its pause; the free-decline values here decide which of this place&apos;s offers count toward it. The
+        fallback speed here is for offers: the board&apos;s order estimates with the country&apos;s
         {task.scope === 'state' ? '' : ", and how long a batch waits is the state's"}. A change waits for a second
         admin&apos;s approval.
       </p>

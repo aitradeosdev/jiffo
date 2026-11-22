@@ -1,9 +1,10 @@
 import { and, eq } from 'drizzle-orm';
 import request from 'supertest';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_MATCHING_SETTINGS } from '@jiffo/shared';
 import { agentPresence, errandOffers, errands } from '../src/db/schema';
 import { AgentLocations } from '../src/matching/agent-locations';
+import { RealtimeGateway } from '../src/realtime/realtime.gateway';
 import { adminAs, approved, createErrand, createTestApp, fund, signIn, type Person, type TestApp } from './helpers';
 
 const box = (west: number, south: number, east: number, north: number) => ({
@@ -106,6 +107,7 @@ describe('Matching per place', () => {
   });
   // Each test starts with Kaduna's places setting nothing, every agent so far offline, and no urgent errand waiting.
   afterEach(async () => {
+    vi.restoreAllMocks();
     await clear();
     await t.db.update(errandOffers).set({ status: 'withdrawn' }).where(eq(errandOffers.status, 'open'));
     await t.db
@@ -220,6 +222,47 @@ describe('Matching per place', () => {
       .set(near.headers)
       .send({ event: 'accept' })
       .expect(200);
+  });
+
+  it("follows a change to its place's steps while open to everyone, telling the customer and the board", async () => {
+    expect((await setMatching('area', ids.area, { searchStepsKm: [2, 4], offersPerStep: 1 })).status).toBe(200);
+    const a = await agentAt(east(1));
+    const b = await agentAt(east(3));
+    const errand = await urgent();
+    await decline(a, errand.id);
+    await decline(b, errand.id);
+    expect(await search(errand.id)).toEqual({ radiusKm: 4, everyone: true });
+    const realtime = t.app.get(RealtimeGateway);
+    const board = vi.spyOn(realtime, 'boardChanged');
+    const told = vi.spyOn(realtime, 'toUser');
+    expect((await setMatching('area', ids.area, { searchStepsKm: [2, 5], offersPerStep: 1 })).status).toBe(200);
+    // The customer sees how far it reaches now, as the board and accepting do: until its next look, as opened.
+    expect(await search(errand.id)).toEqual({ radiusKm: 4, everyone: true });
+    await t.timers.fireWhere((job) => job.event === 'offer_dispatch' && job.errandId === errand.id);
+    expect(await search(errand.id)).toEqual({ radiusKm: 5, everyone: true });
+    const further = await agentAt(east(4.5));
+    expect(await boardHas(further, east(4.5), errand.id)).toBe(true);
+    expect(board).toHaveBeenCalledWith(errand.id, 'changed');
+    expect(told).toHaveBeenCalledWith(customer.userId, 'customer', 'errand.search', { errandId: errand.id });
+  });
+
+  it('finds what a place set whatever case its id is sent in', async () => {
+    expect((await setMatching('area', ids.area, { offerSeconds: 30 })).status).toBe(200);
+    const { version } = await saved('area', ids.area);
+    const res = await approved(t, 'owner', (h) =>
+      request(t.http)
+        .post('/v1/admin/matching')
+        .set(h)
+        .send({
+          scope: 'area',
+          id: ids.area.toUpperCase(),
+          basedOn: version,
+          matching: { offerSeconds: 40 },
+          note: 'Upper',
+        }),
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(await saved('area', ids.area)).toEqual({ version: version + 1, data: { offerSeconds: 40 } });
   });
 
   it('are refused when they would not work, or were changed since they were opened', async () => {

@@ -16,7 +16,8 @@ export type PlaceLevel = PlaceRef & { name: string };
 export type SavedOverride<T> = { version: number; data: T };
 type OverrideTable = typeof priceOverrides | typeof matchingOverrides;
 
-export const placeKey = (p: PlaceRef) => `${p.scope}:${p.id}`;
+/** A place's key in what latestOverrides returns: ids lowercase, as Postgres gives them back, whatever case sent. */
+export const placeKey = (p: PlaceRef) => `${p.scope}:${p.id.toLowerCase()}`;
 
 /** The latest each of these places sets in the table, keyed `scope:id`; a place with none has version 0. */
 export async function latestOverrides<T>(
@@ -32,7 +33,7 @@ export async function latestOverrides<T>(
     from ${table} o
     join jsonb_to_recordset(${wanted}::jsonb) as w(scope text, id uuid) on w.scope = o.scope and w.id = o.scope_id
     order by o.scope, o.scope_id, o.version desc`);
-  for (const r of rows) found.set(`${r.scope}:${r.scope_id}`, { version: r.version, data: r.data });
+  for (const r of rows) found.set(placeKey({ scope: r.scope, id: r.scope_id }), { version: r.version, data: r.data });
   return found;
 }
 
@@ -71,7 +72,8 @@ export async function overrideChains<T extends object>(db: Db | Tx, table: Overr
  * checked against the others' saved values, so two at once must not both pass on stale ones.
  */
 export async function lockPlaces(tx: Tx, countryCode: string) {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'places:' + countryCode}))`);
+  // Named for prices, which it first kept apart: the same name, so servers old and new take the same lock.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'prices:' + countryCode}))`);
 }
 
 /** The place, its country, how the panel names it, and its levels from its state down to it. */
