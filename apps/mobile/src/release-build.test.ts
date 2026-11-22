@@ -97,6 +97,7 @@ describe('Firebase in the Android apps', () => {
       EAS_BUILD: 'true',
       EAS_BUILD_PROFILE: 'production-agent',
       EXPO_PUBLIC_API_URL: 'https://api.example.org',
+      EAS_BUILD_PLATFORM: 'android',
       GOOGLE_MAPS_ANDROID_API_KEY: 'a',
       GOOGLE_MAPS_IOS_API_KEY: 'i',
     };
@@ -104,6 +105,8 @@ describe('Firebase in the Android apps', () => {
     expect(androidWith({ ...store, GOOGLE_SERVICES_JSON: '/tmp/eas/google-services.json' }).googleServicesFile).toBe(
       '/tmp/eas/google-services.json',
     );
+    // An iPhone build doesn't use it: Apple's push goes through APNs.
+    expect(androidWith({ ...store, EAS_BUILD_PLATFORM: 'ios' }).googleServicesFile).toBeUndefined();
     // A preview build without it still builds: push just doesn't work there.
     expect(
       androidWith({

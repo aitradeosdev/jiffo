@@ -4,10 +4,10 @@ Expo Go and the web version can't run the apps' native parts: the money-signing 
 
 There are two kinds of build. Each exists for both apps: put `-customer` or `-agent` after the profile name.
 
-| Profile | What it is | Use it to |
-| --- | --- | --- |
-| `development-agent`, `development-customer` | A debug build with Expo's launcher. It loads the JavaScript from your computer, so changes show without a new build | Try the native parts while working on the app |
-| `preview-agent`, `preview-customer` | A release build, as the store app is built: R8 obfuscation on (MB7), JavaScript inside the app. It talks to the API only over HTTPS | Check a release build on a real phone before it ships |
+| Profile                                     | What it is                                                                                                                          | Use it to                                             |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `development-agent`, `development-customer` | A debug build with Expo's launcher. It loads the JavaScript from your computer, so changes show without a new build                 | Try the native parts while working on the app         |
+| `preview-agent`, `preview-customer`         | A release build, as the store app is built: R8 obfuscation on (MB7), JavaScript inside the app. It talks to the API only over HTTPS | Check a release build on a real phone before it ships |
 
 All the commands below run in a terminal in the repository's `apps/mobile` folder (`cd apps/mobile` from the repository's top folder, once).
 
@@ -67,7 +67,7 @@ All the commands below run in a terminal in the repository's `apps/mobile` folde
 
    - For the server, make a private key (Project settings, Service accounts, Generate new private key) and enter that file in the admin panel: Settings, Providers, Push.
 
-   A development or preview build without the file still builds, without push. A store build stops with an error naming `GOOGLE_SERVICES_JSON`. A build made before the file was saved has no push: build again.
+   Saved as secret, it reaches Expo's build servers only, not your computer. A development or preview build without the file still builds, without push. An Android store build stops with an error naming `GOOGLE_SERVICES_JSON`. A build made before the file was saved has no push: build again.
 
 ## The API the app talks to
 
@@ -101,6 +101,7 @@ Start the backend as the README says. With the console providers, sign-in codes 
    ```
 
    For the release check, use `--profile preview-agent`. The first time, EAS asks to make the app's signing key: say yes, and EAS keeps it. A build takes 10 to 30 minutes.
+
 2. When it's done, EAS shows a link and a QR code, also on [expo.dev](https://expo.dev) under the project's builds. Open it on the phone (scan the QR code with the camera) and tap **Install** to download the APK.
 3. Open the file. The first time, Android asks to allow installs from your browser: tap **Settings**, turn on **Allow from this source**, go back and tap **Install**. If Play Protect warns about an unknown app, tap **Install anyway**.
 4. **Development build:** on your computer, start the bundler for that app with the address from above:
@@ -124,6 +125,7 @@ An app can be installed on an iPhone outside the App Store only with a paid Appl
    ```
 
    Choose **Website**, open the link it shows on the iPhone in Safari, and allow the profile download. Then on the iPhone open **Settings**, tap **Profile Downloaded** near the top and install it. This tells Apple the phone may run your builds.
+
 3. Turn on Developer Mode, once (iOS 16 and later): **Settings**, **Privacy & Security**, **Developer Mode**, turn it on and let the phone restart. If **Developer Mode** isn't listed yet, install the build first (steps 4 and 5): the option appears once the phone has an app from a build like this.
 4. Build. For the agent app:
 
@@ -132,6 +134,7 @@ An app can be installed on an iPhone outside the App Store only with a paid Appl
    ```
 
    The first time, EAS asks you to sign in to your Apple account and offers to make the certificates and the provisioning profile, with your registered phones: say yes to each. It also sets up the app id with App Attest. A phone registered after a build needs a new build.
+
 5. When it's done, open the link or QR code on the iPhone and tap **Install**. The app appears on the home screen.
 6. **Development build:** start the bundler as in step 4 for Android, with `GOOGLE_MAPS_IOS_API_KEY` set to the same key the build had (or without it, if the build had none):
 

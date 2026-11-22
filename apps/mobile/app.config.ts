@@ -46,14 +46,17 @@ export const apiUrlFor = (env: Record<string, string | undefined>) => {
 /**
  * Firebase's google-services.json, for push on Android (FCM): the app asks Firebase for its token, which can't work
  * without it. One file covers both apps, from one Firebase project with both package names. It comes from a private
- * file setting in Expo (GOOGLE_SERVICES_JSON), never the repository. A store build stops without it, as offers
+ * file setting in Expo (GOOGLE_SERVICES_JSON), never the repository. An Android store build stops without it, as offers
  * could never ring; others build without push (docs/mobile-builds.md).
  */
 export const googleServicesFor = (env: Record<string, string | undefined>) => {
   const file = env.GOOGLE_SERVICES_JSON || undefined;
-  if (!file && env.EAS_BUILD === 'true' && /^production/.test(env.EAS_BUILD_PROFILE ?? '')) {
+  // Android's store build only: an iPhone's push goes through Apple (APNs).
+  const androidStore =
+    env.EAS_BUILD === 'true' && env.EAS_BUILD_PLATFORM === 'android' && /^production/.test(env.EAS_BUILD_PROFILE ?? '');
+  if (!file && androidStore) {
     throw new Error(
-      `The ${env.EAS_BUILD_PROFILE} build needs GOOGLE_SERVICES_JSON, Firebase's google-services.json, as a file setting in its EAS environment (docs/mobile-builds.md)`,
+      `The ${env.EAS_BUILD_PROFILE} build for Android needs GOOGLE_SERVICES_JSON, Firebase's google-services.json, as a file setting in its EAS environment (docs/mobile-builds.md)`,
     );
   }
   return file;
