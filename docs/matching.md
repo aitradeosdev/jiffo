@@ -151,7 +151,10 @@ This follows Uber's back-to-back trips.
 
 ## Admin settings, group Matching (M14)
 
-Per state where it makes sense, versioned, and changed only with two-person approval (security plan D4):
+Per state where it makes sense, versioned, and changed only with two-person approval (security plan D4). Built: the
+offer and ranking values can be set per state, city and area as well as per country, each from the nearest level
+that sets it (Settings, Places; [admin-panel.md](admin-panel.md)). Who may get an errand and the acceptance rate stay
+per country.
 
 - batch interval (3 s), offer window (20 s), shortlist size (10)
 - radius steps (3, 6, 10 km) and offers per step (5)

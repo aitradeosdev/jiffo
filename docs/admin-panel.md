@@ -11,7 +11,7 @@
 - **ID checks:** customers' ID checks by state. Those the provider couldn't settle wait in review, longest first; operations verifies or declines each from the customer's page (never with an ID another customer holds), or reopens a declined one so they can check again. The decline's reason is shown to the customer. The providers page says which IDs each identity provider checks.
 - **Money:** what Jiffo holds, earns and pays providers (net revenue), top-ups by way of paying in, customers' own account numbers and what issuing them cost, withdrawals and the nightly check against the payment provider.
 - **Settings:** prices, fees, commission, timers, limits and identity rules as versioned settings, plus categories and states. Identity has a switch each for customers' and agents' ID checks (docs/security/controls.md, Identity checks). Sign-in codes can be switched to Test per country (Settings, Security): no texts are sent and the app shows each code, and every page warns while one is on.
-- **Places:** where Jiffo works, by country, state, city and area, and the prices each sets (below).
+- **Places:** where Jiffo works, by country, state, city and area, and the prices and Matching values each sets (below).
 - **Team and audit log:** who can use the panel, and every change anyone made in it.
 
 ## Places: where Jiffo works
@@ -39,6 +39,12 @@ Jiffo works in areas, drawn in cities, in states, in a country.
   - **Where:** in Places, "Prices" on a state, city or area. The form shows the value from above in grey for each field left empty.
   - **Approval:** a change waits for a second admin's approval, like every price change, and is refused if it would leave this place, or any city or area below it, with a service fee minimum above its cap.
   - **Errands already sent:** an errand is priced where its pickup is, and keeps those prices for life. A later change never alters one already sent, even when its fee is raised.
+- **Matching per place** ([matching.md](matching.md), M14): a state, city or area can set how its urgent errands are offered and ranked, the same way as prices.
+  - **What a place may set:** how long an agent has to answer, how soon to look again, the shortlist, the fallback speed, the search steps and offers per step, the ranking weights and tier boosts, errands before a new agent's own history counts, and which offers are free to decline. A state also sets how long its batch waits, as its urgent errands are matched together.
+  - **What stays the country's:** who may get an errand (how recent a position, how far the board reaches, errands held at once, the fake-GPS hold), offers on or off, and an agent's acceptance rate and pause, so the board, accepting and an agent's standing keep one rule.
+  - **Where:** in Places, "Matching" on a state, city or area, with the value from above in grey for each field left empty. The ranking weights, and the tier boosts, are set all four together or not at all.
+  - **Approval:** a change waits for a second admin's approval, and is refused if it would leave this place, or any city or area below it, with search steps reaching past the board. A country change that would do that to a place is refused too, naming the place.
+  - **Errands:** an urgent errand follows the values where its pickup is, as they stand at each step. One open to everyone keeps how far it was opened, for the board and accepting.
 - **The map's key:** `GOOGLE_MAPS_BROWSER_KEY` in the panel's settings.
   - **Which key:** a Google key with the Maps JavaScript API turned on, restricted to the panel's own address (HTTP referrers), as it is sent to the browser. It can be in the same Google Cloud project as the apps' keys.
   - **Cost:** loading the map is free up to 10,000 times a month, far more than staff use.

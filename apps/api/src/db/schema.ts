@@ -32,6 +32,7 @@ import {
   type AdminRole,
   type CountrySettings,
   type ErrandState,
+  type MatchingOverride,
   type PriceOverride,
   type Prices,
 } from '@jiffo/shared';
@@ -143,6 +144,27 @@ export const priceOverrides = pgTable(
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('price_overrides_scope_version_uq').on(t.scope, t.scopeId, t.version)],
+);
+
+/**
+ * Matching values per state, city and area (docs/matching.md, M14), as prices are: every saved change is a new
+ * version, the highest current. What a place leaves out comes from the level above, then the country's settings.
+ */
+export const matchingOverrides = pgTable(
+  'matching_overrides',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scope: text('scope', { enum: ['state', 'city', 'area'] }).notNull(),
+    scopeId: uuid('scope_id').notNull(),
+    countryCode: char('country_code', { length: 2 })
+      .notNull()
+      .references(() => countries.code),
+    version: integer('version').notNull(),
+    data: jsonb('data').$type<MatchingOverride>().notNull(),
+    createdBy: uuid('created_by'),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('matching_overrides_scope_version_uq').on(t.scope, t.scopeId, t.version)],
 );
 
 /** Every saved change to a country's settings is a new version; the highest version is current. */
@@ -629,6 +651,11 @@ export const errands = pgTable(
      * who may take it, the first to accept getting it. A raised fee starts the search again.
      */
     broadcastFeeKobo: kobo('broadcast_fee_kobo'),
+    /**
+     * How far from the pickup it was open to everyone, in metres: its place's last search step then (M14), which
+     * can differ from the country's. Null for errands opened before places set their own.
+     */
+    broadcastReachMeters: integer('broadcast_reach_m'),
     itemAmountKobo: kobo('item_amount_kobo'),
     scheduledFor: timestamp('scheduled_for', { withTimezone: true }),
     settingsVersion: integer('settings_version').notNull(),

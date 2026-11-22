@@ -2803,6 +2803,199 @@
         ]
       }
     },
+    "/v1/admin/matching": {
+      "post": {
+        "operationId": "AdminController.matchingChange",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "admin": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "state",
+                      "city",
+                      "area"
+                    ]
+                  },
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "basedOn": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "matching": {
+                    "type": "object",
+                    "properties": {
+                      "batchSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 30
+                      },
+                      "offerSeconds": {
+                        "type": "integer",
+                        "minimum": 5,
+                        "maximum": 120
+                      },
+                      "dispatchRetrySeconds": {
+                        "type": "integer",
+                        "minimum": 5,
+                        "maximum": 300
+                      },
+                      "shortlistSize": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 25
+                      },
+                      "fallbackSpeedKmh": {
+                        "type": "integer",
+                        "minimum": 5,
+                        "maximum": 80
+                      },
+                      "searchStepsKm": {
+                        "minItems": 1,
+                        "maxItems": 6,
+                        "type": "array",
+                        "items": {
+                          "type": "number",
+                          "minimum": 0.5,
+                          "maximum": 50
+                        }
+                      },
+                      "offersPerStep": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50
+                      },
+                      "weights": {
+                        "type": "object",
+                        "properties": {
+                          "travel": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100
+                          },
+                          "reliability": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100
+                          },
+                          "rating": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100
+                          },
+                          "waiting": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100
+                          }
+                        },
+                        "required": [
+                          "travel",
+                          "reliability",
+                          "rating",
+                          "waiting"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "tierBoosts": {
+                        "type": "object",
+                        "properties": {
+                          "bronze": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 20
+                          },
+                          "silver": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 20
+                          },
+                          "gold": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 20
+                          },
+                          "platinum": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 20
+                          }
+                        },
+                        "required": [
+                          "bronze",
+                          "silver",
+                          "gold",
+                          "platinum"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "newAgentErrands": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000
+                      },
+                      "freeDeclineKm": {
+                        "type": "number",
+                        "minimum": 0.5,
+                        "maximum": 50
+                      },
+                      "freeDeclineMinutes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 60
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "scope",
+                  "id",
+                  "basedOn",
+                  "matching",
+                  "note"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "default",
+        "x-permission": [
+          "settings"
+        ]
+      }
+    },
     "/v1/admin/me": {
       "get": {
         "operationId": "AdminAuthController.me",

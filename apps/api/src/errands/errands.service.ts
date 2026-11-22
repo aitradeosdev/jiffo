@@ -299,7 +299,8 @@ export class ErrandsService implements OnModuleInit {
             eq(errands.urgent, false),
             and(
               sql`${errands.broadcastFeeKobo} = ${errands.feeKobo}`,
-              sql`ST_DWithin(${errandStops.location}, ${here}, ${rules.searchStepsKm.at(-1)! * 1000})`,
+              // As far as its place's last step reached when it was opened (M14); the country's for older ones.
+              sql`ST_DWithin(${errandStops.location}, ${here}, coalesce(${errands.broadcastReachMeters}, ${rules.searchStepsKm.at(-1)! * 1000}))`,
             ),
           )
         : undefined,
@@ -758,9 +759,7 @@ export class ErrandsService implements OnModuleInit {
         : Promise.resolve(null),
       // An urgent errand's customer sees how far its search reaches (M8), never who was asked.
       role === 'customer' && errand.status === 'requested' && errand.urgent
-        ? this.countries
-            .currentSettings(errand.countryCode)
-            .then(({ settings }) => this.offers.search(errand, settings.matching))
+        ? this.offers.search(errand)
         : Promise.resolve(null),
       role === 'agent' ? this.agentEarns(errand, errand.agentTier ?? 'bronze') : Promise.resolve(null),
       // Support can pay the agent on an errand it settles as cancelled, too.
@@ -1202,7 +1201,8 @@ export class ErrandsService implements OnModuleInit {
         if (refused) throw this.eligibility.refusal(refused);
         // Open to everyone once its search reached its last step (M8), but only within that step's radius.
         const toEveryone = errand.urgent && live.matching.offers && errand.broadcastFeeKobo === errand.feeKobo;
-        if (toEveryone && pickupMeters > live.matching.searchStepsKm.at(-1)! * 1000) {
+        const reach = errand.broadcastReachMeters ?? live.matching.searchStepsKm.at(-1)! * 1000;
+        if (toEveryone && pickupMeters > reach) {
           throw this.eligibility.refusal('too_far');
         }
         // An urgent errand goes to the agent it is offered to, while the offer stands (docs/matching.md, M7):

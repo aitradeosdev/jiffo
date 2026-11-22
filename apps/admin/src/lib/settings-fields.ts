@@ -651,6 +651,76 @@ export const SECTIONS: Section[] = [
   },
 ];
 
+/** What the input shows for a stored value, in the field's own unit. */
+export function fieldText(field: Field, value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (field.kind === 'hoursList' || field.kind === 'kmList') return (value as number[]).join(', ');
+  if (field.kind === 'naira' || field.kind === 'optionalNaira') return String(Number(value) / 100);
+  if (field.kind === 'percent' || field.kind === 'optionalPercent') return String(Number(value) / 100);
+  return String(value);
+}
+
+/** The stored value for what was typed: kobo for naira, basis points for percent. NaN when it can't be read. */
+export function fieldValue(field: Field, text: string): unknown {
+  const t = text.trim().replace(/,/g, '');
+  if (
+    (field.kind === 'optionalNaira' || field.kind === 'optionalPercent' || field.kind === 'optionalText') &&
+    t === ''
+  ) {
+    return null;
+  }
+  if (field.kind === 'optionalText') return t;
+  // Digits stay text: an emergency number like 112 is dialled, not counted. A wrong one is the API's to refuse.
+  if (field.kind === 'digits') return text.trim();
+  if (field.kind === 'hoursList' || field.kind === 'kmList') {
+    const parts = text
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const shape = field.kind === 'kmList' ? /^\d+(\.\d)?$/ : /^\d+$/;
+    return parts.every((p) => shape.test(p)) ? parts.map(Number) : NaN;
+  }
+  if (!/^\d+(\.\d{1,2})?$/.test(t)) return NaN;
+  const n = Number(t);
+  // A distance takes one decimal place: 2.5 km.
+  if (field.kind === 'km') return /^\d+(\.\d)?$/.test(t) ? n : NaN;
+  if (
+    field.kind === 'naira' ||
+    field.kind === 'optionalNaira' ||
+    field.kind === 'percent' ||
+    field.kind === 'optionalPercent'
+  ) {
+    return Math.round(n * 100);
+  }
+  return Number.isInteger(n) ? n : NaN;
+}
+
+/** What to type instead, for a value the field can't read. */
+export const unreadable = (field: Field) =>
+  ['naira', 'optionalNaira', 'percent', 'optionalPercent'].includes(field.kind)
+    ? 'Enter a number, with at most two decimal places'
+    : field.kind === 'hoursList'
+      ? 'Enter whole hours with commas between them, such as 2, 12, 20'
+      : field.kind === 'kmList'
+        ? 'Enter distances in km with commas between them, such as 3, 6, 10'
+        : field.kind === 'km'
+          ? 'Enter a distance in km, with at most one decimal place'
+          : 'Enter a whole number';
+
+/** The unit each kind is typed in, shown beside its input. */
+export const FIELD_UNIT: Partial<Record<FieldKind, string>> = {
+  naira: '₦',
+  optionalNaira: '₦',
+  percent: '%',
+  optionalPercent: '%',
+  minutes: 'min',
+  hours: 'h',
+  hoursList: 'h',
+  kmList: 'km',
+  km: 'km',
+  seconds: 's',
+};
+
 export const FIELD_BY_PATH = new Map(SECTIONS.flatMap((s) => s.fields.map((f) => [f.path, f] as const)));
 
 /** A stored value as the panel shows it: naira for kobo, percent for basis points. */

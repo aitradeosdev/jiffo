@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { api, reasonOf, ASKED, isPending, messageOf } from '@/lib/api';
+import { matchingFromForm } from '@/lib/matching-places';
 import { pricesFromForm } from '@/lib/prices';
 
 export interface SaveState {
@@ -186,6 +187,37 @@ export async function savePrices(_: PricesResult, form: FormData): Promise<Price
         id: String(form.get('id') ?? ''),
         basedOn: Number(form.get('basedOn') ?? 0),
         prices: read.prices,
+        note: String(form.get('note') ?? ''),
+      },
+    });
+    pending = isPending(res);
+  } catch (error) {
+    return { error: messageOf(error) };
+  }
+  if (pending) redirect(ASKED);
+  revalidatePath('/settings/places');
+  return { ok: true };
+}
+
+/**
+ * Matching values for a state, city or area (Places; M14). Each change waits for a second admin, as prices do, so a
+ * saved request goes to Approvals; what the form leaves empty comes from the level above.
+ */
+export async function saveMatching(_: PricesResult, form: FormData): Promise<PricesResult> {
+  const scope = String(form.get('scope') ?? '');
+  if (scope !== 'state' && scope !== 'city' && scope !== 'area') return { error: 'Pick a state, city or area' };
+  const read = matchingFromForm(form, scope);
+  if (read.error) return { error: read.error };
+  let pending = false;
+  try {
+    const res = await api('/admin/matching', {
+      reason: reasonOf(form),
+      method: 'POST',
+      body: {
+        scope,
+        id: String(form.get('id') ?? ''),
+        basedOn: Number(form.get('basedOn') ?? 0),
+        matching: read.matching,
         note: String(form.get('note') ?? ''),
       },
     });

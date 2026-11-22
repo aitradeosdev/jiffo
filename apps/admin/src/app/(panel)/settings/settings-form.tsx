@@ -4,79 +4,20 @@ import { useActionState, useMemo, useState } from 'react';
 import { settingChanges } from '@jiffo/shared';
 import { SubmitButton } from '@/components/submit-button';
 import { buttonClass, Card, inputClass, Notice } from '@/components/ui';
-import { FIELD_BY_PATH, getAt, SECTIONS, setAt, shown, type Field } from '@/lib/settings-fields';
+import {
+  FIELD_BY_PATH,
+  FIELD_UNIT,
+  fieldText,
+  fieldValue,
+  getAt,
+  SECTIONS,
+  setAt,
+  shown,
+  unreadable,
+} from '@/lib/settings-fields';
 import { saveSettings, type SaveState } from './actions';
 
 type Settings = Record<string, unknown>;
-
-/** What the input shows for a stored value, in the field's own unit. */
-function toText(field: Field, value: unknown): string {
-  if (value === null || value === undefined) return '';
-  if (field.kind === 'hoursList' || field.kind === 'kmList') return (value as number[]).join(', ');
-  if (field.kind === 'naira' || field.kind === 'optionalNaira') return String(Number(value) / 100);
-  if (field.kind === 'percent' || field.kind === 'optionalPercent') return String(Number(value) / 100);
-  return String(value);
-}
-
-/** The stored value for what was typed: kobo for naira, basis points for percent. NaN when it can't be read. */
-function fromText(field: Field, text: string): unknown {
-  const t = text.trim().replace(/,/g, '');
-  if (
-    (field.kind === 'optionalNaira' || field.kind === 'optionalPercent' || field.kind === 'optionalText') &&
-    t === ''
-  ) {
-    return null;
-  }
-  if (field.kind === 'optionalText') return t;
-  // Digits stay text: an emergency number like 112 is dialled, not counted. A wrong one is the API's to refuse.
-  if (field.kind === 'digits') return text.trim();
-  if (field.kind === 'hoursList' || field.kind === 'kmList') {
-    const parts = text
-      .split(',')
-      .map((p) => p.trim())
-      .filter(Boolean);
-    const shape = field.kind === 'kmList' ? /^\d+(\.\d)?$/ : /^\d+$/;
-    return parts.every((p) => shape.test(p)) ? parts.map(Number) : NaN;
-  }
-  if (!/^\d+(\.\d{1,2})?$/.test(t)) return NaN;
-  const n = Number(t);
-  // A distance takes one decimal place: 2.5 km.
-  if (field.kind === 'km') return /^\d+(\.\d)?$/.test(t) ? n : NaN;
-  if (
-    field.kind === 'naira' ||
-    field.kind === 'optionalNaira' ||
-    field.kind === 'percent' ||
-    field.kind === 'optionalPercent'
-  ) {
-    return Math.round(n * 100);
-  }
-  return Number.isInteger(n) ? n : NaN;
-}
-
-/** What to type instead, for a value the field can't read. */
-const unreadable = (field: Field) =>
-  ['naira', 'optionalNaira', 'percent', 'optionalPercent'].includes(field.kind)
-    ? 'Enter a number, with at most two decimal places'
-    : field.kind === 'hoursList'
-      ? 'Enter whole hours with commas between them, such as 2, 12, 20'
-      : field.kind === 'kmList'
-        ? 'Enter distances in km with commas between them, such as 3, 6, 10'
-        : field.kind === 'km'
-          ? 'Enter a distance in km, with at most one decimal place'
-          : 'Enter a whole number';
-
-const UNIT: Partial<Record<Field['kind'], string>> = {
-  naira: '₦',
-  optionalNaira: '₦',
-  percent: '%',
-  optionalPercent: '%',
-  minutes: 'min',
-  hours: 'h',
-  hoursList: 'h',
-  kmList: 'km',
-  km: 'km',
-  seconds: 's',
-};
 
 export function SettingsForm({
   country,
@@ -93,7 +34,7 @@ export function SettingsForm({
   const [settings, setSettings] = useState(initial);
   // What's typed, per field, so a half-typed number isn't lost or rewritten while editing.
   const [texts, setTexts] = useState<Record<string, string>>(() =>
-    Object.fromEntries([...FIELD_BY_PATH.values()].map((f) => [f.path, toText(f, getAt(initial, f.path))])),
+    Object.fromEntries([...FIELD_BY_PATH.values()].map((f) => [f.path, fieldText(f, getAt(initial, f.path))])),
   );
   const [note, setNote] = useState('');
   const [confirming, setConfirming] = useState(false);
@@ -220,7 +161,7 @@ export function SettingsForm({
                       <span
                         className={`flex items-center rounded-xl border-2 bg-surface-2 px-3 ${problem ? 'border-danger' : 'border-transparent'}`}
                       >
-                        {UNIT[f.kind] === '₦' ? <span className="text-ink-3">₦</span> : null}
+                        {FIELD_UNIT[f.kind] === '₦' ? <span className="text-ink-3">₦</span> : null}
                         <input
                           id={id}
                           inputMode={
@@ -236,12 +177,12 @@ export function SettingsForm({
                           onChange={(e) => {
                             const text = e.currentTarget.value;
                             setTexts((t) => ({ ...t, [f.path]: text }));
-                            setValue(f.path, fromText(f, text));
+                            setValue(f.path, fieldValue(f, text));
                           }}
                           className="num h-11 w-full bg-transparent px-1.5 text-[15px] focus:outline-none"
                         />
-                        {UNIT[f.kind] && UNIT[f.kind] !== '₦' ? (
-                          <span className="text-ink-3">{UNIT[f.kind]}</span>
+                        {FIELD_UNIT[f.kind] && FIELD_UNIT[f.kind] !== '₦' ? (
+                          <span className="text-ink-3">{FIELD_UNIT[f.kind]}</span>
                         ) : null}
                       </span>
                     )}
@@ -312,7 +253,7 @@ export function SettingsForm({
                     setSettings(initial);
                     setTexts(
                       Object.fromEntries(
-                        [...FIELD_BY_PATH.values()].map((f) => [f.path, toText(f, getAt(initial, f.path))]),
+                        [...FIELD_BY_PATH.values()].map((f) => [f.path, fieldText(f, getAt(initial, f.path))]),
                       ),
                     );
                   }}

@@ -6,7 +6,9 @@ import {
   ID_TYPES,
   settingChanges,
   type CountrySettings,
+  matchingIssue,
   pricesProblem,
+  resolveMatching,
   resolvePrices,
 } from '@jiffo/shared';
 import { APP_CONFIG, type AppConfig, testSignInCodesAllowed } from '../config/app-config';
@@ -14,6 +16,8 @@ import { IdentityChecksService } from '../identity/identity-checks.service';
 import { ProvidersService } from '../providers/providers.service';
 import { sql } from 'drizzle-orm';
 import { DB, type Db, type Tx } from '../db/database.module';
+import { lockPlaces } from '../countries/place-overrides';
+import { MatchingPlacesService } from '../countries/matching-places.service';
 import { PricesService } from '../countries/prices.service';
 import { admins, categories, settingsVersions, states } from '../db/schema';
 import { badRequest, conflict, notFound } from '../common/errors';
@@ -39,6 +43,7 @@ export class SettingsAdminService {
     private readonly providers: ProvidersService,
     private readonly applications: AgentApplicationService,
     private readonly prices: PricesService,
+    private readonly matchingPlaces: MatchingPlacesService,
   ) {}
 
   private country(code: string) {
@@ -110,6 +115,25 @@ export class SettingsAdminService {
       }
     }
   }
+  /**
+   * The same for Matching values (M14): a state, city or area whose own search steps would then reach past the
+   * board is refused here, until its values change.
+   */
+  private async checkPlaceMatching(code: string, settings: CountrySettings, db: Db | Tx = this.db) {
+    for (const place of await this.matchingPlaces.chains(code, db)) {
+      const issue = matchingIssue(resolveMatching(settings.matching, place.chain));
+      if (issue) {
+        throw badRequest('invalid_settings', 'Some settings are not valid', {
+          issues: [
+            {
+              path: `matching.${issue.path}`,
+              message: `${place.name}'s own Matching values would then not work: ${issue.message.toLowerCase()}. Change them in Places first.`,
+            },
+          ],
+        });
+      }
+    }
+  }
 
   private async validated(code: string, input: { settings: unknown }) {
     // Customers verify with a number and a selfie: an ID document for them is refused, not quietly dropped.
@@ -173,6 +197,7 @@ export class SettingsAdminService {
     await this.country(code);
     // Checked when asked for too, so a change that would break a place's prices is refused before it waits.
     await this.checkPlacePrices(code, parsed.data);
+    await this.checkPlaceMatching(code, parsed.data);
     return parsed.data;
   }
 
@@ -204,9 +229,10 @@ export class SettingsAdminService {
     const saved = await this.db.transaction(async (tx) => {
       // One save at a time per country: a second save made at the same moment then sees the first's version.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'settings:' + code}))`);
-      // And none while a place's prices, which fall back to these, are being saved (Settings, Places).
-      await this.prices.lock(tx, code);
+      // And none while what a place sets, which falls back to these, is being saved (Settings, Places).
+      await lockPlaces(tx, code);
       await this.checkPlacePrices(code, parsed, tx);
+      await this.checkPlaceMatching(code, parsed, tx);
       const [latest] = await tx
         .select()
         .from(settingsVersions)

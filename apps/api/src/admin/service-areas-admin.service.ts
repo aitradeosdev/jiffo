@@ -7,6 +7,7 @@ import { shapeOf, type BoundaryInput } from '../countries/service-areas';
 import { countryPrices } from '@jiffo/shared';
 import { CountriesService } from '../countries/countries.service';
 import { PricesService } from '../countries/prices.service';
+import { MatchingPlacesService } from '../countries/matching-places.service';
 import { AuditService } from './audit.service';
 import { requireCountry } from './countries';
 import type { AdminContext } from './admin.types';
@@ -48,6 +49,7 @@ export class ServiceAreasAdminService {
     @Inject(DB) private readonly db: Db,
     private readonly audit: AuditService,
     private readonly prices: PricesService,
+    private readonly matching: MatchingPlacesService,
     private readonly countries: CountriesService,
   ) {}
 
@@ -84,15 +86,21 @@ export class ServiceAreasAdminService {
         .where(eq(states.countryCode, countryCode))
         .orderBy(asc(areas.name)),
     ]);
-    const [saved, current] = await Promise.all([
-      this.prices.latest([
-        ...stateRows.map((s) => ({ scope: 'state' as const, id: s.id })),
-        ...cityRows.map((c) => ({ scope: 'city' as const, id: c.id })),
-        ...areaRows.map((a) => ({ scope: 'area' as const, id: a.id })),
-      ]),
+    const places = [
+      ...stateRows.map((s) => ({ scope: 'state' as const, id: s.id })),
+      ...cityRows.map((c) => ({ scope: 'city' as const, id: c.id })),
+      ...areaRows.map((a) => ({ scope: 'area' as const, id: a.id })),
+    ];
+    const [saved, savedMatching, current] = await Promise.all([
+      this.prices.latest(places),
+      this.matching.latest(places),
       this.countries.currentSettingsIfAny(countryCode),
     ]);
-    const pricesOf = (scope: 'state' | 'city' | 'area', id: string) => saved.get(`${scope}:${id}`)!;
+    // What each place sets for itself: its prices, and its Matching values (M14), each with its version.
+    const own = (scope: 'state' | 'city' | 'area', id: string) => ({
+      prices: saved.get(`${scope}:${id}`)!,
+      matching: savedMatching.get(`${scope}:${id}`)!,
+    });
     const parsed = <T extends { boundary: string }>(row: T) => ({
       ...row,
       boundary: JSON.parse(row.boundary) as unknown,
@@ -100,17 +108,17 @@ export class ServiceAreasAdminService {
     return {
       // The country's own prices, which a state, city or area falls back to (Settings, Places).
       countryPrices: current ? countryPrices(current.settings) : null,
+      // And the country's Matching values, which they fall back to the same way.
+      countryMatching: current?.settings.matching ?? null,
       states: stateRows.map((s) => ({
         ...s,
-        prices: pricesOf('state', s.id),
+        ...own('state', s.id),
         cities: cityRows
           .filter((c) => c.stateId === s.id)
           .map((c) => ({
             ...parsed(c),
-            prices: pricesOf('city', c.id),
-            areas: areaRows
-              .filter((a) => a.cityId === c.id)
-              .map((a) => ({ ...parsed(a), prices: pricesOf('area', a.id) })),
+            ...own('city', c.id),
+            areas: areaRows.filter((a) => a.cityId === c.id).map((a) => ({ ...parsed(a), ...own('area', a.id) })),
           })),
       })),
     };
