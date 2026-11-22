@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { api, reasonOf, ASKED, isPending, messageOf } from '@/lib/api';
 import { matchingFromForm } from '@/lib/matching-places';
 import { pricesFromForm } from '@/lib/prices';
+import { shapeMissing } from '@/lib/shapes';
 
 export interface SaveState {
   error?: string;
@@ -115,6 +116,8 @@ const boundaryOf = (form: FormData) => {
 
 /** Adds a city to a state, with the shape drawn (Places). It starts off. */
 export async function createCity(_: Result, form: FormData): Promise<Result> {
+  const missing = shapeMissing(String(form.get('boundary') ?? ''));
+  if (missing) return { error: missing };
   return run(
     () =>
       api('/admin/cities', {
@@ -132,6 +135,8 @@ export async function createCity(_: Result, form: FormData): Promise<Result> {
 
 /** Adds an area to a city, with the shape drawn (Places). It starts off. */
 export async function createArea(_: Result, form: FormData): Promise<Result> {
+  const missing = shapeMissing(String(form.get('boundary') ?? ''));
+  if (missing) return { error: missing };
   return run(
     () =>
       api('/admin/areas', {

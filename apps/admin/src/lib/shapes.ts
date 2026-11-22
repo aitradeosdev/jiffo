@@ -134,3 +134,13 @@ export function parseBoundary(text: string): { boundary?: Boundary; error?: stri
   }
   return { boundary: boundaryFrom(polygons)! };
 }
+
+/**
+ * Why a new city or area can't be sent yet, or null: it is a name and a shape, and the form carries the shape only
+ * once one is drawn or pasted. Pressing Enter (Go on a phone's keyboard) sends the form without one.
+ */
+export function shapeMissing(boundaryText: string): string | null {
+  return boundaryText.trim()
+    ? null
+    : "Draw the outline on the map, or paste one under 'Paste a shape instead' and tap Use this shape, then save.";
+}
