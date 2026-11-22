@@ -26,6 +26,7 @@ import { SettingsAdminService } from './settings-admin.service';
 import { ServiceAreasAdminService } from './service-areas-admin.service';
 import { BoundaryInput } from '../countries/service-areas';
 import { MAPS, type MapsAdapter } from '../adapters/maps';
+import { RateLimit } from '../common/rate-limit';
 import { ProvidersAdminService } from './providers-admin.service';
 import { APPLICATION_STATUSES, ApplicationsAdminService } from './applications-admin.service';
 import { ID_CHECK_STATUSES, IdChecksAdminService } from './id-checks-admin.service';
@@ -485,6 +486,8 @@ export class AdminController {
    */
   @Get('places/locate')
   @Needs('read')
+  // Each is a paid call to the maps provider, as the apps' address search is.
+  @RateLimit('paid')
   async locatePlace(@Query(new ZodBody(LocateQuery)) query: z.infer<typeof LocateQuery>) {
     const found = await this.maps.locate({ query: query.q, countryCode: query.country, kind: query.kind });
     if (!found) throw notFound('place_not_found', 'Not found on the map');

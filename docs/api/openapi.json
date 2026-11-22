@@ -4126,7 +4126,7 @@
             "description": "An error"
           }
         },
-        "x-rate-limit": "default",
+        "x-rate-limit": "paid",
         "x-permission": [
           "read"
         ]
