@@ -237,11 +237,14 @@ export class OffersService {
           travelSeconds: r.travel.durationSeconds,
           travelEstimated: r.travel.estimated,
           straightMeters: r.straightMeters,
-          // Back to back (M10), never: the agent can't take it until they finish the one they hold.
+          // Back to back (M10) or with another (M13), never: the agent is busy with the one they hold.
           counts:
             !r.backToBack &&
+            !r.pairedWith &&
             offerCounts({ straightMeters: r.straightMeters, offeredAt: now, onlineSince: r.onlineSince }, rules),
           backToBack: r.backToBack,
+          pairedWith: r.pairedWith,
+          pairOrder: r.pairOrder,
           features: r.features,
           offeredAt: now,
           expiresAt: new Date(now.getTime() + rules.offerSeconds * 1000),
@@ -660,8 +663,12 @@ export class OffersService {
     const category = await this.countries.activeCategory(errand.countryCode, errand.categoryKey);
     const minutes = Math.max(1, Math.round(ranked.travel.durationSeconds / 60));
     await this.push.notifyUser(offer.agentId, 'agent', {
-      title: offer.backToBack ? 'Your next errand' : 'New errand for you',
-      body: `${category?.name ?? 'Errand'} · ${formatNaira(errand.feeKobo)} · ${minutes} min away${offer.backToBack ? ', after the one you are on' : ''}. Answer within ${Math.round((offer.expiresAt.getTime() - offer.offeredAt.getTime()) / 1000)} seconds.`,
+      title: offer.backToBack
+        ? 'Your next errand'
+        : offer.pairedWith
+          ? 'A second errand to carry'
+          : 'New errand for you',
+      body: `${category?.name ?? 'Errand'} · ${formatNaira(errand.feeKobo)} · ${minutes} min away${offer.backToBack ? ', after the one you are on' : offer.pairedWith ? ', picked up near the one you are on' : ''}. Answer within ${Math.round((offer.expiresAt.getTime() - offer.offeredAt.getTime()) / 1000)} seconds.`,
       data: {
         type: 'errand.offer',
         errandId: errand.id,
@@ -742,8 +749,10 @@ export class OffersService {
         and(
           eq(errandOffers.agentId, agentId),
           gte(errandOffers.offeredAt, presence.since ?? new Date(0)),
-          // Not those made back to back (M10): the agent is out on an errand, likely driving, when one rings.
+          // Not those made back to back (M10) or to carry with another (M13): the agent is out on an errand,
+          // likely driving, when one rings.
           eq(errandOffers.backToBack, false),
+          isNull(errandOffers.pairedWith),
         ),
       )
       .orderBy(desc(errandOffers.offeredAt))
@@ -864,6 +873,8 @@ export class OffersService {
       counts: offer.offer.counts,
       // Back to back (M10): it waits behind the errand they hold, and starts once that one is done.
       backToBack: offer.offer.backToBack,
+      // With another (M13): carried at once with the errand they hold, its pickup near that one's.
+      paired: !!offer.offer.pairedWith,
       secondsLeft: Math.max(0, Math.ceil((offer.offer.expiresAt.getTime() - Date.now()) / 1000)),
       windowSeconds: Math.round((offer.offer.expiresAt.getTime() - offer.offer.offeredAt.getTime()) / 1000),
       agentEarnsKobo: earns,

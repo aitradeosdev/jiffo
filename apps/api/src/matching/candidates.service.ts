@@ -21,10 +21,19 @@ export interface Candidate {
    * the rest of that one and then the drive from its drop-off.
    */
   backToBack: boolean;
+  /**
+   * On the way to another urgent errand's pickup, near this one's (M13): offered this one to carry with it, with the
+   * travel time to this pickup by way of that one's. That errand, and the way through both errands' stops.
+   */
+  pairedWith: string | null;
+  pairOrder: Array<{ errandId: string; kind: 'pickup' | 'dropoff' }> | null;
 }
 
 /** An agent near the end of an errand, as checked: that errand's drop-off, and whether it is at its end already. */
 type Following = { dropoff: LatLng; atTheEnd: boolean };
+
+/** An agent to carry this errand with another (M13), as checked: the way through both, and to this pickup. */
+type Paired = NonNullable<Awaited<ReturnType<EligibilityService['pairing']>>> & { toNextPickupMeters: number };
 
 type ErrandRow = typeof errands.$inferSelect;
 
@@ -77,16 +86,28 @@ export class CandidatesService {
     // as any agent does.
     const onTheWay = (c: (typeof shortlist)[number]) => !!c.following && !c.following.atTheEnd;
     const travel = await this.travelTimes.toPickup(
-      shortlist.filter((c) => !onTheWay(c)),
+      shortlist.filter((c) => !onTheWay(c) && !c.paired),
       pickup,
       rules,
     );
+    const travelOf = (c: (typeof shortlist)[number]): Travel =>
+      c.paired
+        ? {
+            distanceMeters: c.paired.toNextPickupMeters,
+            durationSeconds: Math.round(c.paired.toNextPickupSeconds),
+            estimated: true,
+          }
+        : onTheWay(c)
+          ? this.backToBackTravel(c, c.following!.dropoff, pickup, rules)
+          : travel.get(c.agentId)!;
     return shortlist
       .map((c) => ({
         agentId: c.agentId,
         straightMeters: c.straightMeters,
-        travel: onTheWay(c) ? this.backToBackTravel(c, c.following!.dropoff, pickup, rules) : travel.get(c.agentId)!,
+        travel: travelOf(c),
         backToBack: !!c.following,
+        pairedWith: c.paired?.held.id ?? null,
+        pairOrder: c.paired?.stops ?? null,
       }))
       .sort((a, b) => a.travel.durationSeconds - b.travel.durationSeconds || a.straightMeters - b.straightMeters);
   }
@@ -155,7 +176,10 @@ export class CandidatesService {
     const near = (await this.nearest(errand.countryCode, pickup, rules, want * 3 + skip.size, radiusKm)).filter(
       (n) => !skip.has(n.agentId),
     );
-    const out: Array<Omit<Candidate, 'travel' | 'backToBack'> & LatLng & { following: Following | null }> = [];
+    const out: Array<
+      Omit<Candidate, 'travel' | 'backToBack' | 'pairedWith' | 'pairOrder'> &
+        LatLng & { following: Following | null; paired: Paired | null }
+    > = [];
     for (let i = 0; i < near.length && out.length < want; i += CHECK_AT_ONCE) {
       const checked = await Promise.all(
         near.slice(i, i + CHECK_AT_ONCE).map((n) => this.check(n, errand, pickup, rules, backToBack)),
@@ -243,23 +267,39 @@ export class CandidatesService {
     // Measured as accepting measures it, from the database's position.
     const pickupMeters = await this.eligibility.pickupMeters(errand.id, me);
     const facts = await this.eligibility.facts(near.agentId, [errand]);
+    // On the way to another urgent errand's pickup near this one's (M13): carried with it.
+    const pair = backToBack ? await this.eligibility.pairing(me, errand.id, pickup, rules) : null;
     // Near the end of another errand (M10): this one starts from that one's drop-off.
     const current = backToBack ? backToBackFrom(me, pickup, rules) : null;
     // Heading somewhere (M13): only an errand whose drop-off brings them closer, from where they start it.
     const dropoff = me.destination ? (await this.eligibility.dropoffs([errand.id])).get(errand.id) : null;
-    const origin = current?.dropoff && !atTheEnd(current) ? current.dropoff : me;
-    const asked = this.eligibility.matchErrand(
-      errand,
-      pickupMeters,
-      near.agentId,
-      facts,
-      this.eligibility.offRoute({ ...origin, destination: me.destination }, dropoff, rules),
-    );
+    const askedFrom = (origin: LatLng) =>
+      this.eligibility.matchErrand(
+        errand,
+        pickupMeters,
+        near.agentId,
+        facts,
+        this.eligibility.offRoute({ ...origin, destination: me.destination }, dropoff, rules),
+      );
+    const asked = askedFrom(me);
     const refused = matchRefusal(me, asked, rules);
     let following: Following | null = null;
+    let paired: Paired | null = null;
     if (refused && backToBack && (refused === 'finish_urgent' || refused === 'busy')) {
-      if (!current?.dropoff || matchRefusal(me, asked, rules, { backToBack: true })) return null;
-      following = { dropoff: current.dropoff, atTheEnd: atTheEnd(current) };
+      if (pair && !matchRefusal(me, asked, rules, { paired: true })) {
+        // Straight lines along the way to this pickup, for the offer log.
+        const ahead = pair.order.slice(0, pair.order.findIndex((s) => s.errand === 'next') + 1);
+        let meters = 0;
+        ahead.reduce<LatLng>((from, s) => ((meters += haversineMeters(from, s.at)), s.at), me);
+        paired = { ...pair, toNextPickupMeters: Math.round(meters) };
+      } else if (current?.dropoff) {
+        // Back to back, measured from where they start it: the current one's drop-off, unless they are there.
+        const origin = atTheEnd(current) ? me : current.dropoff;
+        if (matchRefusal(me, askedFrom(origin), rules, { backToBack: true })) return null;
+        following = { dropoff: current.dropoff, atTheEnd: atTheEnd(current) };
+      } else {
+        return null;
+      }
     } else if (refused) {
       return null;
     }
@@ -272,7 +312,17 @@ export class CandidatesService {
             afterSeconds: TravelTimesService.estimate(haversineMeters(me, following.dropoff), rules).durationSeconds,
           }
         : undefined;
-    if (errand.urgent && (await this.eligibility.makesLate(me, errand.id, rules, this.db, from))) return null;
-    return { agentId: near.agentId, straightMeters: Math.round(pickupMeters), lat: me.lat, lng: me.lng, following };
+    // Carried with another, the pairing has made sure of that already, through both errands' stops.
+    if (errand.urgent && !paired && (await this.eligibility.makesLate(me, errand.id, rules, this.db, from))) {
+      return null;
+    }
+    return {
+      agentId: near.agentId,
+      straightMeters: Math.round(pickupMeters),
+      lat: me.lat,
+      lng: me.lng,
+      following,
+      paired,
+    };
   }
 }

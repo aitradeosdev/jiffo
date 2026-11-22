@@ -151,6 +151,13 @@ export function CustomerTrip({
           </View>
         </Pressable>
 
+        {errand.sharedTrip ? (
+          <Text variant="note" tone="ink2" accessibilityLiveRegion="polite">
+            Your agent is carrying another errand picked up nearby. Jiffo plans the way so yours takes only a few
+            minutes longer.
+          </Text>
+        ) : null}
+
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           <Chip label="Message" icon="chat" onPress={openChat} />
           <Chip label={expanded ? 'Less' : 'Details'} icon="doc" onPress={() => setExpanded((x) => !x)} />

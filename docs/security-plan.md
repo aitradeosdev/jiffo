@@ -186,7 +186,7 @@ Where this plan differs from what was deliberately built, `docs/security-audit.m
 - **G1 Fake GPS:**
   - On the phone: check for mock locations (`isMock` on Android), spoofing apps such as Lockito, and rooted phones.
   - On the server: check for impossible speeds, sudden jumps and perfectly straight trails.
-- **G2** A customer sees an agent's location only during their own active errand, never while the agent is offline or off duty.
+- **G2** A customer sees an agent's location only during their own active errand, never while the agent is offline or off duty. Carrying two errands at once (docs/matching.md, M13), both customers follow the agent once each errand has started, so each sees the agent's way through the other's stops; neither is told anything else about the other errand, and the feature starts switched off.
 - **G3** Location is collected only while the agent is online or on an errand.
 - **G4** GPS trails are deleted after 90 days by a scheduled job, unless a dispute or investigation is open.
 

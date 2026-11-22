@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { and, desc, eq, gt, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import {
   byBestForYou,
   canRevealPin,
@@ -22,6 +22,7 @@ import {
   matchRefusal,
   atTheEnd,
   backToBackFrom,
+  AGENT_OUT_STATES,
 } from '@jiffo/shared';
 import type { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
@@ -164,6 +165,33 @@ const PRECHECKED: Partial<Record<string, 'customer' | 'agent'>> = {
 
 /** Where an agent still carries an errand: one taken back to back (M10) waits until it is handed over. */
 const STILL_CARRYING = ['started', 'item_pending', 'items_locked', 'delivered'] as const;
+
+/** The agent is out on the errand: it can be carried with another (M13). */
+const AGENT_OUT: ReadonlySet<string> = new Set(AGENT_OUT_STATES);
+/** Delivered, or a drop-off photo sent: its drop-off is behind the agent. Not unreachable: they go back. */
+const DELIVERED: ReadonlySet<string> = new Set(['delivered', 'photo_pending']);
+/** Items sent or bought, or delivered: its pickup is behind the agent. */
+const PAST_PICKUP: ReadonlySet<string> = new Set([
+  'item_pending',
+  'items_locked',
+  'delivered',
+  'photo_pending',
+  'unreachable',
+]);
+
+/** The errand this one is carried with (M13), and the way through both errands' stops. */
+export interface Alongside {
+  errandId: string;
+  stops: Array<{
+    errandId: string;
+    kind: 'pickup' | 'dropoff';
+    label: string | null;
+    address: string;
+    lat: number;
+    lng: number;
+    done: boolean;
+  }>;
+}
 
 @Injectable()
 export class ErrandsService implements OnModuleInit {
@@ -730,6 +758,8 @@ export class ErrandsService implements OnModuleInit {
       search: null as { radiusKm: number; everyone: boolean } | null,
       prices: null as Prices | null,
       noMatch: false,
+      alongside: null as Alongside | null,
+      sharedTrip: false,
     };
     if (!viewerId) return { ...view!, ...empty };
     // An agent deciding whether to accept sees what they would earn at their tier.
@@ -759,6 +789,7 @@ export class ErrandsService implements OnModuleInit {
       earns,
       settled,
       noMatch,
+      pair,
     ] = await Promise.all([
       mayHavePhotos
         ? this.db
@@ -820,6 +851,9 @@ export class ErrandsService implements OnModuleInit {
         : Promise.resolve(null),
       // Whether this person chose "Don't match me again" with the other: never the other's choice.
       this.matchBlocks.chose(viewerId, role === 'customer' ? errand.agentId : errand.customerId),
+      // Carried with another errand (M13): the agent sees both errands' stops in order; the customer only that
+      // their agent carries another on the way.
+      (role === 'agent' || role === 'customer') && AGENT_OUT.has(errand.status) ? this.pairOf(errand) : null,
     ]);
     const items = (photoEvents.find((e) => e.event === 'send_item_amount')?.data.photos as string[] | undefined) ?? [];
     const dropoff = photoEvents.find((e) => e.event === 'send_dropoff_photo')?.data.photo as string | undefined;
@@ -844,6 +878,112 @@ export class ErrandsService implements OnModuleInit {
       // Its own prices (its area's, kept when it was sent; the country's for one from before), for the apps'
       // lowest fee and service fee when the fee is raised or a new price offered.
       prices: errand.prices ?? countryPrices(await this.countries.errandSettings(errand)),
+      alongside: role === 'agent' ? pair : null,
+      sharedTrip: !!pair,
+    };
+  }
+
+  /**
+   * The errand carried with this one, if any (docs/matching.md, M13): whichever of the two was offered with the
+   * other, by the agent holding this one.
+   */
+  private async partnerId(errand: Pick<ErrandRow, 'id' | 'agentId'>, agentId = errand.agentId) {
+    if (!agentId) return null;
+    const [offer] = await this.db
+      .select({ errandId: errandOffers.errandId, pairedWith: errandOffers.pairedWith, order: errandOffers.pairOrder })
+      .from(errandOffers)
+      .where(
+        and(
+          eq(errandOffers.agentId, agentId),
+          eq(errandOffers.status, 'accepted'),
+          isNotNull(errandOffers.pairedWith),
+          or(eq(errandOffers.errandId, errand.id), eq(errandOffers.pairedWith, errand.id)),
+        ),
+      )
+      .orderBy(desc(errandOffers.answeredAt))
+      .limit(1);
+    if (!offer?.pairedWith) return null;
+    return { otherId: offer.errandId === errand.id ? offer.pairedWith : offer.errandId, order: offer.order };
+  }
+
+  /** After a change to an urgent errand: the one carried with it, still under way, is told to look again. */
+  private async partnerChanged(errand: ErrandRow) {
+    if (!errand.urgent) return;
+    try {
+      const partner = await this.partnerId(errand, errand.agentId ?? undefined);
+      if (!partner) return;
+      const [other] = await this.db
+        .select({ id: errands.id, customerId: errands.customerId, agentId: errands.agentId, status: errands.status })
+        .from(errands)
+        .where(eq(errands.id, partner.otherId));
+      if (other && AGENT_OUT.has(other.status)) this.notifier.alongsideChanged(other);
+    } catch (error) {
+      // The change is saved; a missed nudge only leaves a screen to refresh on its own.
+      this.logger.warn(`Telling the errand carried with ${errand.id} failed: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * The errand this one is carried with (docs/matching.md, M13), while the same agent holds both, and the way
+   * through both errands' stops kept when the second was accepted.
+   */
+  private async pairOf(errand: ErrandRow): Promise<Alongside | null> {
+    const partner = await this.partnerId(errand);
+    if (!partner?.order) return null;
+    const { otherId, order } = partner;
+    const [other] = await this.db
+      .select({
+        id: errands.id,
+        agentId: errands.agentId,
+        status: errands.status,
+        reachedPickupAt: errands.reachedPickupAt,
+      })
+      .from(errands)
+      .where(eq(errands.id, otherId));
+    if (!other || other.agentId !== errand.agentId || !AGENT_OUT.has(other.status)) return null;
+    const ids = [errand.id, otherId];
+    const stops = await this.db
+      .select({
+        errandId: errandStops.errandId,
+        seq: errandStops.seq,
+        label: errandStops.label,
+        address: errandStops.address,
+        lat: errandStops.lat,
+        lng: errandStops.lng,
+      })
+      .from(errandStops)
+      .where(inArray(errandStops.errandId, ids))
+      .orderBy(errandStops.errandId, errandStops.seq);
+    const state = new Map([
+      [errand.id, errand],
+      [other.id, other],
+    ]);
+    // A pickup is behind the agent once they were seen there or have bought the items; a drop-off once delivered.
+    const done = (id: string, kind: 'pickup' | 'dropoff') => {
+      const e = state.get(id)!;
+      return kind === 'pickup' ? e.reachedPickupAt !== null || PAST_PICKUP.has(e.status) : DELIVERED.has(e.status);
+    };
+    const at = (id: string, kind: 'pickup' | 'dropoff') => {
+      const mine = stops.filter((s) => s.errandId === id);
+      return kind === 'pickup' ? mine[0] : mine.at(-1);
+    };
+    return {
+      errandId: otherId,
+      stops: order.flatMap((s) => {
+        const stop = at(s.errandId, s.kind);
+        if (!stop) return [];
+        return [
+          {
+            errandId: s.errandId,
+            kind: s.kind,
+            label: stop.label,
+            address: stop.address,
+            lat: stop.lat,
+            lng: stop.lng,
+            done: done(s.errandId, s.kind),
+          },
+        ];
+      }),
     };
   }
 
@@ -1014,6 +1154,7 @@ export class ErrandsService implements OnModuleInit {
     await this.notifier.transitioned(outcome.result);
     await this.afterAgentLeft(outcome.result.before, outcome.result.after);
     await this.offers.errandChanged(outcome.result.after);
+    await this.partnerChanged(outcome.result.after);
     return this.viewOne(outcome.result.after, outcome.role, auth.userId);
   }
 
@@ -1266,6 +1407,32 @@ export class ErrandsService implements OnModuleInit {
               .where(and(eq(errandStops.errandId, errand.id), eq(errandStops.seq, 0)))
           : [];
         const current = pickup ? backToBackFrom(me, pickup, live.matching) : null;
+        // Offered with another (M13): taken beside the errand it was offered with, while two at once is on and the
+        // way through both still keeps each customer's errand within the minutes Settings, Matching give.
+        // Not once it is open to everyone (M8): then it goes to the first who may take it, as any other would.
+        const [pairedOffer] =
+          errand.urgent && live.matching.offers && live.matching.twoAtOnce && errand.broadcastFeeKobo !== errand.feeKobo
+            ? await tx
+                .select({ pairedWith: errandOffers.pairedWith })
+                .from(errandOffers)
+                .where(
+                  and(
+                    eq(errandOffers.errandId, errand.id),
+                    eq(errandOffers.agentId, auth.userId),
+                    eq(errandOffers.status, 'open'),
+                    isNotNull(errandOffers.pairedWith),
+                    gt(errandOffers.expiresAt, now),
+                  ),
+                )
+            : [];
+        const [pairPickup] = pairedOffer
+          ? await tx
+              .select({ lat: errandStops.lat, lng: errandStops.lng })
+              .from(errandStops)
+              .where(and(eq(errandStops.errandId, errand.id), eq(errandStops.seq, 0)))
+          : [];
+        const pair = pairPickup ? await this.eligibility.pairing(me, errand.id, pairPickup, live.matching, tx) : null;
+        const paired = pair && pair.held.id === pairedOffer!.pairedWith ? pair : null;
         // Heading somewhere (M13): only an errand whose drop-off brings them closer, from where they start it.
         const dropoff = me.destination ? (await this.eligibility.dropoffs([errand.id], tx)).get(errand.id) : null;
         const origin = current?.dropoff && !atTheEnd(current) ? current.dropoff : me;
@@ -1279,12 +1446,12 @@ export class ErrandsService implements OnModuleInit {
             this.eligibility.offRoute({ ...origin, destination: me.destination }, dropoff, live.matching),
           ),
           live.matching,
-          { backToBack: !!current },
+          { backToBack: !!current, paired: !!paired },
         );
         if (refused) throw this.eligibility.refusal(refused);
         // Holding a scheduled errand taken ahead (M12): never an urgent errand that would make them late for it,
-        // however it is taken.
-        if (errand.urgent && (await this.eligibility.makesLate(me, errand.id, live.matching, tx))) {
+        // however it is taken. Carried with another, the pairing made sure of that through both errands' stops.
+        if (errand.urgent && !paired && (await this.eligibility.makesLate(me, errand.id, live.matching, tx))) {
           throw this.eligibility.refusal('late_for_scheduled');
         }
         // Open to everyone once its search reached its last step (M8), but only within that step's radius.
@@ -1299,7 +1466,8 @@ export class ErrandsService implements OnModuleInit {
         if (errand.urgent && live.matching.offers && !toEveryone) {
           const [taken] = await tx
             .update(errandOffers)
-            .set({ status: 'accepted', answeredAt: now })
+            // Carried with another: the way through both, from where the agent is as they take it.
+            .set({ status: 'accepted', answeredAt: now, ...(paired ? { pairOrder: paired.stops } : {}) })
             .where(
               and(
                 eq(errandOffers.errandId, errand.id),

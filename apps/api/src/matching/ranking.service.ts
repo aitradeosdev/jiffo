@@ -113,8 +113,8 @@ export class RankingService {
           hour: hour % 24,
           buy: errand.buy,
         };
-        // Not for a back-to-back offer: the history it learnt from left those out, as the agent was busy then.
-        const chance = model && !c.backToBack ? predictAcceptance(model, features) : null;
+        // Not for an offer beside another errand (M10, M13): the history left those out, as the agent was busy.
+        const chance = model && !c.backToBack && !c.pairedWith ? predictAcceptance(model, features) : null;
         const parts =
           chance === null
             ? scored

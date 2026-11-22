@@ -32,6 +32,12 @@ export function useErrand(id: string | undefined) {
     if (focused) reload();
     else missed.current = true;
   });
+  // The errand carried with this one changed (M13): no new version here, so asked for again, for the stops.
+  useRealtimeEvent<{ errandId: string }>('errand.alongside', (u) => {
+    if (u.errandId !== id) return;
+    if (focused) reload();
+    else missed.current = true;
+  });
   // An urgent errand's search reached further, or opened to everyone (M8): no new version, so asked for here.
   useRealtimeEvent<{ errandId: string }>('errand.search', (u) => {
     if (u.errandId !== id) return;

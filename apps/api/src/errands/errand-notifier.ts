@@ -322,6 +322,17 @@ export class ErrandNotifier {
     }
   }
 
+  /**
+   * The errand carried with this one changed (docs/matching.md, M13): taken, delivered or ended. Its own version
+   * didn't, so its screens are told to look again, for the stops and the customer's note.
+   */
+  alongsideChanged(errand: { id: string; customerId: string; agentId: string | null }) {
+    const update = { errandId: errand.id };
+    this.realtime.toErrand(errand.id, 'errand.alongside', update);
+    this.realtime.toUser(errand.customerId, 'customer', 'errand.alongside', update);
+    if (errand.agentId) this.realtime.toUser(errand.agentId, 'agent', 'errand.alongside', update);
+  }
+
   async transitioned(r: TransitionResult) {
     // Pairings and finished errands are checked for fraud flags beside this (E6).
     this.risk.errandChanged(r.before, r.after);

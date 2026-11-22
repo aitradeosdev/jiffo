@@ -108,7 +108,7 @@ function OfferScreen({ showing, onClose }: { showing: Showing; onClose: () => vo
   useEffect(() => {
     Vibration.vibrate([0, 500, 250, 500]);
     AccessibilityInfo.announceForAccessibility(
-      `${offer.backToBack ? 'Next errand offer, after the one you are on' : 'New errand offer'}. You earn ${naira(offer.agentEarnsKobo)}. ${secondsToGo(endsAt, Date.now())} seconds to answer.`,
+      `${offer.backToBack ? 'Next errand offer, after the one you are on' : offer.paired ? 'Second errand offer, to carry with the one you are on' : 'New errand offer'}. You earn ${naira(offer.agentEarnsKobo)}. ${secondsToGo(endsAt, Date.now())} seconds to answer.`,
     );
     return () => Vibration.cancel();
   }, [offer, endsAt]);
@@ -232,6 +232,12 @@ function OfferScreen({ showing, onClose }: { showing: Showing; onClose: () => vo
             <Text variant="small" tone="ink2">
               Your next errand: it starts once you finish the one you are on. The time to the pickup counts the rest of
               that one.
+            </Text>
+          ) : null}
+          {offer.paired ? (
+            <Text variant="small" tone="ink2">
+              A second errand to carry with the one you are on: its pickup is near that one&apos;s. The time to the
+              pickup goes by way of that one, and Jiffo shows you the order of the stops.
             </Text>
           ) : null}
           {offer.counts === false ? (

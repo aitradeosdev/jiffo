@@ -7,7 +7,9 @@ import {
   bringsCloser,
   haversineMeters,
   lateForScheduled,
+  pairWith,
   type CountrySettings,
+  type HeldErrand,
   type LatLng,
   type MatchAgent,
   type MatchErrand,
@@ -141,6 +143,41 @@ export class EligibilityService {
   }
 
   /**
+   * The errand an urgent errand could be carried with (docs/matching.md, M13), the way through both, and each stop's
+   * errand, or null: as pairWith has it, for errands of a pickup and a drop-off alone, and never one that would make
+   * the agent late for a scheduled errand they hold.
+   */
+  async pairing(
+    me: LatLng & { held: HeldErrand[] },
+    errandId: string,
+    pickup: LatLng,
+    rules: CountrySettings['matching'],
+    db: Db | Tx = this.db,
+  ) {
+    if (!rules.twoAtOnce || !me.held.some((e) => e.urgent && !e.startsLater)) return null;
+    const dropoff = (await this.dropoffs([errandId], db)).get(errandId);
+    if (!dropoff) return null;
+    const secondsBetween = (a: LatLng, b: LatLng) =>
+      TravelTimesService.estimate(haversineMeters(a, b), rules).durationSeconds;
+    const pair = pairWith(me, { pickup, dropoff }, rules, secondsBetween);
+    if (!pair) return null;
+    const stops = await db
+      .select({ errandId: errandStops.errandId, n: sql<number>`count(*)::int` })
+      .from(errandStops)
+      .where(inArray(errandStops.errandId, [errandId, pair.held.id]))
+      .groupBy(errandStops.errandId);
+    if (stops.length !== 2 || stops.some((s) => s.n !== 2)) return null;
+    const last = pair.order.at(-1)!;
+    if (lateForScheduled(me.held, { at: Date.now() + pair.totalSeconds * 1000, dropoff: last.at }, secondsBetween)) {
+      return null;
+    }
+    return {
+      ...pair,
+      stops: pair.order.map((s) => ({ errandId: s.errand === 'held' ? pair.held.id : errandId, kind: s.kind })),
+    };
+  }
+
+  /**
    * Whether doing this urgent errand would make the agent late for a scheduled one they hold, taken ahead (M12): to
    * its pickup, along its stops, then on to the scheduled one's pickup by its start, each leg estimated at the
    * fallback speed. `from`: where they set off for its pickup, and how long until they do, when they first finish
@@ -225,9 +262,11 @@ export class EligibilityService {
     // transaction's connection runs one query at a time.
     const held = await db
       .select({
+        id: errands.id,
         urgent: errands.urgent,
         status: errands.status,
         scheduledFor: errands.scheduledFor,
+        reachedPickupAt: errands.reachedPickupAt,
         // Its final drop-off, which a back-to-back offer's pickup must be near (M10). The outer table by name: inside
         // a select, a column alone renders unqualified, which the subquery would take for its own.
         dropoffLat: sql<number | null>`(select s.lat from ${errandStops} s where s.errand_id = "errands"."id"
@@ -262,7 +301,10 @@ export class EligibilityService {
       takesPurchases: prefs.takesPurchases,
       workRadiusKm: prefs.workRadiusKm,
       held: held.map((e) => ({
+        id: e.id,
         urgent: e.urgent,
+        // Seen at its pickup (M15): collected, or about to be.
+        reachedPickup: e.reachedPickupAt !== null,
         status: e.status,
         dropoff: e.dropoffLat === null || e.dropoffLng === null ? null : { lat: e.dropoffLat, lng: e.dropoffLng },
         startsAt: e.scheduledFor,

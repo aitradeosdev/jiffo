@@ -835,6 +835,13 @@ export const errandOffers = pgTable(
      * their acceptance rate, and lets them accept it while holding that one.
      */
     backToBack: boolean('back_to_back').notNull().default(false),
+    /**
+     * Offered to be carried with the errand the agent holds (M13): that errand. Never counts toward their acceptance
+     * rate, and lets them accept it while holding that one.
+     */
+    pairedWith: uuid('paired_with').references(() => errands.id),
+    /** The way through both errands' stops, from when it was offered, then from when it was accepted. */
+    pairOrder: jsonb('pair_order').$type<Array<{ errandId: string; kind: 'pickup' | 'dropoff' }>>(),
     /** What the offer looked like to the agent (M13): what acceptance prediction learns from. None before it. */
     features: jsonb('features').$type<OfferFeatures>(),
     offeredAt: timestamp('offered_at', { withTimezone: true }).notNull(),

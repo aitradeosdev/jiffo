@@ -13,6 +13,8 @@ export interface Offer {
   counts: boolean;
   /** Back to back (M10): it waits behind the errand they are on, and starts once that one is done. */
   backToBack: boolean;
+  /** Two at once (M13): carried now with the errand they are on, its pickup near that one's. */
+  paired: boolean;
   errand: {
     id: string;
     categoryKey: string;
@@ -57,9 +59,11 @@ export function offerFacts(offer: Offer) {
   return [
     offer.backToBack
       ? 'After the errand you are on'
-      : errand.scheduledFor
-        ? `Scheduled for ${shortWhen(errand.scheduledFor)}`
-        : 'Now',
+      : offer.paired
+        ? 'With the errand you are on'
+        : errand.scheduledFor
+          ? `Scheduled for ${shortWhen(errand.scheduledFor)}`
+          : 'Now',
     `${errand.stopCount} stops`,
     ...(errand.buy ? ['You buy the items'] : []),
   ];
@@ -69,7 +73,7 @@ export function offerFacts(offer: Offer) {
  * Where the app goes once the agent accepts: the errand taken, or, for one back to back (M10), nowhere, so they stay
  * on the errand they are carrying out. The next one starts after it.
  */
-export const afterAccepting = (offer: Pick<Offer, 'backToBack' | 'errand'>) =>
+export const afterAccepting = (offer: Pick<Offer, 'backToBack' | 'paired' | 'errand'>) =>
   offer.backToBack ? null : `/errand/${offer.errand.id}`;
 
 /** How full the countdown bar is: what's left of the whole window, from 0 to 1. */

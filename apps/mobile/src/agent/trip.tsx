@@ -25,6 +25,7 @@ import { stepsFor, type ErrandView } from '../errands/types';
 import { km } from './board';
 import { usePresence } from './presence';
 import { approvalLine } from '../errands/release';
+import { nextStop, stopLines } from '../errands/alongside';
 import { agentStage } from './stage';
 
 const PIN_KIND = { pickup: 'pick', stop: 'stop', dropoff: 'drop' } as const;
@@ -71,7 +72,10 @@ export function AgentTrip({ errand, actions }: { errand: ErrandView; actions: Ag
   const routeMeters = errand.stops.slice(1).reduce((sum, s, i) => sum + distanceMeters(errand.stops[i]!, s), 0);
   const earns = errand.agentEarnsKobo ?? errand.feeKobo;
   // Before the items are bought (or the parcel collected), the agent heads to the pickup.
-  const headingTo = ['accepted', 'started'].includes(errand.status) ? pickup : dropoff;
+  // Carrying two at once (M13): the next stop through both, whichever errand it is for.
+  const headingTo =
+    (errand.alongside && nextStop(errand.alongside)) ||
+    (['accepted', 'started'].includes(errand.status) ? pickup : dropoff);
   const pins: MapPin[] = [
     ...errand.stops.map((s) => ({ key: String(s.seq), kind: PIN_KIND[s.kind], lat: s.lat, lng: s.lng })),
     ...(coords ? [{ key: 'me', kind: 'me' as const, ...coords }] : []),
@@ -185,6 +189,8 @@ export function AgentTrip({ errand, actions }: { errand: ErrandView; actions: Ag
             </Text>
           </View>
         </Pressable>
+
+        {errand.alongside ? <BothStops errand={errand} /> : null}
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           <Chip label="Directions" icon="nav" onPress={() => directionsTo(headingTo.lat, headingTo.lng)} />
@@ -419,6 +425,59 @@ function NextStep({
   return null;
 }
 
+/**
+ * Two errands at once (docs/matching.md, M13): the stops through both, in the order to take them. A stop of the other
+ * errand opens that one, where its own steps are.
+ */
+function BothStops({ errand }: { errand: ErrandView }) {
+  const c = useColors();
+  const lines = stopLines(errand.alongside!, errand.id);
+  return (
+    <View style={[styles.both, { borderColor: c.line2, backgroundColor: c.surface }]}>
+      <Text variant="sec" accessibilityRole="header">
+        Two errands at once
+      </Text>
+      <Text variant="note" tone="ink3">
+        Take the stops in this order.
+      </Text>
+      {lines.map((l) => (
+        <Pressable
+          key={`${l.errandId}-${l.n}`}
+          accessibilityRole={l.mine ? 'text' : 'button'}
+          accessibilityLabel={`Stop ${l.n}: ${l.title}, ${l.address}${l.done ? ', done' : ''}${l.mine ? '' : '. Opens the other errand'}`}
+          disabled={l.mine}
+          onPress={() => router.push(`/errand/${l.errandId}`)}
+          style={styles.bothRow}
+        >
+          <View
+            style={[
+              styles.tlDot,
+              { borderColor: l.done || l.mine ? c.ink : c.line2, backgroundColor: l.done ? c.ink : c.surface },
+            ]}
+          >
+            {l.done ? (
+              <Icon name="check" size={12} weight={3.2} color={c.onInk} />
+            ) : (
+              <Text variant="note" style={{ fontFamily: fonts.bold }}>
+                {l.n}
+              </Text>
+            )}
+          </View>
+          <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+            <Text style={styles.tlTitle} tone={l.mine ? 'ink' : 'ink2'} numberOfLines={1}>
+              {l.title}
+            </Text>
+            <Text variant="note" tone="ink3" numberOfLines={1}>
+              {l.address}
+            </Text>
+          </View>
+          {l.mine ? null : <Icon name="chev" size={16} color={c.ink3} />}
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 /** The five steps with a line between, done ones ticked, as on the customer's tracker. */
 function Timeline({ errand, step }: { errand: ErrandView; step: number }) {
   const c = useColors();
@@ -618,6 +677,8 @@ function HelpSheet({
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  both: { borderWidth: 1, borderRadius: 16, padding: 14, gap: 8 },
+  bothRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
   tcard: {
     position: 'absolute',
     left: 10,
