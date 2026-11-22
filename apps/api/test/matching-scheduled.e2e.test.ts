@@ -1,7 +1,8 @@
 import { and, eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_MATCHING_SETTINGS } from '@jiffo/shared';
+import { DEFAULT_MATCHING_SETTINGS, NIGERIA_DEFAULT_SETTINGS } from '@jiffo/shared';
+
 import { agentPresence, errandEvents, errandOffers, errands } from '../src/db/schema';
 import { AgentLocations } from '../src/matching/agent-locations';
 import {
@@ -20,6 +21,7 @@ import {
 const HERE = { lat: 6.62, lng: 3.5 };
 const east = (km: number) => ({ lat: HERE.lat, lng: HERE.lng + km / 110 });
 const MINUTE = 60_000;
+const NIGERIA_RAISE_MINUTES = NIGERIA_DEFAULT_SETTINGS.timers.raisePricePromptMinutes;
 
 /**
  * Scheduled errands (docs/matching.md, M12), as Bolt's scheduled rides: taken ahead from the board only by agents
@@ -100,11 +102,11 @@ describe('scheduled errands', () => {
       scheduledFor: new Date(Date.now() + minutes * MINUTE).toISOString(),
       stops: stops(at, { lat: at.lat + 0.01, lng: at.lng }),
     });
-  const board = async (agent: Person, at = HERE) =>
+  const board = async (agent: Person, at = HERE, limit = 50) =>
     (
       (
         await request(t.http)
-          .get(`/v1/errands/board?lat=${at.lat}&lng=${at.lng}&radiusKm=50`)
+          .get(`/v1/errands/board?lat=${at.lat}&lng=${at.lng}&radiusKm=50&limit=${limit}`)
           .set(agent.headers)
           .expect(200)
       ).body.errands as Array<{ id: string }>
@@ -122,6 +124,10 @@ describe('scheduled errands', () => {
     }
     const errand = await scheduledIn(60);
     expect(await board(quitter)).not.toContain(errand.id);
+    // Left out before the board's limit: scheduled errands nearer don't crowd out one they may take.
+    await scheduledIn(90, east(0.3));
+    const further = await createErrand(t, customer, { stops: stops(east(2), east(3)) });
+    expect(await board(quitter, HERE, 2)).toContain(further.id);
     const refused = await request(t.http)
       .post(`/v1/errands/${errand.id}/events`)
       .set(quitter.headers)
@@ -161,6 +167,9 @@ describe('scheduled errands', () => {
       .where(and(eq(errandEvents.errandId, errand.id), eq(errandEvents.event, 'take_back')));
     expect(taken!.data).toMatchObject({ agentId: agent.userId });
     expect(pushesTo(customer).at(-1)).toMatchObject({ title: 'Finding another agent' });
+    // As any urgent errand still waiting a while, the customer will be asked to raise the fee.
+    const [prompt] = timersFor(errand.id, 'raise_prompt').filter((p) => p.job.version === row!.version);
+    expect(prompt!.delayMs).toBe(NIGERIA_RAISE_MINUTES * MINUTE);
     expect(pushesTo(agent).at(-1)).toMatchObject({ title: 'Scheduled errand taken back' });
     // It counts against them as leaving it, and they can't have it again.
     const standing = (await request(t.http).get('/v1/agent/standing').set(agent.headers).expect(200)).body;
@@ -198,5 +207,26 @@ describe('scheduled errands', () => {
     const short = await createErrand(t, customer, { urgent: true, stops: stops(east(0.3), east(1)) });
     const [offer] = await t.db.select().from(errandOffers).where(eq(errandOffers.errandId, short.id));
     expect(offer?.agentId).toBe(agent.userId);
+  });
+
+  it('keeps the same agent from one that makes them late on the board, or open to everyone, too', async () => {
+    await matching({ offers: false });
+    try {
+      const agent = await agentAt(HERE);
+      const ahead = await scheduledIn(30, east(0.5));
+      await act(t, agent, ahead.id, 'accept');
+      const long = await createErrand(t, customer, { urgent: true, stops: stops(east(0.3), east(9)) });
+      expect(await board(agent)).not.toContain(long.id);
+      const refused = await request(t.http)
+        .post(`/v1/errands/${long.id}/events`)
+        .set(agent.headers)
+        .send({ event: 'accept' });
+      expect(refused.status).toBe(409);
+      expect(refused.body.error.code).toBe('late_for_scheduled');
+      const short = await createErrand(t, customer, { urgent: true, stops: stops(east(0.3), east(1)) });
+      expect(await board(agent)).toContain(short.id);
+    } finally {
+      await matching({ offers: true });
+    }
   });
 });

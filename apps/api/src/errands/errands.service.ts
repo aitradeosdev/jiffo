@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { and, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import {
   byBestForYou,
   canRevealPin,
@@ -331,10 +331,16 @@ export class ErrandsService implements OnModuleInit {
       me.categoryKeys ? inArray(errands.categoryKey, me.categoryKeys) : undefined,
       me.takesPurchases ? undefined : eq(errands.buy, false),
     );
-    // Left out in the query, so the limit counts only errands the agent may take.
+    // Left out in the query, so the limit counts only errands the agent may take: scheduled errands too, for an
+    // agent below the completion rate they need (M12).
+    const scheduledOff =
+      me.completionRate !== null && me.completionRate * 10_000 < rules.scheduledMinCompletionBps
+        ? or(isNull(errands.scheduledFor), lte(errands.scheduledFor, new Date()))
+        : undefined;
     const allowed = and(
       boardFull ? eq(errands.urgent, true) : urgentRoom ? undefined : eq(errands.urgent, false),
       this.eligibility.boardExclusions(auth.userId),
+      scheduledOff,
     );
     const pickupOf = and(eq(errandStops.errandId, errands.id), eq(errandStops.seq, 0));
     const [found, counts] = await Promise.all([
@@ -361,10 +367,15 @@ export class ErrandsService implements OnModuleInit {
       auth.userId,
       found.map((r) => ({ id: r.errand.id, customerId: r.errand.customerId })),
     );
-    const rows = found.filter(
+    const allowedRows = found.filter(
       (r) =>
         !matchRefusal(me, this.eligibility.matchErrand(r.errand, Number(r.distanceMeters), auth.userId, facts), rules),
     );
+    // Holding a scheduled errand taken ahead (M12): no urgent errand that would make them late for it.
+    const late = await Promise.all(
+      allowedRows.map((r) => (r.errand.urgent ? this.eligibility.makesLate(me, r.errand.id, rules) : false)),
+    );
+    const rows = allowedRows.filter((_, i) => !late[i]);
     const views = await this.views(
       rows.map((r) => r.errand),
       () => 'prospect',
@@ -1237,6 +1248,11 @@ export class ErrandsService implements OnModuleInit {
           { backToBack: !!pickup && !!backToBackFrom(me, pickup, live.matching) },
         );
         if (refused) throw this.eligibility.refusal(refused);
+        // Holding a scheduled errand taken ahead (M12): never an urgent errand that would make them late for it,
+        // however it is taken.
+        if (errand.urgent && (await this.eligibility.makesLate(me, errand.id, live.matching, tx))) {
+          throw this.eligibility.refusal('late_for_scheduled');
+        }
         // Open to everyone once its search reached its last step (M8), but only within that step's radius.
         const toEveryone = errand.urgent && live.matching.offers && errand.broadcastFeeKobo === errand.feeKobo;
         const reach = errand.broadcastReachMeters ?? live.matching.searchStepsKm.at(-1)! * 1000;
@@ -1465,7 +1481,12 @@ export class ErrandsService implements OnModuleInit {
     const untilStart = errand.scheduledFor.getTime() - Date.now();
     const remindIn = untilStart - scheduledOnlineMinutes * MINUTE_MS;
     const takeBackIn = untilStart - scheduledTakeBackMinutes * MINUTE_MS;
-    if (remindIn > 0) await this.timers.schedule({ ...job, event: 'scheduled_reminder' }, remindIn);
+    if (remindIn > 0) {
+      await this.timers.schedule(
+        { ...job, event: 'scheduled_reminder', takeBackMinutes: scheduledTakeBackMinutes },
+        remindIn,
+      );
+    }
     if (takeBackIn > 0) await this.timers.schedule({ ...job, event: 'take_back' }, takeBackIn);
   }
 
@@ -1487,21 +1508,15 @@ export class ErrandsService implements OnModuleInit {
   private async remindToGoOnline(job: ErrandTimerJob) {
     const [errand] = await this.db.select().from(errands).where(eq(errands.id, job.errandId));
     if (!this.stillTheirs(errand, job) || !errand.scheduledFor || (await this.isOnline(job.agentId!))) return;
-    const [{ timezone }, live] = await Promise.all([
-      this.countries.basics(errand.countryCode),
-      this.countries.currentSettings(errand.countryCode),
-    ]);
-    const startsAt = new Intl.DateTimeFormat('en-NG', {
-      timeZone: timezone,
-      hour: 'numeric',
-      minute: '2-digit',
-    }).format(errand.scheduledFor);
-    await this.notifier.goOnlineReminder(
-      errand,
-      job.agentId!,
-      startsAt,
-      live.settings.matching.scheduledTakeBackMinutes,
+    const { timezone } = await this.countries.basics(errand.countryCode);
+    // In the country's own time; the take-back as it was set when they accepted.
+    const startsAt = new Intl.DateTimeFormat('en', { timeZone: timezone, hour: 'numeric', minute: '2-digit' }).format(
+      errand.scheduledFor,
     );
+    const takeBackMinutes =
+      job.takeBackMinutes ??
+      (await this.countries.currentSettings(errand.countryCode)).settings.matching.scheduledTakeBackMinutes;
+    await this.notifier.goOnlineReminder(errand, job.agentId!, startsAt, takeBackMinutes);
   }
 
   /**
@@ -1525,6 +1540,11 @@ export class ErrandsService implements OnModuleInit {
       const after = await this.write(tx, errand, 'take_back', to, effect, 'system', errand.agentId);
       await this.wallet.onErrandTransition(tx, { before: errand, after, event: 'take_back', ...money });
       await this.scheduleTimers(after, settings);
+      // Urgent now: if no one takes it a while, the customer is asked whether to raise the fee, as for any (M8).
+      await this.timers.schedule(
+        { errandId: after.id, event: 'raise_prompt', status: 'requested', version: after.version },
+        settings.timers.raisePricePromptMinutes * MINUTE_MS,
+      );
       return {
         before: errand,
         after,

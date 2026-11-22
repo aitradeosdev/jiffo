@@ -261,7 +261,6 @@ export class ErrandNotifier {
     }
   }
 
-  /** No agent yet (docs/matching.md, M8): would the customer raise the fee to reach more, or keep waiting? */
   /**
    * A scheduled errand's agent isn't online when they should be (docs/matching.md, M12): what to do, and when it
    * goes to someone else.
@@ -287,6 +286,7 @@ export class ErrandNotifier {
       .catch((error: Error) => this.logger.warn(`Telling ${agentId} of a take-back failed: ${error.message}`));
   }
 
+  /** No agent yet (docs/matching.md, M8): would the customer raise the fee to reach more, or keep waiting? */
   async raisePrompt(errand: ErrandRow) {
     await this.push
       .notifyUser(errand.customerId, 'customer', {

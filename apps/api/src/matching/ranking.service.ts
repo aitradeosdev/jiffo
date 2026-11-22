@@ -247,7 +247,7 @@ export class RankingService {
           where ev.event = 'accept' and e.country_code = ${countryCode} and e.state_code = ${stateCode}
             and ev.created_at > now() - interval '90 days') as accepted,
         (select count(*)::int from errand_events ev join errands e on e.id = ev.errand_id
-          where ev.event = 'withdraw' and e.country_code = ${countryCode} and e.state_code = ${stateCode}
+          where ev.event in ${LEFT_EVENTS} and e.country_code = ${countryCode} and e.state_code = ${stateCode}
             and ev.created_at > now() - interval '90 days') as withdrawn,
         (select avg(r.stars)::float from errand_ratings r join errands e on e.id = r.errand_id
           where r.rater_role = 'customer' and e.country_code = ${countryCode} and e.state_code = ${stateCode}

@@ -151,7 +151,9 @@ offers go back to back; an errand open to everyone still goes to agents holding 
 
 Built as above (Settings, Matching: 50%, 15 and 10 minutes to start). A new agent, with no accepted errands to
 count, can take scheduled errands. "Online" is as the agent last set it. Being late is estimated at the fallback
-speed: to the urgent errand's pickup, along its stops, then to the scheduled one's pickup by its start.
+speed: to the urgent errand's pickup, along its stops, then to the scheduled one's pickup by its start, after
+finishing an errand they are on first. Such an errand isn't offered to them, isn't on their board, and can't be
+accepted however it is taken.
 
 ## After launch (M13)
 

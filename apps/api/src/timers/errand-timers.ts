@@ -41,6 +41,8 @@ export interface ErrandTimerJob {
   key?: string;
   /** For a scheduled errand's reminder and take-back: the agent who took it, whom they are for (M12). */
   agentId?: string;
+  /** For the reminder: how many minutes before the start the take-back was set for, to tell the agent (M12). */
+  takeBackMinutes?: number;
 }
 
 export type TimerHandler = (job: ErrandTimerJob) => Promise<void>;

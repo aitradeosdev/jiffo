@@ -59,7 +59,9 @@ export type MatchRefusal =
   | 'too_far'
   | 'unavailable'
   | 'gave_up'
-  | 'completion_low';
+  | 'completion_low'
+  /** It would make them late for a scheduled errand they hold (M12). */
+  | 'late_for_scheduled';
 
 type Rules = Pick<CountrySettings['matching'], 'boardRadiusKm' | 'maxBoardErrands' | 'scheduledMinCompletionBps'>;
 

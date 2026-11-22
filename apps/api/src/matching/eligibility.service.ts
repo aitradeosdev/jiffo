@@ -4,12 +4,16 @@ import {
   CONFIRMED_PAIR_FLAG_KINDS,
   FAKE_GPS_FLAG_KINDS,
   PAIR_FLAG_KINDS,
+  haversineMeters,
+  lateForScheduled,
   type CountrySettings,
+  type LatLng,
   type MatchAgent,
   type MatchErrand,
   type MatchRefusal,
 } from '@jiffo/shared';
-import { and, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import { TravelTimesService } from './travel-times';
 import { completionRate, recentAccepts } from './completion';
 import { AgentsService } from '../agents/agents.service';
 import { conflict, forbidden, unprocessable, type ApiError } from '../common/errors';
@@ -38,8 +42,9 @@ const REFUSALS: Record<MatchRefusal, () => ApiError> = {
   completion_low: () =>
     conflict(
       'completion_low',
-      'Scheduled errands go to agents who finish at least half the errands they accept. Finish more to take them.',
+      'Scheduled errands go to agents who finish enough of the errands they accept. Finish more to take them.',
     ),
+  late_for_scheduled: () => conflict('late_for_scheduled', 'This errand would make you late for your scheduled errand'),
 };
 
 /**
@@ -95,6 +100,34 @@ export class EligibilityService {
       // Scheduled for later (M12): taken ahead. Once its time has come, it is an errand like any other.
       scheduled: !!errand.scheduledFor && errand.scheduledFor.getTime() > Date.now(),
     };
+  }
+
+  /**
+   * Whether doing this urgent errand would make the agent late for a scheduled one they hold, taken ahead (M12): to
+   * its pickup, along its stops, then on to the scheduled one's pickup by its start, each leg estimated at the
+   * fallback speed. `from`: where they set off for its pickup, and how long until they do, when they first finish
+   * another errand (back to back, M10).
+   */
+  async makesLate(
+    me: Pick<AgentNow, 'lat' | 'lng' | 'held'>,
+    errandId: string,
+    rules: CountrySettings['matching'],
+    db: Db | Tx = this.db,
+    from?: { at: LatLng; afterSeconds: number },
+  ) {
+    if (!me.held.some((e) => e.startsLater)) return false;
+    const route = await db
+      .select({ lat: errandStops.lat, lng: errandStops.lng })
+      .from(errandStops)
+      .where(eq(errandStops.errandId, errandId))
+      .orderBy(asc(errandStops.seq));
+    if (!route.length) return false;
+    const secondsBetween = (a: LatLng, b: LatLng) =>
+      TravelTimesService.estimate(haversineMeters(a, b), rules).durationSeconds;
+    const start = from ?? { at: me, afterSeconds: 0 };
+    let seconds = start.afterSeconds + secondsBetween(start.at, route[0]!);
+    for (let i = 1; i < route.length; i++) seconds += secondsBetween(route[i - 1]!, route[i]!);
+    return lateForScheduled(me.held, { at: Date.now() + seconds * 1000, dropoff: route.at(-1)! }, secondsBetween);
   }
 
   /** The agent now, or the reason they may not get any errand. */
