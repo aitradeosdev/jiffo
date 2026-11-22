@@ -5458,6 +5458,110 @@
         ]
       }
     },
+    "/v1/agent/destination": {
+      "delete": {
+        "operationId": "DestinationController.clear",
+        "tags": [
+          "Destination"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "presence",
+        "x-apps": [
+          "agent"
+        ]
+      },
+      "get": {
+        "operationId": "DestinationController.get",
+        "tags": [
+          "Destination"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "presence",
+        "x-apps": [
+          "agent"
+        ]
+      },
+      "put": {
+        "operationId": "DestinationController.set",
+        "tags": [
+          "Destination"
+        ],
+        "security": [
+          {
+            "app": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "lat": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  "lng": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  }
+                },
+                "required": [
+                  "lat",
+                  "lng",
+                  "label"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "default": {
+            "description": "An error"
+          }
+        },
+        "x-rate-limit": "presence",
+        "x-apps": [
+          "agent"
+        ]
+      }
+    },
     "/v1/agent/offers/current": {
       "get": {
         "operationId": "OffersController.current",

@@ -577,6 +577,24 @@ export const SECTIONS: Section[] = [
         help: "Before the start: sent as urgent to another agent, and it counts against them as leaving an errand. Less than the reminder's.",
       },
       {
+        path: 'matching.destinationMode',
+        label: 'Agents can set where they are heading',
+        kind: 'bool',
+        help: 'Destination mode: an agent heading somewhere, such as home, sees and is offered only errands whose drop-off takes them closer. It ends when they get there or clear it.',
+      },
+      {
+        path: 'matching.destinationUsesPerDay',
+        label: 'Destinations an agent may set a day',
+        kind: 'count',
+        help: 'Each one set, or changed, is one. 1 to 10.',
+      },
+      {
+        path: 'matching.destinationCloserBps',
+        label: 'A drop-off must bring them closer by',
+        kind: 'percent',
+        help: 'Of the way to where they are heading, in a straight line. 5% to 90%.',
+      },
+      {
         path: 'matching.fakeGpsHoldHours',
         label: 'A fake-GPS flag keeps the agent from errands for',
         kind: 'hours',

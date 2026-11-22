@@ -243,7 +243,15 @@ export class CandidatesService {
     // Measured as accepting measures it, from the database's position.
     const pickupMeters = await this.eligibility.pickupMeters(errand.id, me);
     const facts = await this.eligibility.facts(near.agentId, [errand]);
-    const asked = this.eligibility.matchErrand(errand, pickupMeters, near.agentId, facts);
+    // Heading somewhere (M13): only an errand whose drop-off brings them closer.
+    const dropoff = me.destination ? (await this.eligibility.dropoffs([errand.id])).get(errand.id) : null;
+    const asked = this.eligibility.matchErrand(
+      errand,
+      pickupMeters,
+      near.agentId,
+      facts,
+      this.eligibility.offRoute(me, dropoff, rules),
+    );
     const refused = matchRefusal(me, asked, rules);
     let following: Following | null = null;
     if (refused && backToBack && (refused === 'finish_urgent' || refused === 'busy')) {

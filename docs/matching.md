@@ -157,7 +157,7 @@ accepted however it is taken.
 
 ## After launch (M13)
 
-- **Destination mode:** an agent sets a destination, such as home, up to twice a day, and gets only errands whose drop-off brings them closer. Uber and Bolt both offer this.
+- **Destination mode:** an agent sets a destination, such as home, up to twice a day, and gets only errands whose drop-off brings them closer. Uber and Bolt both offer this. Built: offers, the board and accepting all keep to errands whose drop-off is at least 20% of the way nearer, in a straight line; it ends within a km of the destination, or when cleared (Settings, Matching: on, twice a day, 20%). The agent app sets it from the board.
 - **Multi-errand batching:** like DoorDash, one agent carries two errands with nearby pickups at once. This needs separate escrows per errand and changes to the tracker, so it isn't built until volume needs it.
 - **Acceptance prediction:** once there's enough history, add each agent's predicted chance of accepting this errand to the ranking, as DoorDash does.
 

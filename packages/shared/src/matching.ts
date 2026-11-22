@@ -46,6 +46,8 @@ export interface MatchErrand {
   gaveUp: boolean;
   /** Scheduled for later (M12): taken ahead only by agents who finish what they accept. */
   scheduled: boolean;
+  /** Its drop-off doesn't bring the agent nearer the destination they set (M13). */
+  offRoute: boolean;
 }
 
 /** Why an agent may not get an errand. */
@@ -60,6 +62,8 @@ export type MatchRefusal =
   | 'unavailable'
   | 'gave_up'
   | 'completion_low'
+  /** It doesn't take them towards the destination they set (M13). */
+  | 'off_route'
   /** It would make them late for a scheduled errand they hold (M12). */
   | 'late_for_scheduled';
 
@@ -105,6 +109,7 @@ export function matchRefusal(
   if (errand.pickupMeters > agentReachKm(agent, rules) * 1000) return 'too_far';
   if (errand.keptApart) return 'unavailable';
   if (errand.gaveUp) return 'gave_up';
+  if (errand.offRoute) return 'off_route';
   // Scheduled errands go to agents who finish what they accept (M12), as Bolt's do; a new agent has no rate yet.
   if (
     errand.scheduled &&
@@ -114,6 +119,20 @@ export function matchRefusal(
     return 'completion_low';
   }
   return null;
+}
+
+/**
+ * Whether an errand's drop-off brings an agent heading for a destination nearer it (docs/matching.md, M13): by at
+ * least the share of the way Settings, Matching gives, measured in straight lines.
+ */
+export function bringsCloser(
+  from: LatLng,
+  dropoff: LatLng,
+  destination: LatLng,
+  rules: Pick<CountrySettings['matching'], 'destinationCloserBps'>,
+): boolean {
+  const now = haversineMeters(from, destination);
+  return haversineMeters(dropoff, destination) <= now * (1 - rules.destinationCloserBps / 10_000);
 }
 
 /**

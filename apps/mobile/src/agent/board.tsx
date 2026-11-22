@@ -10,6 +10,7 @@ import { useResource } from '../api/useResource';
 import { useBoardWatch, useRealtimeEvent } from '../realtime/realtime';
 import { sortBoard, type BoardSort } from './board-order';
 import { pausedNote, type Standing } from './standing';
+import { destinationChip, type DestinationStatus } from './destination';
 import { useCurrentLocation } from '../location';
 import { isActive, AGENT_STATUS, type ErrandView } from '../errands/types';
 import { naira } from '../money';
@@ -132,13 +133,26 @@ export function AgentBoard() {
       void load();
     }, wait);
   });
+  // Where they are heading (M13), for the chip: again each time the board is back in front, and when it ends.
+  const [destination, setDestination] = useState<DestinationStatus | null>(null);
+  const loadDestination = useCallback(() => {
+    api
+      .get<DestinationStatus>('/v1/agent/destination')
+      .then(setDestination)
+      .catch(() => undefined);
+  }, [api]);
+  useRealtimeEvent('destination.updated', () => {
+    loadDestination();
+    void load();
+  });
   // A slow check besides, for changes missed while the connection was down.
   useFocusEffect(
     useCallback(() => {
+      loadDestination();
       void load();
       const timer = setInterval(load, REFRESH_MS);
       return () => clearInterval(timer);
-    }, [load]),
+    }, [load, loadDestination]),
   );
 
   const jobs = useMemo(() => sortBoard(board?.errands ?? [], sort), [board, sort]);
@@ -237,6 +251,14 @@ export function AgentBoard() {
           <>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
               <Chip label="Preferences" icon="tune" onPress={() => router.push('/preferences')} />
+              {destinationChip(destination) ? (
+                <Chip
+                  label={destinationChip(destination)!}
+                  icon="flag"
+                  selected={!!destination?.destination}
+                  onPress={() => router.push('/destination')}
+                />
+              ) : null}
               <Chip label="Best for you" selected={sort === 'best'} onPress={() => setSort('best')} />
               <Chip label="Nearest" selected={sort === 'near'} onPress={() => setSort('near')} />
               <Chip label="Highest fee" selected={sort === 'fee'} onPress={() => setSort('fee')} />

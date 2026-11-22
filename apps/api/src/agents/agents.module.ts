@@ -7,13 +7,28 @@ import { AgentSelfieService } from './agent-selfie.service';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
 import { PresenceController } from './presence.controller';
+import { DestinationController } from './destination.controller';
+import { DestinationService } from './destination.service';
 import { PresenceService } from './presence.service';
 import { TrailService } from './trail.service';
 
 @Global()
 @Module({
-  controllers: [AgentsController, PresenceController, AgentApplicationController, AgentSelfieController],
-  providers: [AgentsService, PresenceService, AgentApplicationService, AgentSelfieService, TrailService],
+  controllers: [
+    AgentsController,
+    PresenceController,
+    DestinationController,
+    AgentApplicationController,
+    AgentSelfieController,
+  ],
+  providers: [
+    AgentsService,
+    PresenceService,
+    DestinationService,
+    AgentApplicationService,
+    AgentSelfieService,
+    TrailService,
+  ],
   exports: [AgentsService, PresenceService, AgentApplicationService, AgentSelfieService, TrailService],
 })
 export class AgentsModule implements OnModuleInit {
