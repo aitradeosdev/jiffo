@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { matchRefusal, type CountrySettings } from '@jiffo/shared';
+import { atTheEnd, backToBackFrom, haversineMeters, matchRefusal, type CountrySettings } from '@jiffo/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import type { LatLng } from '../adapters/maps';
 import { ApiError } from '../common/errors';
@@ -16,7 +16,15 @@ export interface Candidate {
   /** From their position, as the database has it, to the pickup in a straight line. */
   straightMeters: number;
   travel: Travel;
+  /**
+   * Near the end of another errand (M10): offered this one back to back, to wait behind it, with the travel time
+   * the rest of that one and then the drive from its drop-off.
+   */
+  backToBack: boolean;
 }
+
+/** An agent near the end of an errand, as checked: that errand's drop-off, and whether it is at its end already. */
+type Following = { dropoff: LatLng; atTheEnd: boolean };
 
 type ErrandRow = typeof errands.$inferSelect;
 
@@ -62,10 +70,24 @@ export class CandidatesService {
       skip,
       radiusKm ?? rules.boardRadiusKm,
       rules.shortlistSize,
+      // Offered one at a time, an urgent errand can go back to back (M10); never one open to everyone.
+      errand.urgent,
     );
-    const travel = await this.travelTimes.toPickup(shortlist, pickup, rules);
+    // One still on the way to their drop-off goes there first; once it's delivered, they drive from where they are,
+    // as any agent does.
+    const onTheWay = (c: (typeof shortlist)[number]) => !!c.following && !c.following.atTheEnd;
+    const travel = await this.travelTimes.toPickup(
+      shortlist.filter((c) => !onTheWay(c)),
+      pickup,
+      rules,
+    );
     return shortlist
-      .map((c) => ({ agentId: c.agentId, straightMeters: c.straightMeters, travel: travel.get(c.agentId)! }))
+      .map((c) => ({
+        agentId: c.agentId,
+        straightMeters: c.straightMeters,
+        travel: onTheWay(c) ? this.backToBackTravel(c, c.following!.dropoff, pickup, rules) : travel.get(c.agentId)!,
+        backToBack: !!c.following,
+      }))
       .sort((a, b) => a.travel.durationSeconds - b.travel.durationSeconds || a.straightMeters - b.straightMeters);
   }
 
@@ -103,6 +125,22 @@ export class CandidatesService {
     return { errand: row.errand, pickup: { lat: row.lat, lng: row.lng }, rules };
   }
 
+  /**
+   * How soon an agent still on the way to an errand's drop-off reaches the next pickup (M10): the rest of the way
+   * there, then the drive on. Estimated: neither leg is a route the maps provider is asked for.
+   */
+  private backToBackTravel(agent: LatLng, dropoff: LatLng, pickup: LatLng, rules: CountrySettings['matching']): Travel {
+    const legs = [
+      TravelTimesService.estimate(haversineMeters(agent, dropoff), rules),
+      TravelTimesService.estimate(haversineMeters(dropoff, pickup), rules),
+    ];
+    return {
+      distanceMeters: legs[0]!.distanceMeters + legs[1]!.distanceMeters,
+      durationSeconds: legs[0]!.durationSeconds + legs[1]!.durationSeconds,
+      estimated: true,
+    };
+  }
+
   /** The nearest agents within the radius who pass the check, a few at a time, until there are `want`. */
   private async checkedNear(
     errand: ErrandRow,
@@ -111,14 +149,17 @@ export class CandidatesService {
     skip: ReadonlySet<string>,
     radiusKm: number,
     want: number,
+    backToBack = false,
   ) {
     // More than wanted: some of the nearest are left out, and some won't pass the check.
     const near = (await this.nearest(errand.countryCode, pickup, rules, want * 3 + skip.size, radiusKm)).filter(
       (n) => !skip.has(n.agentId),
     );
-    const out: Array<Omit<Candidate, 'travel'> & LatLng> = [];
+    const out: Array<Omit<Candidate, 'travel' | 'backToBack'> & LatLng & { following: Following | null }> = [];
     for (let i = 0; i < near.length && out.length < want; i += CHECK_AT_ONCE) {
-      const checked = await Promise.all(near.slice(i, i + CHECK_AT_ONCE).map((n) => this.check(n, errand, rules)));
+      const checked = await Promise.all(
+        near.slice(i, i + CHECK_AT_ONCE).map((n) => this.check(n, errand, pickup, rules, backToBack)),
+      );
       for (const c of checked) if (c && out.length < want) out.push(c);
     }
     return out;
@@ -181,8 +222,17 @@ export class CandidatesService {
     }
   }
 
-  /** The agent, if they may get this errand now, by the same check as the board and accepting. */
-  private async check(near: NearAgent, errand: ErrandRow, rules: CountrySettings['matching']) {
+  /**
+   * The agent, if they may get this errand now, by the same check as the board and accepting. With `backToBack`,
+   * also one busy with another errand who is near its end, and the pickup near its drop-off (M10).
+   */
+  private async check(
+    near: NearAgent,
+    errand: ErrandRow,
+    pickup: LatLng,
+    rules: CountrySettings['matching'],
+    backToBack: boolean,
+  ) {
     let me;
     try {
       me = await this.eligibility.agent(near.agentId, rules);
@@ -193,7 +243,16 @@ export class CandidatesService {
     // Measured as accepting measures it, from the database's position.
     const pickupMeters = await this.eligibility.pickupMeters(errand.id, me);
     const facts = await this.eligibility.facts(near.agentId, [errand]);
-    if (matchRefusal(me, this.eligibility.matchErrand(errand, pickupMeters, near.agentId, facts), rules)) return null;
-    return { agentId: near.agentId, straightMeters: Math.round(pickupMeters), lat: me.lat, lng: me.lng };
+    const asked = this.eligibility.matchErrand(errand, pickupMeters, near.agentId, facts);
+    const refused = matchRefusal(me, asked, rules);
+    let following: Following | null = null;
+    if (refused && backToBack && (refused === 'finish_urgent' || refused === 'busy')) {
+      const current = backToBackFrom(me, pickup, rules);
+      if (!current?.dropoff || matchRefusal(me, asked, rules, { backToBack: true })) return null;
+      following = { dropoff: current.dropoff, atTheEnd: atTheEnd(current) };
+    } else if (refused) {
+      return null;
+    }
+    return { agentId: near.agentId, straightMeters: Math.round(pickupMeters), lat: me.lat, lng: me.lng, following };
   }
 }

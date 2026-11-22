@@ -13,7 +13,7 @@ import { and, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { AgentsService } from '../agents/agents.service';
 import { conflict, forbidden, unprocessable, type ApiError } from '../common/errors';
 import { DB, type Db, type Tx } from '../db/database.module';
-import { agentPresence, errandEvents, errands, matchBlocks, riskFlags, users } from '../db/schema';
+import { agentPresence, errandEvents, errandStops, errands, matchBlocks, riskFlags, users } from '../db/schema';
 
 const MINUTE_MS = 60_000;
 
@@ -131,7 +131,17 @@ export class EligibilityService {
     // One after the other, on the caller's connection: accepting asks inside its transaction, and a
     // transaction's connection runs one query at a time.
     const held = await db
-      .select({ urgent: errands.urgent, status: errands.status, scheduledFor: errands.scheduledFor })
+      .select({
+        urgent: errands.urgent,
+        status: errands.status,
+        scheduledFor: errands.scheduledFor,
+        // Its final drop-off, which a back-to-back offer's pickup must be near (M10). The outer table by name: inside
+        // a select, a column alone renders unqualified, which the subquery would take for its own.
+        dropoffLat: sql<number | null>`(select s.lat from ${errandStops} s where s.errand_id = "errands"."id"
+          order by s.seq desc limit 1)`,
+        dropoffLng: sql<number | null>`(select s.lng from ${errandStops} s where s.errand_id = "errands"."id"
+          order by s.seq desc limit 1)`,
+      })
       .from(errands)
       .where(and(eq(errands.agentId, agentId), inArray(errands.status, [...AGENT_OUT_STATES])));
     const prefs = await this.agents.profile(agentId, db);
@@ -145,6 +155,8 @@ export class EligibilityService {
       workRadiusKm: prefs.workRadiusKm,
       held: held.map((e) => ({
         urgent: e.urgent,
+        status: e.status,
+        dropoff: e.dropoffLat === null || e.dropoffLng === null ? null : { lat: e.dropoffLat, lng: e.dropoffLng },
         // A scheduled errand taken ahead isn't under way until it starts.
         startsLater: e.status === 'accepted' && !!e.scheduledFor && e.scheduledFor.getTime() > now,
       })),

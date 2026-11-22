@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { haversineMeters } from '../src/geo';
 import { CountrySettingsSchema, NIGERIA_DEFAULT_SETTINGS } from '../src/settings';
 import {
   averageReliability,
+  backToBackFrom,
   matchRefusal,
   offerCounts,
   pausesOffers,
@@ -34,7 +36,13 @@ const errand = (over: Partial<MatchErrand> = {}): MatchErrand => ({
   ...over,
 });
 
-const held = (over: Partial<HeldErrand> = {}): HeldErrand => ({ urgent: false, startsLater: false, ...over });
+const held = (over: Partial<HeldErrand> = {}): HeldErrand => ({
+  urgent: false,
+  startsLater: false,
+  status: 'accepted',
+  dropoff: null,
+  ...over,
+});
 
 /**
  * Who may get an errand (docs/matching.md, M1): one decision for the board and for accepting, so an agent can
@@ -127,6 +135,9 @@ describe('the Matching settings', () => {
       pauseBelowBps: null,
       pauseMinutes: 30,
       boardTravelTimes: false,
+      backToBack: true,
+      backToBackDropoffKm: 1,
+      backToBackPickupKm: 3,
       offers: true,
       offerSeconds: 20,
       missedOffersOffline: 3,
@@ -260,5 +271,65 @@ describe('the acceptance rate', () => {
     const never = parse({ acceptanceOffers: 50, acceptanceMinOffers: 60 });
     expect(never.success).toBe(false);
     expect(JSON.stringify(never.error)).toContain('more offers than the rate is over');
+  });
+});
+
+/**
+ * Back-to-back offers (docs/matching.md, M10): an agent near the end of an errand can be offered the next urgent
+ * errand whose pickup is near its drop-off, and hold it behind the current one, as Uber's back-to-back trips.
+ */
+describe('back-to-back offers', () => {
+  const dropoff = { lat: 6.5, lng: 3.4 };
+  const east = (km: number) => ({ lat: dropoff.lat, lng: dropoff.lng + km / 111 });
+  const current = held({ urgent: true, status: 'started', dropoff });
+
+  it('offers the next urgent errand to an agent within a km of the drop-off, its pickup within 3 km of it', () => {
+    expect(backToBackFrom({ ...east(0.5), held: [current] }, east(2.5), rules)).toBe(current);
+    // Marked delivered: wherever they are.
+    const delivered = held({ status: 'delivered', dropoff });
+    expect(backToBackFrom({ ...east(4), held: [delivered] }, east(2), rules)).toBe(delivered);
+    expect(
+      backToBackFrom({ ...east(4), held: [held({ status: 'photo_pending', dropoff })] }, east(2), rules),
+    ).not.toBeNull();
+    // A scheduled errand taken ahead, not started, doesn't count as one held now.
+    expect(backToBackFrom({ ...east(0.5), held: [current, held({ startsLater: true })] }, east(1), rules)).toBe(
+      current,
+    );
+  });
+
+  it('not further from the drop-off, unless delivered, nor with the next pickup too far from it', () => {
+    expect(backToBackFrom({ ...east(1.5), held: [current] }, east(1), rules)).toBeNull();
+    expect(backToBackFrom({ ...east(0.5), held: [current] }, east(3.5), rules)).toBeNull();
+    // As admin sets the distances.
+    const wider = { ...rules, backToBackDropoffKm: 2, backToBackPickupKm: 4 };
+    expect(backToBackFrom({ ...east(1.5), held: [current] }, east(3.5), wider)).toBe(current);
+  });
+
+  it('not before the errand is under way, with one already waiting behind it, or with it switched off', () => {
+    expect(backToBackFrom({ ...east(0.2), held: [held({ status: 'accepted', dropoff })] }, east(1), rules)).toBeNull();
+    expect(
+      backToBackFrom({ ...east(0.2), held: [held({ status: 'unreachable', dropoff })] }, east(1), rules),
+    ).toBeNull();
+    expect(backToBackFrom({ ...east(0.2), held: [current, held({ urgent: true })] }, east(1), rules)).toBeNull();
+    expect(backToBackFrom({ ...east(0.2), held: [] }, east(1), rules)).toBeNull();
+    expect(backToBackFrom({ ...east(0.2), held: [current] }, east(1), { ...rules, backToBack: false })).toBeNull();
+  });
+
+  it('lets the agent take it while holding the current one, and never a third', () => {
+    const busy = agent({ held: [current] });
+    expect(matchRefusal(busy, errand({ urgent: true }), rules)).toBe('finish_urgent');
+    expect(matchRefusal(busy, errand({ urgent: true }), rules, { backToBack: true })).toBeNull();
+    const waiting = agent({ held: [current, held({ urgent: true })] });
+    expect(matchRefusal(waiting, errand({ urgent: true }), rules, { backToBack: true })).toBe('busy');
+    // The other checks still apply.
+    expect(matchRefusal(busy, errand({ urgent: true, gaveUp: true }), rules, { backToBack: true })).toBe('gave_up');
+    // Only urgent errands go back to back.
+    expect(matchRefusal(busy, errand(), rules, { backToBack: true })).toBe('finish_urgent');
+  });
+
+  it('measures straight-line distance on the earth', () => {
+    expect(Math.round(haversineMeters(dropoff, east(1)))).toBeGreaterThan(990);
+    expect(Math.round(haversineMeters(dropoff, east(1)))).toBeLessThan(1_010);
+    expect(haversineMeters(dropoff, dropoff)).toBe(0);
   });
 });

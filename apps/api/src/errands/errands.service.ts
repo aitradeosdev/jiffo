@@ -20,6 +20,7 @@ import {
   agentReachKm,
   heldRefusal,
   matchRefusal,
+  backToBackFrom,
 } from '@jiffo/shared';
 import type { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
@@ -146,6 +147,9 @@ const PRECHECKED: Partial<Record<string, 'customer' | 'agent'>> = {
   send_dropoff_photo: 'agent',
   raise_fee: 'customer',
 };
+
+/** Where an agent still carries an errand: one taken back to back (M10) waits until it is handed over. */
+const STILL_CARRYING = ['started', 'item_pending', 'items_locked', 'delivered'] as const;
 
 @Injectable()
 export class ErrandsService implements OnModuleInit {
@@ -1194,10 +1198,34 @@ export class ErrandsService implements OnModuleInit {
         const me = await this.eligibility.agent(auth.userId, live.matching, tx);
         const pickupMeters = await this.eligibility.pickupMeters(errand.id, me, tx);
         const facts = await this.eligibility.facts(auth.userId, [errand], tx);
+        // Offered back to back (M10): taken while holding the errand it follows, with nothing more behind it, while
+        // back-to-back offers are on and the agent still may get one.
+        const [following] =
+          errand.urgent && live.matching.offers && live.matching.backToBack
+            ? await tx
+                .select({ id: errandOffers.id })
+                .from(errandOffers)
+                .where(
+                  and(
+                    eq(errandOffers.errandId, errand.id),
+                    eq(errandOffers.agentId, auth.userId),
+                    eq(errandOffers.status, 'open'),
+                    eq(errandOffers.backToBack, true),
+                    gt(errandOffers.expiresAt, now),
+                  ),
+                )
+            : [];
+        const [pickup] = following
+          ? await tx
+              .select({ lat: errandStops.lat, lng: errandStops.lng })
+              .from(errandStops)
+              .where(and(eq(errandStops.errandId, errand.id), eq(errandStops.seq, 0)))
+          : [];
         const refused = matchRefusal(
           me,
           this.eligibility.matchErrand(errand, pickupMeters, auth.userId, facts),
           live.matching,
+          { backToBack: !!pickup && !!backToBackFrom(me, pickup, live.matching) },
         );
         if (refused) throw this.eligibility.refusal(refused);
         // Open to everyone once its search reached its last step (M8), but only within that step's radius.
@@ -1290,8 +1318,41 @@ export class ErrandsService implements OnModuleInit {
         };
       case 'decline_offer':
         return { patch: { pendingOfferKobo: null }, record: { amountKobo: errand.pendingOfferKobo } };
-      case 'start':
+      case 'start': {
+        // An errand taken back to back (M10) starts once the one it waited behind is handed over: delivered and
+        // its PIN entered, or its photo sent, whatever the customer then does with it.
+        const [taken] = errand.urgent
+          ? await tx
+              .select({ id: errandOffers.id })
+              .from(errandOffers)
+              .where(
+                and(
+                  eq(errandOffers.errandId, errand.id),
+                  eq(errandOffers.agentId, auth.userId),
+                  eq(errandOffers.status, 'accepted'),
+                  eq(errandOffers.backToBack, true),
+                ),
+              )
+              .limit(1)
+          : [];
+        if (taken) {
+          const [onAnother] = await tx
+            .select({ id: errands.id })
+            .from(errands)
+            .where(
+              and(
+                eq(errands.agentId, auth.userId),
+                ne(errands.id, errand.id),
+                inArray(errands.status, [...STILL_CARRYING]),
+              ),
+            )
+            .limit(1);
+          if (onAnother) {
+            throw conflict('finish_current', 'Finish the errand you are on first: this one starts after it');
+          }
+        }
         return { patch: { startedAt: now }, record: {} };
+      }
       case 'send_item_amount': {
         const { amountKobo, photos } = this.parse('send_item_amount', data);
         const limit = await this.itemLimit(tx, errand, live);

@@ -781,6 +781,11 @@ export const errandOffers = pgTable(
      * online, so declining those is free, as the offer screen says.
      */
     counts: boolean('counts').notNull().default(true),
+    /**
+     * Offered back to back (M10): to an agent near the end of another errand, to wait behind it. Never counts toward
+     * their acceptance rate, and lets them accept it while holding that one.
+     */
+    backToBack: boolean('back_to_back').notNull().default(false),
     offeredAt: timestamp('offered_at', { withTimezone: true }).notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     answeredAt: timestamp('answered_at', { withTimezone: true }),

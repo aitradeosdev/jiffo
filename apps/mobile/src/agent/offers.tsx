@@ -12,7 +12,16 @@ import { useColors } from '../theme/theme';
 import { fonts } from '../theme/tokens';
 import { Button, Text } from '../ui/kit';
 import { Avatar, Badge, IconCircle, List, Row } from '../ui/parts';
-import { barShare, customerLine, isOfferPush, offerEndsAt, offerFacts, secondsToGo, type Offer } from './offer';
+import {
+  afterAccepting,
+  barShare,
+  customerLine,
+  isOfferPush,
+  type Offer,
+  offerEndsAt,
+  offerFacts,
+  secondsToGo,
+} from './offer';
 
 /** How long "Time's up" or "Taken by someone else" shows before the screen closes. */
 const ENDED_MS = 2_500;
@@ -99,7 +108,7 @@ function OfferScreen({ showing, onClose }: { showing: Showing; onClose: () => vo
   useEffect(() => {
     Vibration.vibrate([0, 500, 250, 500]);
     AccessibilityInfo.announceForAccessibility(
-      `New errand offer. You earn ${naira(offer.agentEarnsKobo)}. ${secondsToGo(endsAt, Date.now())} seconds to answer.`,
+      `${offer.backToBack ? 'Next errand offer, after the one you are on' : 'New errand offer'}. You earn ${naira(offer.agentEarnsKobo)}. ${secondsToGo(endsAt, Date.now())} seconds to answer.`,
     );
     return () => Vibration.cancel();
   }, [offer, endsAt]);
@@ -130,7 +139,8 @@ function OfferScreen({ showing, onClose }: { showing: Showing; onClose: () => vo
     try {
       await api.post(`/v1/errands/${offer.errand.id}/events`, { event: 'accept' });
       onClose();
-      router.push(`/errand/${offer.errand.id}`);
+      const next = afterAccepting(offer);
+      if (next) router.push(next);
     } catch (e) {
       // Ran out, or went elsewhere, as they tapped; any other refusal says why and leaves them to decline.
       if (e instanceof ApiError && (e.code === 'not_offered' || e.code === 'errand_not_found')) {
@@ -218,6 +228,12 @@ function OfferScreen({ showing, onClose }: { showing: Showing; onClose: () => vo
           <Text variant="note" tone="ink3">
             The full addresses show once you accept.
           </Text>
+          {offer.backToBack ? (
+            <Text variant="small" tone="ink2">
+              Your next errand: it starts once you finish the one you are on. The time to the pickup counts the rest of
+              that one.
+            </Text>
+          ) : null}
           {offer.counts === false ? (
             <View style={[styles.free, { borderColor: c.urgent }]}>
               <Text variant="small">Declining this one is free: it doesn't count toward your acceptance rate.</Text>

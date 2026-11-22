@@ -11,6 +11,8 @@ export interface Offer {
   agentEarnsKobo: number;
   /** Whether declining it lowers their acceptance rate (M9): not for one far away or soon after going online. */
   counts: boolean;
+  /** Back to back (M10): it waits behind the errand they are on, and starts once that one is done. */
+  backToBack: boolean;
   errand: {
     id: string;
     categoryKey: string;
@@ -53,11 +55,22 @@ export function customerLine(c: Offer['customer']) {
 export function offerFacts(offer: Offer) {
   const { errand } = offer;
   return [
-    errand.scheduledFor ? `Scheduled for ${shortWhen(errand.scheduledFor)}` : 'Now',
+    offer.backToBack
+      ? 'After the errand you are on'
+      : errand.scheduledFor
+        ? `Scheduled for ${shortWhen(errand.scheduledFor)}`
+        : 'Now',
     `${errand.stopCount} stops`,
     ...(errand.buy ? ['You buy the items'] : []),
   ];
 }
+
+/**
+ * Where the app goes once the agent accepts: the errand taken, or, for one back to back (M10), nowhere, so they stay
+ * on the errand they are carrying out. The next one starts after it.
+ */
+export const afterAccepting = (offer: Pick<Offer, 'backToBack' | 'errand'>) =>
+  offer.backToBack ? null : `/errand/${offer.errand.id}`;
 
 /** How full the countdown bar is: what's left of the whole window, from 0 to 1. */
 export const barShare = (left: number, windowSeconds: number) =>

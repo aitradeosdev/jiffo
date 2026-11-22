@@ -1,9 +1,16 @@
+import type { ErrandState } from './errands';
+import { haversineMeters, type LatLng } from './geo';
 import type { AgentTier, CountrySettings } from './settings';
 
-/** An errand the agent holds now: urgent or not, and whether it is a scheduled one taken ahead, not started yet. */
+/**
+ * An errand the agent holds now: urgent or not, whether it is a scheduled one taken ahead, not started yet, where
+ * it stands, and its final drop-off.
+ */
 export interface HeldErrand {
   urgent: boolean;
   startsLater: boolean;
+  status: ErrandState;
+  dropoff: LatLng | null;
 }
 
 /** What matching knows about the agent asking. */
@@ -54,9 +61,16 @@ export const agentReachKm = (agent: Pick<MatchAgent, 'workRadiusKm'>, rules: Pic
 
 /**
  * Whether the errands the agent holds let them take one more: an urgent errand is held alone, apart from a
- * scheduled one taken ahead that hasn't started; errands from the board up to the cap.
+ * scheduled one taken ahead that hasn't started; errands from the board up to the cap. An urgent errand offered
+ * back to back (M10) waits behind the one they hold, and no more behind it.
  */
-export function heldRefusal(held: HeldErrand[], urgent: boolean, rules: Rules): MatchRefusal | null {
+export function heldRefusal(
+  held: HeldErrand[],
+  urgent: boolean,
+  rules: Rules,
+  options: { backToBack?: boolean } = {},
+): MatchRefusal | null {
+  if (options.backToBack && urgent) return held.filter((e) => !e.startsLater).length > 1 ? 'busy' : null;
   if (held.some((e) => e.urgent)) return 'finish_urgent';
   if (urgent) return held.some((e) => !e.startsLater) ? 'busy' : null;
   return held.length >= rules.maxBoardErrands ? 'too_many_errands' : null;
@@ -67,9 +81,14 @@ export function heldRefusal(held: HeldErrand[], urgent: boolean, rules: Rules): 
  * and not held for faked GPS: one decision for the board and for accepting, so an agent can only take what the
  * board would show them.
  */
-export function matchRefusal(agent: MatchAgent, errand: MatchErrand, rules: Rules): MatchRefusal | null {
+export function matchRefusal(
+  agent: MatchAgent,
+  errand: MatchErrand,
+  rules: Rules,
+  options: { backToBack?: boolean } = {},
+): MatchRefusal | null {
   if (errand.customerId === agent.userId) return 'own_errand';
-  const held = heldRefusal(agent.held, errand.urgent, rules);
+  const held = heldRefusal(agent.held, errand.urgent, rules, options);
   if (held) return held;
   if (agent.categoryKeys && !agent.categoryKeys.includes(errand.categoryKey)) return 'category_off';
   if (errand.buy && !agent.takesPurchases) return 'no_purchases';
@@ -78,6 +97,36 @@ export function matchRefusal(agent: MatchAgent, errand: MatchErrand, rules: Rule
   if (errand.gaveUp) return 'gave_up';
   return null;
 }
+
+type BackToBackRules = Pick<CountrySettings['matching'], 'backToBack' | 'backToBackDropoffKm' | 'backToBackPickupKm'>;
+
+/** Where an errand is under way, and can be followed back to back; marked delivered, or a photo sent, at its end. */
+const UNDER_WAY: readonly ErrandState[] = ['started', 'item_pending', 'items_locked', 'delivered', 'photo_pending'];
+const AT_THE_END: readonly ErrandState[] = ['delivered', 'photo_pending'];
+
+/**
+ * The errand an urgent offer could follow back to back (docs/matching.md, M10), or null: the one errand the agent
+ * holds now, under way, with them within a km of its final drop-off or having marked it delivered, and the next
+ * pickup within 3 km of that drop-off (Settings, Matching). A scheduled errand taken ahead, not started, isn't
+ * held now; one already waiting behind the current one leaves no room.
+ */
+export function backToBackFrom(
+  agent: LatLng & { held: HeldErrand[] },
+  pickup: LatLng,
+  rules: BackToBackRules,
+): HeldErrand | null {
+  if (!rules.backToBack) return null;
+  const now = agent.held.filter((e) => !e.startsLater);
+  const current = now.length === 1 ? now[0]! : null;
+  if (!current?.dropoff || !UNDER_WAY.includes(current.status)) return null;
+  const nearEnd =
+    AT_THE_END.includes(current.status) || haversineMeters(agent, current.dropoff) <= rules.backToBackDropoffKm * 1000;
+  if (!nearEnd) return null;
+  return haversineMeters(current.dropoff, pickup) <= rules.backToBackPickupKm * 1000 ? current : null;
+}
+
+/** Whether the errand is at its end already, so the time to finish it is the hand-off alone. */
+export const atTheEnd = (e: Pick<HeldErrand, 'status'>) => AT_THE_END.includes(e.status);
 
 /** What ranking knows about an agent for one errand (docs/matching.md, M4). */
 export interface RankInputs {

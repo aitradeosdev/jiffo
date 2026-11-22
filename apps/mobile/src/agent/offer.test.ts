@@ -5,6 +5,7 @@ import {
   isOfferPush,
   isPushForOffer,
   offerEndsAt,
+  afterAccepting,
   offerFacts,
   offlineMessage,
   secondsToGo,
@@ -18,6 +19,7 @@ const offer: Offer = {
   windowSeconds: 20,
   agentEarnsKobo: 212_500,
   counts: true,
+  backToBack: false,
   errand: {
     id: 'errand-1',
     categoryKey: 'parcel',
@@ -58,6 +60,8 @@ describe('an offer', () => {
 
   it('lists what the errand involves', () => {
     expect(offerFacts(offer)).toEqual(['Now', '2 stops']);
+    // Back to back (M10): after the errand they are on, not now.
+    expect(offerFacts({ ...offer, backToBack: true })).toEqual(['After the errand you are on', '2 stops']);
     expect(offerFacts({ ...offer, errand: { ...offer.errand, buy: true, stopCount: 3 } })).toEqual([
       'Now',
       '3 stops',
@@ -117,5 +121,11 @@ describe('the countdown bar', () => {
     expect(barShare(0, 20)).toBe(0);
     expect(barShare(25, 20)).toBe(1);
     expect(barShare(5, 0)).toBe(0);
+  });
+
+  it('opens the errand taken, unless it waits behind the one they are on', () => {
+    expect(afterAccepting(offer)).toBe('/errand/errand-1');
+    // Back to back (M10): they stay on the errand they are carrying out; the next one starts after it.
+    expect(afterAccepting({ ...offer, backToBack: true })).toBeNull();
   });
 });

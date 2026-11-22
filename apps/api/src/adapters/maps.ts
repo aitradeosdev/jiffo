@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { haversineMeters } from '@jiffo/shared';
 import { providerFetch } from './provider-fetch';
 import { unavailable } from '../common/errors';
 
@@ -57,15 +58,8 @@ const inParts = <T>(items: T[], size: number) =>
 
 export const MAPS = Symbol('MAPS');
 
-const EARTH_RADIUS_M = 6_371_000;
-/** Straight-line distance between two points. */
-export function haversineMeters(a: LatLng, b: LatLng): number {
-  const rad = (d: number) => (d * Math.PI) / 180;
-  const dLat = rad(b.lat - a.lat);
-  const dLng = rad(b.lng - a.lng);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
-}
+/** Straight-line distance between two points: one formula for the server and the apps, in @jiffo/shared. */
+export { haversineMeters };
 
 /** A rough road estimate from straight lines: roads wind about 30% more, at about 20 km/h in city traffic. */
 export function estimateRoute(points: LatLng[]): RouteEstimate {
