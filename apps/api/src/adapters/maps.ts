@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { haversineMeters } from '@jiffo/shared';
 import { providerFetch } from './provider-fetch';
 import { unavailable } from '../common/errors';
 
@@ -55,12 +56,10 @@ export interface MapsAdapter {
 const inParts = <T>(items: T[], size: number) =>
   Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size));
 
-import { haversineMeters } from '@jiffo/shared';
-
 export const MAPS = Symbol('MAPS');
 
 /** Straight-line distance between two points: one formula for the server and the apps, in @jiffo/shared. */
-export { haversineMeters } from '@jiffo/shared';
+export { haversineMeters };
 
 /** A rough road estimate from straight lines: roads wind about 30% more, at about 20 km/h in city traffic. */
 export function estimateRoute(points: LatLng[]): RouteEstimate {

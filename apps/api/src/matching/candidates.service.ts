@@ -73,8 +73,11 @@ export class CandidatesService {
       // Offered one at a time, an urgent errand can go back to back (M10); never one open to everyone.
       errand.urgent,
     );
+    // One still on the way to their drop-off goes there first; once it's delivered, they drive from where they are,
+    // as any agent does.
+    const onTheWay = (c: (typeof shortlist)[number]) => !!c.following && !c.following.atTheEnd;
     const travel = await this.travelTimes.toPickup(
-      shortlist.filter((c) => !c.following),
+      shortlist.filter((c) => !onTheWay(c)),
       pickup,
       rules,
     );
@@ -82,7 +85,7 @@ export class CandidatesService {
       .map((c) => ({
         agentId: c.agentId,
         straightMeters: c.straightMeters,
-        travel: c.following ? this.backToBackTravel(c, c.following, pickup, rules) : travel.get(c.agentId)!,
+        travel: onTheWay(c) ? this.backToBackTravel(c, c.following!.dropoff, pickup, rules) : travel.get(c.agentId)!,
         backToBack: !!c.following,
       }))
       .sort((a, b) => a.travel.durationSeconds - b.travel.durationSeconds || a.straightMeters - b.straightMeters);
@@ -123,23 +126,17 @@ export class CandidatesService {
   }
 
   /**
-   * How soon an agent near the end of an errand reaches the next pickup (M10): the rest of the way to that errand's
-   * drop-off, none once it is delivered, then the drive from there. Estimated: neither leg is a route the maps
-   * provider is asked for.
+   * How soon an agent still on the way to an errand's drop-off reaches the next pickup (M10): the rest of the way
+   * there, then the drive on. Estimated: neither leg is a route the maps provider is asked for.
    */
-  private backToBackTravel(
-    agent: LatLng,
-    following: Following,
-    pickup: LatLng,
-    rules: CountrySettings['matching'],
-  ): Travel {
+  private backToBackTravel(agent: LatLng, dropoff: LatLng, pickup: LatLng, rules: CountrySettings['matching']): Travel {
     const legs = [
-      following.atTheEnd ? null : TravelTimesService.estimate(haversineMeters(agent, following.dropoff), rules),
-      TravelTimesService.estimate(haversineMeters(following.dropoff, pickup), rules),
-    ].filter((l): l is Travel => l !== null);
+      TravelTimesService.estimate(haversineMeters(agent, dropoff), rules),
+      TravelTimesService.estimate(haversineMeters(dropoff, pickup), rules),
+    ];
     return {
-      distanceMeters: legs.reduce((n, l) => n + l.distanceMeters, 0),
-      durationSeconds: legs.reduce((n, l) => n + l.durationSeconds, 0),
+      distanceMeters: legs[0]!.distanceMeters + legs[1]!.distanceMeters,
+      durationSeconds: legs[0]!.durationSeconds + legs[1]!.durationSeconds,
       estimated: true,
     };
   }

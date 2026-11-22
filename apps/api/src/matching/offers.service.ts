@@ -737,7 +737,14 @@ export class OffersService {
     const recent = await this.db
       .select({ status: errandOffers.status })
       .from(errandOffers)
-      .where(and(eq(errandOffers.agentId, agentId), gte(errandOffers.offeredAt, presence.since ?? new Date(0))))
+      .where(
+        and(
+          eq(errandOffers.agentId, agentId),
+          gte(errandOffers.offeredAt, presence.since ?? new Date(0)),
+          // Not those made back to back (M10): the agent is out on an errand, likely driving, when one rings.
+          eq(errandOffers.backToBack, false),
+        ),
+      )
       .orderBy(desc(errandOffers.offeredAt))
       .limit(n);
     if (recent.length < n || recent.some((o) => o.status !== 'expired')) return;

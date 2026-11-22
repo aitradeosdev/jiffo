@@ -12,7 +12,16 @@ import { useColors } from '../theme/theme';
 import { fonts } from '../theme/tokens';
 import { Button, Text } from '../ui/kit';
 import { Avatar, Badge, IconCircle, List, Row } from '../ui/parts';
-import { barShare, customerLine, isOfferPush, offerEndsAt, offerFacts, secondsToGo, type Offer } from './offer';
+import {
+  afterAccepting,
+  barShare,
+  customerLine,
+  isOfferPush,
+  type Offer,
+  offerEndsAt,
+  offerFacts,
+  secondsToGo,
+} from './offer';
 
 /** How long "Time's up" or "Taken by someone else" shows before the screen closes. */
 const ENDED_MS = 2_500;
@@ -130,7 +139,8 @@ function OfferScreen({ showing, onClose }: { showing: Showing; onClose: () => vo
     try {
       await api.post(`/v1/errands/${offer.errand.id}/events`, { event: 'accept' });
       onClose();
-      router.push(`/errand/${offer.errand.id}`);
+      const next = afterAccepting(offer);
+      if (next) router.push(next);
     } catch (e) {
       // Ran out, or went elsewhere, as they tapped; any other refusal says why and leaves them to decline.
       if (e instanceof ApiError && (e.code === 'not_offered' || e.code === 'errand_not_found')) {

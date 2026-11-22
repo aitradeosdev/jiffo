@@ -5,6 +5,7 @@ import {
   isOfferPush,
   isPushForOffer,
   offerEndsAt,
+  afterAccepting,
   offerFacts,
   offlineMessage,
   secondsToGo,
@@ -120,5 +121,11 @@ describe('the countdown bar', () => {
     expect(barShare(0, 20)).toBe(0);
     expect(barShare(25, 20)).toBe(1);
     expect(barShare(5, 0)).toBe(0);
+  });
+
+  it('opens the errand taken, unless it waits behind the one they are on', () => {
+    expect(afterAccepting(offer)).toBe('/errand/errand-1');
+    // Back to back (M10): they stay on the errand they are carrying out; the next one starts after it.
+    expect(afterAccepting({ ...offer, backToBack: true })).toBeNull();
   });
 });

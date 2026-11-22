@@ -65,6 +65,13 @@ export function offerFacts(offer: Offer) {
   ];
 }
 
+/**
+ * Where the app goes once the agent accepts: the errand taken, or, for one back to back (M10), nowhere, so they stay
+ * on the errand they are carrying out. The next one starts after it.
+ */
+export const afterAccepting = (offer: Pick<Offer, 'backToBack' | 'errand'>) =>
+  offer.backToBack ? null : `/errand/${offer.errand.id}`;
+
 /** How full the countdown bar is: what's left of the whole window, from 0 to 1. */
 export const barShare = (left: number, windowSeconds: number) =>
   windowSeconds > 0 ? Math.min(1, Math.max(0, left / windowSeconds)) : 0;

@@ -12,6 +12,7 @@ import {
   createErrand,
   createTestApp,
   fund,
+  photo,
   signIn,
   type Person,
   type TestApp,
@@ -190,7 +191,11 @@ describe('back-to-back offers', () => {
     await act(t, agent, first.id, 'mark_delivered');
     await report(agent, north(dropoff, -1.5));
     await t.timers.fireWhere((job) => job.event === 'offer_dispatch' && job.errandId === early.id);
-    expect(await current(agent)).toMatchObject({ errand: { id: early.id }, backToBack: true });
+    const offer = await current(agent);
+    expect(offer).toMatchObject({ errand: { id: early.id }, backToBack: true });
+    // Done with the first, they drive from where they are: 3 km to the pickup, not the 1.5 km from the drop-off.
+    const [row] = await t.db.select().from(errandOffers).where(eq(errandOffers.id, offer!.id));
+    expect(row!.travelSeconds).toBeGreaterThan(estimate(dropoff, next) + 100);
   });
 
   it('never with the next pickup more than 3 km from the drop-off, nor with back-to-back offers switched off', async () => {
@@ -226,5 +231,56 @@ describe('back-to-back offers', () => {
     await request(t.http).post(`/v1/agent/offers/${offer!.id}/decline`).set(agent.headers).expect(200);
     const res = await event(agent, offered.id, 'accept');
     expect(res.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it('starts the waiting errand once the first is handed over, though its photo waits for the customer', async () => {
+    const dropoff = east(9);
+    const agent = await agentAt(east(8));
+    const first = await underWay(agent, east(8), dropoff);
+    await report(agent, east(8.6));
+    const next = north(dropoff, 1);
+    const second = await urgent(next, north(next, 1));
+    expect((await current(agent))?.errand.id).toBe(second.id);
+    await event(agent, second.id, 'accept').expect(200);
+    await act(t, agent, first.id, 'mark_delivered');
+    await act(t, agent, first.id, 'send_dropoff_photo', { photo: await photo(t, agent, first.id, 'dropoff_photo') });
+    await act(t, agent, second.id, 'start');
+  });
+
+  it('never takes an agent offline for back-to-back offers they let run out', async () => {
+    await matching({ missedOffersOffline: 1 });
+    try {
+      const dropoff = east(11);
+      const agent = await agentAt(east(10));
+      await underWay(agent, east(10), dropoff);
+      await report(agent, east(10.6));
+      const next = north(dropoff, 1);
+      const offered = await urgent(next, north(next, 1));
+      const offer = await current(agent);
+      expect(offer?.errand.id).toBe(offered.id);
+      await t.timers.fireWhere((job) => job.event === 'offer_expire' && job.offerId === offer!.id);
+      const [presence] = await t.db.select().from(agentPresence).where(eq(agentPresence.userId, agent.userId));
+      expect(presence!.online).toBe(true);
+    } finally {
+      await matching({ missedOffersOffline: DEFAULT_MATCHING_SETTINGS.missedOffersOffline });
+    }
+  });
+
+  it('is accepted back to back only while back-to-back offers are on', async () => {
+    const dropoff = east(13);
+    const agent = await agentAt(east(12));
+    await underWay(agent, east(12), dropoff);
+    await report(agent, east(12.6));
+    const next = north(dropoff, 1);
+    const offered = await urgent(next, north(next, 1));
+    expect((await current(agent))?.errand.id).toBe(offered.id);
+    await matching({ backToBack: false });
+    try {
+      const res = await event(agent, offered.id, 'accept');
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('finish_urgent');
+    } finally {
+      await matching({ backToBack: true });
+    }
   });
 });

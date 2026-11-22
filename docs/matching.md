@@ -127,9 +127,10 @@ This follows Uber's back-to-back trips.
 - At most one errand can wait behind the current one. It starts only after the current errand completes.
 
 Built as above (Settings, Matching: on, 1 km and 3 km to start). A back-to-back offer never counts toward the
-agent's acceptance rate, and its travel time is estimated: the rest of the way to the drop-off, none once delivered,
-then the drive. Only one-at-a-time offers go back to back; an errand open to everyone still goes to agents holding
-nothing urgent.
+agent's acceptance rate, nor toward the missed offers that take them offline. Its travel time is estimated: the rest
+of the way to the drop-off, then the drive; once delivered, from wherever the agent is, as for any agent. The next
+errand starts once the current one is handed over: its PIN entered, or its drop-off photo sent. Only one-at-a-time
+offers go back to back; an errand open to everyone still goes to agents holding nothing urgent.
 
 ## Open board (M11)
 
