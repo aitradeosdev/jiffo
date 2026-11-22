@@ -4,10 +4,20 @@ import { useActionState, useEffect, useMemo, useState } from 'react';
 import { ReasonInput } from '@/components/reason';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, Card, Notice, buttonClass, inputClass } from '@/components/ui';
-import { applyPrices, PRICE_FIELDS, type PriceOverride, type Prices } from '@jiffo/shared';
+import {
+  applyPrices,
+  PRICE_FIELDS,
+  resolveMatching,
+  type CountrySettings,
+  type MatchingOverride,
+  type PriceOverride,
+  type Prices,
+} from '@jiffo/shared';
+import { matchingInputs, matchingText } from '@/lib/matching-places';
 import { PRICE_LABELS, priceInput } from '@/lib/prices';
+import { FIELD_UNIT } from '@/lib/settings-fields';
 import { boundaryField, editableOnMap, parseBoundary, type Boundary } from '@/lib/shapes';
-import { createArea, createCity, savePrices, updatePlace } from '../actions';
+import { createArea, createCity, saveMatching, savePrices, updatePlace } from '../actions';
 import { PlacesMap, type MapShape } from './map';
 
 /** The prices a place sets now, and their version: 0, with nothing set, before the first. */
@@ -15,12 +25,18 @@ export interface SavedPrices {
   version: number;
   data: PriceOverride;
 }
+/** The Matching values a place sets now (M14), and their version, as for prices. */
+export interface SavedMatching {
+  version: number;
+  data: MatchingOverride;
+}
 export interface PlaceArea {
   id: string;
   name: string;
   enabled: boolean;
   boundary: Boundary;
   prices: SavedPrices;
+  matching: SavedMatching;
 }
 export interface PlaceCity extends PlaceArea {
   areas: PlaceArea[];
@@ -31,8 +47,15 @@ export interface PlaceState {
   name: string;
   enabled: boolean;
   prices: SavedPrices;
+  matching: SavedMatching;
   cities: PlaceCity[];
 }
+
+type Scope = 'state' | 'city' | 'area';
+/** What a place sets for itself, of each kind. */
+type Own = { id: string; name: string; prices: SavedPrices; matching: SavedMatching };
+/** Marks a place that sets something of its own. */
+const owns = (data: object) => (Object.keys(data).length ? ' (own)' : '');
 
 /** Setting a state's, city's or area's prices: what it sets now, and what it would take from the levels above. */
 type PriceTask = {
@@ -44,9 +67,23 @@ type PriceTask = {
   above: PriceOverride[];
 };
 
-/** What is being drawn: a new city, a new area in a city, or a new shape (and name) for one; or prices set. */
+/** Setting a place's Matching values (M14), the same way. */
+type MatchingTask = {
+  kind: 'matching';
+  scope: Scope;
+  id: string;
+  name: string;
+  saved: SavedMatching;
+  above: MatchingOverride[];
+};
+
+/**
+ * What is being drawn: a new city, a new area in a city, or a new shape (and name) for one; or prices or Matching
+ * values set.
+ */
 type Task =
   | PriceTask
+  | MatchingTask
   | { kind: 'new-city' }
   | { kind: 'new-area'; cityId: string; cityName: string }
   | { kind: 'reshape'; place: 'city' | 'area'; id: string; name: string; boundary: Boundary };
@@ -58,11 +95,13 @@ type Task =
 export function Places({
   states,
   countryPrices,
+  countryMatching,
   canEdit,
   mapsKey,
 }: {
   states: PlaceState[];
   countryPrices: Prices | null;
+  countryMatching: CountrySettings['matching'] | null;
   canEdit: boolean;
   mapsKey: string;
 }) {
@@ -92,8 +131,27 @@ export function Places({
     setDrawing((d) => d + 1);
   };
 
+  /** Opens a place's prices or Matching values, with what each level above it sets. */
+  const openOwn = (kind: 'prices' | 'matching', scope: Scope, place: Own, above: Own[]) =>
+    start(
+      kind === 'prices'
+        ? { kind, scope, id: place.id, name: place.name, saved: place.prices, above: above.map((a) => a.prices.data) }
+        : {
+            kind,
+            scope,
+            id: place.id,
+            name: place.name,
+            saved: place.matching,
+            above: above.map((a) => a.matching.data),
+          },
+    );
+
   const target =
-    task?.kind === 'reshape' || task?.kind === 'prices' ? task.id : task?.kind === 'new-area' ? task.cityId : null;
+    task?.kind === 'reshape' || task?.kind === 'prices' || task?.kind === 'matching'
+      ? task.id
+      : task?.kind === 'new-area'
+        ? task.cityId
+        : null;
   // The one being reshaped is drawn by the drawing tool instead, unless it has holes, which the tool can't take.
   const inTool = task?.kind === 'reshape' && editableOnMap(task.boundary) ? task.id : null;
   const shapes = useMemo<MapShape[]>(
@@ -149,24 +207,29 @@ export function Places({
               </option>
             ))}
           </select>
-          {state && countryPrices && !task ? (
-            <button
-              type="button"
-              className="mt-3 text-sm font-semibold text-ink-2 underline"
-              onClick={() =>
-                start({
-                  kind: 'prices',
-                  scope: 'state',
-                  id: state.id,
-                  name: state.name,
-                  saved: state.prices,
-                  above: [],
-                })
-              }
-            >
-              Prices for {state.name}
-              {Object.keys(state.prices.data).length ? ' (own)' : ''}
-            </button>
+          {state && !task ? (
+            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+              {countryPrices ? (
+                <button
+                  type="button"
+                  className="text-sm font-semibold text-ink-2 underline"
+                  onClick={() => openOwn('prices', 'state', state, [])}
+                >
+                  Prices for {state.name}
+                  {owns(state.prices.data)}
+                </button>
+              ) : null}
+              {countryMatching ? (
+                <button
+                  type="button"
+                  className="text-sm font-semibold text-ink-2 underline"
+                  onClick={() => openOwn('matching', 'state', state, [])}
+                >
+                  Matching for {state.name}
+                  {owns(state.matching.data)}
+                </button>
+              ) : null}
+            </div>
           ) : null}
           {state && !state.enabled ? (
             <div className="mt-3">
@@ -183,7 +246,15 @@ export function Places({
             canEdit={canEdit}
             onDone={() => start(null)}
           />
-        ) : task && task.kind !== 'prices' && canEdit ? (
+        ) : task?.kind === 'matching' && countryMatching ? (
+          <MatchingPanel
+            key={round}
+            task={task}
+            countryMatching={countryMatching}
+            canEdit={canEdit}
+            onDone={() => start(null)}
+          />
+        ) : task && task.kind !== 'prices' && task.kind !== 'matching' && canEdit ? (
           <DrawPanel
             key={round}
             task={task}
@@ -221,19 +292,8 @@ export function Places({
                     onReshape={() =>
                       start({ kind: 'reshape', place: 'city', id: city.id, name: city.name, boundary: city.boundary })
                     }
-                    onPrices={
-                      countryPrices && !task
-                        ? () =>
-                            start({
-                              kind: 'prices',
-                              scope: 'city',
-                              id: city.id,
-                              name: city.name,
-                              saved: city.prices,
-                              above: [state.prices.data],
-                            })
-                        : undefined
-                    }
+                    onPrices={countryPrices && !task ? () => openOwn('prices', 'city', city, [state]) : undefined}
+                    onMatching={countryMatching && !task ? () => openOwn('matching', 'city', city, [state]) : undefined}
                   />
                   <ul className="ml-4 space-y-1.5 border-l border-line pl-3">
                     {city.areas.map((area) => (
@@ -252,16 +312,11 @@ export function Places({
                             })
                           }
                           onPrices={
-                            countryPrices && !task
-                              ? () =>
-                                  start({
-                                    kind: 'prices',
-                                    scope: 'area',
-                                    id: area.id,
-                                    name: area.name,
-                                    saved: area.prices,
-                                    above: [state.prices.data, city.prices.data],
-                                  })
+                            countryPrices && !task ? () => openOwn('prices', 'area', area, [state, city]) : undefined
+                          }
+                          onMatching={
+                            countryMatching && !task
+                              ? () => openOwn('matching', 'area', area, [state, city])
                               : undefined
                           }
                         />
@@ -325,6 +380,7 @@ function PlaceRow({
   canEdit,
   onReshape,
   onPrices,
+  onMatching,
 }: {
   place: 'city' | 'area';
   item: PlaceArea;
@@ -332,6 +388,8 @@ function PlaceRow({
   onReshape: () => void;
   /** Opens its prices: anyone can look; those who may change settings can change them. */
   onPrices?: () => void;
+  /** Opens its Matching values, the same way. */
+  onMatching?: () => void;
 }) {
   const [result, action] = useActionState(updatePlace, {});
   return (
@@ -362,7 +420,12 @@ function PlaceRow({
       ) : null}
       {onPrices ? (
         <button type="button" className="text-sm font-semibold text-ink-2 underline" onClick={onPrices}>
-          Prices{Object.keys(item.prices.data).length ? ' (own)' : ''}
+          Prices{owns(item.prices.data)}
+        </button>
+      ) : null}
+      {onMatching ? (
+        <button type="button" className="text-sm font-semibold text-ink-2 underline" onClick={onMatching}>
+          Matching{owns(item.matching.data)}
         </button>
       ) : null}
       {result.error ? (
@@ -566,6 +629,100 @@ function PricePanel({
                 minLength={3}
                 maxLength={500}
                 placeholder="For example: errands take longer in Lekki's traffic"
+                className={`${inputClass} mt-1.5`}
+              />
+            </div>
+            <Notice>{result.error}</Notice>
+            <div className="flex gap-2">
+              <SubmitButton small pendingLabel="Saving…">
+                Ask for approval
+              </SubmitButton>
+              <button type="button" className={buttonClass('ghost', true)} onClick={onDone}>
+                Cancel
+              </button>
+            </div>
+          </>
+        ) : (
+          <button type="button" className={buttonClass('ghost', true)} onClick={onDone}>
+            Close
+          </button>
+        )}
+      </form>
+    </Card>
+  );
+}
+
+/**
+ * A state's, city's or area's Matching values (M14): how its urgent errands are offered and ranked, each field it
+ * sets, or empty to take the level above's, shown as the placeholder. Who may get an errand stays the country's.
+ * Saving asks a second admin to approve (Approvals).
+ */
+function MatchingPanel({
+  task,
+  countryMatching,
+  canEdit,
+  onDone,
+}: {
+  task: MatchingTask;
+  countryMatching: CountrySettings['matching'];
+  canEdit: boolean;
+  onDone: () => void;
+}) {
+  const [result, action] = useActionState(saveMatching, {});
+  useEffect(() => {
+    if (result.ok) onDone();
+  }, [result, onDone]);
+  const inherited = resolveMatching(countryMatching, task.above);
+  const from = task.scope === 'state' ? 'the country' : task.scope === 'city' ? 'the state' : 'the city';
+  return (
+    <Card title={`Matching for ${task.name}`}>
+      <p className="-mt-1 mb-3 text-sm text-ink-3">
+        How urgent errands here are offered and ranked. Leave a field empty to use {from}&apos;s, shown in grey. Who may
+        get an errand stays the country&apos;s, as do the offers over which an agent&apos;s acceptance rate is worked
+        out and its pause; the free-decline values here decide which of this place&apos;s offers count toward it. The
+        fallback speed here is for offers: the board&apos;s order estimates with the country&apos;s
+        {task.scope === 'state' ? '' : ", and how long a batch waits is the state's"}. A change waits for a second
+        admin&apos;s approval.
+      </p>
+      <form action={action} className="space-y-3">
+        <ReasonInput after={result} />
+        <input type="hidden" name="scope" value={task.scope} />
+        <input type="hidden" name="id" value={task.id} />
+        <input type="hidden" name="basedOn" value={task.saved.version} />
+        <div className="space-y-3">
+          {matchingInputs(task.scope).flatMap((input) =>
+            input.parts.map((part) => (
+              <label key={part.path} className="block text-sm">
+                <span className="font-semibold">{part.label}</span>
+                <span className="mt-1.5 flex items-center gap-1.5">
+                  <input
+                    name={part.path}
+                    inputMode={part.kind === 'kmList' ? 'text' : 'decimal'}
+                    defaultValue={matchingText(part, task.saved.data)}
+                    placeholder={matchingText(part, inherited)}
+                    disabled={!canEdit}
+                    className={inputClass}
+                  />
+                  {FIELD_UNIT[part.kind] ? <span className="text-ink-3">{FIELD_UNIT[part.kind]}</span> : null}
+                </span>
+                {part.help ? <span className="mt-1 block text-[13px] text-ink-3">{part.help}</span> : null}
+              </label>
+            )),
+          )}
+        </div>
+        {canEdit ? (
+          <>
+            <div>
+              <label className="block text-sm font-semibold" htmlFor="matching-note">
+                What changes, and why
+              </label>
+              <input
+                id="matching-note"
+                name="note"
+                required
+                minLength={3}
+                maxLength={500}
+                placeholder="For example: fewer agents out here, so search further sooner"
                 className={`${inputClass} mt-1.5`}
               />
             </div>

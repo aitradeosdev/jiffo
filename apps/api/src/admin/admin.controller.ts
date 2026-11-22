@@ -35,6 +35,7 @@ import {
   PROVIDER_CATEGORIES,
   RISK_FLAG_STATUSES,
   RISK_QUEUES,
+  MatchingOverrideSchema,
   PriceOverrideSchema,
 } from '@jiffo/shared';
 import { forbidden, notFound } from '../common/errors';
@@ -103,6 +104,14 @@ const PriceChangeBody = z.object({
   /** The version of the place's prices this change was made from: 0 when it had none. */
   basedOn: z.number().int().min(0),
   prices: PriceOverrideSchema,
+  note: z.string().trim().min(3).max(500),
+});
+const MatchingChangeBody = z.object({
+  scope: z.enum(['state', 'city', 'area']),
+  id: z.string().uuid(),
+  /** The version of the place's Matching values this change was made from: 0 when it had none. */
+  basedOn: z.number().int().min(0),
+  matching: MatchingOverrideSchema,
   note: z.string().trim().min(3).max(500),
 });
 const PlaceChangeBody = z
@@ -484,6 +493,18 @@ export class AdminController {
     @Res({ passthrough: true }) res: Response,
   ) {
     return held(res, await this.gated.priceChange(admin, body));
+  }
+
+  /** Matching values for a state, city or area (Settings, Places; M14): waits for a second admin's approval. */
+  @Post('matching')
+  @HttpCode(200)
+  @Needs('settings')
+  async matchingChange(
+    @CurrentAdmin() admin: AdminContext,
+    @Body(new ZodBody(MatchingChangeBody)) body: z.infer<typeof MatchingChangeBody>,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return held(res, await this.gated.matchingChange(admin, body));
   }
 
   @Get('money/summary')

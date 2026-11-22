@@ -110,6 +110,118 @@ export function customerIdTypesOf(value: unknown) {
   return value.every(numbers) ? value : [...CUSTOMER_ID_TYPES];
 }
 
+/**
+ * Who may get an errand, and how urgent ones are offered and ranked (docs/matching.md). Per country; a state, city
+ * or area may set some of it for itself (matching-places.ts).
+ */
+export const MatchingSettingsSchema = z
+  .object({
+    /** How recent an agent's position must be for them to see errands or take one. */
+    locationFreshMinutes: minutes.max(30).default(2),
+    /** How far from the agent a pickup may be, on the board and when accepting. */
+    boardRadiusKm: z.number().int().min(1).max(50).default(10),
+    /**
+     * Errands from the board an agent may hold at once, scheduled ones taken ahead included. An urgent errand
+     * is always held alone.
+     */
+    maxBoardErrands: z.number().int().min(1).max(10).default(3),
+    /**
+     * How long a fake-GPS flag on an agent keeps them from errands, unless staff clear it sooner, so a phone's
+     * glitch costs a day at most. 0: a flag doesn't hold them.
+     */
+    fakeGpsHoldHours: z
+      .number()
+      .int()
+      .min(0)
+      .max(24 * 7)
+      .default(24),
+    /**
+     * How many of the agents nearest a pickup in a straight line have their road travel time asked of the
+     * maps provider (docs/matching.md, M3). Each is a paid lookup.
+     */
+    shortlistSize: z.number().int().min(1).max(25).default(10),
+    /**
+     * When the maps provider can't give travel times: roads are taken as 30% longer than a straight line,
+     * at this speed, and it is logged.
+     */
+    fallbackSpeedKmh: z.number().int().min(5).max(80).default(20),
+    /** How much each part counts in an agent's score (M4), in percent: they must add up to 100. */
+    weights: z
+      .object({ travel: percent, reliability: percent, rating: percent, waiting: percent })
+      .refine((w) => w.travel + w.reliability + w.rating + w.waiting === 100, {
+        message: 'The ranking weights must add up to 100%',
+        // Beside the first of them, so the panel shows it there.
+        path: ['travel'],
+      })
+      .default(() => ({ ...DEFAULT_MATCHING_SETTINGS.weights })),
+    /** Points added to the score for each tier, on top of it: 0 to 20 (0.2). */
+    tierBoosts: z
+      .object({ bronze: boost, silver: boost, gold: boost, platinum: boost })
+      .default(() => ({ ...DEFAULT_MATCHING_SETTINGS.tierBoosts })),
+    /** Errands an agent completes before their own reliability and rating count; until then, the state's. */
+    newAgentErrands: z.number().int().min(0).max(1_000).default(10),
+    /**
+     * Urgent errands offered to one agent at a time (M6). Off: they're on the board, for any agent with room
+     * for one to take, as before offers.
+     */
+    offers: z.boolean().default(true),
+    /** How long an agent has to answer an offer for an urgent errand before it moves to the next (M6). */
+    offerSeconds: z.number().int().min(5).max(120).default(20),
+    /** Offers in a row an agent lets run out before they are taken offline. 0: never. */
+    missedOffersOffline: z.number().int().min(0).max(20).default(3),
+    /** With no one to offer an urgent errand to, how soon to look again. */
+    dispatchRetrySeconds: z.number().int().min(5).max(300).default(15),
+    /**
+     * An urgent errand's search (M8): offered one agent at a time within each radius in turn, in km, then to
+     * every agent within the last at once, the first to accept getting it. A raised fee starts it again.
+     */
+    searchStepsKm: z
+      .array(z.number().min(0.5).max(50))
+      .min(1, 'Give at least one search step')
+      .max(6)
+      .refine((steps) => steps.every((km, i) => i === 0 || km > steps[i - 1]!), {
+        message: 'Each search step must reach further than the one before',
+      })
+      .default(() => [...DEFAULT_MATCHING_SETTINGS.searchStepsKm]),
+    /** Agents offered it one at a time at each step before the search moves out to the next. */
+    offersPerStep: z.number().int().min(1).max(50).default(5),
+    /**
+     * How long an urgent errand's first offer waits, so errands sent about the same time in a state are matched
+     * together (M5): as many as can get an agent, with the highest total score.
+     */
+    batchSeconds: z.number().int().min(1).max(30).default(3),
+    /**
+     * The acceptance rate (M9): offers whose pickup is further than this, in km, don't count, so declining them
+     * is free; nor do offers this many minutes after going online, nor any to everyone at once.
+     */
+    freeDeclineKm: z.number().min(0.5).max(50).default(3),
+    freeDeclineMinutes: z.number().int().min(0).max(60).default(2),
+    /** The rate is over an agent's last this many counted offers. */
+    acceptanceOffers: z.number().int().min(10).max(500).default(50),
+    /** Counted offers an agent has before their rate counts, in their ranking and for a pause; until then, none. */
+    acceptanceMinOffers: z.number().int().min(1).max(500).default(10),
+    /**
+     * Below this rate, in basis points, an agent's offers pause for `pauseMinutes`. Null: never (a low rate then
+     * only lowers their ranking). After a pause, only offers since count toward the next.
+     */
+    pauseBelowBps: z.number().int().min(1).max(9_999).nullable().default(null),
+    pauseMinutes: z.number().int().min(5).max(1_440).default(30),
+    /**
+     * The board's "Best for you" order (M11) goes by travel time to each pickup: from the maps provider for the
+     * nearest ten when on (each a paid lookup, shared by agents nearby for ten minutes), else estimated from the
+     * distance at the fallback speed.
+     */
+    boardTravelTimes: z.boolean().default(false),
+  })
+  .refine((m) => (m.searchStepsKm.at(-1) ?? 0) <= m.boardRadiusKm, {
+    message: "The last search step can't reach past how far the board reaches",
+    path: ['searchStepsKm'],
+  })
+  .refine((m) => m.acceptanceMinOffers <= m.acceptanceOffers, {
+    message: "The acceptance rate can't need more offers than the rate is over",
+    path: ['acceptanceMinOffers'],
+  });
+
 const CountrySettingsObject = z.object({
   pricing: z.object({
     baseFeeKobo: kobo,
@@ -376,114 +488,7 @@ const CountrySettingsObject = z.object({
     })
     .default(() => structuredClone(DEFAULT_RISK_SETTINGS)),
   /** Who may get an errand (docs/matching.md, M1). */
-  matching: z
-    .object({
-      /** How recent an agent's position must be for them to see errands or take one. */
-      locationFreshMinutes: minutes.max(30).default(2),
-      /** How far from the agent a pickup may be, on the board and when accepting. */
-      boardRadiusKm: z.number().int().min(1).max(50).default(10),
-      /**
-       * Errands from the board an agent may hold at once, scheduled ones taken ahead included. An urgent errand
-       * is always held alone.
-       */
-      maxBoardErrands: z.number().int().min(1).max(10).default(3),
-      /**
-       * How long a fake-GPS flag on an agent keeps them from errands, unless staff clear it sooner, so a phone's
-       * glitch costs a day at most. 0: a flag doesn't hold them.
-       */
-      fakeGpsHoldHours: z
-        .number()
-        .int()
-        .min(0)
-        .max(24 * 7)
-        .default(24),
-      /**
-       * How many of the agents nearest a pickup in a straight line have their road travel time asked of the
-       * maps provider (docs/matching.md, M3). Each is a paid lookup.
-       */
-      shortlistSize: z.number().int().min(1).max(25).default(10),
-      /**
-       * When the maps provider can't give travel times: roads are taken as 30% longer than a straight line,
-       * at this speed, and it is logged.
-       */
-      fallbackSpeedKmh: z.number().int().min(5).max(80).default(20),
-      /** How much each part counts in an agent's score (M4), in percent: they must add up to 100. */
-      weights: z
-        .object({ travel: percent, reliability: percent, rating: percent, waiting: percent })
-        .refine((w) => w.travel + w.reliability + w.rating + w.waiting === 100, {
-          message: 'The ranking weights must add up to 100%',
-          // Beside the first of them, so the panel shows it there.
-          path: ['travel'],
-        })
-        .default(() => ({ ...DEFAULT_MATCHING_SETTINGS.weights })),
-      /** Points added to the score for each tier, on top of it: 0 to 20 (0.2). */
-      tierBoosts: z
-        .object({ bronze: boost, silver: boost, gold: boost, platinum: boost })
-        .default(() => ({ ...DEFAULT_MATCHING_SETTINGS.tierBoosts })),
-      /** Errands an agent completes before their own reliability and rating count; until then, the state's. */
-      newAgentErrands: z.number().int().min(0).max(1_000).default(10),
-      /**
-       * Urgent errands offered to one agent at a time (M6). Off: they're on the board, for any agent with room
-       * for one to take, as before offers.
-       */
-      offers: z.boolean().default(true),
-      /** How long an agent has to answer an offer for an urgent errand before it moves to the next (M6). */
-      offerSeconds: z.number().int().min(5).max(120).default(20),
-      /** Offers in a row an agent lets run out before they are taken offline. 0: never. */
-      missedOffersOffline: z.number().int().min(0).max(20).default(3),
-      /** With no one to offer an urgent errand to, how soon to look again. */
-      dispatchRetrySeconds: z.number().int().min(5).max(300).default(15),
-      /**
-       * An urgent errand's search (M8): offered one agent at a time within each radius in turn, in km, then to
-       * every agent within the last at once, the first to accept getting it. A raised fee starts it again.
-       */
-      searchStepsKm: z
-        .array(z.number().min(0.5).max(50))
-        .min(1, 'Give at least one search step')
-        .max(6)
-        .refine((steps) => steps.every((km, i) => i === 0 || km > steps[i - 1]!), {
-          message: 'Each search step must reach further than the one before',
-        })
-        .default(() => [...DEFAULT_MATCHING_SETTINGS.searchStepsKm]),
-      /** Agents offered it one at a time at each step before the search moves out to the next. */
-      offersPerStep: z.number().int().min(1).max(50).default(5),
-      /**
-       * How long an urgent errand's first offer waits, so errands sent about the same time in a state are matched
-       * together (M5): as many as can get an agent, with the highest total score.
-       */
-      batchSeconds: z.number().int().min(1).max(30).default(3),
-      /**
-       * The acceptance rate (M9): offers whose pickup is further than this, in km, don't count, so declining them
-       * is free; nor do offers this many minutes after going online, nor any to everyone at once.
-       */
-      freeDeclineKm: z.number().min(0.5).max(50).default(3),
-      freeDeclineMinutes: z.number().int().min(0).max(60).default(2),
-      /** The rate is over an agent's last this many counted offers. */
-      acceptanceOffers: z.number().int().min(10).max(500).default(50),
-      /** Counted offers an agent has before their rate counts, in their ranking and for a pause; until then, none. */
-      acceptanceMinOffers: z.number().int().min(1).max(500).default(10),
-      /**
-       * Below this rate, in basis points, an agent's offers pause for `pauseMinutes`. Null: never (a low rate then
-       * only lowers their ranking). After a pause, only offers since count toward the next.
-       */
-      pauseBelowBps: z.number().int().min(1).max(9_999).nullable().default(null),
-      pauseMinutes: z.number().int().min(5).max(1_440).default(30),
-      /**
-       * The board's "Best for you" order (M11) goes by travel time to each pickup: from the maps provider for the
-       * nearest ten when on (each a paid lookup, shared by agents nearby for ten minutes), else estimated from the
-       * distance at the fallback speed.
-       */
-      boardTravelTimes: z.boolean().default(false),
-    })
-    .refine((m) => (m.searchStepsKm.at(-1) ?? 0) <= m.boardRadiusKm, {
-      message: "The last search step can't reach past how far the board reaches",
-      path: ['searchStepsKm'],
-    })
-    .refine((m) => m.acceptanceMinOffers <= m.acceptanceOffers, {
-      message: "The acceptance rate can't need more offers than the rate is over",
-      path: ['acceptanceMinOffers'],
-    })
-    .default(() => structuredClone(DEFAULT_MATCHING_SETTINGS)),
+  matching: MatchingSettingsSchema.default(() => structuredClone(DEFAULT_MATCHING_SETTINGS)),
   /** The emergency button (docs/security-plan.md, E9). */
   safety: z
     .object({

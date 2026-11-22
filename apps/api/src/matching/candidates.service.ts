@@ -3,7 +3,7 @@ import { matchRefusal, type CountrySettings } from '@jiffo/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import type { LatLng } from '../adapters/maps';
 import { ApiError } from '../common/errors';
-import { CountriesService } from '../countries/countries.service';
+import { MatchingPlacesService } from '../countries/matching-places.service';
 import { DB, type Db } from '../db/database.module';
 import { errandStops, errands } from '../db/schema';
 import { AgentLocations, type NearAgent } from './agent-locations';
@@ -35,7 +35,7 @@ export class CandidatesService {
 
   constructor(
     @Inject(DB) private readonly db: Db,
-    private readonly countries: CountriesService,
+    private readonly places: MatchingPlacesService,
     private readonly locations: AgentLocations,
     private readonly eligibility: EligibilityService,
     private readonly travelTimes: TravelTimesService,
@@ -46,8 +46,13 @@ export class CandidatesService {
    * this fee, and those holding another offer), so they never take the places of agents who could be asked.
    * `radiusKm`: how far from the pickup to look (a search step, M8); the board's reach when left out.
    */
-  async forErrand(errandId: string, skip: ReadonlySet<string> = new Set(), radiusKm?: number): Promise<Candidate[]> {
-    const found = await this.waiting(errandId);
+  async forErrand(
+    errandId: string,
+    skip: ReadonlySet<string> = new Set(),
+    radiusKm?: number,
+    known?: CountrySettings['matching'],
+  ): Promise<Candidate[]> {
+    const found = await this.waiting(errandId, known);
     if (!found) return [];
     const { errand, pickup, rules } = found;
     const shortlist = await this.checkedNear(
@@ -69,23 +74,32 @@ export class CandidatesService {
    * those an urgent errand open to everyone is told of (M8), the rest on the next look, every few seconds. No
    * travel times: no one is ranked.
    */
-  async everyoneWithin(errandId: string, skip: ReadonlySet<string>, radiusKm: number, max = 50) {
-    const found = await this.waiting(errandId);
+  async everyoneWithin(
+    errandId: string,
+    skip: ReadonlySet<string>,
+    radiusKm: number,
+    max = 50,
+    known?: CountrySettings['matching'],
+  ) {
+    const found = await this.waiting(errandId, known);
     if (!found) return [];
     const { errand, pickup, rules } = found;
     const checked = await this.checkedNear(errand, pickup, rules, skip, radiusKm, max);
     return checked.map((c) => ({ agentId: c.agentId, straightMeters: c.straightMeters }));
   }
 
-  /** The errand if it still waits, with its pickup and its country's Matching rules. */
-  private async waiting(errandId: string) {
+  /**
+   * The errand if it still waits, with its pickup and the Matching rules where it is (M14): `rules` when the caller
+   * has them already.
+   */
+  private async waiting(errandId: string, known?: CountrySettings['matching']) {
     const [row] = await this.db
       .select({ errand: errands, lat: errandStops.lat, lng: errandStops.lng })
       .from(errands)
       .innerJoin(errandStops, and(eq(errandStops.errandId, errands.id), eq(errandStops.seq, 0)))
       .where(eq(errands.id, errandId));
     if (!row || row.errand.status !== 'requested') return null;
-    const rules = (await this.countries.currentSettings(row.errand.countryCode)).settings.matching;
+    const rules = known ?? (await this.places.rulesFor(row.errand));
     return { errand: row.errand, pickup: { lat: row.lat, lng: row.lng }, rules };
   }
 

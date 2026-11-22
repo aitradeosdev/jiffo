@@ -15,6 +15,7 @@ import { AgentsService } from '../agents/agents.service';
 import { PresenceService } from '../agents/presence.service';
 import { notFound } from '../common/errors';
 import { CountriesService } from '../countries/countries.service';
+import { MatchingPlacesService } from '../countries/matching-places.service';
 import { DB, type Db } from '../db/database.module';
 import {
   agentPresence,
@@ -88,6 +89,7 @@ export class OffersService {
     @Inject(DB) private readonly db: Db,
     @Inject(ERRAND_TIMERS) private readonly timers: ErrandTimers,
     private readonly countries: CountriesService,
+    private readonly places: MatchingPlacesService,
     private readonly ranking: RankingService,
     private readonly push: PushService,
     private readonly realtime: RealtimeGateway,
@@ -156,7 +158,8 @@ export class OffersService {
     const [errand] = await this.db.select().from(errands).where(eq(errands.id, errandId));
     if (!errand || errand.status !== 'requested' || !errand.urgent) return;
     known.version = errand.version;
-    const rules = (await this.countries.currentSettings(errand.countryCode)).settings.matching;
+    // Where it is: its area's, city's and state's own values, then the country's (M14).
+    const rules = await this.places.rulesFor(errand);
     known.retrySeconds = rules.dispatchRetrySeconds;
     // Offers off for the country: the errand is on the board instead. Looked at again soon all the same, so
     // turning offers on offers the errands waiting then.
@@ -190,7 +193,7 @@ export class OffersService {
     const skip = new Set([...passed.map((p) => p.agentId), ...busy]);
     // Ranked once, as far as the last step reaches, and offered from this step's radius out: further out at once
     // where no one nearer can be asked.
-    const ranked = await this.ranking.ranked(errandId, skip, rules.searchStepsKm.at(-1));
+    const ranked = await this.ranking.ranked(errandId, skip, rules.searchStepsKm.at(-1), rules);
     for (const [i, r] of ringOrder(ranked, rules.searchStepsKm.slice(step.index)).entries()) {
       const outcome = await this.offerTo(errand, r, i + 1, rules);
       if (outcome === 'offered' || outcome === 'stop') return;
@@ -263,7 +266,7 @@ export class OffersService {
   async errandCreated(errand: ErrandRow) {
     if (errand.status !== 'requested' || !errand.urgent) return;
     try {
-      const rules = (await this.countries.currentSettings(errand.countryCode)).settings.matching;
+      const rules = await this.places.stateRules(errand.countryCode, errand.stateCode);
       if (!rules.offers) return await this.dispatch(errand.id);
       await this.batchSoon(errand, rules);
     } catch (error) {
@@ -309,11 +312,13 @@ export class OffersService {
     await this.redis.client.set(key, '1', 'EX', BATCH_RUNNING_SECONDS).catch(() => undefined);
     const done = new Set<string>();
     try {
-      const rules = (await this.countries.currentSettings(trigger.countryCode)).settings.matching;
+      // How long the batch waits is the state's; each errand is matched by the rules where it is (M14).
+      const country = (await this.countries.currentSettings(trigger.countryCode)).settings.matching;
+      const rules = await this.places.stateRules(trigger.countryCode, trigger.stateCode, country);
       const waiting = await this.waitingForBatch(trigger, rules);
       for (const e of waiting) done.add(e.id);
       if (!waiting.length) return;
-      await this.matchBatch(trigger, waiting, rules).catch(async (error: Error) => {
+      await this.matchBatch(trigger, waiting, country).catch(async (error: Error) => {
         this.logger.warn(`The batch for ${trigger.countryCode}-${trigger.stateCode} failed: ${error.message}`);
         for (const e of waiting) await this.dispatch(e.id);
       });
@@ -356,25 +361,29 @@ export class OffersService {
 
   /** After a batch: if errands arrived while it ran, the next batch starts for them. */
   private async nextBatch(trigger: ErrandRow, done: ReadonlySet<string>) {
-    const rules = (await this.countries.currentSettings(trigger.countryCode)).settings.matching;
+    const rules = await this.places.stateRules(trigger.countryCode, trigger.stateCode);
     if (!rules.offers) return;
     const next = (await this.waitingForBatch(trigger, rules)).find((e) => !done.has(e.id));
     if (next) await this.batchSoon(next, rules);
   }
 
   /** Assigns the batch's errands their agents together, and offers the rest one at a time. */
-  private async matchBatch(trigger: ErrandRow, waiting: ErrandRow[], rules: CountrySettings['matching']) {
-    if (!rules.offers) {
+  private async matchBatch(trigger: ErrandRow, waiting: ErrandRow[], country: CountrySettings['matching']) {
+    if (!country.offers) {
       for (const e of waiting) await this.dispatch(e.id);
       return;
     }
     const skip = await this.notToOffer(trigger.countryCode);
+    const rulesOf = await Promise.all(waiting.map((e) => this.places.rulesFor(e, country)));
     const options = await Promise.all(
-      waiting.map(async (e) => {
-        const ranked = await this.ranking.ranked(e.id, skip, rules.searchStepsKm.at(-1)).catch((error: Error) => {
-          this.logger.warn(`Ranking errand ${e.id} for its batch failed: ${error.message}`);
-          return [] as Ranked[];
-        });
+      waiting.map(async (e, i) => {
+        const rules = rulesOf[i]!;
+        const ranked = await this.ranking
+          .ranked(e.id, skip, rules.searchStepsKm.at(-1), rules)
+          .catch((error: Error) => {
+            this.logger.warn(`Ranking errand ${e.id} for its batch failed: ${error.message}`);
+            return [] as Ranked[];
+          });
         return nearestRing(ranked, rules.searchStepsKm);
       }),
     );
@@ -392,7 +401,7 @@ export class OffersService {
     for (const [i, e] of waiting.entries()) {
       const j = picked[i];
       const r = j === null || j === undefined ? undefined : options[i]!.find((o) => o.agentId === agents[j]);
-      const outcome = r ? await this.offerTo(e, r, options[i]!.indexOf(r) + 1, rules) : 'taken';
+      const outcome = r ? await this.offerTo(e, r, options[i]!.indexOf(r) + 1, rulesOf[i]!) : 'taken';
       if (outcome === 'taken') left.push(e.id);
     }
     for (const id of left) await this.dispatch(id);
@@ -491,10 +500,16 @@ export class OffersService {
    * How far an urgent errand's search reaches now, for its customer (M8): null while it isn't offered (offers off,
    * or not urgent). They never see who was asked or said no.
    */
-  async search(errand: ErrandRow, rules: CountrySettings['matching']) {
-    if (!errand.urgent || errand.status !== 'requested' || !rules.offers) return null;
+  async search(errand: ErrandRow) {
+    if (!errand.urgent || errand.status !== 'requested') return null;
+    const rules = await this.places.rulesFor(errand);
+    if (!rules.offers) return null;
     const last = rules.searchStepsKm.at(-1)!;
-    if (errand.broadcastFeeKobo === errand.feeKobo) return { radiusKm: last, everyone: true };
+    // Open to everyone: as far as it was opened, as the board and accepting go by, until its next look follows a
+    // change to its place's steps.
+    if (errand.broadcastFeeKobo === errand.feeKobo) {
+      return { radiusKm: errand.broadcastReachMeters ? errand.broadcastReachMeters / 1000 : last, everyone: true };
+    }
     const made = await this.offersMade(errand);
     return { radiusKm: searchRadiusKm(made.n, made.farthest, rules), everyone: false };
   }
@@ -510,15 +525,30 @@ export class OffersService {
    * told already or got another offer to answer are told, and it looks again soon, for agents arriving.
    */
   private async toEveryone(errand: ErrandRow, rules: CountrySettings['matching']) {
+    // As far as its place's last step reaches (M14), kept with it for the board and accepting.
+    const last = rules.searchStepsKm.at(-1)!;
+    const reach = Math.round(last * 1000);
     if (errand.broadcastFeeKobo !== errand.feeKobo) {
       const [marked] = await this.db
         .update(errands)
-        .set({ broadcastFeeKobo: errand.feeKobo })
+        .set({ broadcastFeeKobo: errand.feeKobo, broadcastReachMeters: reach })
         .where(and(eq(errands.id, errand.id), eq(errands.status, 'requested'), eq(errands.feeKobo, errand.feeKobo)))
         .returning({ id: errands.id });
       if (!marked) return;
       this.searchChanged(errand);
       this.realtime.boardChanged(errand.id, 'added');
+    } else if (errand.broadcastReachMeters !== reach) {
+      // Its place's steps changed since it was opened: the board and accepting follow from now, and the customer and
+      // agents watching the board are told.
+      const [moved] = await this.db
+        .update(errands)
+        .set({ broadcastReachMeters: reach })
+        .where(and(eq(errands.id, errand.id), eq(errands.status, 'requested')))
+        .returning({ id: errands.id });
+      if (moved) {
+        this.searchChanged(errand);
+        this.realtime.boardChanged(errand.id, 'changed');
+      }
     }
     const [passed, told, holding] = await Promise.all([
       this.passed(errand),
@@ -532,7 +562,7 @@ export class OffersService {
         .where(and(eq(errandOffers.countryCode, errand.countryCode), eq(errandOffers.status, 'open'))),
     ]);
     const skip = new Set([...passed, ...told, ...holding].map((p) => p.agentId));
-    const near = await this.candidates.everyoneWithin(errand.id, skip, rules.searchStepsKm.at(-1)!);
+    const near = await this.candidates.everyoneWithin(errand.id, skip, last, undefined, rules);
     if (near.length) {
       // Told once each: an agent another look told already is left out here.
       const fresh = await this.db

@@ -23,6 +23,7 @@ import { PeopleAdminService } from './people-admin.service';
 import { ProvidersAdminService } from './providers-admin.service';
 import { SettingsAdminService } from './settings-admin.service';
 import { PricesAdminService, type PriceChange } from './prices-admin.service';
+import { MatchingPlacesAdminService, type MatchingChange } from './matching-places-admin.service';
 import { maskPhone } from './masking';
 import { TeamService, type TeamChange } from './team.service';
 
@@ -52,6 +53,7 @@ export class ApprovalRequests implements OnModuleInit {
     private readonly people: PeopleAdminService,
     private readonly providers: ProvidersAdminService,
     private readonly prices: PricesAdminService,
+    private readonly matching: MatchingPlacesAdminService,
   ) {}
 
   onModuleInit() {
@@ -62,6 +64,7 @@ export class ApprovalRequests implements OnModuleInit {
       this.settings.saveSettings(as, p.code as string, p.input as { basedOn: number; settings: unknown; note: string }),
     );
     run('price_change', (as, p) => this.prices.save(as, p as unknown as PriceChange));
+    run('matching_change', (as, p) => this.matching.save(as, p as unknown as MatchingChange));
     run('team_invite', (as, p) =>
       this.team.invite(as, p as { email: string; name: string; role: AdminRole; phone: string }),
     );
@@ -151,6 +154,23 @@ export class ApprovalRequests implements OnModuleInit {
     const { place, summary } = await this.prices.describe(input);
     return this.approvals.submit(admin, {
       kind: 'price_change',
+      payload: { ...input },
+      summary,
+      note: input.note,
+      countryCode: place.countryCode,
+      targetType: input.scope,
+      targetId: input.id,
+    });
+  }
+
+  /**
+   * Matching values for a state, city or area (Settings, Places; M14), as a change to the country's Matching
+   * settings is: checked now, so a change that can't be saved is refused before it waits, and again when approved.
+   */
+  async matchingChange(admin: AdminContext, input: MatchingChange) {
+    const { place, summary } = await this.matching.describe(input);
+    return this.approvals.submit(admin, {
+      kind: 'matching_change',
       payload: { ...input },
       summary,
       note: input.note,

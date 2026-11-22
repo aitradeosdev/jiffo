@@ -15,6 +15,7 @@ import { ResolveStaffAlertForm } from './staff-alerts';
 import { dateTime, money } from '@/lib/format';
 import { FIELD_BY_PATH } from '@/lib/settings-fields';
 import { PRICE_LABELS, type PriceField } from '@/lib/prices';
+import { matchingChangeText } from '@/lib/matching-places';
 
 export const metadata: Metadata = { title: 'Audit log' };
 
@@ -134,6 +135,12 @@ function describe(entry: Entry, names: Map<string, string>, currencyOf: (code: s
             return `${info.label.toLowerCase()} ${c.to === null ? 'as above' : info.percent ? `${c.to / 100}%` : formatNaira(c.to)}`;
           })
           .join(', ') || 'nothing'
+      }`;
+    }
+    case 'matching.change': {
+      const changes = (entry.data.changes as Array<{ field: string; to: unknown }>) ?? [];
+      return `Changed Matching for ${String(entry.data.place)}: ${
+        changes.map((c) => matchingChangeText(c.field, c.to)).join('; ') || 'nothing'
       }`;
     }
     case 'city.create':

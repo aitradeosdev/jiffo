@@ -12,6 +12,7 @@ import {
 } from '@jiffo/shared';
 import { eq, sql } from 'drizzle-orm';
 import { CountriesService } from '../countries/countries.service';
+import { MatchingPlacesService } from '../countries/matching-places.service';
 import { DB, type Db } from '../db/database.module';
 import { agentPresence, errands } from '../db/schema';
 import { CandidatesService, type Candidate } from './candidates.service';
@@ -43,25 +44,35 @@ export class RankingService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly countries: CountriesService,
+    private readonly places: MatchingPlacesService,
     private readonly candidates: CandidatesService,
     private readonly redis: MatchingRedis,
   ) {}
 
-  /** `skip` and `radiusKm`: who is left out, and how far to look (CandidatesService.forErrand). */
-  async ranked(errandId: string, skip?: ReadonlySet<string>, radiusKm?: number): Promise<Ranked[]> {
-    const found = await this.candidates.forErrand(errandId, skip, radiusKm);
-    if (!found.length) return [];
+  /**
+   * `skip` and `radiusKm`: who is left out, and how far to look (CandidatesService.forErrand). `rules`: the
+   * Matching rules where the errand is (M14), when the caller has them already.
+   */
+  async ranked(
+    errandId: string,
+    skip?: ReadonlySet<string>,
+    radiusKm?: number,
+    known?: CountrySettings['matching'],
+  ): Promise<Ranked[]> {
     const [errand] = await this.db
-      .select({ countryCode: errands.countryCode, stateCode: errands.stateCode })
+      .select({ countryCode: errands.countryCode, stateCode: errands.stateCode, areaId: errands.areaId })
       .from(errands)
       .where(eq(errands.id, errandId));
-    const rules = (await this.countries.currentSettings(errand!.countryCode)).settings.matching;
+    if (!errand) return [];
+    const rules = known ?? (await this.places.rulesFor(errand));
+    const found = await this.candidates.forErrand(errandId, skip, radiusKm, rules);
+    if (!found.length) return [];
     const [history, average] = await Promise.all([
       this.history(
         found.map((c) => c.agentId),
         rules,
       ),
-      this.stateAverages(errand!.countryCode, errand!.stateCode),
+      this.stateAverages(errand.countryCode, errand.stateCode),
     ]);
     return found
       .map((c) => {
