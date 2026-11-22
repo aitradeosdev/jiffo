@@ -26,6 +26,7 @@ import type { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { DB, type Db, type Tx } from '../db/database.module';
 import {
+  agentPresence,
   earningHolds,
   errandEvents,
   errandOffers,
@@ -71,6 +72,18 @@ import {
 } from './errand-view';
 
 type Patch = Partial<typeof errands.$inferInsert>;
+
+/** What an errand forgets of its agent when they leave it, or it is taken back from them, before the start. */
+const RELEASE_AGENT: Patch = {
+  agentId: null,
+  agentTier: null,
+  pinCipher: null,
+  pinHmac: null,
+  pinAttempts: 0,
+  pendingOfferKobo: null,
+  acceptedAt: null,
+  reachedPickupAt: null,
+};
 
 /** What an event changes beyond the status: `patch` is written with the transition, `record` goes in the event log. */
 interface EventEffect {
@@ -950,6 +963,9 @@ export class ErrandsService implements OnModuleInit {
       const after = await this.write(tx, errand, event, to, effect, actor, auth.userId);
       await this.wallet.onErrandTransition(tx, { before: errand, after, event, ...money });
       await this.scheduleTimers(after, settings);
+      // A scheduled errand taken ahead (M12): its agent is reminded to be online, and it is taken back from one who
+      // isn't, by the Matching settings now.
+      if (event === 'accept') await this.scheduleReadiness(after, live);
       return {
         role: role === 'prospect' ? ('agent' as const) : role,
         result: { before: errand, after, event, record: effect.record, settings } satisfies TransitionResult,
@@ -989,6 +1005,8 @@ export class ErrandsService implements OnModuleInit {
     if (job.event === 'offer_dispatch') return this.offers.retry(job.errandId);
     if (job.event === 'raise_prompt') return this.promptRaise(job);
     if (job.event === 'offer_batch') return this.offers.runBatch(job.errandId);
+    if (job.event === 'scheduled_reminder') return this.remindToGoOnline(job);
+    if (job.event === 'take_back') return this.takeBack(job);
     const money = await this.settingsOf(job.errandId);
     if (!money) return;
     const { settings } = money;
@@ -1170,16 +1188,7 @@ export class ErrandsService implements OnModuleInit {
     live: CountrySettings,
   ): Promise<EventEffect | ApiError | PinLock> {
     const now = new Date();
-    const releaseAgent: Patch = {
-      agentId: null,
-      agentTier: null,
-      pinCipher: null,
-      pinHmac: null,
-      pinAttempts: 0,
-      pendingOfferKobo: null,
-      acceptedAt: null,
-      reachedPickupAt: null,
-    };
+    const releaseAgent = RELEASE_AGENT;
 
     switch (event) {
       case 'accept': {
@@ -1442,6 +1451,93 @@ export class ErrandsService implements OnModuleInit {
     const [errand] = await this.db.select().from(errands).where(eq(errands.id, job.errandId));
     if (!errand || errand.status !== 'requested' || errand.version !== job.version) return;
     await this.notifier.raisePrompt(errand);
+  }
+
+  /**
+   * A scheduled errand just taken ahead (docs/matching.md, M12): its agent is reminded to be online some minutes
+   * before the start, and a few minutes later it is taken back if they still aren't. Both for this agent alone,
+   * whatever else changes on the errand meanwhile.
+   */
+  private async scheduleReadiness(errand: ErrandRow, live: CountrySettings) {
+    if (!errand.scheduledFor || !errand.agentId) return;
+    const { scheduledOnlineMinutes, scheduledTakeBackMinutes } = live.matching;
+    const job = { errandId: errand.id, status: errand.status, version: errand.version, agentId: errand.agentId };
+    const untilStart = errand.scheduledFor.getTime() - Date.now();
+    const remindIn = untilStart - scheduledOnlineMinutes * MINUTE_MS;
+    const takeBackIn = untilStart - scheduledTakeBackMinutes * MINUTE_MS;
+    if (remindIn > 0) await this.timers.schedule({ ...job, event: 'scheduled_reminder' }, remindIn);
+    if (takeBackIn > 0) await this.timers.schedule({ ...job, event: 'take_back' }, takeBackIn);
+  }
+
+  /** Whether the agent is online now, as they last said. */
+  private async isOnline(agentId: string, db: Db | Tx = this.db) {
+    const [presence] = await db
+      .select({ online: agentPresence.online })
+      .from(agentPresence)
+      .where(eq(agentPresence.userId, agentId));
+    return !!presence?.online;
+  }
+
+  /** Still theirs and still to start: the scheduled errand a reminder or take-back is for (M12). */
+  private stillTheirs(errand: ErrandRow | undefined, job: ErrandTimerJob): errand is ErrandRow {
+    return !!errand && errand.status === 'accepted' && !!job.agentId && errand.agentId === job.agentId;
+  }
+
+  /** The scheduled errand's agent should be online by now: one who isn't is told, and when it goes elsewhere. */
+  private async remindToGoOnline(job: ErrandTimerJob) {
+    const [errand] = await this.db.select().from(errands).where(eq(errands.id, job.errandId));
+    if (!this.stillTheirs(errand, job) || !errand.scheduledFor || (await this.isOnline(job.agentId!))) return;
+    const [{ timezone }, live] = await Promise.all([
+      this.countries.basics(errand.countryCode),
+      this.countries.currentSettings(errand.countryCode),
+    ]);
+    const startsAt = new Intl.DateTimeFormat('en-NG', {
+      timeZone: timezone,
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(errand.scheduledFor);
+    await this.notifier.goOnlineReminder(
+      errand,
+      job.agentId!,
+      startsAt,
+      live.settings.matching.scheduledTakeBackMinutes,
+    );
+  }
+
+  /**
+   * The scheduled errand's agent still isn't online (M12): it is taken back and sent as urgent, offered one agent at
+   * a time as any urgent errand, and it counts against them as leaving it. The customer and the agent are told.
+   */
+  private async takeBack(job: ErrandTimerJob) {
+    const money = await this.settingsOf(job.errandId);
+    if (!money) return;
+    const { settings } = money;
+    const result = await this.db.transaction(async (tx) => {
+      const [errand] = await tx.select().from(errands).where(eq(errands.id, job.errandId)).for('update');
+      if (!this.stillTheirs(errand, job) || (await this.isOnline(job.agentId!, tx))) return null;
+      const to = nextState(errand.status, 'take_back', transitionContext(errand, 'system'));
+      const effect: EventEffect = {
+        // Urgent now, and no longer for later: due within minutes.
+        patch: { ...RELEASE_AGENT, urgent: true, scheduledFor: null },
+        record: { agentId: errand.agentId, scheduledFor: errand.scheduledFor, timer: true },
+      };
+      // Under the agent's name, so it counts against them as leaving an errand does.
+      const after = await this.write(tx, errand, 'take_back', to, effect, 'system', errand.agentId);
+      await this.wallet.onErrandTransition(tx, { before: errand, after, event: 'take_back', ...money });
+      await this.scheduleTimers(after, settings);
+      return {
+        before: errand,
+        after,
+        event: 'take_back' as const,
+        record: effect.record,
+        settings,
+      } satisfies TransitionResult;
+    });
+    if (!result) return;
+    await this.notifier.transitioned(result);
+    await this.notifier.takenBack(result.after, job.agentId!);
+    await this.afterAgentLeft(result.before, result.after);
+    await this.offers.errandChanged(result.after);
   }
 
   /**

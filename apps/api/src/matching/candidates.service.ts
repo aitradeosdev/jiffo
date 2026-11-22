@@ -1,6 +1,14 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { atTheEnd, backToBackFrom, haversineMeters, matchRefusal, type CountrySettings } from '@jiffo/shared';
-import { and, eq, sql } from 'drizzle-orm';
+import {
+  atTheEnd,
+  backToBackFrom,
+  haversineMeters,
+  lateForScheduled,
+  matchRefusal,
+  type CountrySettings,
+  type HeldErrand,
+} from '@jiffo/shared';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import type { LatLng } from '../adapters/maps';
 import { ApiError } from '../common/errors';
 import { MatchingPlacesService } from '../countries/matching-places.service';
@@ -253,6 +261,26 @@ export class CandidatesService {
     } else if (refused) {
       return null;
     }
+    // Holding a scheduled errand taken ahead (M12): not one that would make them late for it.
+    if (errand.urgent && me.held.some((e) => e.startsLater) && (await this.makesLate(me, errand, rules))) return null;
     return { agentId: near.agentId, straightMeters: Math.round(pickupMeters), lat: me.lat, lng: me.lng, following };
+  }
+
+  /**
+   * Whether doing this urgent errand would make the agent late for a scheduled one they hold (M12): to its pickup,
+   * along its stops, then on to the scheduled one's pickup by its start, each leg estimated at the fallback speed.
+   */
+  private async makesLate(me: LatLng & { held: HeldErrand[] }, errand: ErrandRow, rules: CountrySettings['matching']) {
+    const route = await this.db
+      .select({ lat: errandStops.lat, lng: errandStops.lng })
+      .from(errandStops)
+      .where(eq(errandStops.errandId, errand.id))
+      .orderBy(asc(errandStops.seq));
+    if (!route.length) return false;
+    const secondsBetween = (a: LatLng, b: LatLng) =>
+      TravelTimesService.estimate(haversineMeters(a, b), rules).durationSeconds;
+    let seconds = secondsBetween(me, route[0]!);
+    for (let i = 1; i < route.length; i++) seconds += secondsBetween(route[i - 1]!, route[i]!);
+    return lateForScheduled(me.held, { at: Date.now() + seconds * 1000, dropoff: route.at(-1)! }, secondsBetween);
   }
 }

@@ -10,6 +10,7 @@ import {
   type MatchRefusal,
 } from '@jiffo/shared';
 import { and, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import { completionRate, recentAccepts } from './completion';
 import { AgentsService } from '../agents/agents.service';
 import { conflict, forbidden, unprocessable, type ApiError } from '../common/errors';
 import { DB, type Db, type Tx } from '../db/database.module';
@@ -34,6 +35,11 @@ const REFUSALS: Record<MatchRefusal, () => ApiError> = {
   too_far: () => unprocessable('too_far', 'This pickup is too far from where you are'),
   unavailable: () => conflict('unavailable', "This errand isn't available to you"),
   gave_up: () => conflict('gave_up', 'You left this errand, so it goes to another agent'),
+  completion_low: () =>
+    conflict(
+      'completion_low',
+      'Scheduled errands go to agents who finish at least half the errands they accept. Finish more to take them.',
+    ),
 };
 
 /**
@@ -66,7 +72,14 @@ export class EligibilityService {
 
   /** An errand as matching checks it for this agent, with what facts() found. */
   matchErrand(
-    errand: { id: string; customerId: string; urgent: boolean; categoryKey: string; buy: boolean },
+    errand: {
+      id: string;
+      customerId: string;
+      urgent: boolean;
+      categoryKey: string;
+      buy: boolean;
+      scheduledFor: Date | null;
+    },
     pickupMeters: number,
     agentId: string,
     facts: { apart: Set<string>; gaveUp: Set<string> },
@@ -79,6 +92,8 @@ export class EligibilityService {
       pickupMeters,
       keptApart: agentId !== errand.customerId && facts.apart.has(errand.customerId),
       gaveUp: facts.gaveUp.has(errand.id),
+      // Scheduled for later (M12): taken ahead. Once its time has come, it is an errand like any other.
+      scheduled: !!errand.scheduledFor && errand.scheduledFor.getTime() > Date.now(),
     };
   }
 
@@ -141,13 +156,23 @@ export class EligibilityService {
           order by s.seq desc limit 1)`,
         dropoffLng: sql<number | null>`(select s.lng from ${errandStops} s where s.errand_id = "errands"."id"
           order by s.seq desc limit 1)`,
+        // Its pickup, which an agent holding a scheduled errand ahead must reach by its start (M12).
+        pickupLat: sql<number | null>`(select s.lat from ${errandStops} s where s.errand_id = "errands"."id"
+          and s.seq = 0)`,
+        pickupLng: sql<number | null>`(select s.lng from ${errandStops} s where s.errand_id = "errands"."id"
+          and s.seq = 0)`,
       })
       .from(errands)
       .where(and(eq(errands.agentId, agentId), inArray(errands.status, [...AGENT_OUT_STATES])));
     const prefs = await this.agents.profile(agentId, db);
+    // Their completion rate, as ranking has it: for scheduled errands, which need half or more (M12).
+    const {
+      rows: [recent],
+    } = await db.execute<{ accepted: number; withdrawn: number }>(recentAccepts(sql`${agentId}::uuid`));
     const now = Date.now();
     return {
       userId: agentId,
+      completionRate: recent ? completionRate(recent) : null,
       lat: here.lat,
       lng: here.lng,
       categoryKeys: prefs.categoryKeys,
@@ -157,6 +182,8 @@ export class EligibilityService {
         urgent: e.urgent,
         status: e.status,
         dropoff: e.dropoffLat === null || e.dropoffLng === null ? null : { lat: e.dropoffLat, lng: e.dropoffLng },
+        startsAt: e.scheduledFor,
+        pickup: e.pickupLat === null || e.pickupLng === null ? null : { lat: e.pickupLat, lng: e.pickupLng },
         // A scheduled errand taken ahead isn't under way until it starts.
         startsLater: e.status === 'accepted' && !!e.scheduledFor && e.scheduledFor.getTime() > now,
       })),
@@ -184,7 +211,7 @@ export class EligibilityService {
         where (b.user_id = ${agentId} and b.other_user_id = ${errands.customerId})
           or (b.other_user_id = ${agentId} and b.user_id = ${errands.customerId}))`,
       sql`not exists (select 1 from errand_events ev where ev.errand_id = ${errands.id}
-        and ev.event in ('withdraw', 'release_agent') and ev.data->>'agentId' = ${agentId})`,
+        and ev.event in ('withdraw', 'release_agent', 'take_back') and ev.data->>'agentId' = ${agentId})`,
     );
   }
 
@@ -230,7 +257,7 @@ export class EligibilityService {
             errandEvents.errandId,
             rows.map((r) => r.id),
           ),
-          inArray(errandEvents.event, ['withdraw', 'release_agent']),
+          inArray(errandEvents.event, ['withdraw', 'release_agent', 'take_back']),
           sql`${errandEvents.data}->>'agentId' = ${agentId}`,
         ),
       );

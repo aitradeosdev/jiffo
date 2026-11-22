@@ -559,6 +559,24 @@ export const SECTIONS: Section[] = [
         help: 'Its travel time counts the rest of the errand they are on, then the drive. 0.5 to 10 km.',
       },
       {
+        path: 'matching.scheduledMinCompletionBps',
+        label: 'Scheduled errands: completion rate needed to take one',
+        kind: 'percent',
+        help: "Of the errands an agent accepted lately, the share they didn't leave. New agents, with none yet, can take them.",
+      },
+      {
+        path: 'matching.scheduledOnlineMinutes',
+        label: 'Scheduled errands: remind the agent to be online',
+        kind: 'minutes',
+        help: 'Before the start, if they are offline then.',
+      },
+      {
+        path: 'matching.scheduledTakeBackMinutes',
+        label: 'Scheduled errands: taken back from an agent still offline',
+        kind: 'minutes',
+        help: "Before the start: sent as urgent to another agent, and it counts against them as leaving an errand. Less than the reminder's.",
+      },
+      {
         path: 'matching.fakeGpsHoldHours',
         label: 'A fake-GPS flag keeps the agent from errands for',
         kind: 'hours',

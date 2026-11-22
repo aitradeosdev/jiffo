@@ -48,6 +48,12 @@ function noteFor(event: ErrandEvent, r: TransitionResult): Note | null {
       };
     case 'release_agent':
       return { to: 'agent', title: 'Errand released', body: 'The customer asked for a different agent.' };
+    case 'take_back':
+      return {
+        to: 'customer',
+        title: 'Finding another agent',
+        body: "Your agent wasn't online in time for your scheduled errand. We're finding you another now.",
+      };
     case 'cancel':
       return r.before.agentId
         ? { to: 'agent', title: 'Errand cancelled', body: 'The customer cancelled the errand.' }
@@ -256,6 +262,31 @@ export class ErrandNotifier {
   }
 
   /** No agent yet (docs/matching.md, M8): would the customer raise the fee to reach more, or keep waiting? */
+  /**
+   * A scheduled errand's agent isn't online when they should be (docs/matching.md, M12): what to do, and when it
+   * goes to someone else.
+   */
+  async goOnlineReminder(errand: ErrandRow, agentId: string, startsAt: string, takeBackMinutes: number) {
+    await this.push
+      .notifyUser(agentId, 'agent', {
+        title: 'Go online for your scheduled errand',
+        body: `It starts at ${startsAt}. Go online now: if you aren't online ${takeBackMinutes} minutes before, it goes to another agent.`,
+        data: { type: 'errand.go_online', errandId: errand.id },
+      })
+      .catch((error: Error) => this.logger.warn(`Go-online reminder for ${errand.id} failed: ${error.message}`));
+  }
+
+  /** The agent wasn't online in time, so the scheduled errand went to another (M12). */
+  async takenBack(errand: ErrandRow, agentId: string) {
+    await this.push
+      .notifyUser(agentId, 'agent', {
+        title: 'Scheduled errand taken back',
+        body: "You weren't online in time, so it went to another agent. It counts as leaving an errand.",
+        data: { type: 'errand.taken_back', errandId: errand.id },
+      })
+      .catch((error: Error) => this.logger.warn(`Telling ${agentId} of a take-back failed: ${error.message}`));
+  }
+
   async raisePrompt(errand: ErrandRow) {
     await this.push
       .notifyUser(errand.customerId, 'customer', {
@@ -326,7 +357,7 @@ export class ErrandNotifier {
     this.realtime.toUser(after.customerId, 'customer', 'errand.updated', update);
     if (agentId) this.realtime.toUser(agentId, 'agent', 'errand.updated', update);
 
-    if ((event === 'withdraw' || event === 'release_agent') && before.agentId) {
+    if ((event === 'withdraw' || event === 'release_agent' || event === 'take_back') && before.agentId) {
       await this.chat.closeOpen(after.id);
       this.realtime.removeFromErrand(before.agentId, 'agent', after.id);
     }

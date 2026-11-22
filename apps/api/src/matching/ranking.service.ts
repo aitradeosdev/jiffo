@@ -15,6 +15,7 @@ import { CountriesService } from '../countries/countries.service';
 import { MatchingPlacesService } from '../countries/matching-places.service';
 import { DB, type Db } from '../db/database.module';
 import { agentPresence, errands } from '../db/schema';
+import { completionRate, LEFT_EVENTS, RECENT, recentAccepts } from './completion';
 import { CandidatesService, type Candidate } from './candidates.service';
 import { MatchingRedis } from './matching-redis';
 
@@ -27,7 +28,6 @@ export interface Ranked extends Candidate {
 }
 
 /** Errands of their own that count: their last 100 accepted, and their last 100 ratings (M4). */
-const RECENT = 100;
 /** How long a state's averages are used before being worked out again. */
 const AVERAGES_SECONDS = 10 * 60;
 /** A state with no history yet: every agent reliable, rated four and a half stars. */
@@ -172,7 +172,7 @@ export class RankingService {
       select a.id as "agentId",
         (select count(*)::int from errands e where e.agent_id = a.id and e.status = 'completed') as completed,
         recent.accepted, recent.withdrawn,
-        (select count(*)::int from errand_events w where w.event = 'withdraw' and w.actor_id = a.id
+        (select count(*)::int from errand_events w where w.event in ${LEFT_EVENTS} and w.actor_id = a.id
           and w.created_at > now() - interval '7 days') as "leftThisWeek",
         (select avg(r.stars)::float from (select stars from errand_ratings
           where ratee_id = a.id and rater_role = 'customer' order by created_at desc limit ${RECENT}) r) as rating,
@@ -185,13 +185,7 @@ export class RankingService {
       from (values ${ids}) as a(id)
       left join agent_presence p on p.user_id = a.id
       left join agent_profiles ap on ap.user_id = a.id
-      left join lateral (
-        select count(*)::int as accepted,
-          count(*) filter (where exists (select 1 from errand_events w
-            where w.errand_id = acc.errand_id and w.event = 'withdraw' and w.actor_id = a.id))::int as withdrawn
-        from (select ev.errand_id from errand_events ev where ev.event = 'accept' and ev.actor_id = a.id
-          order by ev.id desc limit ${RECENT}) acc
-      ) recent on true
+      left join lateral (${recentAccepts(sql`a.id`)}) recent on true
       left join lateral (
         select count(*) filter (where o.status = 'accepted')::int as taken, count(*)::int as answered
         from (select status from errand_offers where agent_id = a.id and counts
@@ -211,7 +205,7 @@ export class RankingService {
           r.agentId,
           {
             // Of the errands they accepted lately, the share they didn't leave.
-            completionRate: r.accepted ? 1 - r.withdrawn / r.accepted : null,
+            completionRate: completionRate(r),
             // Of their last counted offers, the share they took (M9).
             acceptanceRate: r.answered && r.answered >= rules.acceptanceMinOffers ? r.taken / r.answered : null,
             countedOffers: r.answered,

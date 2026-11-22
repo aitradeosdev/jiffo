@@ -17,7 +17,11 @@ export type TimerEvent =
   /** Offer the urgent errands waiting for a first offer in the errand's state together (docs/matching.md, M5). */
   | 'offer_batch'
   /** Still waiting: ask the customer whether to raise the fee (docs/matching.md, M8). */
-  | 'raise_prompt';
+  | 'raise_prompt'
+  /** A scheduled errand's agent should be online by now: remind one who isn't (docs/matching.md, M12). */
+  | 'scheduled_reminder'
+  /** A scheduled errand's agent still isn't online: take it back and send it as urgent (M12). */
+  | 'take_back';
 
 /**
  * A system event due later. It only applies if the errand is still exactly as it was when the timer
@@ -35,6 +39,8 @@ export interface ErrandTimerJob {
   offerId?: string;
   /** Makes a job its own when several of one kind can wait for one errand version (a dispatch retry). */
   key?: string;
+  /** For a scheduled errand's reminder and take-back: the agent who took it, whom they are for (M12). */
+  agentId?: string;
 }
 
 export type TimerHandler = (job: ErrandTimerJob) => Promise<void>;

@@ -25,6 +25,7 @@ export const EVENT: Record<string, string> = {
   accept: 'Agent accepted',
   withdraw: 'Agent withdrew before starting',
   release_agent: 'Customer asked for a different agent',
+  take_back: 'Taken back: the agent was not online in time, sent as urgent',
   cancel: 'Customer cancelled',
   expire: 'No agent took it in time',
   raise_fee: 'Customer raised the fee',
