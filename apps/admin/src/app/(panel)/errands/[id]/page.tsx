@@ -8,6 +8,7 @@ import { Badge, Card, Notice } from '@/components/ui';
 import { api, ApiError, getCountry, getMe } from '@/lib/api';
 import { ACCOUNT, EVENT, getCategories, JOURNAL, nameOf, STATUS, type PersonRef } from '@/lib/errands';
 import { dateTime, money } from '@/lib/format';
+import { duration, OFFER_STATUS, partsText, type OfferStatus } from '@/lib/matching';
 import { ActionsForm } from './actions-form';
 import { EvidenceForm } from './evidence-form';
 import { TrailMap } from './trail-map';
@@ -76,6 +77,29 @@ interface Detail {
   };
   ratings: Array<{ raterRole: string; stars: number; comment: string | null }>;
   actions: string[];
+  /** Every offer of it, in order, ranked how and with what answer (docs/matching.md, M15). */
+  offers: Array<{
+    id: string;
+    agent: { id: string; firstName: string | null; lastName: string | null };
+    rank: number;
+    status: OfferStatus;
+    feeKobo: number;
+    score: number;
+    parts: Record<string, number>;
+    travelSeconds: number;
+    travelEstimated: boolean;
+    straightMeters: number;
+    counts: boolean;
+    offeredAt: string;
+    answeredAt: string | null;
+  }>;
+  /** Who was told once it was open to everyone (M8). */
+  broadcasts: Array<{
+    agent: { id: string; firstName: string | null; lastName: string | null };
+    feeKobo: number;
+    straightMeters: number;
+    toldAt: string;
+  }>;
 }
 
 const PHOTO: Record<string, string> = {
@@ -227,6 +251,60 @@ export default async function ErrandPage({
               ))}
             </ol>
           </Card>
+
+          {d.errand.urgent ? (
+            <Card title={`Offers (${d.offers.length})`}>
+              {d.offers.length === 0 ? (
+                <p className="text-sm text-ink-3">Not offered to anyone yet.</p>
+              ) : (
+                <ol className="space-y-3">
+                  {d.offers.map((o) => {
+                    const status = OFFER_STATUS[o.status];
+                    return (
+                      <li key={o.id} className="text-sm">
+                        <p className="flex flex-wrap items-center gap-2">
+                          <span className="text-ink-3">#{o.rank}</span>
+                          <Link href={`/people/${o.agent.id}`} className="font-semibold underline">
+                            {[o.agent.firstName, o.agent.lastName].filter(Boolean).join(' ') || 'No name yet'}
+                          </Link>
+                          <Badge tone={status.tone}>{status.label}</Badge>
+                          {o.counts ? null : <Badge tone="neutral">Free to decline</Badge>}
+                        </p>
+                        <p className="mt-0.5 text-[13px] text-ink-2">
+                          Score {Math.round(o.score * 100)} ({partsText(o.parts)}) ·{' '}
+                          {(o.straightMeters / 1000).toFixed(1)} km, {duration(o.travelSeconds)} away
+                          {o.travelEstimated ? ' (estimated)' : ''} · at {money(o.feeKobo)}
+                        </p>
+                        <p className="text-[13px] text-ink-3">
+                          Offered {time(o.offeredAt)}
+                          {o.answeredAt
+                            ? ` · answered after ${duration((Date.parse(o.answeredAt) - Date.parse(o.offeredAt)) / 1000)}`
+                            : ''}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+              {d.broadcasts.length ? (
+                <div className="mt-4 border-t border-line pt-3">
+                  <p className="text-sm font-semibold">
+                    Open to everyone: {d.broadcasts.length} {d.broadcasts.length === 1 ? 'agent' : 'agents'} told
+                  </p>
+                  <ul className="mt-1.5 space-y-1 text-[13px] text-ink-2">
+                    {d.broadcasts.map((b) => (
+                      <li key={`${b.agent.id}-${b.feeKobo}`}>
+                        <Link href={`/people/${b.agent.id}`} className="underline">
+                          {[b.agent.firstName, b.agent.lastName].filter(Boolean).join(' ') || 'No name yet'}
+                        </Link>{' '}
+                        · {(b.straightMeters / 1000).toFixed(1)} km · at {money(b.feeKobo)} · {time(b.toldAt)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </Card>
+          ) : null}
 
           <Card title={`Chat (${d.chat.length})`}>
             <ChatList chat={d.chat} time={time} />

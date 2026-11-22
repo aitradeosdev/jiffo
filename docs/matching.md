@@ -167,6 +167,9 @@ per country.
 
 ## Admin dashboard and logs (M15)
 
+Built: the panel's Matching page, the offer log on an errand's page, and the figures on an agent's page
+([admin-panel.md](admin-panel.md)). Arrival at the pickup is the agent's first position within 150 m of it.
+
 - **Per state and category:**
   - time to first offer and time to accept
   - offers per errand

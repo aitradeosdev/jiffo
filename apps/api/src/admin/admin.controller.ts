@@ -55,6 +55,7 @@ const held = <T>(res: Response, out: T) => {
   if (out && typeof out === 'object' && 'pending' in out && out.pending) res.status(202);
   return out;
 };
+import { DASHBOARD_DAYS, MatchingStatsService, type DashboardDays } from './matching-stats.service';
 import type { AdminContext } from './admin.types';
 
 const AdminId = new ParseUUIDPipe({ exceptionFactory: () => notFound('admin_not_found', 'Teammate not found') });
@@ -113,6 +114,20 @@ const MatchingChangeBody = z.object({
   basedOn: z.number().int().min(0),
   matching: MatchingOverrideSchema,
   note: z.string().trim().min(3).max(500),
+});
+const MatchingDashboardQuery = z.object({
+  country: z.string().length(2).toUpperCase(),
+  days: z.coerce
+    .number()
+    .refine((d): d is DashboardDays => (DASHBOARD_DAYS as readonly number[]).includes(d), 'One of 1, 7 or 30')
+    .default(7),
+  state: z
+    .string()
+    .trim()
+    .min(1)
+    .max(8)
+    .transform((s) => s.toUpperCase())
+    .optional(),
 });
 const PlaceChangeBody = z
   .object({ name: PlaceName, boundary: BoundaryInput, enabled: z.boolean() })
@@ -244,6 +259,7 @@ const AuditQuery = z.object({
 export class AdminController {
   constructor(
     private readonly overviewService: OverviewService,
+    private readonly matchingStats: MatchingStatsService,
     private readonly team: TeamService,
     private readonly audit: AuditService,
     private readonly errands: ErrandsAdminService,
@@ -840,6 +856,16 @@ export class AdminController {
       throw forbidden('confirm_identity', "Confirm it's you first, then try again");
     }
     return held(res, await this.gated.errandAction(admin, id, body));
+  }
+
+  /**
+   * The matching dashboard (docs/matching.md, M15): per state and category, and per agent, over the last day, week
+   * or month.
+   */
+  @Get('matching')
+  @Needs('read')
+  matchingDashboard(@Query(new ZodBody(MatchingDashboardQuery)) query: z.infer<typeof MatchingDashboardQuery>) {
+    return this.matchingStats.dashboard(query.country, query.days, query.state);
   }
 
   @Get('overview')

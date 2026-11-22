@@ -35,6 +35,8 @@ import { flaggedErrand } from '../risk/flagged';
 import { ApplicationsAdminService } from './applications-admin.service';
 import { IdChecksAdminService } from './id-checks-admin.service';
 import { containing, cursorOf, exactTime, idPrefix, parseCursor, phoneDigits } from './list-helpers';
+import { RankingService } from '../matching/ranking.service';
+import { MatchingStatsService } from './matching-stats.service';
 import type { AdminContext } from './admin.types';
 import { StaffOversightService } from './staff-oversight.service';
 
@@ -61,7 +63,28 @@ export class PeopleAdminService {
     private readonly idChecks: IdChecksAdminService,
     private readonly realtime: RealtimeGateway,
     private readonly oversight: StaffOversightService,
+    private readonly ranking: RankingService,
+    private readonly matchingStats: MatchingStatsService,
   ) {}
+
+  /**
+   * An agent's matching figures (M15): their acceptance rate over their last counted offers, completion rate,
+   * errands left this week and any pause on their offers, with the offers they had in the last 30 days.
+   */
+  private async matchingOf(agentId: string, countryCode: string) {
+    const [standing, offers30d] = await Promise.all([
+      this.ranking.standing(agentId, countryCode),
+      this.matchingStats.agentOffers(agentId),
+    ]);
+    return {
+      acceptanceRate: standing.acceptanceRate,
+      countedOffers: standing.countedOffers,
+      completionRate: standing.completionRate,
+      cancellations7d: standing.cancellations7d,
+      offersPausedUntil: standing.offersPausedUntil,
+      offers30d,
+    };
+  }
 
   /** What each tier means under the country's current settings: commission, and when earnings can be withdrawn. */
   private async tierTerms(countryCode: string) {
@@ -261,7 +284,9 @@ export class PeopleAdminService {
     ]);
     const balance = (type: string) => Number(balances.find((b) => b.type === type)?.balance ?? 0);
     const isAgent = apps.some((a) => a.app === 'agent');
-    const application = isAgent ? await this.applications.detail(id) : null;
+    const [application, matching] = isAgent
+      ? await Promise.all([this.applications.detail(id), this.matchingOf(id, user.countryCode)])
+      : [null, null];
 
     const avg = (role: 'customer' | 'agent') => averages.find((a) => a.raterRole === role)?.average ?? null;
     const p = payout[0];
@@ -278,6 +303,8 @@ export class PeopleAdminService {
       },
       apps: [...new Set(apps.map((a) => a.app))],
       devices: apps,
+      /** How they stand in matching, and the offers they had in the last 30 days (docs/matching.md, M15). */
+      matching,
       agent: isAgent
         ? {
             tier: profile[0]?.tier ?? 'bronze',

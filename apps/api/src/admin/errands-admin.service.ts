@@ -14,7 +14,9 @@ import {
   admins,
   agentProfiles,
   conversations,
+  errandBroadcasts,
   errandEvents,
+  errandOffers,
   errandRatings,
   errandStops,
   errands,
@@ -292,6 +294,50 @@ export class ErrandsAdminService {
     };
   }
 
+  /**
+   * Who was offered the errand, in the order they were, ranked how and with what answer, and who was told once it
+   * was open to everyone (docs/matching.md, M15): for disputes and fairness complaints.
+   */
+  private async offerLog(errandId: string) {
+    const agent = { id: users.id, firstName: users.firstName, lastName: users.lastName };
+    const [offers, broadcasts] = await Promise.all([
+      this.db
+        .select({
+          id: errandOffers.id,
+          agent,
+          rank: errandOffers.rank,
+          status: errandOffers.status,
+          feeKobo: errandOffers.feeKobo,
+          score: errandOffers.score,
+          parts: errandOffers.parts,
+          travelSeconds: errandOffers.travelSeconds,
+          travelEstimated: errandOffers.travelEstimated,
+          straightMeters: errandOffers.straightMeters,
+          counts: errandOffers.counts,
+          offeredAt: errandOffers.offeredAt,
+          expiresAt: errandOffers.expiresAt,
+          answeredAt: errandOffers.answeredAt,
+        })
+        .from(errandOffers)
+        .innerJoin(users, eq(users.id, errandOffers.agentId))
+        .where(eq(errandOffers.errandId, errandId))
+        .orderBy(asc(errandOffers.offeredAt), asc(errandOffers.id)),
+      this.db
+        .select({
+          agent,
+          feeKobo: errandBroadcasts.feeKobo,
+          straightMeters: errandBroadcasts.straightMeters,
+          toldAt: errandBroadcasts.toldAt,
+        })
+        .from(errandBroadcasts)
+        .innerJoin(users, eq(users.id, errandBroadcasts.agentId))
+        .where(eq(errandBroadcasts.errandId, errandId))
+        .orderBy(asc(errandBroadcasts.toldAt), asc(errandBroadcasts.straightMeters))
+        .limit(500),
+    ]);
+    return { offers, broadcasts };
+  }
+
   /** One errand in full, as evidence: people, route, timeline, chat, photos and every money movement. */
   async detail(id: string) {
     const [errand] = await this.db.select().from(errands).where(eq(errands.id, id));
@@ -429,6 +475,7 @@ export class ErrandsAdminService {
       calls: await this.evidence.calls(errand.id),
       /** The GPS trail as kept now (G1, G4). */
       trail: await this.evidence.trailShown(errand.id),
+      ...(await this.offerLog(errand.id)),
       /** Its dispute evidence packs, newest first (E8). */
       evidence: await this.evidence.list(errand.id),
       customer: byId.get(errand.customerId) ?? null,

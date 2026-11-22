@@ -1,0 +1,1 @@
+ALTER TABLE "errands" ADD COLUMN "reached_pickup_at" timestamp with time zone;
